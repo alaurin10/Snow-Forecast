@@ -1,0 +1,18 @@
+# Runtime data (database, raw cache, backups)
+/data/
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# Editors / OS
+.DS_Store
+.idea/

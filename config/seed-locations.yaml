@@ -1,0 +1,120 @@
+# The six prototype locations (docs/reference/pull.py LOCATIONS), used to seed
+# a new database with `snowwatch init`. After that the list lives in the
+# database and is managed in the app (milestone M4) or with
+# `snowwatch locations import|export`.
+#
+# NWS office/radar come from api.weather.gov/points; avalanche zones from a
+# point-in-polygon lookup on the avalanche.org map layer (4 Nov 2026).
+# Elevations are metres. Canadian avalanche zones are looked up by point at
+# run time because Avalanche Canada's area ids change through the season.
+
+- id: crystal
+  name: Crystal Mountain
+  kind: resort
+  region: WA Cascades
+  country: US
+  tz: America/Los_Angeles
+  bands:
+    - {band: base, label: Base, lat: 46.935, lon: -121.475, elev_m: 1341}
+    - {band: mid, label: Mid-mountain, lat: 46.935, lon: -121.475, elev_m: 1800}
+    - {band: summit, label: Summit, lat: 46.935, lon: -121.475, elev_m: 2095}
+  snotel: "642:WA:SNTL"
+  nws_office: SEW
+  radar_station: KATX
+  avy: {provider: nac, center_id: NWAC, zone_id: "3023"}
+  links:
+    Radar (Seattle): https://radar.weather.gov/station/katx/standard
+    NWS forecast: https://forecast.weather.gov/MapClick.php?lat=46.935&lon=-121.475
+    Avalanche (NWAC): https://nwac.us/forecasts/avalanche/west-slopes-south
+    Mountain passes (WSDOT): https://wsdot.com/travel/real-time/mountainpasses/
+
+- id: snoqualmie
+  name: Snoqualmie Pass
+  kind: resort
+  region: WA Cascades
+  country: US
+  tz: America/Los_Angeles
+  bands:
+    - {band: base, label: Base, lat: 47.424, lon: -121.418, elev_m: 914}
+    - {band: mid, label: Upper lifts, lat: 47.424, lon: -121.418, elev_m: 1150}
+    - {band: summit, label: Alpental top, lat: 47.424, lon: -121.418, elev_m: 1652}
+  snotel: "672:WA:SNTL"
+  nws_office: SEW
+  radar_station: KATX
+  avy: {provider: nac, center_id: NWAC, zone_id: "3028"}
+  links:
+    Radar (Seattle): https://radar.weather.gov/station/katx/standard
+    NWS forecast: https://forecast.weather.gov/MapClick.php?lat=47.424&lon=-121.418
+    Avalanche (NWAC): https://nwac.us/forecasts/avalanche/snoqualmie-pass
+    Pass report (WSDOT): https://wsdot.com/travel/real-time/mountainpasses/snoqualmie
+
+- id: rainy
+  name: Heather–Maple / Rainy Pass
+  kind: backcountry
+  region: North Cascades
+  country: US
+  tz: America/Los_Angeles
+  bands:
+    - {band: base, label: Rainy Pass trailhead, lat: 48.518, lon: -120.735, elev_m: 1480}
+    - {band: mid, label: Heather Pass, lat: 48.518, lon: -120.735, elev_m: 1890}
+    - {band: summit, label: Maple Pass, lat: 48.518, lon: -120.735, elev_m: 2124}
+  snotel: "711:WA:SNTL"
+  nws_office: OTX
+  radar_station: KATX
+  avy: {provider: nac, center_id: NWAC, zone_id: "3029"}
+  links:
+    Radar (Seattle): https://radar.weather.gov/station/katx/standard
+    NWS forecast: https://forecast.weather.gov/MapClick.php?lat=48.518&lon=-120.735
+    Avalanche (NWAC): https://nwac.us/forecasts/avalanche/east-slopes-north
+    SR 20 status (WSDOT): https://wsdot.com/travel/real-time/mountainpasses/north-cascades
+
+- id: whistler
+  name: Whistler
+  kind: resort
+  region: BC Coast Mountains
+  country: CA
+  tz: America/Vancouver
+  bands:
+    - {band: base, label: Village, lat: 50.06, lon: -122.95, elev_m: 675}
+    - {band: mid, label: Roundhouse, lat: 50.06, lon: -122.95, elev_m: 1850}
+    - {band: summit, label: Peak, lat: 50.06, lon: -122.95, elev_m: 2182}
+  avy: {provider: avcan}
+  links:
+    Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSS
+    Mountain forecast (ECCC): https://weather.gc.ca/mountain_forecast/
+    Avalanche Canada: https://avalanche.ca/map
+    Hwy 99 (DriveBC): https://www.drivebc.ca/
+
+- id: revelstoke
+  name: Revelstoke
+  kind: resort
+  region: BC Interior (Selkirks)
+  country: CA
+  tz: America/Vancouver
+  bands:
+    - {band: base, label: Base, lat: 51.0, lon: -118.16, elev_m: 512}
+    - {band: mid, label: Mid-mountain, lat: 51.0, lon: -118.16, elev_m: 1500}
+    - {band: summit, label: Summit, lat: 51.0, lon: -118.16, elev_m: 2225}
+  avy: {provider: avcan}
+  links:
+    Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSR
+    Mountain forecast (ECCC): https://weather.gc.ca/mountain_forecast/
+    Avalanche Canada: https://avalanche.ca/map
+    Hwy 1 (DriveBC): https://www.drivebc.ca/
+
+- id: sunshine
+  name: Banff Sunshine
+  kind: resort
+  region: AB Rockies
+  country: CA
+  tz: America/Edmonton
+  bands:
+    - {band: base, label: Parking lot, lat: 51.08, lon: -115.77, elev_m: 1658}
+    - {band: mid, label: Village, lat: 51.08, lon: -115.77, elev_m: 2160}
+    - {band: summit, label: Lookout Mtn, lat: 51.08, lon: -115.77, elev_m: 2730}
+  avy: {provider: avcan}
+  links:
+    Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSM
+    Mountain forecast (ECCC): https://weather.gc.ca/mountain_forecast/
+    Avalanche Canada: https://avalanche.ca/map
+    Hwy 1 (511 Alberta): https://511.alberta.ca/
