@@ -1,0 +1,49 @@
+# Forecast pipeline settings. Model identifiers were checked against the live
+# Open-Meteo API on 4 Nov 2026 (see docs/SOURCES.md); missing models or
+# variables are tolerated at run time.
+
+models:
+  # Deterministic models used for the consensus at every lead time they cover.
+  global: [gfs_seamless, ecmwf_ifs025, gem_seamless, icon_seamless]
+  # Short-range models that join the consensus for the first 48 h.
+  short_range:
+    US: [ncep_hrrr_conus, ncep_nbm_conus]
+    CA: [gem_hrdps_continental]
+  # NBM has no pressure-level data.
+  upper_air_exclude: [ncep_nbm_conus]
+
+# Ensemble systems (member counts: GEFS 31, ECMWF ENS 51, GEPS 21).
+ensembles: [gfs_seamless, ecmwf_ifs025, gem_global]
+
+short_range_hours: 48
+consensus_min_models: 3
+blend_periods: 4
+periods: 20
+hourly_hours: 240
+day_start_hour: 6
+night_start_hour: 18
+min_period_hours: 6
+ensemble_min_members: 10
+ensemble_max_age_h: 13
+
+# Open-Meteo derives snowfall from snow water with a fixed ratio:
+# 0.7 cm of snow per mm of water (7:1).
+snowfall_cm_per_mm: 0.7
+# Snow level is this far below the freezing level.
+snow_level_offset_m: 305
+
+# Snow-to-liquid ratio from the median temperature during snowing hours.
+# Bands are checked top-down; min_c is inclusive (°F 31/26/19 converted).
+slr_bands:
+  - {min_c: -0.556, ratio: 8, label: "Heavy & wet"}
+  - {min_c: -3.333, ratio: 11, label: "Average"}
+  - {min_c: -7.222, ratio: 14, label: "Light"}
+  - {min_c: null, ratio: 17, label: "Dry & fluffy"}
+# Headline depth method: "raw" (model snowfall) or "slr" (ratio-adjusted).
+depth_method: raw
+
+schedule:
+  runs_utc: ["03:30", "09:30", "15:30", "21:30"]
+  ensemble_runs_utc: ["09:30", "21:30"]
+  backup_utc: "10:00"
+  vacuum_weekday: sun

@@ -57,7 +57,7 @@ Design principles:
 | 11 | Locations live in the database and are managed in the app by the owner | The draft used a config file, which meant SSH and a restart for every new location |
 | 12 | Owner and viewer roles from the Cloudflare Access identity | The owner edits the list; viewers can't. There is still no separate login inside the app |
 | 13 | One image built on the mini PC, two services (api, worker). No `cloudflared` container; the existing HA tunnel is reused | Keeps everything at home and reuses what is already running |
-| 14 | Snow depth from snow water and a temperature-based snow-to-liquid ratio, checked against SNOTEL (4.4) | Open-Meteo's snowfall appears to use a fixed ratio, which under-reads cold, dry snow |
+| 14 | Snow depth from snow water and a temperature-based snow-to-liquid ratio, checked against SNOTEL (4.4) | Open-Meteo's snowfall uses a fixed 7:1 ratio, which under-reads cold, dry snow |
 
 ## 2. App design
 
@@ -180,9 +180,10 @@ The charts are hand-built SVG on `d3-scale`, `d3-shape`, `d3-array` and `d3-time
 
 | Source | Used for | When |
 |---|---|---|
-| Open-Meteo forecast, default blend, 3 points (one per band) | Hourly: temperature_2m, apparent_temperature, precipitation, rain, showers, snowfall, precipitation_probability, freezing_level_height, weather_code, cloud_cover (total, low, mid, high), visibility, wind_speed_10m, wind_gusts_10m, wind_direction_10m, wind speed and direction at 850 and 700 hPa with geopotential height, is_day. Daily: sunrise, sunset, daylight_duration. `past_days=3`, `forecast_days=11`, `timezone=auto` | every run |
-| Open-Meteo multi-model, 3 points | Per model: snowfall, precipitation, rain, temperature_2m, freezing_level_height, wind_speed_10m, wind_gusts_10m, cloud_cover. Models: GFS, ECMWF IFS 0.25°, GEM, ICON, plus HRRR and NBM (US) or HRDPS (Canada). 16 days | every run |
-| Open-Meteo ensemble, mid only | Snowfall per member: GEFS (~31), ECMWF ENS (51), GEPS (21, optional). 16 days | 2×/day, after 00Z and 12Z |
+| Open-Meteo forecast, default blend, 3 points (one per band) | Hourly: temperature_2m, apparent_temperature, precipitation, rain, showers, snowfall, precipitation_probability, freezing_level_height, weather_code, cloud_cover (total, low, mid, high), visibility, wind_speed_10m, wind_gusts_10m, wind_direction_10m, is_day. Daily: sunrise, sunset, daylight_duration. `past_days=3`, `forecast_days=11` | every run |
+| Open-Meteo multi-model, 3 points | Per model: snowfall, precipitation, rain, temperature_2m, freezing_level_height, wind_speed_10m, wind_gusts_10m, wind_direction_10m, cloud_cover. Models: `gfs_seamless`, `ecmwf_ifs025`, `gem_seamless`, `icon_seamless`, plus `ncep_hrrr_conus` and `ncep_nbm_conus` (US) or `gem_hrdps_continental` (Canada). 16 days | every run |
+| Open-Meteo upper air, 1 point (summit), all models except NBM | Wind speed and direction at 850 and 700 hPa; temperature and geopotential height at 850, 700, 600 and 500 hPa. Pressure-level values don't depend on the requested elevation, so one point serves all three bands. 16 days | every run |
+| Open-Meteo ensemble, mid only | Snowfall per member: GEFS `gfs_seamless` (31), ECMWF ENS `ecmwf_ifs025` (51), GEPS `gem_global` (21). 16 days | 2×/day, after 00Z and 12Z |
 | Open-Meteo elevation and geocoding | Terrain elevation for map pins; place search | Manage only |
 | NWS `/points/{lat},{lon}` and `/alerts/active?point=` | Forecast office and radar station; active watches and warnings (US). A User-Agent with contact info is required | when adding a location; every run |
 | NWS AFD | Link to the forecast discussion | daily |
@@ -192,29 +193,41 @@ The charts are hand-built SVG on `d3-scale`, `d3-shape`, `d3-array` and `d3-time
 | OpenSkiMap / openskidata.org ski-area GeoJSON | Resort catalog for search; the US and Canada subset is imported into SQLite | monthly |
 | OpenTopoMap tiles (loaded by the browser, with attribution) | Map in the Manage wizard and the location mini-map | on view |
 
-**Verification status.** The cloud build environment couldn't reach any data host, so the following are unconfirmed and milestone M0 checks them live:
-- The Open-Meteo model IDs (for example `ncep_hrrr_conus`, `ncep_nbm_conus`, `gem_hrdps_continental`) and ensemble IDs.
-- Pressure-level variable names (`wind_speed_700hPa`, `geopotential_height_700hPa`).
-- Open-Meteo's fixed snowfall ratio, believed to be 7 cm of snow per 10 mm of water.
-- The free-tier limits.
-- The avalanche.org zone-product endpoint and parameters, and the Avalanche Canada products API.
-- The OpenSkiMap feature fields: name, location, activities, status, and elevation statistics.
+**Verified live on 4 Nov 2026.** `snowwatch check-sources` regenerates `docs/SOURCES.md` with the full details. In short:
 
-Already confirmed from the National Avalanche Center's docs repo: the map-layer endpoint and its properties. Its terms say danger displays "must be published and expired accordingly", and third-party use must not change the intent of the information.
+| Item | Result |
+|---|---|
+| Model reach | GFS 16 d, ECMWF IFS ~15 d, GEM ~10 d, ICON ~7.5 d, NBM ~11 d, HRRR and HRDPS ~2 d |
+| `freezing_level_height` | Only GFS, ICON and HRRR. Derived from pressure-level temperatures for the others (4.5) |
+| Pressure levels | GFS, ECMWF, GEM, ICON, HRRR and HRDPS; NBM has none |
+| `visibility` | GFS and HRRR only |
+| Snowfall ratio | Fixed 0.7 cm of snow per mm of water (7:1) for every model |
+| Ensembles | GEFS 31 members × 16 d, ECMWF ENS 51 × ~14 d, GEPS 21 × 16 d |
+| Elevation API | Several points per call |
+| NWS `/points` | `cwa`, `gridId/X/Y`, `radarStation`, `timeZone`, `forecastZone` |
+| SNOTEL stations | `stations?stationTriplets=*:WA:SNTL` returns every station with lat/lon/elevation (ft) |
+| avalanche.org | Map layer: 93 zones. `product?type=forecast&center_id=&zone_id=` returns `danger[{lower, middle, upper, valid_day}]` for today and tomorrow, `forecast_avalanche_problems`, `published_time`, `expires_time` |
+| Avalanche Canada | `forecasts/en/areas` (GeoJSON) and `forecasts/en/products` (`report.dangerRatings[{date, ratings{alp, tln, btl}}]`, `problems`, `dateIssued`, `validUntil`). Area ids change through the season, so zones are found by point |
+| OpenSkiMap | 21 MB GeoJSON, updated daily. 845 named, operating downhill areas in the US and Canada, 784 with min/max elevation (Crystal: 1,344 / 2,072 m) |
 
-The pipeline treats a missing model or variable as normal, and the model list is config.
+The avalanche.org terms say danger displays "must be published and expired accordingly", and third-party use must not change the intent of the information.
+
+The pipeline treats a missing model or variable as normal, and the model list is config (`config/forecast.yaml`).
 
 ### 3.2 Budget
 
 Open-Meteo's free tier is about 10,000 weighted calls per day, with per-hour and per-minute caps as well. A call's weight is roughly locations × (days ÷ 14) × (variables ÷ 10), where variables multiply by models and by ensemble members.
 
-| Call | Rough weight |
+| Call | Weight (US location) |
 |---|---|
-| Blend, 3 elevations, ~25 variables | ~8 |
-| Multi-model, 3 elevations, 8 variables × 6 models, 16 days | ~16 |
-| Ensembles, 1 elevation, ~100 members, 16 days | ~12 |
-| **Per location per day** (4 full runs, ensembles twice) | **~120** |
-| **25 locations per day** (the default cap) | **~3,000** (30% of the free tier) |
+| Blend, 3 points, 21 variables, 14 days | 6.3 |
+| Multi-model, 3 points, 9 variables × 6 models, 16 days | 18.5 |
+| Upper air, 1 point, 12 variables × 5 models, 16 days | 6.9 |
+| Ensembles, 1 point, 103 members, 16 days | 11.8 |
+| **Per location per day** (4 full runs, ensembles twice) | **~150** |
+| **25 locations per day** (the default cap) | **~3,750** (37% of the free tier) |
+
+`snowwatch budget` prints the current estimate.
 
 The worker records the estimated weight of every call, and the Status page and the Manage budget guard show the total.
 
@@ -269,7 +282,7 @@ In the prototype, the 15-day running-total percentiles silently switch member se
 
 ### 4.4 Snow-to-liquid ratio
 
-Open-Meteo's `snowfall` appears to be snow water times a fixed ratio (to verify in M0), which under-reads cold, dry snow.
+Open-Meteo's `snowfall` is snow water times a fixed 0.7 cm per mm (7:1), confirmed for every model. That under-reads cold, dry snow, which typically falls at 12–20:1.
 - **Method:** build the consensus on **snow water**, then convert to depth with the period's snow-to-liquid ratio, taken from the median temperature during snowing hours:
 
   | Temperature | Ratio | Label |
@@ -287,7 +300,8 @@ Open-Meteo's `snowfall` appears to be snow water times a fixed ratio (to verify 
 
 - The period consensus, windows and hourly series are computed for base, mid and summit, each at its own coordinates.
 - Ensembles are fetched at mid only. Their percentiles at base and summit are scaled by the ratio of model-consensus totals between bands and labelled "estimated".
-- Snow level = freezing level − 1,000 ft (configurable).
+- **Freezing level** comes from the model where it exists (GFS, ICON, HRRR). For the others it is found from the upper-air call: the 0 °C crossing between pressure levels, interpolated against geopotential height, or extrapolated down from `temperature_2m` with a 6.5 °C/km lapse rate when the whole column is below freezing.
+- Snow level = freezing level − 1,000 ft (305 m, configurable).
 
 ### 4.6 Backcountry layer (no safety score anywhere)
 
@@ -543,7 +557,7 @@ M0–M3 is the first useful release, aimed at early-season use.
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | Foundations: repo layout, tooling, test-only CI, migrations including `locations`, seed file, `snowwatch capture-fixtures`, live checks of every "to verify" item in 3.1 | CI is green and real responses are captured for all 6 locations |
+| M0 | Foundations: repo layout, tooling, test-only CI, migrations including `locations`, seed file, `snowwatch capture-fixtures`, live checks of the sources in 3.1 | CI is green and real responses are captured for all 6 locations |
 | M1 | Pipeline: sources, analysis port, 4.2–4.5, scheduler, job queue, CLI | A run fills the DB for all locations; the parity, hourly-sum and monotonic-band tests pass |
 | M2 | API and Location page: Forecast and Models tabs, day/night bars with detail sheet, hourly stack with crosshair, tables | It beats the prototype on a phone (screenshots for review) |
 | M3 | Ship it: Overview and Calendar, PWA, Docker, deploy timer, tunnel hostname, Access, health checks, backups, `RUNBOOK.md` | The owner and a friend open `snow.andrewlaurin.com` on cellular |
