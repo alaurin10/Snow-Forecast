@@ -1,0 +1,101 @@
+"""The full snapshot built from the captured responses of all six locations."""
+
+from __future__ import annotations
+
+import gzip
+
+import pytest
+
+from snowwatch.analysis.build import build_snapshot
+from snowwatch.doc import Snapshot
+from tests.helpers import captured_at, config, fixture_inputs, fixture_snapshot, seed
+
+LOCS = ["crystal", "snoqualmie", "rainy", "whistler", "revelstoke", "sunshine"]
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
+def test_hourly_adds_up_to_the_bars(loc_id: str) -> None:
+    snap = fixture_snapshot(loc_id)
+    for band in snap.bands:
+        h = band.hourly
+        for p in band.periods:
+            if p.start not in h.t or p.swe_mm is None:
+                continue
+            i0 = h.t.index(p.start)
+            idx = list(range(i0, i0 + p.hours))
+            if idx[-1] >= len(h.t):
+                continue  # period runs past the shown hours
+            swe = sum(h.swe_mm[i] or 0 for i in idx)
+            assert swe == pytest.approx(p.swe_mm, abs=0.05 + 0.005 * p.hours), (band.band, p.key)
+            assert sum(h.snow_cm[i] or 0 for i in idx) == pytest.approx(p.snow_cm or 0, abs=0.1)
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
+def test_document_shape_and_size(loc_id: str) -> None:
+    snap = fixture_snapshot(loc_id)
+    assert [b.band for b in snap.bands] == ["base", "mid", "summit"]
+    for band in snap.bands:
+        assert len(band.periods) == 20 and len(band.hourly.t) == 240
+        assert band.windows["next5"].snow_cm is not None
+    assert snap.bands[1].windows["next5"].members_cm  # mid carries the member totals
+    others = [b.windows["next5"].ens for b in (snap.bands[0], snap.bands[2])]
+    assert all(e is None or e.estimated for e in others)
+    assert set(snap.ensembles) == {"gfs_seamless", "ecmwf_ifs025", "gem_global"}
+    assert snap.warnings == []
+    blob = gzip.compress(snap.model_dump_json().encode())
+    assert len(blob) < 60 * 1024
+    assert Snapshot.model_validate_json(snap.model_dump_json()) == snap
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
+def test_running_band_never_dips(loc_id: str) -> None:
+    daily = fixture_snapshot(loc_id).daily
+    assert 15 <= len(daily) <= 16
+    p90 = [d.pooled_cum.p90 for d in daily if d.pooled_cum and d.pooled_cum.p90 is not None]
+    assert p90 == sorted(p90)
+    for system in ("gfs_seamless", "ecmwf_ifs025", "gem_global"):
+        vals = [d.ens_cum[system].p90 for d in daily if d.ens_cum.get(system)]
+        assert vals == sorted(vals)
+    # ECMWF ENS ends first. The pooled band stops there (no splice) and the
+    # GEFS band, present every day, carries on.
+    tails = [d for d in daily if d.pooled_tail]
+    assert all(d.pooled_cum is None and d.pooled_tail == "gfs_seamless" for d in tails)
+    assert all(d.ens_cum["gfs_seamless"] for d in daily)
+
+
+def test_slr_depth_is_at_least_raw_when_cold() -> None:
+    w = fixture_snapshot("whistler").bands[2].windows["next5"]
+    assert w.snow_cm_slr is not None and w.snow_cm_raw is not None
+    assert w.snow_cm_slr > w.snow_cm_raw
+
+
+def test_us_locations_use_short_range_models() -> None:
+    p0 = fixture_snapshot("crystal").bands[1].periods[0]
+    assert "ncep_hrrr_conus" in p0.models and p0.basis == "models"
+
+
+def test_missing_ensembles_and_upper_air_are_tolerated() -> None:
+    inputs = fixture_inputs("rainy")
+    bare = type(inputs)(blend=inputs.blend, multi=inputs.multi)
+    snap, _ = build_snapshot(seed()["rainy"], bare, config(), captured_at())
+    mid = snap.bands[1]
+    assert mid.windows["next5"].ens is None and mid.periods[0].ens is None
+    assert all(p.basis in ("models", None) for p in mid.periods)
+    assert snap.ensembles == {}
+
+
+def test_tz_mismatch_is_reported() -> None:
+    inputs = fixture_inputs("crystal")
+    odd = type(inputs)(blend=inputs.blend, multi=inputs.multi)
+    loc = seed()["crystal"].model_copy(update={"tz": "America/Denver"})
+    snap, _ = build_snapshot(loc, odd, config(), captured_at())
+    assert any("timezone" in w for w in snap.warnings)
+
+
+def test_forecast_daily_records() -> None:
+    _, recs = build_snapshot(seed()["crystal"], fixture_inputs("crystal"), config(), captured_at())
+    sources = {r.source for r in recs}
+    assert {"cons", "gfs_seamless", "ecmwf_ifs025", "ens_p50"} <= sources
+    # Days start today in the location's timezone (captured 4 Nov, early afternoon).
+    assert min(r.target_date for r in recs) == "2026-11-04"
+    assert all(r.snow_cm is None or r.snow_cm >= 0 for r in recs)

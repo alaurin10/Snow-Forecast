@@ -63,6 +63,7 @@ class Fetcher:
         self.tries = tries
         self.on_call = on_call
         self.calls: list[CallRecord] = []
+        self.rate_limited = 0  # 429 responses seen (each costs a 65 s wait)
 
     def close(self) -> None:
         self._client.close()
@@ -97,6 +98,7 @@ class Fetcher:
                 continue
             if resp.status_code == 429:
                 last = "HTTP 429 (rate limited)"
+                self.rate_limited += 1
                 self._sleep(RATE_LIMIT_WAIT_S)
                 continue
             if resp.status_code >= 500:
