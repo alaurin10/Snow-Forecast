@@ -34,6 +34,7 @@ def test_429_waits_65s_then_succeeds() -> None:
     assert f.get_json("https://x.test/a", source="t", weight=2.5) == {"ok": True}
     assert sleeps == [65.0]
     assert f.calls[0].tries == 2 and f.total_weight == 2.5
+    assert f.rate_limited == 1
 
 
 def test_server_errors_back_off_then_raise() -> None:

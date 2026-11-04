@@ -277,7 +277,7 @@ The charts must add up to the bars. For each band and each period:
 In the prototype, the 15-day running-total percentiles silently switch member sets when the ECMWF ensemble ends a day before GEFS. In the 17 Oct sample, Crystal's 90th percentile drops from 6.0 in to 4.8 in on the last day because only GEFS members remain.
 
 - **Per system:** compute member running totals separately for each ensemble (GEFS, ECMWF ENS, GEPS), and store per-system percentiles.
-- **Pooled band:** the 10–90% band covers only the days where every system has data. Past that, a dashed outline labelled "GEFS only" continues it.
+- **Pooled band:** the 10–90% band covers only the days where every system has data, and stops there. Each system's own band is kept for every day it covers, so the chart draws the GEFS band (dashed, labelled) all the way to day 16. Nothing is spliced, so no line dips.
 - **Test:** every running-total percentile is non-decreasing over time, because it is an order statistic of non-decreasing sequences.
 
 ### 4.4 Snow-to-liquid ratio

@@ -43,9 +43,22 @@ cd frontend && npm run lint && npm run check && npm test && npm run build
 
 Copy `.env.example` to `.env` to set `NWS_CONTACT` and the other settings.
 
-## Data tools
+## Commands
 
-- `uv run snowwatch check-sources --write ../docs/SOURCES.md`: probe every upstream source and rewrite the report.
-- `uv run snowwatch capture-fixtures`: save today's real responses for the seed locations to `backend/tests/fixtures/live-YYYYMMDD/` for tests.
+Run from `backend/` with `uv run snowwatch …`:
+
+| Command | What it does |
+|---|---|
+| `init` | Create or migrate the database and seed the locations |
+| `pull [--only ID …] [--ensembles]` | Fetch, analyse and store forecasts now |
+| `show ID [--band base\|mid\|summit]` | Print a location's latest forecast as a table (in, °F, ft) |
+| `worker [--run-now]` | The scheduler: runs at 03:30/09:30/15:30/21:30 UTC, the job queue, nightly backups |
+| `rebuild [--from FOLDER]` | Rebuild snapshots with no API calls, from the raw cache or saved fixtures |
+| `backup` | Write a database backup and a `locations.yaml` copy now |
+| `locations list\|import\|export`, `budget` | Manage the list; estimated Open-Meteo usage |
+| `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and rewrite the report |
+| `capture-fixtures` | Save today's real responses to `backend/tests/fixtures/live-YYYYMMDD/` |
+
+Try it offline: `uv run snowwatch init && uv run snowwatch rebuild --from tests/fixtures/live-20261104 && uv run snowwatch show whistler`.
 
 Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0), NWS, NRCS SNOTEL, avalanche.org and Avalanche Canada. Ski areas from [OpenSkiMap](https://openskimap.org/) (© OpenStreetMap contributors, ODbL).
