@@ -1,0 +1,1751 @@
+{
+  "$defs": {
+    "Alert": {
+      "properties": {
+        "ends": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headline": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "headline",
+        "severity",
+        "onset",
+        "ends",
+        "url"
+      ],
+      "title": "Alert",
+      "type": "object"
+    },
+    "BandOut": {
+      "properties": {
+        "band": {
+          "type": "string"
+        },
+        "elev_m": {
+          "type": "number"
+        },
+        "hourly": {
+          "$ref": "#/$defs/HourlyOut"
+        },
+        "label": {
+          "type": "string"
+        },
+        "periods": {
+          "items": {
+            "$ref": "#/$defs/PeriodOut"
+          },
+          "type": "array"
+        },
+        "stats": {
+          "$ref": "#/$defs/ElevationOut"
+        },
+        "windows": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WindowOut"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "band",
+        "label",
+        "elev_m",
+        "periods",
+        "windows",
+        "hourly",
+        "stats"
+      ],
+      "title": "BandOut",
+      "type": "object"
+    },
+    "BandSummary": {
+      "properties": {
+        "band": {
+          "type": "string"
+        },
+        "elev_m": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "band",
+        "label",
+        "elev_m"
+      ],
+      "title": "BandSummary",
+      "type": "object"
+    },
+    "DailyEns": {
+      "properties": {
+        "n": {
+          "type": "integer"
+        },
+        "p10": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p50": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p90": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "p10",
+        "p50",
+        "p90",
+        "n"
+      ],
+      "title": "DailyEns",
+      "type": "object"
+    },
+    "DailyRow": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "ens_cum": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DailyEns"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "ens_day": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DailyEns"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hours": {
+          "type": "integer"
+        },
+        "models": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "models_cum": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "pooled_cum": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DailyEns"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pooled_tail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_level_min_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "hours",
+        "models",
+        "models_cum",
+        "ens_cum",
+        "pooled_cum",
+        "pooled_tail",
+        "ens_day",
+        "snow_level_min_m"
+      ],
+      "title": "DailyRow",
+      "type": "object"
+    },
+    "ElevationOut": {
+      "properties": {
+        "d6_10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next5_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temp_now_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmax24_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmin24_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "temp_now_c",
+        "tmin24_c",
+        "tmax24_c",
+        "last24_cm",
+        "next24_cm",
+        "next5_cm",
+        "d6_10_cm"
+      ],
+      "title": "ElevationOut",
+      "type": "object"
+    },
+    "EnsStats": {
+      "properties": {
+        "estimated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n": {
+          "type": "integer"
+        },
+        "p10": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p50": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p90": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "p10",
+        "p50",
+        "p90",
+        "mean",
+        "n"
+      ],
+      "title": "EnsStats",
+      "type": "object"
+    },
+    "HourlyOut": {
+      "properties": {
+        "cloud": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "cloud_high": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "cloud_low": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "cloud_mid": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "fl_hi": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "fl_lo": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "fl_m": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "gust_kmh": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "is_day": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "pop": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "ptype": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rain_mm": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "snow_cm": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "snow_level_m": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "swe_mm": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "t": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "temp_c": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "temp_hi": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "temp_lo": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "visibility_m": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "water_mm": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "wcode": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "wdir": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "wind_hi": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "wind_kmh": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "t",
+        "snow_cm",
+        "swe_mm",
+        "water_mm",
+        "rain_mm",
+        "ptype",
+        "temp_c",
+        "temp_lo",
+        "temp_hi",
+        "fl_m",
+        "fl_lo",
+        "fl_hi",
+        "snow_level_m",
+        "wind_kmh",
+        "wind_hi",
+        "gust_kmh",
+        "wdir",
+        "cloud",
+        "cloud_low",
+        "cloud_mid",
+        "cloud_high",
+        "pop",
+        "visibility_m",
+        "is_day",
+        "wcode"
+      ],
+      "title": "HourlyOut",
+      "type": "object"
+    },
+    "LocationMeta": {
+      "properties": {
+        "country": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "tz": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "region",
+        "country",
+        "tz",
+        "lat",
+        "lon",
+        "links"
+      ],
+      "title": "LocationMeta",
+      "type": "object"
+    },
+    "LocationSummary": {
+      "properties": {
+        "alerts": {
+          "default": 0,
+          "type": "integer"
+        },
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/BandSummary"
+          },
+          "type": "array"
+        },
+        "country": {
+          "type": "string"
+        },
+        "d6_10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "last24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "next5_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next5_p10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next5_p90_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "region": {
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tz": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "region",
+        "country",
+        "tz",
+        "bands"
+      ],
+      "title": "LocationSummary",
+      "type": "object"
+    },
+    "PeriodOut": {
+      "properties": {
+        "basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blend_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cloud_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "ens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnsStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gust_max_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hours": {
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "models": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "nmodels": {
+          "type": "integer"
+        },
+        "pop_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ptype": {
+          "type": "string"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slr": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm_raw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm_slr": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_level_min_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "start": {
+          "type": "string"
+        },
+        "swe_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmax_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmin_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "water_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wind_max_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "date",
+        "kind",
+        "label",
+        "start",
+        "hours",
+        "snow_cm",
+        "snow_cm_raw",
+        "snow_cm_slr",
+        "swe_mm",
+        "water_mm",
+        "rain_mm",
+        "basis",
+        "nmodels",
+        "models",
+        "blend_cm",
+        "ens",
+        "ptype",
+        "slr",
+        "quality",
+        "tmin_c",
+        "tmax_c",
+        "snow_level_min_m",
+        "wind_max_kmh",
+        "gust_max_kmh",
+        "cloud_mean",
+        "pop_max"
+      ],
+      "title": "PeriodOut",
+      "type": "object"
+    },
+    "RunOut": {
+      "properties": {
+        "api_weight": {
+          "type": "number"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "started_at",
+        "finished_at",
+        "api_weight",
+        "errors"
+      ],
+      "title": "RunOut",
+      "type": "object"
+    },
+    "Snapshot": {
+      "properties": {
+        "alerts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Alert"
+          },
+          "type": "array"
+        },
+        "avalanche": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/BandOut"
+          },
+          "type": "array"
+        },
+        "basis_switch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "daily": {
+          "items": {
+            "$ref": "#/$defs/DailyRow"
+          },
+          "type": "array"
+        },
+        "depth_method": {
+          "type": "string"
+        },
+        "ensembles": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "flags": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/LocationMeta"
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "now": {
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snotel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Snotel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sun": {
+          "items": {
+            "$ref": "#/$defs/SunDay"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": 1,
+          "type": "integer"
+        },
+        "warnings": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "location",
+        "run_id",
+        "generated_at",
+        "now",
+        "depth_method",
+        "models",
+        "ensembles",
+        "basis_switch",
+        "bands",
+        "daily",
+        "sun"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "Snotel": {
+      "properties": {
+        "change24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change72_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "daily": {
+          "items": {
+            "$ref": "#/$defs/SnotelDay"
+          },
+          "type": "array"
+        },
+        "depth_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "obs_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swe_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "triplet": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "triplet",
+        "name",
+        "elev_m",
+        "obs_time",
+        "depth_cm",
+        "swe_mm",
+        "change24_cm",
+        "change72_cm",
+        "daily"
+      ],
+      "title": "Snotel",
+      "type": "object"
+    },
+    "SnotelDay": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "depth_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "precip_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swe_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temp_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "depth_cm",
+        "swe_mm",
+        "temp_c",
+        "precip_mm"
+      ],
+      "title": "SnotelDay",
+      "type": "object"
+    },
+    "SunDay": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "daylight_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sunrise": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sunset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "sunrise",
+        "sunset",
+        "daylight_s"
+      ],
+      "title": "SunDay",
+      "type": "object"
+    },
+    "TrendOut": {
+      "properties": {
+        "location_id": {
+          "type": "string"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/TrendRun"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "location_id",
+        "runs"
+      ],
+      "title": "TrendOut",
+      "type": "object"
+    },
+    "TrendRun": {
+      "properties": {
+        "daily": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "issued_at": {
+          "type": "string"
+        },
+        "next5_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "issued_at",
+        "next5_cm",
+        "daily"
+      ],
+      "title": "TrendRun",
+      "type": "object"
+    },
+    "WindowOut": {
+      "properties": {
+        "ens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnsStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ens_slr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnsStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members_cm": {
+          "default": [],
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "members_cm_slr": {
+          "default": [],
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snow_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm_raw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm_slr": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "snow_cm",
+        "snow_cm_raw",
+        "snow_cm_slr",
+        "ens",
+        "ens_slr"
+      ],
+      "title": "WindowOut",
+      "type": "object"
+    }
+  },
+  "description": "Every response shape, exported as one JSON Schema for the TypeScript types.",
+  "properties": {
+    "locations": {
+      "items": {
+        "$ref": "#/$defs/LocationSummary"
+      },
+      "type": "array"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/RunOut"
+      },
+      "type": "array"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/Snapshot"
+    },
+    "trend": {
+      "$ref": "#/$defs/TrendOut"
+    }
+  },
+  "required": [
+    "snapshot",
+    "locations",
+    "trend",
+    "runs"
+  ],
+  "title": "ApiTypes",
+  "type": "object"
+}

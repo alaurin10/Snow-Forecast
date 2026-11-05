@@ -207,6 +207,35 @@ def cmd_show(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
+    """JSON Schema of every API response, for the generated TypeScript types."""
+    from snowwatch.api.models import ApiTypes
+
+    schema = ApiTypes.model_json_schema()
+
+    def strip_field_titles(node: object) -> None:
+        # Pydantic titles every field; the TypeScript generator would turn
+        # each into its own alias. Keep titles only on the model definitions.
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "properties" and isinstance(value, dict):
+                    for prop in value.values():
+                        if isinstance(prop, dict):
+                            prop.pop("title", None)
+                strip_field_titles(value)
+        elif isinstance(node, list):
+            for item in node:
+                strip_field_titles(item)
+
+    strip_field_titles(schema)
+    text = json.dumps(schema, indent=2, sort_keys=True) + "\n"
+    if args.out:
+        Path(args.out).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="snowwatch", description="Snow Watch pipeline and tools")
     sub = p.add_subparsers(dest="command", required=True)
@@ -262,6 +291,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id")
     s.add_argument("--band", choices=["base", "mid", "summit"], default="mid")
     s.set_defaults(func=cmd_show)
+
+    s = sub.add_parser("schema", help="write the API's JSON Schema (for frontend types)")
+    s.add_argument("--out", help="file to write (default stdout)")
+    s.set_defaults(func=cmd_schema)
 
     return p
 

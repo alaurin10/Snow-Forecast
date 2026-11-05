@@ -164,7 +164,7 @@ The charts are hand-built SVG on `d3-scale`, `d3-shape`, `d3-array` and `d3-time
 
 | Role | Light | Dark |
 |---|---|---|
-| Snow (day bars, snowfall) | `#2a78d6` | `#5598e7` |
+| Snow (day bars, snowfall) | `#2a78d6` | `#3987e5` |
 | Snow, night bars | `#184f95` | `#256abf` |
 | Mixed precipitation | `#e87ba4` | `#d55181` |
 | Rain | `#008300` | `#008300` |

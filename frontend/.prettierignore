@@ -7,3 +7,8 @@ bun.lockb
 
 # Miscellaneous
 /static/
+
+# Generated (npm run types / snowwatch schema)
+src/lib/types.gen.ts
+src/lib/api-schema.json
+src/lib/fixtures/
