@@ -1,4 +1,5 @@
 import type {
+	AvalancheView,
 	BudgetOut,
 	CatalogItem,
 	JobOut,
@@ -7,6 +8,7 @@ import type {
 	LookupStatus,
 	Me,
 	OverviewRow,
+	PlanOut,
 	ResolveIn,
 	ResolveOut,
 	RunOut,
@@ -97,6 +99,20 @@ export function getSnapshot(id: string, { fresh = false } = {}): Promise<Snapsho
 
 export const getTrend = (id: string) =>
 	get<TrendOut>(`/api/locations/${encodeURIComponent(id)}/trend`);
+
+// Avalanche forecasts expire on the clock, so a cached copy lives one minute.
+let avalanche: { at: number; p: Promise<Record<string, AvalancheView>> } | null = null;
+export function getAvalanche(): Promise<Record<string, AvalancheView>> {
+	if (!avalanche || Date.now() - avalanche.at > 60_000) {
+		const p = get<Record<string, AvalancheView>>('/api/avalanche');
+		p.catch(() => (avalanche = null));
+		avalanche = { at: Date.now(), p };
+	}
+	return avalanche.p;
+}
+
+export const getPlan = (date?: string) =>
+	get<PlanOut>(date ? `/api/plan?date=${encodeURIComponent(date)}` : '/api/plan');
 
 // --- Owner-only (Manage page) ---
 

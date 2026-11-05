@@ -11,15 +11,22 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from snowwatch import avalanche
 from snowwatch.api.models import (
     BandSummary,
+    BestDay,
+    DangerChip,
     LocationSummary,
     OverviewPeriod,
     OverviewRow,
+    PlanDate,
+    PlanOut,
+    PlanRow,
     RunOut,
     TrendOut,
     TrendRun,
 )
+from snowwatch.avalanche import AvalancheView
 from snowwatch.doc import Snapshot
 from snowwatch.locations import service
 from snowwatch.settings import Settings
@@ -66,6 +73,46 @@ def latest_snapshots(conn: sqlite3.Connection) -> dict[str, Snapshot]:
     return out
 
 
+def danger_for(v: AvalancheView | None, day: str | None) -> DangerChip:
+    """The highest rating on `day` (or today), if the forecast is current and covers it."""
+    if v is None:
+        return DangerChip(level=None, status="none")
+    if v.status != "current" or v.doc is None:
+        return DangerChip(level=None, status=v.status)
+    if day is None:
+        if v.today_max is None:
+            return DangerChip(level=None, status="not_issued")
+        return DangerChip(level=v.today_max, status="current")
+    levels = [
+        lvl
+        for d in v.doc.days
+        if d.date == day
+        for lvl in (d.alpine, d.treeline, d.below)
+        if lvl is not None
+    ]
+    if not levels:
+        return DangerChip(level=None, status="not_issued")
+    return DangerChip(level=max(levels), status="current")
+
+
+def best_day(snap: Snapshot) -> BestDay | None:
+    """The best-rated day (earliest on a tie), when it's at least Good."""
+    rated = [d for d in snap.days if d.score is not None and d.rating is not None]
+    if not rated:
+        return None
+    top = max(d.score or 0 for d in rated)
+    if top < 3:
+        return None
+    d = next(d for d in rated if d.score == top)
+    assert d.rating is not None and d.score is not None
+    return BestDay(date=d.date, label=d.label, rating=d.rating, score=d.score)
+
+
+def avalanche_views(conn: sqlite3.Connection) -> dict[str, AvalancheView]:
+    locs = service.list_locations(conn)
+    return avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
+
+
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/api")
     _snapshots.clear()  # a new app may point at a different database
@@ -104,10 +151,16 @@ def make_router() -> APIRouter:
     def overview(conn: Conn, response: Response) -> list[OverviewRow]:
         """Every active location with its headline numbers and 20 period totals."""
         snaps = latest_snapshots(conn)
+        avy = avalanche_views(conn)
         rows = []
         for loc in service.list_locations(conn):
             row = OverviewRow(
-                id=loc.id, name=loc.name, kind=loc.kind, region=loc.region, country=loc.country
+                id=loc.id,
+                name=loc.name,
+                kind=loc.kind,
+                region=loc.region,
+                country=loc.country,
+                danger=danger_for(avy.get(loc.id), None),
             )
             snap = snaps.get(loc.id)
             if snap is not None:
@@ -128,9 +181,56 @@ def make_router() -> APIRouter:
                     )
                     for p in mid.periods
                 ]
+                row.best_day = best_day(snap)
+                row.powder_dates = [d.date for d in snap.days if d.rating == "Powder"]
             rows.append(row)
         response.headers["Cache-Control"] = CACHE
         return rows
+
+    @router.get("/avalanche", response_model=dict[str, AvalancheView])
+    def avalanche_all(conn: Conn, response: Response) -> dict[str, AvalancheView]:
+        """Every location's avalanche forecast, with expiry applied at request time."""
+        response.headers["Cache-Control"] = "public, max-age=60"
+        return avalanche_views(conn)
+
+    @router.get("/plan", response_model=PlanOut)
+    def plan(
+        conn: Conn, response: Response, day: str | None = Query(None, alias="date")
+    ) -> PlanOut:
+        """Plan a day: every location's facts (and resort ratings) for one date."""
+        snaps = latest_snapshots(conn)
+        locs = service.list_locations(conn)
+        labels: dict[str, str] = {}
+        for loc in locs:
+            snap = snaps.get(loc.id)
+            for d in snap.days if snap else []:
+                labels.setdefault(d.date, d.label)
+        dates = sorted(labels)[:10]
+        if day is None:
+            if not dates:
+                raise HTTPException(404, "no forecasts yet")
+            day = dates[0]
+        elif day not in dates:
+            raise HTTPException(400, f"no forecast for {day}; choose one of {', '.join(dates)}")
+        avy = avalanche_views(conn)
+        rows = []
+        for loc in locs:
+            snap = snaps.get(loc.id)
+            found = next((d for d in snap.days if d.date == day), None) if snap else None
+            rows.append(
+                PlanRow(
+                    id=loc.id,
+                    name=loc.name,
+                    kind=loc.kind,
+                    region=loc.region,
+                    day=found,
+                    danger=danger_for(avy.get(loc.id), day),
+                )
+            )
+        response.headers["Cache-Control"] = CACHE
+        return PlanOut(
+            date=day, dates=[PlanDate(date=d, label=labels[d]) for d in dates], rows=rows
+        )
 
     @router.get("/locations/{location_id}")
     def location(location_id: str, conn: Conn, request: Request) -> Response:

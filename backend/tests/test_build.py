@@ -48,6 +48,28 @@ def test_document_shape_and_size(loc_id: str) -> None:
 
 
 @pytest.mark.parametrize("loc_id", LOCS)
+def test_backcountry_ridge_and_days(loc_id: str) -> None:
+    snap = fixture_snapshot(loc_id)
+    assert snap.ridge is not None and len(snap.ridge.kmh) == 240
+    assert snap.ridge.level_m == snap.bands[2].elev_m
+    bc = snap.backcountry
+    assert bc is not None
+    assert [r.window for r in bc.rose] == ["past72", "next48"]
+    for rose in bc.rose:
+        assert len(rose.sectors) == 8
+        assert sum(rose.sectors) == pytest.approx(1, abs=0.01) or sum(rose.sectors) == 0
+    assert len(bc.refreeze) == 9 and {n.band for n in bc.refreeze} == {"base", "mid", "summit"}
+    assert len(bc.sky) == 3 and bc.storm.next48_cm is not None
+    days = [p for p in snap.bands[1].periods if p.kind == "day"]
+    assert [d.date for d in snap.days] == [p.date for p in days]
+    resort = snap.location.kind == "resort"
+    assert all((d.rating is not None) == resort for d in snap.days)
+    assert all(len(d.reasons) <= 3 for d in snap.days)
+    # The day's snow is the mid-band day bar.
+    assert [d.day_cm for d in snap.days] == [p.snow_cm for p in days]
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
 def test_running_band_never_dips(loc_id: str) -> None:
     daily = fixture_snapshot(loc_id).daily
     assert 15 <= len(daily) <= 16
@@ -82,6 +104,9 @@ def test_missing_ensembles_and_upper_air_are_tolerated() -> None:
     assert mid.windows["next5"].ens is None and mid.periods[0].ens is None
     assert all(p.basis in ("models", None) for p in mid.periods)
     assert snap.ensembles == {}
+    # Without free-air data the rose falls back to the summit's own wind.
+    assert snap.ridge is None and snap.backcountry is not None
+    assert snap.backcountry.rose[1].mean_kmh is not None
 
 
 def test_tz_mismatch_is_reported() -> None:

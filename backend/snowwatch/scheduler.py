@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -12,9 +13,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from snowwatch import jobs
+from snowwatch import avalanche, jobs
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, prune_raw
+from snowwatch.locations.service import list_locations
 from snowwatch.pipeline import run_all
 from snowwatch.settings import Settings
 from snowwatch.store.backup import backup, vacuum
@@ -67,6 +69,19 @@ class Worker:
                 len(results),
                 fetcher.total_weight,
             )
+            self._avalanche(conn, fetcher)
+
+    def _avalanche(self, conn: sqlite3.Connection, fetcher: Fetcher) -> None:
+        """Avalanche forecasts. A failure is logged and never fails the run."""
+        try:
+            res = avalanche.refresh(conn, fetcher, list_locations(conn))
+            log.info("avalanche forecasts: %d saved, %d errors", res.saved, len(res.errors))
+        except Exception:
+            log.exception("avalanche refresh failed")
+
+    def refresh_avalanche(self) -> None:
+        with self.lock, self._fetcher() as fetcher:
+            self._avalanche(connect(self.settings.database), fetcher)
 
     def process_jobs(self) -> None:
         if not self.lock.acquire(blocking=False):
@@ -89,6 +104,8 @@ class Worker:
                             )
                         failed = [e for r in results if not r.ok for e in r.errors]
                         error = "; ".join(failed) or None
+                        with self._fetcher() as fetcher:
+                            self._avalanche(conn, fetcher)
                     elif job["kind"] == "lookups":
                         self.refresh_lookups(locked=True)
                     else:
@@ -108,6 +125,7 @@ class Worker:
             self.ping(self.settings.healthchecks_backup_url)
             removed = prune_raw(self.settings.raw_dir)
             log.info("pruned %d cached raw responses", removed)
+            avalanche.prune(conn)
 
     def weekly(self) -> None:
         with self.lock:
@@ -145,6 +163,14 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             CronTrigger(hour=h, minute=m, timezone=UTC),
             kwargs={"ensembles": t in cfg.ensemble_runs_utc},
             id=f"run-{t}",
+            **opts,
+        )
+    for t in cfg.avalanche_utc:
+        h, m = _hm(t)
+        sched.add_job(
+            worker.refresh_avalanche,
+            CronTrigger(hour=h, minute=m, timezone=UTC),
+            id=f"avalanche-{t}",
             **opts,
         )
     sched.add_job(worker.process_jobs, IntervalTrigger(seconds=15), id="jobs", **opts)

@@ -5,7 +5,8 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
-from snowwatch.doc import Snapshot
+from snowwatch.avalanche import AvalancheView
+from snowwatch.doc import DayOut, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.models import Location
 
@@ -43,6 +44,20 @@ class OverviewPeriod(BaseModel):
     snow_cm: float | None
 
 
+class DangerChip(BaseModel):
+    """The highest avalanche rating for a day, when the forecast is current."""
+
+    level: int | None  # 1–5
+    status: str  # current, expired, no_rating, none (no zone), not_issued (no rating for that day)
+
+
+class BestDay(BaseModel):
+    date: str
+    label: str
+    rating: str
+    score: int
+
+
 class OverviewRow(BaseModel):
     """One location on the Overview and Calendar pages (mid band)."""
 
@@ -61,6 +76,31 @@ class OverviewRow(BaseModel):
     alerts: list[str] = []
     snow_depth_cm: float | None = None
     periods: list[OverviewPeriod] = []
+    danger: DangerChip | None = None
+    best_day: BestDay | None = None  # resorts: the best-rated day in the next 10
+    powder_dates: list[str] = []  # resorts: days rated Powder
+
+
+class PlanDate(BaseModel):
+    date: str
+    label: str
+
+
+class PlanRow(BaseModel):
+    id: str
+    name: str
+    kind: str
+    region: str
+    day: DayOut | None  # None when the location has no forecast for that date
+    danger: DangerChip
+
+
+class PlanOut(BaseModel):
+    """Plan a day: every location on one date."""
+
+    date: str
+    dates: list[PlanDate]
+    rows: list[PlanRow]
 
 
 class TrendRun(BaseModel):
@@ -107,3 +147,5 @@ class ApiTypes(BaseModel):
     job: JobOut
     budget: BudgetOut
     lookups: LookupStatus
+    avalanche: dict[str, AvalancheView]
+    plan: PlanOut

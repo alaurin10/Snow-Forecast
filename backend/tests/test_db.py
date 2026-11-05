@@ -28,7 +28,7 @@ EXPECTED = {
 
 def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
     conn = connect(tmp_path / "db.sqlite")
-    assert migrate(conn) == ["001_init"]
+    assert migrate(conn) == ["001_init", "002_avalanche_doc"]
     assert table_names(conn) >= EXPECTED
     assert migrate(conn) == []
 
@@ -44,3 +44,10 @@ def test_readonly_connection_does_not_create_file(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.OperationalError):
         connect(path, readonly=True)
     assert not path.exists()
+
+
+def test_avalanche_doc_column(tmp_path: Path) -> None:
+    conn = connect(tmp_path / "db.sqlite")
+    migrate(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(avalanche)")}
+    assert "doc_json" in cols

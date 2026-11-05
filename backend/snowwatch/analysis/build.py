@@ -9,14 +9,16 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from snowwatch.analysis import backcountry as bc
 from snowwatch.analysis import ensemble as ens
 from snowwatch.analysis.consensus import PeriodConsensus, period_consensus
 from snowwatch.analysis.freezing import LEVELS, freezing_level_m
 from snowwatch.analysis.hourly import consensus_line, scale_to_total, shape_value, support_counts
 from snowwatch.analysis.periods import Period, build_periods
+from snowwatch.analysis.ridge import ridge_wind
 from snowwatch.analysis.series import (
     Hourly,
     PointData,
@@ -28,21 +30,31 @@ from snowwatch.analysis.series import (
     split_models,
     total,
 )
+from snowwatch.analysis.skiday import DayFacts, rate
 from snowwatch.analysis.slr import period_ratio, ptype
 from snowwatch.config import ForecastConfig
 from snowwatch.doc import (
     Alert,
+    BackcountryOut,
     BandOut,
     DailyEns,
     DailyRow,
+    DayOut,
     ElevationOut,
     EnsStats,
     HourlyOut,
     LocationMeta,
     PeriodOut,
+    Reason,
+    RefreezeNight,
+    RidgeOut,
+    RoseOut,
+    SkyDay,
     Snapshot,
     Snotel,
+    StormOut,
     SunDay,
+    WarmingOut,
     WindowOut,
 )
 from snowwatch.models import Location
@@ -319,6 +331,25 @@ def build_snapshot(
     ]
 
     daily, records = _daily(loc, inputs, cfg, tz, now_h, systems, work[1], periods)
+    ridge_kmh, ridge_dir = ridge_wind(
+        upper,
+        loc.bands[2].elev_m,
+        [*range(now_h - 72 * 3600, now_h, 3600), *all_hours],
+    )
+    have_ridge = any(v is not None for v in ridge_kmh.values())
+    ridge = (
+        RidgeOut(
+            level_m=loc.bands[2].elev_m,
+            kmh=[r(ridge_kmh.get(h), 0) for h in shown],
+            dir=[r(ridge_dir.get(h), 0) for h in shown],
+        )
+        if have_ridge
+        else None
+    )
+    backcountry = _backcountry(
+        loc, inputs, cfg, tz, now_h, all_hours, periods, work, ridge_kmh, ridge_dir
+    )
+    days = _days(loc, inputs, cfg, tz, now_h, periods, work, bands_out)
     switch = next(
         (p for p, c in zip(periods, work[1].sw, strict=True) if c.basis == "ensemble"), None
     )
@@ -346,9 +377,217 @@ def build_snapshot(
         sun=_sun(inputs.blend[1], tz),
         alerts=inputs.alerts,
         snotel=inputs.snotel,
+        ridge=ridge,
+        backcountry=backcountry,
+        days=days,
         warnings=warnings,
     )
     return snap, records
+
+
+def _past(series: Hourly, now_h: int, hours: int) -> list[int]:
+    return [h for h in series if now_h - hours * 3600 <= h < now_h]
+
+
+def _first(a: Hourly, b: Hourly) -> Hourly:
+    """`a` where it has a value, otherwise `b`."""
+    return {h: a.get(h) if a.get(h) is not None else b.get(h) for h in set(a) | set(b)}
+
+
+def _backcountry(
+    loc: Location,
+    inputs: ForecastInputs,
+    cfg: ForecastConfig,
+    tz: ZoneInfo,
+    now_h: int,
+    all_hours: Sequence[int],
+    periods: Sequence[Period],
+    work: Mapping[int, _BandWork],
+    ridge_kmh: Hourly,
+    ridge_dir: Hourly,
+) -> BackcountryOut:
+    """Facts for touring (section 4.6 of the plan). No safety judgement."""
+    k = cfg.snowfall_cm_per_mm
+    bcfg = cfg.backcountry
+    top, mid = work[2], work[1]
+    blend_top = inputs.blend[2]
+    past_snow = blend_top.get("snowfall")
+    past72 = _past(past_snow, now_h, 72)
+    next48 = list(all_hours[:48])
+    # Ridge wind where the free-air data has it, the summit's own wind otherwise.
+    speed = _first(ridge_kmh, _first(top.wind[0], blend_top.get("wind_speed_10m")))
+    direction = _first(ridge_dir, _first(top.wdir, blend_top.get("wind_direction_10m")))
+    future_snow = {h: None if v is None else v * k for h, v in top.hourly_sw.items()}
+
+    roses = []
+    for name, hours, snow in (("past72", past72, past_snow), ("next48", next48, future_snow)):
+        rose = bc.loading_rose(hours, snow, speed, direction, bcfg)
+        roses.append(
+            RoseOut(
+                window=name,
+                sectors=[round(x, 3) for x in rose.sectors],
+                snow_cm=rose.snow_cm,
+                mean_kmh=r(rose.mean_kmh, 0),
+                wind_from=rose.wind_from,
+                loading=rose.loading,
+                label=rose.label,
+            )
+        )
+
+    next72 = list(all_hours[:72])
+    fl_rise = bc.max_rise(mid.fl[0], next72)
+    t_rise = bc.max_rise(mid.temp[0], next72)
+    mid_past = inputs.blend[1].get("snowfall")
+    recent = sum(mid_past.get(h) or 0.0 for h in _past(mid_past, now_h, 72))
+    depth = inputs.snotel.depth_cm if inputs.snotel else None
+    on_snow = (depth or 0) > 0 or recent >= 1.0
+    rain48 = bc.total_over(mid.hourly_liq, next48)
+    warming = WarmingOut(
+        fl_rise_m=r(fl_rise.amount, -1),
+        fl_rise_at=_iso(fl_rise.end, tz) if fl_rise.end else None,
+        temp_rise_c=r(t_rise.amount),
+        temp_rise_at=_iso(t_rise.end, tz) if t_rise.end else None,
+        rain_on_snow_mm=r(rain48) if on_snow else None,
+    )
+
+    nights = [p for p in periods if p.kind == "night"][:3]
+    refreeze = []
+    for i in range(3):
+        w = work[i]
+        for p in nights:
+            f = bc.refreeze(p.hours, w.temp[0], w.cloud, bcfg)
+            refreeze.append(
+                RefreezeNight(
+                    date=p.date.isoformat(),
+                    band=loc.bands[i].band,
+                    status=f.status,
+                    low_c=f.low_c,
+                    clear_frac=f.clear_frac,
+                )
+            )
+
+    sky = []
+    for p in [p for p in periods if p.kind == "day"][:3]:
+        sk = bc.sky(
+            p.hours,
+            {
+                "low": blend_top.get("cloud_cover_low"),
+                "mid": blend_top.get("cloud_cover_mid"),
+                "high": blend_top.get("cloud_cover_high"),
+            },
+            blend_top.get("visibility"),
+            blend_top.get("is_day"),
+        )
+        sky.append(
+            SkyDay(
+                date=p.date.isoformat(),
+                cloud_low=sk.cloud_low,
+                cloud_mid=sk.cloud_mid,
+                cloud_high=sk.cloud_high,
+                vis_min_m=sk.vis_min_m,
+            )
+        )
+
+    storm = StormOut(
+        past72_cm=r(sum(past_snow.get(h) or 0.0 for h in past72)) if past72 else None,
+        next48_cm=r(bc.total_over(future_snow, next48)),
+    )
+    return BackcountryOut(rose=roses, warming=warming, refreeze=refreeze, sky=sky, storm=storm)
+
+
+def _local_hours(day: date, start: int, end: int, tz: ZoneInfo) -> list[int]:
+    """Unix hours from `start`:00 to `end`:00 (exclusive) local time on `day`."""
+    out = []
+    for hour in range(start, end):
+        t = datetime(day.year, day.month, day.day, hour, tzinfo=tz)
+        out.append(int(t.timestamp()))
+    return out
+
+
+def _days(
+    loc: Location,
+    inputs: ForecastInputs,
+    cfg: ForecastConfig,
+    tz: ZoneInfo,
+    now_h: int,
+    periods: Sequence[Period],
+    work: Mapping[int, _BandWork],
+    bands_out: Sequence[BandOut],
+) -> list[DayOut]:
+    """One row per day period: the Plan-a-day facts, and the rating for resorts."""
+    scfg = cfg.skiday
+    mid, top = work[1], work[2]
+    mid_periods = {p.key: p for p in bands_out[1].periods}
+    top_periods = {p.key: p for p in bands_out[2].periods}
+    blend_mid = inputs.blend[1]
+    past_snow = blend_mid.get("snowfall")
+    out: list[DayOut] = []
+    for j, p in enumerate(periods):
+        if p.kind != "day":
+            continue
+        po = mid_periods[p.key]
+        prev = periods[j - 1] if j > 0 else None
+        if prev is not None and prev.kind == "night":
+            night = mid_periods[prev.key]
+            overnight = night.snow_cm
+            night_quality, night_cm = night.quality, night.snow_cm or 0.0
+        else:
+            # The night before is already past (today, morning or later): use the
+            # high-res model's snowfall from the evening before until now.
+            day_start = _local_hours(p.date, cfg.day_start_hour, cfg.day_start_hour + 1, tz)[0]
+            before = range(day_start - 12 * 3600, min(now_h, p.hours[0]), 3600)
+            got = [v for h in before if (v := past_snow.get(h)) is not None]
+            overnight = r(sum(got)) if got else None
+            night_quality, night_cm = None, 0.0
+        lift = [
+            h
+            for h in _local_hours(p.date, scfg.lift_start_hour, scfg.lift_end_hour, tz)
+            if h in p.hours
+        ] or list(p.hours)
+        gusts = [v for h in lift if (v := top.gust.get(h)) is not None]
+        temps = [v for h in lift if (v := mid.temp[0].get(h)) is not None]
+        rain = [v for h in lift if (v := mid.hourly_liq.get(h)) is not None]
+        clouds = [v for h in lift if (v := blend_mid.get("cloud_cover_low").get(h)) is not None]
+        vis = [v for h in lift if (v := blend_mid.get("visibility").get(h)) is not None]
+        codes = [v for h in lift if (v := blend_mid.get("weather_code").get(h)) is not None]
+        day_cm = po.snow_cm
+        quality = po.quality if (day_cm or 0.0) >= night_cm else night_quality or po.quality
+        top_p = top_periods.get(p.key)
+        facts = DayFacts(
+            new_cm=None
+            if overnight is None and day_cm is None
+            else (overnight or 0) + (day_cm or 0),
+            quality=quality,
+            water_mm=po.water_mm,
+            rain_mm=sum(rain) if rain else None,
+            gust_max_kmh=max(gusts) if gusts else (top_p.gust_max_kmh if top_p else None),
+            cloud_low=sum(clouds) / len(clouds) if clouds else None,
+            vis_min_m=min(vis) if vis else None,
+            tmax_c=max(temps) if temps else po.tmax_c,
+        )
+        rating = rate(facts, scfg) if loc.kind == "resort" else None
+        out.append(
+            DayOut(
+                date=p.date.isoformat(),
+                label=p.label,
+                overnight_cm=r(overnight),
+                day_cm=day_cm,
+                quality=quality,
+                rating=rating.rating if rating else None,
+                score=rating.score if rating else None,
+                reasons=[Reason(code=x.code, value=r(x.value)) for x in rating.reasons]
+                if rating
+                else [],
+                gust_max_kmh=r(facts.gust_max_kmh, 0),
+                rain_mm=r(facts.rain_mm),
+                tmax_c=r(facts.tmax_c),
+                tmin_c=r(min(temps)) if temps else po.tmin_c,
+                cloud_low=r(facts.cloud_low, 0),
+                vis_min_m=facts.vis_min_m,
+                wcode=max(codes) if codes else None,
+            )
+        )
+    return out
 
 
 def _scaled_ens_mean(

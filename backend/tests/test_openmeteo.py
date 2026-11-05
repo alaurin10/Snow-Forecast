@@ -30,6 +30,8 @@ def test_upper_air_is_one_point_at_the_summit(cfg: ForecastConfig) -> None:
     assert req.params["latitude"] == "47.01"
     assert "elevation" not in req.params
     assert "geopotential_height_500hPa" in req.params["hourly"]
+    assert "wind_direction_700hPa" in req.params["hourly"]
+    assert req.params["past_days"] == "3"  # the loading rose looks back 72 h
 
 
 def test_ensemble_at_mid(cfg: ForecastConfig) -> None:
