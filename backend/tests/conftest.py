@@ -14,6 +14,30 @@ from snowwatch.store.db import connect, migrate
 SEED = REPO_ROOT / "config" / "seed-locations.yaml"
 
 
+APP_ENV_VARS = (
+    "ENV",
+    "DATA_DIR",
+    "DB_PATH",
+    "STATIC_DIR",
+    "CONFIG_DIR",
+    "NWS_CONTACT",
+    "ADMIN_EMAILS",
+    "CF_ACCESS_TEAM",
+    "CF_ACCESS_AUDS",
+    "DEV_ADMIN_EMAIL",
+    "MAX_LOCATIONS",
+    "HEALTHCHECKS_RUN_URL",
+    "HEALTHCHECKS_BACKUP_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not see the real app settings of the machine they run on."""
+    for name in APP_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path / "data", site_spacing_s=0, max_locations=25)

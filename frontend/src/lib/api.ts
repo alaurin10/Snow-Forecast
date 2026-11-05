@@ -1,4 +1,19 @@
-import type { LocationSummary, OverviewRow, RunOut, Snapshot, TrendOut } from './types.gen';
+import type {
+	BudgetOut,
+	CatalogItem,
+	JobOut,
+	Location,
+	LocationSummary,
+	LookupStatus,
+	Me,
+	OverviewRow,
+	ResolveIn,
+	ResolveOut,
+	RunOut,
+	SaveOut,
+	Snapshot,
+	TrendOut
+} from './types.gen';
 import { session } from './session.svelte';
 
 export class ApiError extends Error {
@@ -17,10 +32,14 @@ export class SignInRequired extends ApiError {
 	}
 }
 
-async function request(path: string): Promise<Response> {
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
 	// redirect: 'manual' turns an Access login redirect into an opaque response
 	// we can recognise, instead of a CORS failure that looks like being offline.
-	const r = await fetch(path, { headers: { Accept: 'application/json' }, redirect: 'manual' });
+	const r = await fetch(path, {
+		...init,
+		headers: { Accept: 'application/json', ...(init.headers ?? {}) },
+		redirect: 'manual'
+	});
 	const html = (r.headers.get('content-type') ?? '').includes('text/html');
 	if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400) || (r.ok && html)) {
 		session.signInNeeded = true;
@@ -29,8 +48,8 @@ async function request(path: string): Promise<Response> {
 	return r;
 }
 
-async function get<T>(path: string): Promise<T> {
-	const r = await request(path);
+async function get<T>(path: string, init: RequestInit = {}): Promise<T> {
+	const r = await request(path, init);
 	if (!r.ok) {
 		let detail = r.statusText;
 		try {
@@ -78,3 +97,43 @@ export function getSnapshot(id: string, { fresh = false } = {}): Promise<Snapsho
 
 export const getTrend = (id: string) =>
 	get<TrendOut>(`/api/locations/${encodeURIComponent(id)}/trend`);
+
+// --- Owner-only (Manage page) ---
+
+const send = <T>(method: string, path: string, body?: unknown) =>
+	get<T>(path, {
+		method,
+		headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+		body: body === undefined ? undefined : JSON.stringify(body)
+	});
+
+export const getMe = () => get<Me>('/api/me');
+export const adminLocations = () => get<Location[]>('/api/admin/locations');
+export const adminLookups = () => get<LookupStatus>('/api/admin/lookups');
+export const refreshLookups = () => send<JobOut>('POST', '/api/admin/lookups/refresh');
+export const searchCatalog = (q: string) =>
+	get<CatalogItem[]>(`/api/admin/catalog/search?q=${encodeURIComponent(q)}`);
+export const resolveLocation = (body: ResolveIn) =>
+	send<ResolveOut>('POST', '/api/admin/locations/resolve', body);
+export const createLocation = (loc: Location) => send<SaveOut>('POST', '/api/admin/locations', loc);
+export const updateLocation = (loc: Location) =>
+	send<SaveOut>('PUT', `/api/admin/locations/${encodeURIComponent(loc.id)}`, loc);
+export const archiveLocation = (id: string) =>
+	send<{ ok: boolean }>('DELETE', `/api/admin/locations/${encodeURIComponent(id)}`);
+export const reorderLocations = (ids: string[]) =>
+	send<{ ok: boolean }>('PUT', '/api/admin/locations/order', ids);
+export const refreshLocation = (id: string) =>
+	send<JobOut>('POST', `/api/admin/locations/${encodeURIComponent(id)}/refresh`);
+export const getJob = (id: number) => get<JobOut>(`/api/admin/jobs/${id}`);
+export const getBudget = () => get<BudgetOut>('/api/admin/budget');
+
+/** Poll a job until it's done or failed (or ~3 minutes pass). */
+export async function waitForJob(id: number, onUpdate?: (j: JobOut) => void): Promise<JobOut> {
+	for (let i = 0; i < 90; i++) {
+		const j = await getJob(id);
+		onUpdate?.(j);
+		if (j.status === 'done' || j.status === 'failed') return j;
+		await new Promise((r) => setTimeout(r, 2000));
+	}
+	return getJob(id);
+}

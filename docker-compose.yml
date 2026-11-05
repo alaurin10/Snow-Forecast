@@ -12,6 +12,8 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      ENV: prod # never the dev owner shortcut, whatever .env says
     volumes:
       - ./data:/data
     ports:
@@ -27,6 +29,8 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      ENV: prod
     volumes:
       - ./data:/data
     healthcheck:

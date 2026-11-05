@@ -89,6 +89,8 @@ class Worker:
                             )
                         failed = [e for r in results if not r.ok for e in r.errors]
                         error = "; ".join(failed) or None
+                    elif job["kind"] == "lookups":
+                        self.refresh_lookups(locked=True)
                     else:
                         error = f"unknown job kind {job['kind']!r}"
                 except Exception as e:
@@ -110,6 +112,21 @@ class Worker:
     def weekly(self) -> None:
         with self.lock:
             vacuum(connect(self.settings.database))
+        self.refresh_lookups()
+
+    def refresh_lookups(self, *, locked: bool = False) -> None:
+        """Ski-area catalog, SNOTEL stations and avalanche zones (for the Manage page)."""
+        from snowwatch.lookups import refresh
+
+        def run() -> None:
+            with self._fetcher() as fetcher:
+                refresh(connect(self.settings.database), fetcher)
+
+        if locked:
+            run()
+        else:
+            with self.lock:
+                run()
 
 
 def _hm(text: str) -> tuple[int, int]:

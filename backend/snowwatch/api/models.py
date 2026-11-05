@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
 from snowwatch.doc import Snapshot
+from snowwatch.locations.resolve import ResolveIn, ResolveOut
+from snowwatch.models import Location
 
 
 class BandSummary(BaseModel):
@@ -82,6 +85,11 @@ class RunOut(BaseModel):
     errors: list[str]
 
 
+class Me(BaseModel):
+    email: str | None
+    is_owner: bool
+
+
 class ApiTypes(BaseModel):
     """Every response shape, exported as one JSON Schema for the TypeScript types."""
 
@@ -90,3 +98,12 @@ class ApiTypes(BaseModel):
     overview: list[OverviewRow]
     trend: TrendOut
     runs: list[RunOut]
+    me: Me
+    admin_locations: list[Location]
+    catalog: list[CatalogItem]
+    resolve_in: ResolveIn
+    resolve_out: ResolveOut
+    save: SaveOut
+    job: JobOut
+    budget: BudgetOut
+    lookups: LookupStatus

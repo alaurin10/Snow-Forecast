@@ -127,3 +127,18 @@ def parse_snotel(
         change72_cm=change(72),
         daily=rows,
     )
+
+
+def all_stations_request() -> Request:
+    """Every SNOTEL station in every state (about 900), with location and elevation."""
+    return Request(
+        "snotel_stations_all",
+        SOURCE,
+        f"{BASE}/stations",
+        {
+            "stationTriplets": "*:*:SNTL",
+            "returnForecastPointMetadata": "false",
+            "returnReservoirMetadata": "false",
+            "returnStationElements": "false",
+        },
+    )

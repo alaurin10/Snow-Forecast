@@ -12,7 +12,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from snowwatch import __version__
+from snowwatch.api.admin import make_admin_router
+from snowwatch.api.auth import CurrentViewer, make_verifier
 from snowwatch.api.public import make_router
+from snowwatch.http import Fetcher
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
 
@@ -71,7 +74,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(body, status_code=503 if stale else 200)
 
     app.state.settings = settings
+    app.state.access = make_verifier(settings)
+    app.state.make_fetcher = lambda: Fetcher(user_agent=settings.user_agent, tries=2, timeout_s=20)
+
+    @app.get("/api/me")
+    def me(viewer: CurrentViewer) -> dict[str, Any]:
+        """Who is viewing, so the app shows owner-only controls."""
+        return {"email": viewer.email, "is_owner": viewer.is_owner}
+
     app.include_router(make_router())
+    app.include_router(make_admin_router())
 
     static = settings.static_root
     if static is not None and (static / "index.html").exists():

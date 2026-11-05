@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { getHealth, getOverview, getRuns, type Health } from '../../lib/api';
+	import { resolve } from '$app/paths';
+	import { getHealth, getMe, getOverview, getRuns, type Health } from '../../lib/api';
 	import { prefs, type BandName, type Theme } from '../../lib/prefs.svelte';
 	import type { OverviewRow, RunOut } from '../../lib/types.gen';
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
 	let rows = $state<OverviewRow[]>([]);
+	let owner = $state(false);
 
 	$effect(() => {
 		getHealth()
@@ -16,6 +18,9 @@
 			.catch(() => {});
 		getOverview()
 			.then((r) => (rows = r))
+			.catch(() => {});
+		getMe()
+			.then((m) => (owner = m.is_owner))
 			.catch(() => {});
 	});
 
@@ -54,6 +59,13 @@
 </script>
 
 <svelte:head><title>More · Snow Watch</title></svelte:head>
+
+{#if owner}
+	<a class="card manage" href={resolve('/admin')}>
+		<strong>Manage locations</strong>
+		<span class="muted">Add resorts and backcountry zones, reorder, pause or remove them.</span>
+	</a>
+{/if}
 
 <div class="grid">
 	<section class="card">
@@ -168,6 +180,14 @@
 	}
 	.small {
 		font-size: 0.85rem;
+	}
+	.manage {
+		display: grid;
+		gap: 2px;
+		color: inherit;
+		text-decoration: none;
+		margin-bottom: 12px;
+		border-color: var(--snow);
 	}
 	tr.bad td {
 		color: var(--temp);
