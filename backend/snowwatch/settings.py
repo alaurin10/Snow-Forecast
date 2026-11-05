@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The repo-root .env (what the README describes), then one in the working
+    # directory, which wins if both exist.
+    model_config = SettingsConfigDict(env_file=(REPO_ROOT / ".env", ".env"), extra="ignore")
 
     env: str = "dev"
     data_dir: Path = REPO_ROOT / "data"
@@ -31,6 +33,14 @@ class Settings(BaseSettings):
     admin_emails: str = ""
     cf_access_team: str = ""
     cf_access_auds: str = ""
+
+    @property
+    def static_root(self) -> Path | None:
+        """Where the built frontend is: STATIC_DIR, or frontend/build when it exists."""
+        if self.static_dir is not None:
+            return self.static_dir
+        default = REPO_ROOT / "frontend" / "build"
+        return default if (default / "index.html").exists() else None
 
     @property
     def database(self) -> Path:

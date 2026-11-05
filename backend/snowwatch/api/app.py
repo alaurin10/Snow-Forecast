@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from snowwatch import __version__
+from snowwatch.api.public import make_router
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
 
@@ -64,7 +65,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         return JSONResponse(body, status_code=503 if stale else 200)
 
-    static = settings.static_dir
+    app.state.settings = settings
+    app.include_router(make_router())
+
+    static = settings.static_root
     if static is not None and (static / "index.html").exists():
         root = static.resolve()
 
