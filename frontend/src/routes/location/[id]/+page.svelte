@@ -33,7 +33,15 @@
 		error = null;
 		crosshair.reset();
 		getSnapshot(current)
-			.then((s) => (snap = s))
+			.then((s) => {
+				snap = s;
+				// Deep link from the Calendar: open that period's details.
+				const key = page.url.searchParams.get('period');
+				if (key) {
+					const b = s.bands.find((x) => x.band === prefs.band) ?? s.bands[1];
+					selected = b.periods.find((x) => x.key === key) ?? null;
+				}
+			})
 			.catch(
 				(e: Error) =>
 					(error =

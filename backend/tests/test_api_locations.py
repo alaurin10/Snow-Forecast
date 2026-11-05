@@ -115,3 +115,45 @@ def test_schema_command(tmp_path) -> None:  # type: ignore[no-untyped-def]
     assert main(["schema", "--out", str(out)]) == 0
     schema = json.loads(out.read_text())
     assert {"Snapshot", "LocationSummary", "TrendOut", "PeriodOut"} <= set(schema["$defs"])
+
+
+def test_overview_rows(client: TestClient) -> None:
+    rows = client.get("/api/overview").json()
+    assert [r["id"] for r in rows][:2] == ["crystal", "snoqualmie"]
+    whistler = next(r for r in rows if r["id"] == "whistler")
+    assert len(whistler["periods"]) == 20 and whistler["periods"][0]["key"]
+    assert whistler["next5_cm"] > 10 and whistler["run_id"] == 2
+    crystal = next(r for r in rows if r["id"] == "crystal")
+    assert crystal["snow_depth_cm"] is not None  # SNOTEL Morse Lake
+    sunshine = next(r for r in rows if r["id"] == "sunshine")
+    assert sunshine["run_id"] is None and sunshine["periods"] == []
+
+
+def test_overview_cache_follows_new_runs(
+    client: TestClient, settings: Settings, conn: sqlite3.Connection
+) -> None:
+    from snowwatch.api import public
+
+    client.get("/api/overview")
+    assert public._snapshots["rainy"][0] == 2
+    run_id = repo.start_run(conn, "test")
+    loc = service.get_location(conn, "rainy")
+    assert loc is not None
+    run_location(
+        conn,
+        loc,
+        Fetcher(user_agent="t"),
+        config(),
+        run_id=run_id,
+        now=captured_at(),
+        ensembles=False,
+        responses=load_responses(FIXTURES / "rainy"),
+    )
+    repo.finish_run(conn, run_id, "ok", [], 0)
+    rainy = next(r for r in client.get("/api/overview").json() if r["id"] == "rainy")
+    assert rainy["run_id"] == 3 and public._snapshots["rainy"][0] == 3
+
+
+def test_health_reports_run_details(client: TestClient) -> None:
+    body = client.get("/api/health").json()
+    assert body["last_run"]["errors"] == 0 and "api_weight" in body["last_run"]

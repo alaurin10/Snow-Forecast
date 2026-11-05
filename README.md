@@ -3,6 +3,7 @@
 Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resorts and backcountry zones, running on a home mini PC and shared at `snow.andrewlaurin.com` through Cloudflare Tunnel and Access.
 
 - [`docs/PLAN.md`](docs/PLAN.md): the build plan (design, data sources, analysis, deployment, milestones).
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md): putting it on the mini PC at `snow.andrewlaurin.com` (Docker, Cloudflare Tunnel and Access, updates, backups).
 - [`docs/SOURCES.md`](docs/SOURCES.md): the latest live check of every data source.
 - [`docs/SPEC-draft.md`](docs/SPEC-draft.md) and [`docs/reference/`](docs/reference/): the original draft spec and the working prototype.
 
@@ -14,10 +15,11 @@ Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resort
 | `frontend/` | SvelteKit single-page app (static build served by the API) |
 | `config/forecast.yaml` | Models, ensembles, thresholds and schedule |
 | `config/seed-locations.yaml` | The six starting locations |
+| `docker/`, `docker-compose.yml`, `deploy/` | The image, the two services (api on port 8090, worker) and the auto-update timer |
 
 ## Development
 
-Needs [uv](https://docs.astral.sh/uv/) and Node 22+ (npm 11; Node 24 ships it).
+Needs [uv](https://docs.astral.sh/uv/) and Node.js. **Node 24 LTS is recommended** (it ships npm 11, which CI uses). Other versions work: Node 25 prints an engine warning for a test-only package, and on Node 22 upgrade npm first (`npm install -g npm@11`), because npm 10 has a bug that stops this install.
 
 ```bash
 cd backend

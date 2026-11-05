@@ -53,3 +53,24 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+
+  docker:
+    # Proves the image builds and starts. Nothing is pushed anywhere: the
+    # mini PC builds its own image.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f docker/Dockerfile -t snowwatch:ci .
+      - name: Smoke test
+        run: |
+          docker run --rm snowwatch:ci snowwatch --help
+          mkdir -p /tmp/sw-data && chmod 777 /tmp/sw-data
+          docker run -d --name sw -p 8000:8000 -v /tmp/sw-data:/data snowwatch:ci
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/livez && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health)" = 503
+          curl -sf localhost:8000/ | grep -q '<html'
+          curl -sf localhost:8000/calendar | grep -q '<html'
+          docker run --rm -v /tmp/sw-data:/data snowwatch:ci snowwatch init
+          curl -sf localhost:8000/api/locations | grep -q crystal
+          curl -sf localhost:8000/manifest.webmanifest | grep -q 'Snow Watch'
+          docker logs sw

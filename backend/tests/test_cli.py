@@ -49,3 +49,42 @@ def test_scheduler_jobs(env: Settings) -> None:
     assert {"run-03:30", "run-09:30", "run-15:30", "run-21:30", "jobs", "nightly", "weekly"} <= ids
     ens = {j.id: j.kwargs.get("ensembles") for j in sched.get_jobs() if j.id.startswith("run-")}
     assert ens == {"run-03:30": False, "run-09:30": True, "run-15:30": False, "run-21:30": True}
+
+
+def test_healthcheck_pings(env: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from snowwatch import scheduler
+
+    pings: list[str] = []
+    s = env.model_copy(
+        update={
+            "healthchecks_run_url": "https://hc.test/run",
+            "healthchecks_backup_url": "https://hc.test/bk",
+        }
+    )
+    w = Worker(s, config(), ping=pings.append)
+    cli.main(["init"])
+
+    class Res:
+        def __init__(self, ok: bool) -> None:
+            self.ok = ok
+
+    monkeypatch.setattr(scheduler, "run_all", lambda *a, **k: (1, [Res(False)]))
+    w.full_run(ensembles=False)
+    assert pings == []  # nothing succeeded
+    monkeypatch.setattr(scheduler, "run_all", lambda *a, **k: (2, [Res(True)]))
+    w.full_run(ensembles=False)
+    w.nightly()
+    assert pings == ["https://hc.test/run", "https://hc.test/bk"]
+
+    def boom(url: str) -> None:
+        raise OSError("offline")
+
+    Worker(s, config(), ping=boom).nightly()  # a failed ping never breaks the job
+
+
+def test_no_ping_without_url(env: Settings) -> None:
+    pings: list[str] = []
+    w = Worker(env, config(), ping=pings.append)
+    cli.main(["init"])
+    w.nightly()
+    assert pings == []

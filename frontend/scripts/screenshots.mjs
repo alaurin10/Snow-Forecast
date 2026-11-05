@@ -20,7 +20,9 @@ mkdirSync(out, { recursive: true });
 const widths = [380, 768, 1280];
 const themes = ['light', 'dark'];
 const pages = [
-	{ name: 'list', path: '/' },
+	{ name: 'overview', path: '/' },
+	{ name: 'calendar', path: '/calendar' },
+	{ name: 'more', path: '/more' },
 	{ name: `${loc}-forecast`, path: `/location/${loc}` },
 	{ name: `${loc}-models`, path: `/location/${loc}`, tab: 'Models' }
 ];
@@ -49,6 +51,9 @@ for (const theme of themes) {
 				iw: window.innerWidth
 			}));
 			if (sw > iw) problems.push(`${p.name} ${theme} ${width}px scrolls sideways (${sw} > ${iw})`);
+			// Phones and tablets get the bottom tab bar; desktop puts the links in the top bar.
+			const tabbar = await page.locator('nav.tabbar').isVisible();
+			if (tabbar !== width < 1100) problems.push(`${p.name} ${width}px: tab bar visible=${tabbar}`);
 			await page.screenshot({ path: `${out}/${p.name}-${width}-${theme}.png`, fullPage: true });
 		}
 		await ctx.close();

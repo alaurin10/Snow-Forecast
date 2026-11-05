@@ -12,6 +12,7 @@ import DayNightBars from '../DayNightBars.svelte';
 import ModelAgreement from '../ModelAgreement.svelte';
 import Exceedance from '../Exceedance.svelte';
 import TrendChart from '../TrendChart.svelte';
+import Sparkline from '../Sparkline.svelte';
 
 const snowy = whistler as unknown as Snapshot;
 const dry = crystal as unknown as Snapshot;
@@ -98,6 +99,22 @@ describe.each([
 			props: { daily: snap.daily, models: snap.models, units: 'imperial', width: 360 }
 		});
 		expectMarksInside(container);
+	});
+
+	it('sparkline keeps marks in bounds on a shared scale', () => {
+		const periods = band.periods.map((p) => ({
+			key: p.key,
+			label: p.label,
+			kind: p.kind,
+			date: p.date,
+			snow_cm: p.snow_cm
+		}));
+		const max = Math.max(2.54, ...periods.map((p) => p.snow_cm ?? 0));
+		const { container } = render(Sparkline, { props: { periods, max, width: 280 } });
+		const bars = container.querySelectorAll('path.mark');
+		expect(bars.length).toBe(periods.filter((p) => (p.snow_cm ?? 0) > 0).length);
+		if (bars.length) expectMarksInside(container, 0.5);
+		else expect(container.querySelector('svg')).not.toBeNull();
 	});
 
 	it('exceedance curve keeps marks in bounds', () => {
