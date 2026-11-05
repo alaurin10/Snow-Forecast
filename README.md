@@ -17,7 +17,7 @@ Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resort
 
 ## Development
 
-Needs [uv](https://docs.astral.sh/uv/) and Node 22+ (npm 11; Node 24 ships it).
+Needs [uv](https://docs.astral.sh/uv/) and Node.js. **Node 24 LTS is recommended** (it ships npm 11, which CI uses). Other versions work: Node 25 prints an engine warning for a test-only package, and on Node 22 upgrade npm first (`npm install -g npm@11`), because npm 10 has a bug that stops this install.
 
 ```bash
 cd backend
