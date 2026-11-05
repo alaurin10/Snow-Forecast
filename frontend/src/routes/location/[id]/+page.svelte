@@ -7,6 +7,7 @@
 	import type { PeriodOut, Snapshot, TrendOut } from '../../../lib/types.gen';
 	import { elevation, snow, type UnitSystem } from '../../../lib/units';
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
+	import { dateOf, weekday } from '../../../lib/time';
 	import DayNightBars from '../../../lib/charts/DayNightBars.svelte';
 	import HourlyStack from '../../../lib/charts/HourlyStack.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
@@ -139,9 +140,7 @@
 						<h2>About this forecast</h2>
 						<p class="muted small">
 							Snow is the median of {snap.models.length} weather models, switching to the ensemble mean
-							{#if snap.basis_switch}from {new Date(snap.basis_switch).toLocaleDateString('en-US', {
-									weekday: 'short'
-								})}{/if}
+							{#if snap.basis_switch}from {weekday(dateOf(snap.basis_switch))}{/if}
 							when fewer than three models still run. Ranges come from
 							{Object.entries(snap.ensembles)
 								.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)

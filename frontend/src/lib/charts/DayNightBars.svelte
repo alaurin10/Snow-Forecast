@@ -63,7 +63,17 @@
 				out.push({ date: p.date, label, x: x0, hi: p.tmax_c });
 			}
 		}
-		return out;
+		// Drop a label that would overlap the one before it (about 6 px per character).
+		const kept: typeof out = [];
+		for (const d of out) {
+			const prev = kept.at(-1);
+			if (prev && d.x - prev.x < ((prev.label.length + d.label.length) * 6) / 2 + 4) {
+				if (kept.length === 1) kept[0] = d; // prefer the full day over a partial first one
+				continue;
+			}
+			kept.push(d);
+		}
+		return kept;
 	});
 	// On narrow charts, print a value only where the bar beats both neighbours.
 	const showValue = (i: number): boolean => {
