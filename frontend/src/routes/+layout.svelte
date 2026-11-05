@@ -1,6 +1,9 @@
 <script lang="ts">
-	import '@fontsource/barlow-semi-condensed/500.css';
-	import '@fontsource/barlow-semi-condensed/600.css';
+	import '@fontsource/inter/400.css';
+	import '@fontsource/inter/500.css';
+	import '@fontsource/inter/600.css';
+	import '@fontsource/space-grotesk/500.css';
+	import '@fontsource/space-grotesk/600.css';
 	import '../lib/theme.css';
 	import favicon from '../lib/assets/favicon.svg';
 	import { page } from '$app/state';
@@ -53,23 +56,33 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<meta name="theme-color" content="#2a78d6" />
+	<meta name="theme-color" content="#faf7f4" media="(prefers-color-scheme: light)" />
+	<meta name="theme-color" content="#0a111d" media="(prefers-color-scheme: dark)" />
 </svelte:head>
 
 <header class="bar">
-	<a class="brand" href={resolve('/')}>Snow Watch</a>
-	<nav class="topnav" aria-label="Main">
-		{#each tabs as t (t.href)}
-			<a href={resolve(t.href)} aria-current={active(t.href) ? 'page' : undefined}>{t.label}</a>
-		{/each}
-	</nav>
-	<div class="controls">
-		<div class="seg" role="group" aria-label="Units">
+	<div class="bar-in">
+		<a class="brand" href={resolve('/')}>
+			<span class="mark" aria-hidden="true">
+				<svg viewBox="0 0 24 24" width="19" height="19"
+					><path
+						d="M12 2v20M4.9 6.5l14.2 11M19.1 6.5L4.9 17.5M9.5 3.5L12 6l2.5-2.5M9.5 20.5L12 18l2.5 2.5"
+					/></svg
+				>
+			</span>
+			Snow Watch
+		</a>
+		<nav class="topnav glass" aria-label="Main">
+			{#each tabs as t (t.href)}
+				<a href={resolve(t.href)} aria-current={active(t.href) ? 'page' : undefined}>{t.label}</a>
+			{/each}
+		</nav>
+		<div class="seg glass units" role="group" aria-label="Units">
 			<button aria-pressed={prefs.units === 'imperial'} onclick={() => prefs.setUnits('imperial')}
-				>in °F</button
+				>in · °F</button
 			>
 			<button aria-pressed={prefs.units === 'metric'} onclick={() => prefs.setUnits('metric')}
-				>cm °C</button
+				>cm · °C</button
 			>
 		</div>
 	</div>
@@ -99,10 +112,10 @@
 	Model snowfall is derived, not measured.
 </footer>
 
-<nav class="tabbar" aria-label="Main">
+<nav class="tabbar glass" aria-label="Main">
 	{#each tabs as t (t.href)}
 		<a href={resolve(t.href)} aria-current={active(t.href) ? 'page' : undefined}>
-			<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={t.icon} /></svg>
+			<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={t.icon} /></svg>
 			<span>{t.label}</span>
 		</a>
 	{/each}
@@ -110,56 +123,93 @@
 
 <style>
 	.bar {
+		position: sticky;
+		top: 0;
+		z-index: 30;
+		background: var(--header-glass);
+		backdrop-filter: blur(20px) saturate(1.6);
+		-webkit-backdrop-filter: blur(20px) saturate(1.6);
+		border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+	}
+	.bar-in {
+		max-width: 1280px;
+		margin: 0 auto;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		gap: 12px;
+		gap: 16px;
 		padding: 10px 16px;
-		background: var(--surface);
-		border-bottom: 1px solid var(--border);
 	}
 	.brand {
+		display: flex;
+		align-items: center;
+		gap: 10px;
 		font-family: var(--font-num);
 		font-weight: 600;
-		font-size: 1.2rem;
+		font-size: 1.15rem;
 		color: var(--text);
 		text-decoration: none;
-		letter-spacing: 0.01em;
+		letter-spacing: -0.01em;
 	}
-	.controls {
-		display: flex;
-		gap: 8px;
-		align-items: center;
+	.mark {
+		width: 32px;
+		height: 32px;
+		border-radius: 10px;
+		background: var(--accent);
+		display: grid;
+		place-items: center;
+	}
+	.mark svg {
+		fill: none;
+		stroke: var(--surface);
+		stroke-width: 2;
+		stroke-linecap: round;
+	}
+	:global(.glass) {
+		background: var(--glass);
+		backdrop-filter: blur(24px) saturate(1.8);
+		-webkit-backdrop-filter: blur(24px) saturate(1.8);
+		border: 1px solid var(--glass-border);
+		box-shadow: var(--glass-shadow);
+	}
+	.units {
+		padding: 3px;
+	}
+	.units button {
+		padding: 7px 12px;
 	}
 	.topnav {
 		display: none;
-		gap: 4px;
-		margin-right: auto;
-		margin-left: 18px;
+		gap: 2px;
+		padding: 4px;
+		border-radius: 999px;
 	}
 	.topnav a {
 		color: var(--text-2);
 		text-decoration: none;
-		padding: 6px 10px;
-		border-radius: 8px;
+		padding: 8px 18px;
+		border-radius: 999px;
+		font-size: 0.9rem;
 	}
 	.topnav a[aria-current='page'] {
-		color: var(--text);
-		background: var(--surface-2);
+		color: var(--accent);
+		background: var(--surface);
 		font-weight: 600;
+		box-shadow: 0 2px 8px rgb(31 27 46 / 0.1);
 	}
 	.banner {
-		max-width: 1280px;
-		margin: 10px auto 0;
-		padding: 8px 14px;
-		border-radius: 10px;
+		max-width: 1248px;
+		margin: 12px auto 0;
+		padding: 10px 14px;
+		border-radius: 14px;
 		background: var(--surface-2);
 		border: 1px solid var(--border);
 		font-size: 0.88rem;
 		width: calc(100% - 32px);
 	}
 	.banner.warn {
-		border-color: var(--temp);
+		background: var(--warn-bg);
+		border-color: var(--warn-border);
 	}
 	.banner button {
 		margin-left: 8px;
@@ -175,37 +225,41 @@
 	main {
 		max-width: 1280px;
 		margin: 0 auto;
-		padding: 12px 16px 24px;
+		padding: 16px 16px 24px;
 	}
 	footer {
 		max-width: 1280px;
 		margin: 0 auto;
-		padding: 8px 16px 96px;
+		padding: 8px 16px 120px;
 		font-size: 0.78rem;
 	}
 	footer a {
 		color: inherit;
 	}
+	/* Phones and tablets: a floating glass pill. */
 	.tabbar {
 		position: fixed;
-		left: 0;
-		right: 0;
-		bottom: 0;
+		left: 16px;
+		right: 16px;
+		bottom: calc(14px + env(safe-area-inset-bottom));
 		z-index: 30;
+		max-width: 440px;
+		margin: 0 auto;
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
-		background: var(--surface);
-		border-top: 1px solid var(--border);
-		padding-bottom: env(safe-area-inset-bottom);
+		gap: 2px;
+		padding: 5px;
+		border-radius: 999px;
 	}
 	.tabbar a {
 		display: grid;
 		justify-items: center;
-		gap: 1px;
+		gap: 2px;
 		padding: 7px 0 6px;
-		color: var(--text-3);
+		border-radius: 999px;
+		color: var(--text-2);
 		text-decoration: none;
-		font-size: 0.72rem;
+		font-size: 0.68rem;
 	}
 	.tabbar svg {
 		fill: none;
@@ -215,18 +269,25 @@
 		stroke-linejoin: round;
 	}
 	.tabbar a[aria-current='page'] {
-		color: var(--snow);
+		color: var(--accent);
+		background: var(--glass-active);
 		font-weight: 600;
 	}
 	@media (min-width: 1100px) {
+		.bar-in {
+			padding: 12px 32px;
+		}
+		main {
+			padding: 24px 32px;
+		}
+		footer {
+			padding: 8px 32px 28px;
+		}
 		.topnav {
 			display: flex;
 		}
 		.tabbar {
 			display: none;
-		}
-		footer {
-			padding-bottom: 28px;
 		}
 	}
 </style>

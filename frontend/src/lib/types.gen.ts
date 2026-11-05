@@ -295,6 +295,7 @@ export interface OverviewPeriod {
 	key: string;
 	kind: string;
 	label: string;
+	ptype?: string;
 	snow_cm: number | null;
 }
 /**

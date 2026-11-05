@@ -12,19 +12,24 @@
 		TrendOut,
 		VerificationOut
 	} from '../../../lib/types.gen';
-	import { elevation, snow, type UnitSystem } from '../../../lib/units';
+	import {
+		converters,
+		elevation,
+		snow,
+		snowNum,
+		speed,
+		temperature,
+		type UnitSystem
+	} from '../../../lib/units';
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
-	import DayNightBars from '../../../lib/charts/DayNightBars.svelte';
-	import HourlyStack from '../../../lib/charts/HourlyStack.svelte';
+	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
 	import Exceedance from '../../../lib/charts/Exceedance.svelte';
 	import TrendChart from '../../../lib/charts/TrendChart.svelte';
 	import PeriodSheet from '../../../lib/charts/PeriodSheet.svelte';
-	import Tiles from '../../../lib/components/Tiles.svelte';
 	import PeriodTable from '../../../lib/components/PeriodTable.svelte';
 	import BandTable from '../../../lib/components/BandTable.svelte';
-	import RatingChip from '../../../lib/components/RatingChip.svelte';
 	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
 	import StationPanel from '../../../lib/observed/StationPanel.svelte';
 	import Scorecard from '../../../lib/observed/Scorecard.svelte';
@@ -32,7 +37,8 @@
 	import Webcams from '../../../lib/components/Webcams.svelte';
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
-	import { reasonText } from '../../../lib/conditions';
+	import { compass, skyWord } from '../../../lib/conditions';
+	import { nextStorm, STORM_CM } from '../../../lib/storm';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -103,14 +109,17 @@
 		return scale === null ? [] : m.map((v) => v * scale);
 	};
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
-	const powder = $derived(
-		(snap?.days ?? []).filter((d) => d.rating === 'Powder').map((d) => d.date)
-	);
-	const best = $derived.by(() => {
-		const rated = (snap?.days ?? []).filter((d) => d.score !== null && d.score !== undefined);
-		const top = Math.max(0, ...rated.map((d) => d.score ?? 0));
-		return top >= 3 ? (rated.find((d) => d.score === top) ?? null) : null;
-	});
+	const c = $derived(converters(units));
+	const storm = $derived(band ? nextStorm(band.periods) : null);
+	// Open the period details for a time picked on the chart.
+	const pickTime = (t: string) => {
+		if (!band) return;
+		const at = Date.parse(t);
+		selected =
+			band.periods.find(
+				(p) => Date.parse(p.start) <= at && at < Date.parse(p.start) + p.hours * 3600e3
+			) ?? null;
+	};
 	// Flags for "Heads up", plus avalanche danger 4+ while the center's rating is current.
 	const headsUp = $derived.by(() => {
 		const out: Flag[] = (snap?.flags ?? []).filter((f) => f.type !== 'best_day');
@@ -123,8 +132,6 @@
 			? ((snap?.days ?? []).find((d) => d.date === selected!.date) ?? null)
 			: null
 	);
-	// Ridge wind on the wind chart for tours, and for any location's summit band.
-	const ridge = $derived(backcountry || band?.band === 'summit' ? (snap?.ridge ?? null) : null);
 	const updated = $derived(
 		snap
 			? new Date(snap.generated_at).toLocaleString('en-US', {
@@ -183,7 +190,68 @@
 					<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
 				</section>
 			{/if}
-			<Tiles {band} {units} />
+			<div class="hero">
+				<section class="card stat">
+					<span class="eyebrow">Next 5 days</span>
+					<span class="hero-n num"
+						>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
+					>
+					{#if band.windows['next5'].ens}
+						{@const e = band.windows['next5'].ens}
+						<span class="faint small"
+							>{snowNum(e.p10, units)}–{snowNum(e.p90, units)}
+							{c.snowUnit} likely range{e.estimated ? ' (est.)' : ''}</span
+						>
+					{/if}
+					<div class="minis">
+						<div>
+							<span class="num">{snow(band.windows['d6_10'].snow_cm, units)}</span>
+							<span class="faint small">days 6–10</span>
+						</div>
+						<div>
+							<span class="num">{snow(band.stats.last24_cm, units)}</span>
+							<span class="faint small">last 24 h</span>
+						</div>
+					</div>
+				</section>
+				<section class="card storm">
+					<span class="eyebrow">Next storm</span>
+					{#if storm}
+						<span class="hero-n num"
+							>{snowNum(storm.total_cm, units)}<small>{c.snowUnit} storm total</small></span
+						>
+						<strong>{storm.first.label}{storm.periods > 1 ? ` → ${storm.last.label}` : ''}</strong>
+						<ul>
+							<li>Heaviest {storm.peak.label}: {snow(storm.peak.snow_cm, units)}</li>
+							{#if storm.snow_level_min_m !== null}
+								<li>Snow level down to {elevation(storm.snow_level_min_m, units)}</li>
+							{/if}
+						</ul>
+					{:else}
+						<span class="hero-n">Quiet</span>
+						<span>No storm of {snow(STORM_CM, units)} or more in the forecast.</span>
+					{/if}
+				</section>
+				<section class="card stat">
+					<span class="eyebrow">Right now</span>
+					<span class="hero-n num"
+						>{temperature(band.hourly.temp_c[0], units)}
+						<small>{skyWord(band.hourly.wcode[0])}</small></span
+					>
+					<div class="minis">
+						<div>
+							<span class="num">{elevation(band.hourly.fl_m[0], units)}</span>
+							<span class="faint small">freezing level</span>
+						</div>
+						<div>
+							<span class="num"
+								>{compass(band.hourly.wdir[0])} {speed(band.hourly.wind_kmh[0], units)}</span
+							>
+							<span class="faint small">gusts {speed(band.hourly.gust_kmh[0], units)}</span>
+						</div>
+					</div>
+				</section>
+			</div>
 			{#if headsUp.length}
 				<section class="card thin heads">
 					<h2>Heads up</h2>
@@ -199,29 +267,13 @@
 					</ul>
 				</section>
 			{/if}
-			{#if best}
-				<section class="card thin best">
-					<span class="lead">Best ski day</span>
-					<strong>{best.label === 'Today' ? 'Today' : weekday(best.date)}</strong>
-					<RatingChip rating={best.rating} score={best.score} />
-					<span class="muted"
-						>{(best.reasons ?? []).map((r) => reasonText(r, units)).join(' · ')}</span
-					>
-				</section>
-			{/if}
 			<section class="card">
-				<DayNightBars
-					periods={band.periods}
-					{units}
-					selected={selected?.key ?? null}
-					onselect={(p) => (selected = p)}
-					{powder}
-				/>
+				<ForecastChart {band} bands={snap.bands} {units} onpick={pickTime} />
 			</section>
 			<div class="split">
 				<section class="card">
-					<h2>Hourly</h2>
-					<HourlyStack {band} bands={snap.bands} {units} {ridge} />
+					<h2>Day by day</h2>
+					<PeriodTable periods={band.periods} {units} />
 				</section>
 				<aside class="side">
 					<section class="card">
@@ -256,10 +308,6 @@
 					<Webcams cams={snap.location.webcams ?? []} />
 				</aside>
 			</div>
-			<section class="card">
-				<h2>Day by day</h2>
-				<PeriodTable periods={band.periods} {units} />
-			</section>
 		</div>
 	{:else if tab === 'models'}
 		<div class="stackcol">
@@ -326,56 +374,129 @@
 		align-items: flex-end;
 		gap: 12px;
 		flex-wrap: wrap;
-		position: sticky;
-		top: 0;
-		z-index: 5;
-		background: var(--bg);
-		padding: 6px 0 10px;
+		padding: 4px 0 14px;
 	}
 	.title {
 		min-width: 0;
 	}
 	h1 {
-		margin: 2px 0 0;
-		font-size: 1.5rem;
-		line-height: 1.15;
+		margin: 4px 0 2px;
+		font-family: var(--font-num);
+		font-size: 2rem;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		line-height: 1.1;
 	}
 	.back {
-		font-size: 0.8rem;
+		font-size: 0.82rem;
 		text-decoration: none;
 	}
 	.sub {
-		font-size: 0.82rem;
+		font-size: 0.85rem;
 	}
 	.alert {
-		background: var(--surface);
-		border: 1px solid var(--temp);
-		border-left-width: 4px;
-		border-radius: 8px;
-		padding: 8px 12px;
-		margin: 0 0 10px;
+		background: var(--warn-bg);
+		border: 1px solid var(--warn-border);
+		border-radius: 14px;
+		padding: 10px 14px;
+		margin: 0 0 12px;
 		font-size: 0.88rem;
 	}
 	.tabs {
-		display: flex;
-		gap: 4px;
-		border-bottom: 1px solid var(--border);
-		margin: 0 0 12px;
+		display: inline-flex;
+		gap: 2px;
+		padding: 3px;
+		margin: 0 0 16px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		max-width: 100%;
 		overflow-x: auto;
 	}
 	.tabs button {
 		border: 0;
 		background: none;
-		padding: 8px 12px;
+		padding: 8px 16px;
 		cursor: pointer;
 		color: var(--text-2);
-		border-bottom: 2px solid transparent;
+		border-radius: 999px;
 		white-space: nowrap;
+		font-size: 0.88rem;
 	}
 	.tabs button[aria-current='page'] {
 		color: var(--text);
-		border-bottom-color: var(--snow);
+		background: var(--surface);
+		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
 		font-weight: 600;
+	}
+	.hero {
+		display: grid;
+		gap: 12px;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	}
+	.hero .card {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+		padding: 18px 20px;
+	}
+	.eyebrow {
+		font-size: 0.72rem;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-3);
+	}
+	.hero-n {
+		font-family: var(--font-num);
+		font-size: 2.6rem;
+		font-weight: 600;
+		line-height: 1;
+		letter-spacing: -0.02em;
+	}
+	.hero-n small {
+		font-family: var(--font-ui);
+		font-size: 0.9rem;
+		font-weight: 500;
+		letter-spacing: 0;
+		margin-left: 6px;
+		color: var(--text-2);
+	}
+	.minis {
+		display: flex;
+		gap: 24px;
+		border-top: 1px solid var(--grid);
+		padding-top: 10px;
+		margin-top: 4px;
+	}
+	.minis div {
+		display: grid;
+		gap: 1px;
+	}
+	.minis .num {
+		font-weight: 600;
+		font-size: 1.05rem;
+	}
+	.storm {
+		background: var(--feature-bg);
+		border-color: var(--feature-bg);
+		color: var(--feature-ink);
+	}
+	.storm .eyebrow,
+	.storm .hero-n small,
+	.storm ul,
+	.storm span {
+		color: var(--feature-2);
+	}
+	.storm .hero-n {
+		color: var(--feature-ink);
+	}
+	.storm ul {
+		margin: 0;
+		padding-left: 18px;
+		font-size: 0.85rem;
+		display: grid;
+		gap: 3px;
 	}
 	.stackcol {
 		display: grid;
@@ -383,6 +504,7 @@
 	}
 	.split {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 12px;
 		min-width: 0;
 	}
@@ -430,29 +552,18 @@
 		border-left-color: var(--snow);
 	}
 	.heads li.warning {
-		border-left-color: var(--temp);
+		border-left-color: var(--warn);
 	}
 	.heads .new {
 		margin-left: 6px;
 		font-size: 0.65rem;
 		font-weight: 700;
 		text-transform: uppercase;
-		color: var(--snow);
+		color: var(--accent);
 	}
 	.thin {
 		padding-top: 8px;
 		padding-bottom: 8px;
-	}
-	.best {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 6px 8px;
-		font-size: 0.88rem;
-	}
-	.best .lead {
-		font-weight: 600;
-		color: var(--text-2);
 	}
 	.section {
 		font-size: 0.95rem;

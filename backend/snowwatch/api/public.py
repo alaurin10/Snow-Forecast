@@ -186,7 +186,12 @@ def make_router() -> APIRouter:
                 row.snow_depth_cm = snap.snotel.depth_cm if snap.snotel else None
                 row.periods = [
                     OverviewPeriod(
-                        key=p.key, label=p.label, kind=p.kind, date=p.date, snow_cm=p.snow_cm
+                        key=p.key,
+                        label=p.label,
+                        kind=p.kind,
+                        date=p.date,
+                        snow_cm=p.snow_cm,
+                        ptype=p.ptype,
                     )
                     for p in mid.periods
                 ]

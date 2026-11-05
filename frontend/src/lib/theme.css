@@ -1,48 +1,64 @@
-/* Snow Watch design tokens. Chart colors were checked with the dataviz palette
-   validator in both themes (docs/PLAN.md 2.4); dark values are stepped for the
-   dark surface, not flipped. */
+/* Snow Watch design tokens. Two themes: Alpenglow (light) and Night Ski (dark).
+   Data colors (precipitation type, chart series) are identical in both themes so
+   the color coding never changes; only surfaces, text and the accent switch. */
 :root {
 	color-scheme: light;
-	--bg: #f4f4f1;
-	--surface: #fcfcfb;
-	--surface-2: #f0efec;
-	--border: #e2e1dc;
-	--text: #0b0b0b;
-	--text-2: #52514e;
-	--text-3: #75746f;
-	--grid: #e8e7e2;
-	--night: rgb(24 79 149 / 0.07);
-	--focus: #2a78d6;
+	--bg: #faf7f4;
+	--surface: #ffffff;
+	--surface-2: #f3eee9;
+	--border: #eae3dc;
+	--text: #1f1b2e;
+	--text-2: #575167;
+	--text-3: #6a6479;
+	--grid: #f1ebe5;
+	--night: rgb(31 27 46 / 0.045);
+	--focus: #4b3fb5;
+	--accent: #4b3fb5;
+	--accent-soft: #ece8fb;
+	--accent-ink: #2f2680;
+	--warn: #b84a5e;
+	--warn-bg: #fcedef;
+	--warn-border: #f3cbd2;
+	--warn-ink: #a63a50;
+	--glass: rgb(255 255 255 / 0.62);
+	--glass-border: rgb(255 255 255 / 0.95);
+	--glass-shadow: 0 12px 32px rgb(31 27 46 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.9);
+	--glass-active: rgb(75 63 181 / 0.12);
+	--header-glass: rgb(250 247 244 / 0.72);
+	--feature-bg: #2f2680;
+	--feature-ink: #ffffff;
+	--feature-2: #e4dffa;
+	--ens: rgb(87 81 103 / 0.16);
+	--ens-line: #575167;
+	--cloud: 140 147 168; /* rgb triplet; strips set the alpha */
+	--c0: #f3eee9;
+	--c1: #b9d3f6;
+	--c2: #86b3ee;
+	--c3: #3b7dd8;
+	--c4: #2b6cc4;
+	--c5: #1a4a8c;
+	--c-ink-light: #1f1b2e; /* text on c1–c2 */
+	--c-ink-dark: #ffffff; /* text on c3–c5 */
 
-	--snow: #2a78d6;
-	--snow-night: #184f95;
-	--mix: #e87ba4;
-	--rain: #008300;
-	--temp: #eb6834;
-	--level: #6250d6;
-	--wind: #1baf7a;
-	--ens: rgb(82 81 78 / 0.16);
-	--ens-line: #52514e;
-	--cloud: 82 81 78; /* rgb triplet; strips set the alpha */
+	/* Data colors, shared by both themes. */
+	--snow: #4a8fe7;
+	--snow-heavy: #dd6b20;
+	--snow-night: #2b6cc4;
+	--mix: #9b6be0;
+	--rain: #26965f;
+	--temp: #e5484d;
+	--level: #c2479f;
+	--wind: #14a3a3;
 
 	/* Categorical slots, fixed order (one per model). */
-	--s1: #2a78d6;
-	--s2: #eb6834;
-	--s3: #1baf7a;
-	--s4: #eda100;
-	--s5: #e87ba4;
-	--s6: #008300;
-	--s7: #6250d6;
+	--s1: #4a8fe7;
+	--s2: #dd6b20;
+	--s3: #14a3a3;
+	--s4: #c98500;
+	--s5: #c2479f;
+	--s6: #26965f;
+	--s7: #9b6be0;
 
-	/* Calendar ramp (ordinal, validated): more snow is darker. */
-	--c0: #ecebe7;
-	--c1: #86b6ef;
-	--c2: #5598e7;
-	--c3: #2a78d6;
-	--c4: #1c5cab;
-	--c5: #104281;
-	--c-ink-light: #0b0b0b; /* text on c1–c2 */
-	--c-ink-dark: #ffffff; /* text on c3–c5 */
 	/* North American avalanche danger scale (same in both themes); always with
 	   the number and the word. */
 	--d1: #50b848;
@@ -53,92 +69,97 @@
 	--d-ink: #111111;
 	--d-ink-on-dark: #ffffff;
 
-	--radius: 12px;
-	--shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-	--font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-	--font-num: 'Barlow Semi Condensed', var(--font-ui);
+	--radius: 18px;
+	--shadow: 0 1px 2px rgb(31 27 46 / 0.04);
+	--font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--font-num: 'Space Grotesk', var(--font-ui);
 }
 
 @media (prefers-color-scheme: dark) {
 	:root:where(:not([data-theme='light'])) {
 		color-scheme: dark;
-		--bg: #121211;
-		--surface: #1a1a19;
-		--surface-2: #242422;
-		--border: #31312d;
-		--text: #f0efec;
-		--text-2: #c3c2b7;
-		--text-3: #94938b;
-		--grid: #2b2b28;
-		--night: rgb(255 255 255 / 0.045);
-		--focus: #3987e5;
-		--snow: #3987e5;
-		--snow-night: #256abf;
-		--mix: #d55181;
-		--rain: #008300;
-		--temp: #d95926;
-		--level: #9085e9;
-		--wind: #199e70;
-		--ens: rgb(195 194 183 / 0.16);
-		--ens-line: #c3c2b7;
-		--cloud: 195 194 183;
-		--s1: #3987e5;
-		--s2: #d95926;
-		--s3: #199e70;
-		--s4: #c98500;
-		--s5: #d55181;
-		--s6: #008300;
-		--s7: #9085e9;
-		/* Calendar ramp (ordinal, validated): more snow is lighter. */
-		--c0: #242422;
-		--c1: #184f95;
-		--c2: #256abf;
-		--c3: #3987e5;
-		--c4: #6da7ec;
-		--c5: #b7d3f6;
+		--bg: #0a111d;
+		--surface: #111a29;
+		--surface-2: #1a2538;
+		--border: #223047;
+		--text: #eaf0f8;
+		--text-2: #aebbcd;
+		--text-3: #8593a8;
+		--grid: #1e2a3f;
+		--night: rgb(255 255 255 / 0.035);
+		--focus: #a99cf5;
+		--accent: #a99cf5;
+		--accent-soft: #1e2142;
+		--accent-ink: #cfc7fa;
+		--warn: #e07a8e;
+		--warn-bg: #2a1520;
+		--warn-border: #5a2a3a;
+		--warn-ink: #f3b8c4;
+		--glass: rgb(30 42 62 / 0.55);
+		--glass-border: rgb(255 255 255 / 0.12);
+		--glass-shadow: 0 12px 32px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.14);
+		--glass-active: rgb(255 255 255 / 0.12);
+		--header-glass: rgb(10 17 29 / 0.72);
+		--feature-bg: #1e2142;
+		--feature-ink: #eaf0f8;
+		--feature-2: #c9c3f0;
+		--feature-bg: #1e2142;
+		--feature-ink: #eaf0f8;
+		--feature-2: #c9c3f0;
+		--ens: rgb(174 187 205 / 0.16);
+		--ens-line: #aebbcd;
+		--cloud: 140 147 168;
+		/* Calendar ramp: more snow is lighter. */
+		--c0: #1a2538;
+		--c1: #16365f;
+		--c2: #2b5a9e;
+		--c3: #4a8fe7;
+		--c4: #86b3ee;
+		--c5: #c9dffa;
 		--c-ink-light: #ffffff;
-		--c-ink-dark: #0b0b0b;
+		--c-ink-dark: #0a111d;
 	}
 }
 
 :root[data-theme='dark'] {
 	color-scheme: dark;
-	--bg: #121211;
-	--surface: #1a1a19;
-	--surface-2: #242422;
-	--border: #31312d;
-	--text: #f0efec;
-	--text-2: #c3c2b7;
-	--text-3: #94938b;
-	--grid: #2b2b28;
-	--night: rgb(255 255 255 / 0.045);
-	--focus: #3987e5;
-	--snow: #3987e5;
-	--snow-night: #256abf;
-	--mix: #d55181;
-	--rain: #008300;
-	--temp: #d95926;
-	--level: #9085e9;
-	--wind: #199e70;
-	--ens: rgb(195 194 183 / 0.16);
-	--ens-line: #c3c2b7;
-	--cloud: 195 194 183;
-	--s1: #3987e5;
-	--s2: #d95926;
-	--s3: #199e70;
-	--s4: #c98500;
-	--s5: #d55181;
-	--s6: #008300;
-	--s7: #9085e9;
-	/* Calendar ramp (ordinal, validated): more snow is lighter. */
-	--c0: #242422;
-	--c1: #184f95;
-	--c2: #256abf;
-	--c3: #3987e5;
-	--c4: #6da7ec;
-	--c5: #b7d3f6;
+	--bg: #0a111d;
+	--surface: #111a29;
+	--surface-2: #1a2538;
+	--border: #223047;
+	--text: #eaf0f8;
+	--text-2: #aebbcd;
+	--text-3: #8593a8;
+	--grid: #1e2a3f;
+	--night: rgb(255 255 255 / 0.035);
+	--focus: #a99cf5;
+	--accent: #a99cf5;
+	--accent-soft: #1e2142;
+	--accent-ink: #cfc7fa;
+	--warn: #e07a8e;
+	--warn-bg: #2a1520;
+	--warn-border: #5a2a3a;
+	--warn-ink: #f3b8c4;
+	--glass: rgb(30 42 62 / 0.55);
+	--glass-border: rgb(255 255 255 / 0.12);
+	--glass-shadow: 0 12px 32px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.14);
+	--glass-active: rgb(255 255 255 / 0.12);
+	--header-glass: rgb(10 17 29 / 0.72);
+	--feature-bg: #1e2142;
+	--feature-ink: #eaf0f8;
+	--feature-2: #c9c3f0;
+	--ens: rgb(174 187 205 / 0.16);
+	--ens-line: #aebbcd;
+	--cloud: 140 147 168;
+	/* Calendar ramp: more snow is lighter. */
+	--c0: #1a2538;
+	--c1: #16365f;
+	--c2: #2b5a9e;
+	--c3: #4a8fe7;
+	--c4: #86b3ee;
+	--c5: #c9dffa;
 	--c-ink-light: #ffffff;
-	--c-ink-dark: #0b0b0b;
+	--c-ink-dark: #0a111d;
 }
 
 *,
@@ -268,9 +289,9 @@ table.data thead th {
 }
 
 .btn.primary {
-	background: var(--snow);
-	border-color: var(--snow);
-	color: #fff;
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--surface);
 	font-weight: 600;
 }
 
