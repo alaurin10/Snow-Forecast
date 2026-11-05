@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from snowwatch.models import AvyRef, Band, Location
+from snowwatch.models import AvyRef, Band, Location, Webcam
 from snowwatch.store.db import utcnow_iso
 
 
@@ -31,6 +31,7 @@ def _from_row(row: sqlite3.Row) -> Location:
         radar_station=row["radar_station"],
         avy=AvyRef.model_validate_json(row["avy_json"]) if row["avy_json"] else None,
         links=json.loads(row["links_json"]),
+        webcams=[Webcam.model_validate(w) for w in json.loads(row["webcams_json"] or "[]")],
         catalog_ref=row["catalog_ref"],
         active=bool(row["active"]),
         sort_order=row["sort_order"],
@@ -87,6 +88,7 @@ def upsert_location(
         "radar_station": loc.radar_station,
         "avy_json": loc.avy.model_dump_json() if loc.avy else None,
         "links_json": json.dumps(loc.links),
+        "webcams_json": json.dumps([w.model_dump(exclude_none=True) for w in loc.webcams]),
         "catalog_ref": loc.catalog_ref,
         "now": now,
         "by": by,
@@ -96,17 +98,18 @@ def upsert_location(
             """
             INSERT INTO locations (id, name, kind, region, country, tz, active, sort_order,
                 bands_json, snotel_triplet, nws_office, radar_station, avy_json, links_json,
-                catalog_ref, created_at, updated_at, updated_by)
+                webcams_json, catalog_ref, created_at, updated_at, updated_by)
             VALUES (:id, :name, :kind, :region, :country, :tz, :active, :sort_order,
                 :bands_json, :snotel_triplet, :nws_office, :radar_station, :avy_json,
-                :links_json, :catalog_ref, :now, :now, :by)
+                :links_json, :webcams_json, :catalog_ref, :now, :now, :by)
             ON CONFLICT (id) DO UPDATE SET
                 name = excluded.name, kind = excluded.kind, region = excluded.region,
                 country = excluded.country, tz = excluded.tz, active = excluded.active,
                 sort_order = excluded.sort_order, bands_json = excluded.bands_json,
                 snotel_triplet = excluded.snotel_triplet, nws_office = excluded.nws_office,
                 radar_station = excluded.radar_station, avy_json = excluded.avy_json,
-                links_json = excluded.links_json, catalog_ref = excluded.catalog_ref,
+                links_json = excluded.links_json, webcams_json = excluded.webcams_json,
+                catalog_ref = excluded.catalog_ref,
                 updated_at = excluded.updated_at, updated_by = excluded.updated_by,
                 archived_at = NULL
             """,

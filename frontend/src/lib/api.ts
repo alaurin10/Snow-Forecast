@@ -9,6 +9,8 @@ import type {
 	Me,
 	OverviewRow,
 	PlanOut,
+	StatusOut,
+	VerificationOut,
 	ResolveIn,
 	ResolveOut,
 	RunOut,
@@ -110,6 +112,11 @@ export function getAvalanche(): Promise<Record<string, AvalancheView>> {
 	}
 	return avalanche.p;
 }
+
+export const getVerification = (id: string) =>
+	get<VerificationOut>(`/api/locations/${encodeURIComponent(id)}/verification`);
+
+export const getStatus = () => get<StatusOut>('/api/status');
 
 export const getPlan = (date?: string) =>
 	get<PlanOut>(date ? `/api/plan?date=${encodeURIComponent(date)}` : '/api/plan');

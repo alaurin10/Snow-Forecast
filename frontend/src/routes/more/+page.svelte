@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { getHealth, getMe, getOverview, getRuns, type Health } from '../../lib/api';
+	import { getHealth, getMe, getRuns, type Health } from '../../lib/api';
 	import { prefs, type BandName, type Theme } from '../../lib/prefs.svelte';
-	import type { OverviewRow, RunOut } from '../../lib/types.gen';
+	import type { RunOut } from '../../lib/types.gen';
+	import AlertsSettings from '../../lib/components/AlertsSettings.svelte';
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
-	let rows = $state<OverviewRow[]>([]);
 	let owner = $state(false);
 
 	$effect(() => {
@@ -15,9 +15,6 @@
 			.catch(() => {});
 		getRuns(20)
 			.then((r) => (runs = r))
-			.catch(() => {});
-		getOverview()
-			.then((r) => (rows = r))
 			.catch(() => {});
 		getMe()
 			.then((m) => (owner = m.is_owner))
@@ -31,13 +28,6 @@
 		const h = Math.round(m / 60);
 		return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 	};
-	const when = (iso: string) =>
-		new Date(iso).toLocaleString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			hour: 'numeric',
-			minute: '2-digit'
-		});
 	const todayUtc = new Date().toISOString().slice(0, 10);
 	const usedToday = $derived(
 		Math.round(
@@ -107,6 +97,8 @@
 		</p>
 	</section>
 
+	<AlertsSettings />
+
 	<section class="card">
 		<h2>Status</h2>
 		{#if health}
@@ -122,35 +114,7 @@
 				· Open-Meteo today ≈ <strong>{usedToday}</strong> of 10,000 calls
 			</p>
 		{/if}
-		<h3>Locations</h3>
-		<div class="table-wrap">
-			<table class="data">
-				<tbody>
-					{#each rows as r (r.id)}
-						<tr><td>{r.name}</td><td>{ago(r.generated_at)}</td></tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-		<h3>Recent runs</h3>
-		<div class="table-wrap">
-			<table class="data">
-				<thead
-					><tr><th>Started</th><th>Kind</th><th>Status</th><th>Errors</th><th>Calls</th></tr></thead
-				>
-				<tbody>
-					{#each runs as r (r.id)}
-						<tr class:bad={r.status === 'failed'}>
-							<td>{when(r.started_at)}</td>
-							<td>{r.kind}</td>
-							<td>{r.status}</td>
-							<td title={r.errors.join('\n')}>{r.errors.length}</td>
-							<td>{Math.round(r.api_weight)}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+		<a class="btn" href={resolve('/status')}>Sources, runs and data age →</a>
 	</section>
 </div>
 
@@ -188,8 +152,5 @@
 		text-decoration: none;
 		margin-bottom: 12px;
 		border-color: var(--snow);
-	}
-	tr.bad td {
-		color: var(--temp);
 	}
 </style>

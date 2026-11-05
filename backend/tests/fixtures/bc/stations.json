@@ -1,0 +1,125 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "WHSE_WATER_MANAGEMENT.SSL_SNOW_ASWS_STNS_SP.77",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -116.1371167,
+     51.05991674
+    ]
+   },
+   "geometry_name": "SHAPE",
+   "properties": {
+    "SNOW_ASWS_STN_ID": 77,
+    "LOCATION_ID": "2C14P",
+    "LOCATION_NAME": "Floe Lake",
+    "ELEVATION": 2090,
+    "STATUS": "Active",
+    "LATITUDE": 51.059917,
+    "LONGITUDE": -116.137117,
+    "OPERATOR": "BC Hydro",
+    "CAMERA_URL": null,
+    "OBJECTID": 110917
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "WHSE_WATER_MANAGEMENT.SSL_SNOW_ASWS_STNS_SP.105",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -123.102889,
+     50.13705604
+    ]
+   },
+   "geometry_name": "SHAPE",
+   "properties": {
+    "SNOW_ASWS_STN_ID": 105,
+    "LOCATION_ID": "3A20P",
+    "LOCATION_NAME": "Callaghan Creek",
+    "ELEVATION": 1017,
+    "STATUS": "Active",
+    "LATITUDE": 50.137056,
+    "LONGITUDE": -123.102889,
+    "OPERATOR": "BC Hydro",
+    "CAMERA_URL": null,
+    "OBJECTID": 112961
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "WHSE_WATER_MANAGEMENT.SSL_SNOW_ASWS_STNS_SP.33",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -122.92996,
+     50.53625004
+    ]
+   },
+   "geometry_name": "SHAPE",
+   "properties": {
+    "SNOW_ASWS_STN_ID": 33,
+    "LOCATION_ID": "1D06P",
+    "LOCATION_NAME": "Tenquille Lake",
+    "ELEVATION": 1680,
+    "STATUS": "Active",
+    "LATITUDE": 50.53625,
+    "LONGITUDE": -122.92996,
+    "OPERATOR": "BC ENV",
+    "CAMERA_URL": null,
+    "OBJECTID": 110873
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "WHSE_WATER_MANAGEMENT.SSL_SNOW_ASWS_STNS_SP.58",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -118.1516028,
+     51.03634174
+    ]
+   },
+   "geometry_name": "SHAPE",
+   "properties": {
+    "SNOW_ASWS_STN_ID": 58,
+    "LOCATION_ID": "2A06P",
+    "LOCATION_NAME": "Mount Revelstoke",
+    "ELEVATION": 1850,
+    "STATUS": "Active",
+    "LATITUDE": 51.036342,
+    "LONGITUDE": -118.151603,
+    "OPERATOR": "BC Hydro",
+    "CAMERA_URL": null,
+    "OBJECTID": 110898
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "WHSE_WATER_MANAGEMENT.SSL_SNOW_ASWS_STNS_SP.59",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -117.716667,
+     51.23333304
+    ]
+   },
+   "geometry_name": "SHAPE",
+   "properties": {
+    "SNOW_ASWS_STN_ID": 59,
+    "LOCATION_ID": "2A17P",
+    "LOCATION_NAME": "Fidelity Mountain",
+    "ELEVATION": 1874,
+    "STATUS": "Inactive",
+    "LATITUDE": 51.233333,
+    "LONGITUDE": -117.716667,
+    "OPERATOR": "BC ENV",
+    "CAMERA_URL": null,
+    "OBJECTID": 110899
+   }
+  }
+ ]
+}

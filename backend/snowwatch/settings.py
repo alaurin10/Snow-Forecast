@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     cf_access_auds: str = ""
     # Development only (ENV=dev and no CF_ACCESS_TEAM): treat every request as this owner.
     dev_admin_email: str = ""
+    # Web Push alerts: `snowwatch push keys` prints a pair. Empty = push is off.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
 
     @property
     def static_root(self) -> Path | None:

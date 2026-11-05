@@ -36,7 +36,14 @@
 	const elevs = $derived(loc.bands.map((b) => b.elev_m));
 	const rising = $derived(elevs[0] < elevs[1] && elevs[1] < elevs[2]);
 	const idOk = $derived(/^[a-z0-9][a-z0-9-]{1,39}$/.test(loc.id));
-	const canSave = $derived(rising && idOk && loc.name.trim().length > 0 && !saving);
+	const urlOk = (u: string | null | undefined) => !u || /^https?:\/\/\S+$/.test(u);
+	const camsOk = $derived(
+		(loc.webcams ?? []).every((w) => w.name.trim() && urlOk(w.url) && w.url && urlOk(w.image_url))
+	);
+	const canSave = $derived(rising && idOk && camsOk && loc.name.trim().length > 0 && !saving);
+	function addCam() {
+		loc.webcams = [...(loc.webcams ?? []), { name: '', url: '', image_url: null }];
+	}
 
 	function setElev(i: number, raw: string) {
 		const v = Number(raw);
@@ -126,7 +133,7 @@
 	<h4>Detected</h4>
 	<div class="grid2">
 		<label>
-			Snow station (SNOTEL)
+			Snow station
 			<select bind:value={loc.snotel}>
 				<option value={null}>None</option>
 				{#if loc.snotel && !candidates.some((c) => c.triplet === loc.snotel)}
@@ -179,6 +186,36 @@
 			{/each}
 		</ul>
 	{/if}
+
+	<h4>Webcams</h4>
+	{#each loc.webcams ?? [] as cam, i (i)}
+		<div class="cam">
+			<label>Name <input bind:value={cam.name} placeholder="e.g. Summit cam" /></label>
+			<label
+				>Page link <input
+					bind:value={cam.url}
+					type="url"
+					placeholder="https://… (the webcam's web page)"
+				/></label
+			>
+			<label
+				>Image link (optional) <input
+					value={cam.image_url ?? ''}
+					oninput={(e) => (cam.image_url = e.currentTarget.value.trim() || null)}
+					type="url"
+					placeholder="https://… (a .jpg that updates)"
+				/></label
+			>
+			<button
+				type="button"
+				class="x"
+				aria-label={`Remove ${cam.name || 'webcam'}`}
+				onclick={() => (loc.webcams = (loc.webcams ?? []).filter((_, j) => j !== i))}>✕</button
+			>
+		</div>
+	{/each}
+	{#if !camsOk}<p class="bad">Each webcam needs a name and links starting with https://</p>{/if}
+	<button type="button" class="btn small addcam" onclick={addCam}>+ Add a webcam</button>
 
 	<div class="actions">
 		<button type="button" class="btn" onclick={oncancel}>Cancel</button>
@@ -285,6 +322,36 @@
 		background: none;
 		cursor: pointer;
 		color: var(--text-3);
+	}
+	.cam {
+		display: grid;
+		gap: 6px;
+		grid-template-columns: 1fr auto;
+		align-items: end;
+		padding: 8px 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.cam label {
+		grid-column: 1;
+	}
+	.cam .x {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	@media (min-width: 700px) {
+		.cam {
+			grid-template-columns: 1fr 1.5fr 1.5fr auto;
+		}
+		.cam label {
+			grid-column: auto;
+		}
+		.cam .x {
+			grid-column: auto;
+			grid-row: auto;
+		}
+	}
+	.addcam {
+		justify-self: start;
 	}
 	.actions {
 		display: flex;

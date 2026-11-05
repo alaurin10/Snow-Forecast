@@ -14,6 +14,7 @@ from snowwatch.inputs import load_responses
 from snowwatch.locations import service
 from snowwatch.settings import REPO_ROOT, Settings, get_settings
 from snowwatch.sources.openmeteo import daily_weight
+from snowwatch.store import repo
 from snowwatch.store.db import connect, migrate
 
 DEFAULT_SEED = REPO_ROOT / "config" / "seed-locations.yaml"
@@ -64,6 +65,24 @@ def cmd_locations(args: argparse.Namespace, settings: Settings) -> int:
             Path(args.path).write_text(text)
         else:
             sys.stdout.write(text)
+    elif args.action == "stations":
+        # Fill in the nearest snow station for every location that has none.
+        from snowwatch.locations.resolve import has_stations, rank_stations
+
+        for loc in service.list_locations(conn, include_inactive=True):
+            if loc.snotel:
+                continue
+            if not has_stations(conn, loc.country):
+                print(f"{loc.id:14s} no station list yet: run `snowwatch lookups refresh` first")
+                continue
+            mid = loc.band("mid")
+            best = rank_stations(conn, mid.lat, mid.lon, mid.elev_m, loc.country, limit=1)
+            if not best:
+                print(f"{loc.id:14s} no snow station within range")
+                continue
+            loc.snotel = best[0].triplet
+            service.upsert_location(conn, loc, max_locations=settings.max_locations, by="stations")
+            print(f"{loc.id:14s} {best[0].triplet}  {best[0].name}, {best[0].distance_km} km")
     return 0
 
 
@@ -214,6 +233,7 @@ def cmd_lookups(args: argparse.Namespace, settings: Settings) -> int:
     migrate(conn)
     with _fetcher(settings) as fetcher:
         out = refresh(conn, fetcher)
+        repo.save_source_status(conn, fetcher.sources)
     for k, v in out.items():
         print(f"{k:16s} {v}")
     return 1 if any(isinstance(v, str) for v in out.values()) else 0
@@ -228,6 +248,7 @@ def cmd_avalanche(args: argparse.Namespace, settings: Settings) -> int:
     locs = list_locations(conn)
     with _fetcher(settings) as fetcher:
         out = refresh(conn, fetcher, locs)
+        repo.save_source_status(conn, fetcher.sources)
     for loc_id, v in views(conn, {loc.id: loc.tz or "UTC" for loc in locs}).items():
         doc = v.doc
         where = f"{doc.center_id} · {doc.zone}" if doc else "-"
@@ -235,6 +256,17 @@ def cmd_avalanche(args: argparse.Namespace, settings: Settings) -> int:
     for err in out.errors:
         print(f"error: {err}", file=sys.stderr)
     return 1 if out.errors else 0
+
+
+def cmd_push(args: argparse.Namespace, settings: Settings) -> int:
+    from snowwatch.push import generate_keys
+
+    public, private = generate_keys()
+    print("# Web Push keys for push alerts. Add both lines to .env, then restart:")
+    print("#   docker compose up -d")
+    print(f"VAPID_PUBLIC_KEY={public}")
+    print(f"VAPID_PRIVATE_KEY={private}")
+    return 0
 
 
 def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
@@ -278,8 +310,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("migrate", help="apply database migrations")
     s.set_defaults(func=cmd_migrate)
 
-    s = sub.add_parser("locations", help="list, import or export locations")
-    s.add_argument("action", choices=["list", "import", "export"])
+    s = sub.add_parser(
+        "locations",
+        help="list, import or export locations; `stations` fills in missing snow stations",
+    )
+    s.add_argument("action", choices=["list", "import", "export", "stations"])
     s.add_argument("path", nargs="?", help="YAML file for import/export")
     s.set_defaults(func=cmd_locations)
 
@@ -329,6 +364,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("avalanche", help="fetch the avalanche forecasts for every location")
     s.add_argument("action", choices=["refresh"])
     s.set_defaults(func=cmd_avalanche)
+
+    s = sub.add_parser("push", help="push alerts: `push keys` prints a new VAPID key pair")
+    s.add_argument("action", choices=["keys"])
+    s.set_defaults(func=cmd_push)
 
     s = sub.add_parser("schema", help="write the API's JSON Schema (for frontend types)")
     s.add_argument("--out", help="file to write (default stdout)")

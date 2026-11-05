@@ -150,8 +150,26 @@ def station_meta(conn: sqlite3.Connection, triplet: str) -> dict[str, Any] | Non
     return {
         "stationTriplet": row["triplet"],
         "name": row["name"],
-        "elevation": row["elev_m"] / 0.3048,
+        "elevation": None if row["elev_m"] is None else row["elev_m"] / 0.3048,
+        "latitude": row["lat"],
+        "longitude": row["lon"],
     }
+
+
+def save_station_rows(conn: sqlite3.Connection, rows: Iterable[Mapping[str, Any]]) -> int:
+    """Stations already in table shape: triplet, name, state, lat, lon, elev_m."""
+    now = utcnow_iso()
+    values = [
+        (r["triplet"], r["name"], r.get("state"), r["lat"], r["lon"], r.get("elev_m"), now)
+        for r in rows
+    ]
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO snotel_stations "
+            "(triplet, name, state, lat, lon, elev_m, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            values,
+        )
+    return len(values)
 
 
 def save_stations(conn: sqlite3.Connection, stations: Iterable[Mapping[str, Any]]) -> int:
@@ -175,3 +193,61 @@ def save_stations(conn: sqlite3.Connection, stations: Iterable[Mapping[str, Any]
             rows,
         )
     return len(rows)
+
+
+def record_flags(
+    conn: sqlite3.Connection, location_id: str, run_id: int, flags: Iterable[tuple[str, str]]
+) -> dict[tuple[str, str], int]:
+    """Log this run's flags (type, key) and return when each was first raised.
+
+    A flag that was missing from the location's previous run counts as raised
+    again now, so it reads as new (and would alert) when it comes back.
+    """
+    prev = conn.execute(
+        "SELECT MAX(run_id) FROM snapshots WHERE location_id = ? AND run_id < ?",
+        (location_id, run_id),
+    ).fetchone()[0]
+    out: dict[tuple[str, str], int] = {}
+    with conn:
+        for ftype, key in flags:
+            row = conn.execute(
+                "SELECT first_run, last_run FROM flag_log "
+                "WHERE location_id = ? AND type = ? AND key = ?",
+                (location_id, ftype, key),
+            ).fetchone()
+            if row is None or prev is None or row["last_run"] < prev:
+                first = run_id
+            else:
+                first = row["first_run"]
+            conn.execute(
+                "INSERT INTO flag_log (location_id, type, key, first_run, last_run) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT (location_id, type, key) DO UPDATE SET "
+                "first_run = excluded.first_run, last_run = excluded.last_run",
+                (location_id, ftype, key, first, run_id),
+            )
+            out[(ftype, key)] = first
+    return out
+
+
+def save_source_status(conn: sqlite3.Connection, stats: Mapping[str, Any]) -> None:
+    """Fold a fetcher's per-source counts (`http.SourceStat`) into `source_status`."""
+    today = utcnow_iso()[:10]
+    with conn:
+        for source, st in stats.items():
+            row = conn.execute("SELECT * FROM source_status WHERE source = ?", (source,)).fetchone()
+            same_day = row is not None and row["day"] == today
+            conn.execute(
+                "INSERT OR REPLACE INTO source_status (source, last_ok_at, last_error_at, "
+                "last_error, day, calls_today, errors_today, weight_today) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    source,
+                    st.last_ok_at or (row["last_ok_at"] if row else None),
+                    st.last_error_at or (row["last_error_at"] if row else None),
+                    st.last_error or (row["last_error"] if row else None),
+                    today,
+                    (row["calls_today"] if same_day else 0) + st.ok + st.errors,
+                    (row["errors_today"] if same_day else 0) + st.errors,
+                    round((row["weight_today"] if same_day else 0.0) + st.weight, 2),
+                ),
+            )

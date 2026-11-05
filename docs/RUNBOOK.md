@@ -6,6 +6,32 @@ setup as Home-Hub's dashboard (`apps/dashboard/`, `docs/10-remote-access.md`).
 
 Nothing here needs an open router port: the tunnel is outbound only.
 
+**This is the one document for everything you do yourself.** Anything the app
+can't do for you is in the checklist below, with the exact commands or clicks.
+
+## Owner checklist
+
+Tick these off once; each links to the step with the details.
+
+- [ ] **First-time setup on the mini PC:** steps 1–9 below.
+- [ ] **Cloudflare Access** (step 6). This is what makes you the owner (Manage
+      locations) and keeps the site private. Until it's done, everyone who reaches
+      the site is a viewer.
+- [ ] **Avalanche data terms:** before inviting friends, read the display terms of
+      [avalanche.org](https://avalanche.org) and
+      [Avalanche Canada](https://avalanche.ca). Snow Watch shows ratings exactly as
+      published, hides them once they expire and links to the center; check that
+      this is acceptable for private use with friends.
+- [ ] **Push alerts** (step 10): create the keys once, then turn alerts on on each
+      phone.
+- [ ] **After updating to M6** (section below): load the BC snow stations and fill
+      in the Canadian locations' stations.
+- [ ] **Webcams** (Everyday tasks): add any you want on the Manage page.
+- [ ] **In about a week:** read the forecast scorecard and decide on the snow depth
+      method (Everyday tasks → "Raw or snow-ratio depth").
+- [ ] **Optional:** Banff Sunshine's nearest snow station (Floe Lake) is in BC, over
+      the divide. An Alberta snow pillow would be closer; ask for it as a follow-up.
+
 ## What runs where
 
 | Where | What |
@@ -62,6 +88,7 @@ Edit `.env`:
 | `NWS_CONTACT` | Your email (the National Weather Service asks for one) |
 | `TZ` | `America/Los_Angeles` |
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | From step 8 (optional) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | From step 10 (push alerts; leave empty to keep alerts off) |
 
 The containers run as uid 1000. If `id -u` isn't 1000, run
 `sudo chown 1000:1000 data`.
@@ -165,6 +192,64 @@ On a phone with **Wi-Fi off**:
 - [ ] Add to Home Screen works (Safari: Share → Add to Home Screen; Chrome: ⋮ → Install app).
 - [ ] The router still has no port-forward rules.
 
+### 10. Push alerts (optional)
+
+Snow Watch can send a phone or desktop notification when a powder day or a storm
+first shows up in the forecast (and, if someone picks it, avalanche danger High
+or Extreme). It uses the browser's own push system, so nobody needs an extra
+app, and it needs the HTTPS site from steps 5–6.
+
+1. Create the keys (once):
+   ```bash
+   docker compose run --rm worker snowwatch push keys
+   ```
+   It prints two lines, `VAPID_PUBLIC_KEY=…` and `VAPID_PRIVATE_KEY=…`.
+2. Paste both lines into `.env`. Keep the private key secret, and don't change the
+   keys later: that would silently cut off every phone that subscribed.
+3. Restart:
+   ```bash
+   docker compose up -d
+   ```
+4. On each phone or computer:
+   - **iPhone or iPad** (iOS 16.4 or newer): open `https://snow.andrewlaurin.com`
+     in Safari → Share → **Add to Home Screen**. Open Snow Watch **from the Home
+     Screen icon**, then More → Alerts → **Turn on alerts** → Allow → **Send a
+     test**.
+   - **Android:** in Chrome, More → Alerts → **Turn on alerts** → Allow → **Send a
+     test**. Installing the app (⋮ → Install app) is optional.
+   - **Desktop:** the same from Chrome, Edge or Firefox.
+5. Pick which alerts and which locations, then **Save**. Friends can do the same
+   on their own phones once they can sign in.
+
+If the test doesn't arrive, see Troubleshooting.
+
+## After updating to M6
+
+If the mini PC was set up before M6 (flags, snow stations, scorecard, map,
+webcams, push alerts), do this once after the timer deploys it:
+
+1. Load the BC snow-pillow stations (and refresh the other lookups):
+   ```bash
+   docker compose run --rm worker snowwatch lookups refresh
+   ```
+2. Give Whistler, Revelstoke and Sunshine their nearest snow station (it only
+   fills in locations that have none, so your other edits are kept):
+   ```bash
+   docker compose run --rm worker snowwatch locations stations
+   ```
+   It prints what it picked: Callaghan Creek, Mount Revelstoke (snow water only;
+   that station has no depth sensor) and Floe Lake.
+3. Fetch avalanche forecasts and a fresh forecast now instead of waiting for the
+   next run:
+   ```bash
+   docker compose run --rm worker snowwatch avalanche refresh
+   ```
+   ```bash
+   docker compose run --rm worker snowwatch pull
+   ```
+4. Push alerts: step 10.
+5. Check More → **Status**: every source should show a recent success.
+
 ---
 
 ## Everyday tasks
@@ -185,6 +270,26 @@ Edit `data/locations.yaml`, then:
 ```bash
 docker compose run --rm worker snowwatch locations import /data/locations.yaml
 ```
+
+**Webcams:** More → Manage locations → **Edit** a location → **+ Add a webcam**.
+Give it a name and the webcam's **page link** (what opens when tapped). If the
+resort publishes a still image that updates (a link ending in `.jpg` that you can
+open on its own), paste it as the **image link** and the location page shows a
+thumbnail. Leave the image empty when there isn't one.
+
+**Raw or snow-ratio depth:** after about a week of runs, open a location with a
+snow station → **Observed** → **Forecast scorecard**. It compares the forecast
+made the evening before with what the station measured. The two "Consensus" rows
+are the two depth methods: model depth (the default) and snow-ratio depth. If
+snow-ratio has the smaller mean error at most locations for a couple of weeks,
+switch the default in `config/forecast.yaml`:
+```yaml
+depth_method: slr
+```
+then commit it to `main` (the timer deploys it). Switch back with `raw`.
+
+**Push alerts for a friend:** they turn them on themselves (step 10, on their own
+phone). Nothing to do on the mini PC.
 
 **See a forecast in the terminal:** `docker compose run --rm worker snowwatch show crystal`
 
@@ -232,3 +337,9 @@ Or restore the Docker VM's Proxmox snapshot.
 | "Your sign-in has expired" bar | Tap **Sign in again**; Access sessions last a month |
 | Build fails after an update | `journalctl -u snowwatch-deploy`. The old containers keep running; fix on `main` or roll back |
 | Disk filling up | `docker image prune -f`; old raw responses are pruned nightly |
+| More → Alerts says "Push alerts aren't set up on the server yet" | The two `VAPID_…` lines are missing from `.env`, or the containers weren't restarted (`docker compose up -d`) |
+| iPhone: no "Turn on alerts" button, only "Add to Home Screen" | Open Snow Watch from the Home Screen icon, not from Safari; iOS only allows push there (iOS 16.4+) |
+| "Notifications are blocked for this site" | Allow notifications for the site in the browser's settings (iPhone: Settings → Notifications → Snow Watch), reload, try again |
+| "Send a test" says the push service refused it | Turn alerts off and on again on that device. If it keeps failing, check the worker log: `docker compose logs worker \| grep push` |
+| Status page shows a source in red | It hasn't succeeded for a day. The Last error column says why; most fix themselves on the next run |
+| Observed tab: "No snow station is set" | Run `docker compose run --rm worker snowwatch locations stations` (after `lookups refresh`), or pick one when adding a location |

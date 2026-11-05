@@ -7,18 +7,20 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from snowwatch import avalanche, jobs
+from snowwatch import avalanche, jobs, push
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, prune_raw
 from snowwatch.locations.service import list_locations
 from snowwatch.pipeline import run_all
 from snowwatch.settings import Settings
+from snowwatch.store import repo
 from snowwatch.store.backup import backup, vacuum
 from snowwatch.store.db import connect, migrate
 
@@ -70,12 +72,42 @@ class Worker:
                 fetcher.total_weight,
             )
             self._avalanche(conn, fetcher)
+            self._notify(conn, run_id)
+
+    def _notify(self, conn: sqlite3.Connection, run_id: int) -> None:
+        """Push alerts for flags first raised in this run. Never fails the run."""
+        if not push.enabled(self.settings):
+            return
+        try:
+            snaps = []
+            names = {loc.id: loc.name for loc in list_locations(conn)}
+            for loc_id, name in names.items():
+                snap = repo.latest_snapshot(conn, loc_id)
+                if snap is not None and snap.run_id == run_id:
+                    snaps.append((loc_id, name, snap))
+            sent = push.notify(conn, self.settings, push.new_flags_for_run(conn, run_id, snaps))
+            if sent:
+                log.info("sent %d push alerts", sent)
+        except Exception:
+            log.exception("push alerts failed")
 
     def _avalanche(self, conn: sqlite3.Connection, fetcher: Fetcher) -> None:
         """Avalanche forecasts. A failure is logged and never fails the run."""
         try:
-            res = avalanche.refresh(conn, fetcher, list_locations(conn))
+            locs = list_locations(conn)
+            res = avalanche.refresh(conn, fetcher, locs)
             log.info("avalanche forecasts: %d saved, %d errors", res.saved, len(res.errors))
+            if push.enabled(self.settings):
+                views = avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
+                levels = {}
+                for loc in locs:
+                    v = views.get(loc.id)
+                    today = datetime.now(ZoneInfo(loc.tz or "UTC")).date().isoformat()
+                    if v is not None and v.status == "current":
+                        levels[loc.id] = (loc.name, v.today_max, today)
+                push.notify(conn, self.settings, push.avalanche_alerts(conn, levels))
+            repo.save_source_status(conn, fetcher.sources)
+            fetcher.sources.clear()
         except Exception:
             log.exception("avalanche refresh failed")
 
@@ -93,7 +125,7 @@ class Worker:
                 try:
                     if job["kind"] == "pull" and job["location_id"]:
                         with self._fetcher() as fetcher:
-                            _, results = run_all(
+                            run_id, results = run_all(
                                 conn,
                                 fetcher,
                                 self.cfg,
@@ -102,6 +134,7 @@ class Worker:
                                 ensembles=None,
                                 spacing_s=0,
                             )
+                        self._notify(conn, run_id)
                         failed = [e for r in results if not r.ok for e in r.errors]
                         error = "; ".join(failed) or None
                         with self._fetcher() as fetcher:

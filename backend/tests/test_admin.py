@@ -372,3 +372,22 @@ def test_catalog_query_normalises_names(conn: sqlite3.Connection) -> None:
     assert find("mt bachelor") == ["Mount Bachelor"]
     assert find("st sauveur") == ["Saint-Sauveur"]
     assert find("sky big") == ["Big Sky Resort"]
+
+
+def test_webcams_round_trip(client: TestClient, conn: sqlite3.Connection) -> None:
+    loc = client.get("/api/admin/locations", headers=H).json()[0]
+    loc["webcams"] = [
+        {
+            "name": "Summit",
+            "url": "https://example.com/cams",
+            "image_url": "https://example.com/c.jpg",
+        },
+        {"name": "Base", "url": "https://example.com/base"},
+    ]
+    assert client.put(f"/api/admin/locations/{loc['id']}", json=loc, headers=H).status_code == 200
+    saved = service.get_location(conn, loc["id"])
+    assert saved is not None and [w.name for w in saved.webcams] == ["Summit", "Base"]
+    assert saved.webcams[1].image_url is None
+    assert "image_url: https://example.com/c.jpg" in service.export_yaml(conn)
+    loc["webcams"] = [{"name": "Bad", "url": "javascript:alert(1)"}]
+    assert client.put(f"/api/admin/locations/{loc['id']}", json=loc, headers=H).status_code == 422

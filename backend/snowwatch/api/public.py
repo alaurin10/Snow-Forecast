@@ -5,17 +5,19 @@ from __future__ import annotations
 import gzip
 import sqlite3
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from snowwatch import avalanche
+from snowwatch.analysis.flags import SEVERITY, avalanche_flag
 from snowwatch.api.models import (
     BandSummary,
     BestDay,
     DangerChip,
+    LocationAge,
     LocationSummary,
     OverviewPeriod,
     OverviewRow,
@@ -23,6 +25,8 @@ from snowwatch.api.models import (
     PlanOut,
     PlanRow,
     RunOut,
+    SourceRow,
+    StatusOut,
     TrendOut,
     TrendRun,
 )
@@ -32,6 +36,7 @@ from snowwatch.locations import service
 from snowwatch.settings import Settings
 from snowwatch.store import repo
 from snowwatch.store.db import connect
+from snowwatch.verify import VerificationOut, verification
 
 CACHE = "public, max-age=300, stale-while-revalidate=3600"
 
@@ -113,6 +118,10 @@ def avalanche_views(conn: sqlite3.Connection) -> dict[str, AvalancheView]:
     return avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
 
 
+def _today() -> str:
+    return datetime.now(UTC).date().isoformat()
+
+
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/api")
     _snapshots.clear()  # a new app may point at a different database
@@ -183,6 +192,14 @@ def make_router() -> APIRouter:
                 ]
                 row.best_day = best_day(snap)
                 row.powder_dates = [d.date for d in snap.days if d.rating == "Powder"]
+                flags = list(snap.flags)
+                v = avy.get(loc.id)
+                extra = avalanche_flag(v.today_max, None) if v and v.status == "current" else None
+                if extra is not None:
+                    flags.append(extra)
+                row.flags = sorted(flags, key=lambda f: SEVERITY.get(f.severity, 3))
+            mid_band = loc.band("mid")
+            row.lat, row.lon = mid_band.lat, mid_band.lon
             rows.append(row)
         response.headers["Cache-Control"] = CACHE
         return rows
@@ -281,6 +298,55 @@ def make_router() -> APIRouter:
                     None if any(v is None for v in vals) else round(sum(v or 0 for v in vals), 1)
                 )
         return TrendOut(location_id=location_id, runs=list(by_run.values()))
+
+    @router.get("/locations/{location_id}/verification", response_model=VerificationOut)
+    def scorecard(location_id: str, conn: Conn, request: Request) -> VerificationOut:
+        """Next-day forecasts against the snow station, per source."""
+        loc = service.get_location(conn, location_id)
+        if loc is None:
+            raise HTTPException(404, f"unknown location {location_id!r}")
+        cfg = request.app.state.forecast_config
+        return verification(conn, loc, swe_ratio=cfg.verify_swe_ratio)
+
+    @router.get("/status", response_model=StatusOut)
+    def status(conn: Conn, request: Request) -> StatusOut:
+        settings: Settings = request.app.state.settings
+        sources = [
+            SourceRow(
+                source=r["source"],
+                last_ok_at=r["last_ok_at"],
+                last_error_at=r["last_error_at"],
+                last_error=r["last_error"],
+                calls_today=r["calls_today"] if r["day"] == _today() else 0,
+                errors_today=r["errors_today"] if r["day"] == _today() else 0,
+            )
+            for r in conn.execute("SELECT * FROM source_status ORDER BY source")
+        ]
+        runs = [RunOut.model_validate(r) for r in repo.recent_runs(conn, 20)]
+        weight = conn.execute(
+            "SELECT COALESCE(SUM(api_weight), 0) FROM runs WHERE started_at >= ?", (_today(),)
+        ).fetchone()[0]
+        snaps = latest_snapshots(conn)
+        ages = []
+        for loc in service.list_locations(conn):
+            snap = snaps.get(loc.id)
+            ages.append(
+                LocationAge(
+                    id=loc.id,
+                    name=loc.name,
+                    generated_at=snap.generated_at if snap else None,
+                    station=loc.snotel,
+                    station_obs_time=snap.snotel.obs_time if snap and snap.snotel else None,
+                    flags=len(snap.flags) if snap else 0,
+                )
+            )
+        return StatusOut(
+            sources=sources,
+            runs=runs,
+            weight_today=round(float(weight), 1),
+            budget=settings.open_meteo_daily_budget,
+            locations=ages,
+        )
 
     @router.get("/runs", response_model=list[RunOut])
     def runs(conn: Conn, limit: int = Query(20, ge=1, le=200)) -> list[RunOut]:

@@ -7,6 +7,8 @@
 	import Sparkline from '../lib/charts/Sparkline.svelte';
 	import DangerChip from '../lib/components/DangerChip.svelte';
 	import RatingChip from '../lib/components/RatingChip.svelte';
+	import FlagBadges from '../lib/components/FlagBadges.svelte';
+	import MapView from '../lib/components/MapView.svelte';
 	import { weekday } from '../lib/time';
 	import type { OverviewRow } from '../lib/types.gen';
 
@@ -41,6 +43,8 @@
 			? `${snowNum(r.next5_p10_cm, prefs.units)}–${snowNum(r.next5_p90_cm, prefs.units)} likely`
 			: 'no range';
 	const href = (id: string) => resolve('/location/[id]', { id });
+	// Shown elsewhere on the row: alerts, danger and best day have their own chips.
+	const HIDDEN = ['nws_alert', 'avalanche_danger', 'best_day'];
 	const dayName = (d: { label: string; date: string }) =>
 		d.label === 'Today' ? 'Today' : weekday(d.date);
 </script>
@@ -55,6 +59,12 @@
 				<button aria-pressed={prefs.sort === key} onclick={() => prefs.setSort(key)}>{label}</button
 				>
 			{/each}
+		</div>
+		<div class="seg" role="group" aria-label="View">
+			<button aria-pressed={prefs.view === 'list'} onclick={() => prefs.setView('list')}
+				>List</button
+			>
+			<button aria-pressed={prefs.view === 'map'} onclick={() => prefs.setView('map')}>Map</button>
 		</div>
 		<div class="seg" role="group" aria-label="Show">
 			{#each kinds as [key, label] (key)}
@@ -71,6 +81,8 @@
 	<p class="muted">Loading…</p>
 {:else if !shown.length}
 	<p class="card muted">No locations match.</p>
+{:else if prefs.view === 'map'}
+	<MapView rows={shown} units={prefs.units} {href} />
 {:else}
 	<!-- Phones: cards -->
 	<ul class="cards">
@@ -121,6 +133,12 @@
 							max={sparkMax}
 							label={`${r.name}: 10-day snowfall`}
 						/>
+						<FlagBadges
+							flags={r.flags ?? []}
+							runId={r.run_id}
+							units={prefs.units}
+							exclude={HIDDEN}
+						/>
 						{#if r.best_day}
 							<div class="best small">
 								Best ski day <strong>{dayName(r.best_day)}</strong>
@@ -156,6 +174,12 @@
 							<div class="faint small">
 								{r.region} · {r.kind === 'backcountry' ? 'Backcountry' : 'Resort'}
 							</div>
+							<FlagBadges
+								flags={r.flags ?? []}
+								runId={r.run_id}
+								units={prefs.units}
+								exclude={HIDDEN}
+							/>
 						</td>
 						<td class="num">{snowNum(r.last24_cm, prefs.units)} {c.snowUnit}</td>
 						<td>

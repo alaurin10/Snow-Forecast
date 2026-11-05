@@ -89,3 +89,47 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 		event.respondWith(caches.match(request, { cacheName: SHELL }).then((r) => r ?? fetch(request)));
 	}
 });
+
+// Push alerts (W3C Web Push). The server sends {title, body, url, tag}.
+interface PushPayload {
+	title?: string;
+	body?: string;
+	url?: string;
+	tag?: string;
+}
+
+self.addEventListener('push', (event: PushEvent) => {
+	let data: PushPayload;
+	try {
+		data = (event.data?.json() as PushPayload) ?? {};
+	} catch {
+		data = { title: event.data?.text() };
+	}
+	event.waitUntil(
+		self.registration.showNotification(data.title ?? 'Snow Watch', {
+			body: data.body ?? '',
+			tag: data.tag,
+			icon: '/icons/icon-192.png',
+			badge: '/icons/icon-192.png',
+			data: { url: data.url ?? '/' }
+		})
+	);
+});
+
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+	event.notification.close();
+	const target = new URL(
+		(event.notification.data as { url?: string } | null)?.url ?? '/',
+		self.location.origin
+	);
+	if (target.origin !== self.location.origin) return; // only open our own pages
+	event.waitUntil(
+		self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+			const open = wins.find((w) => new URL(w.url).origin === target.origin);
+			if (open) {
+				return open.focus().then((w) => w.navigate(target.href));
+			}
+			return self.clients.openWindow(target.href);
+		})
+	);
+});

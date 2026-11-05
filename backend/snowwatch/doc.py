@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-DOC_VERSION = 2
+from snowwatch.models import Webcam
+
+DOC_VERSION = 3
 
 
 class EnsStats(BaseModel):
@@ -167,6 +169,22 @@ class Snotel(BaseModel):
     change24_cm: float | None
     change72_cm: float | None
     daily: list[SnotelDay]
+    network: str = "NRCS SNOTEL"
+    distance_km: float | None = None  # from the mid band
+
+
+class Flag(BaseModel):
+    """Something worth a look (section 4.7 of the plan). The browser words it in your units."""
+
+    type: str  # powder_day, storm_incoming, model_outlier, low_confidence, rain_on_snow, …
+    severity: str  # info, notice, warning
+    date: str | None = None
+    period_key: str | None = None
+    value: float | None = None  # metric: cm, mm, km/h, m or °C, depending on the type
+    value2: float | None = None
+    model: str | None = None  # model_outlier: which model
+    detail: str | None = None  # e.g. below_base / above_mid, the rating, the NWS event
+    first_run: int | None = None  # the run that first raised it (for "New")
 
 
 class RidgeOut(BaseModel):
@@ -267,6 +285,7 @@ class LocationMeta(BaseModel):
     lat: float
     lon: float
     links: dict[str, str]
+    webcams: list[Webcam] = []
 
 
 class Snapshot(BaseModel):
@@ -287,5 +306,5 @@ class Snapshot(BaseModel):
     ridge: RidgeOut | None = None
     backcountry: BackcountryOut | None = None
     days: list[DayOut] = []
-    flags: list[dict[str, object]] = Field(default_factory=list)  # milestone M6
+    flags: list[Flag] = Field(default_factory=list)
     warnings: list[str] = []

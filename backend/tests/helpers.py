@@ -34,13 +34,30 @@ def captured_at() -> datetime:
     return datetime.fromisoformat(json.loads((FIXTURES / "meta.json").read_text())["captured_at"])
 
 
+def bc_stations() -> dict[str, dict[str, Any]]:
+    """BC snow-pillow stations from the saved WFS sample, shaped like `repo.station_meta`."""
+    from snowwatch.sources.bc_asws import station_rows
+
+    rows = station_rows(json.loads((FIXTURES.parent / "bc" / "stations.json").read_text()))
+    return {
+        r["triplet"]: {
+            "stationTriplet": r["triplet"],
+            "name": r["name"],
+            "elevation": None if r["elev_m"] is None else r["elev_m"] / 0.3048,
+            "latitude": r["lat"],
+            "longitude": r["lon"],
+        }
+        for r in rows
+    }
+
+
 @cache
 def fixture_inputs(loc_id: str) -> ForecastInputs:
     return inputs_from_responses(
         seed()[loc_id],
         load_responses(FIXTURES / loc_id),
         config(),
-        stations=load_stations(FIXTURES / "shared"),
+        stations={**load_stations(FIXTURES / "shared"), **bc_stations()},
     )
 
 
@@ -48,6 +65,9 @@ def fixture_inputs(loc_id: str) -> ForecastInputs:
 def fixture_snapshot(loc_id: str) -> Snapshot:
     snap, _ = build_snapshot(seed()[loc_id], fixture_inputs(loc_id), config(), captured_at())
     return snap
+
+
+BC_DATA = "https://www.env.gov.bc.ca/wsd/data_searches/snow/asws/data/"
 
 
 def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = None) -> Any:
@@ -68,6 +88,13 @@ def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = Non
 
     def handler(req: httpx.Request) -> httpx.Response:
         url = str(req.url.copy_with(query=None))
+        if url.startswith(BC_DATA):  # BC snow pillows: small saved CSVs
+            name = url.rsplit("/", 1)[-1]
+            if log is not None:
+                log.append(f"bc/{name}")
+            if any(f in "bc_asws" for f in fail):
+                return httpx.Response(500)
+            return httpx.Response(200, text=(FIXTURES.parent / "bc" / name).read_text())
         key = index.get((url, frozenset(dict(req.url.params).items())))
         if log is not None:
             log.append(key or f"unmatched {url}")

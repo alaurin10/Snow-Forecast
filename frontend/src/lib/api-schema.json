@@ -1104,6 +1104,100 @@
       "title": "EnsStats",
       "type": "object"
     },
+    "Flag": {
+      "description": "Something worth a look (section 4.7 of the plan). The browser words it in your units.",
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "first_run": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "period_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "severity": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value2": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type",
+        "severity"
+      ],
+      "title": "Flag",
+      "type": "object"
+    },
     "HourlyOut": {
       "properties": {
         "cloud": {
@@ -1597,7 +1691,7 @@
         "snotel": {
           "anyOf": [
             {
-              "pattern": "^\\d+:[A-Z]{2}:SNTL$",
+              "pattern": "^(\\d+:[A-Z]{2}:SNTL|[0-9A-Z]+:BC:ASWS)$",
               "type": "string"
             },
             {
@@ -1620,6 +1714,13 @@
             }
           ],
           "default": null
+        },
+        "webcams": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Webcam"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -1630,6 +1731,59 @@
         "bands"
       ],
       "title": "Location",
+      "type": "object"
+    },
+    "LocationAge": {
+      "properties": {
+        "flags": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "station": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "station_obs_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "generated_at",
+        "station",
+        "station_obs_time",
+        "flags"
+      ],
+      "title": "LocationAge",
       "type": "object"
     },
     "LocationMeta": {
@@ -1663,6 +1817,13 @@
         },
         "tz": {
           "type": "string"
+        },
+        "webcams": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Webcam"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -1930,6 +2091,13 @@
           ],
           "default": null
         },
+        "flags": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Flag"
+          },
+          "type": "array"
+        },
         "generated_at": {
           "anyOf": [
             {
@@ -1948,6 +2116,28 @@
           "type": "string"
         },
         "last24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lat": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lon": {
           "anyOf": [
             {
               "type": "number"
@@ -2944,8 +3134,7 @@
         },
         "flags": {
           "items": {
-            "additionalProperties": true,
-            "type": "object"
+            "$ref": "#/$defs/Flag"
           },
           "type": "array"
         },
@@ -3003,7 +3192,7 @@
           "type": "array"
         },
         "version": {
-          "default": 2,
+          "default": 3,
           "type": "integer"
         },
         "warnings": {
@@ -3068,6 +3257,17 @@
             }
           ]
         },
+        "distance_km": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "elev_m": {
           "anyOf": [
             {
@@ -3087,6 +3287,10 @@
               "type": "null"
             }
           ]
+        },
+        "network": {
+          "default": "NRCS SNOTEL",
+          "type": "string"
         },
         "obs_time": {
           "anyOf": [
@@ -3211,6 +3415,97 @@
         "precip_mm"
       ],
       "title": "SnotelDay",
+      "type": "object"
+    },
+    "SourceRow": {
+      "properties": {
+        "calls_today": {
+          "type": "integer"
+        },
+        "errors_today": {
+          "type": "integer"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_error_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_ok_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "last_ok_at",
+        "last_error_at",
+        "last_error",
+        "calls_today",
+        "errors_today"
+      ],
+      "title": "SourceRow",
+      "type": "object"
+    },
+    "StatusOut": {
+      "description": "The Status page: per-source health, runs, usage and data age.",
+      "properties": {
+        "budget": {
+          "type": "number"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/LocationAge"
+          },
+          "type": "array"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/RunOut"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceRow"
+          },
+          "type": "array"
+        },
+        "weight_today": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sources",
+        "runs",
+        "weight_today",
+        "budget",
+        "locations"
+      ],
+      "title": "StatusOut",
       "type": "object"
     },
     "StormOut": {
@@ -3348,6 +3643,191 @@
       "title": "TrendRun",
       "type": "object"
     },
+    "VerificationOut": {
+      "properties": {
+        "band_elev_m": {
+          "type": "number"
+        },
+        "location_id": {
+          "type": "string"
+        },
+        "n_days": {
+          "type": "integer"
+        },
+        "needs_days": {
+          "type": "integer"
+        },
+        "pairs": {
+          "items": {
+            "$ref": "#/$defs/VerificationPair"
+          },
+          "type": "array"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/VerificationRow"
+          },
+          "type": "array"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "station": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "station_elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "station_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "location_id",
+        "station",
+        "station_name",
+        "station_elev_m",
+        "band_elev_m",
+        "since",
+        "n_days",
+        "ready",
+        "needs_days",
+        "rows",
+        "pairs"
+      ],
+      "title": "VerificationOut",
+      "type": "object"
+    },
+    "VerificationPair": {
+      "properties": {
+        "cons_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cons_slr_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "from_swe": {
+          "type": "boolean"
+        },
+        "observed_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "observed_cm",
+        "from_swe",
+        "cons_cm",
+        "cons_slr_cm"
+      ],
+      "title": "VerificationPair",
+      "type": "object"
+    },
+    "VerificationRow": {
+      "properties": {
+        "bias_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "false_alarms": {
+          "type": "integer"
+        },
+        "hits": {
+          "type": "integer"
+        },
+        "mae_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "misses": {
+          "type": "integer"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "n",
+        "bias_cm",
+        "mae_cm",
+        "hits",
+        "misses",
+        "false_alarms"
+      ],
+      "title": "VerificationRow",
+      "type": "object"
+    },
     "WarmingOut": {
       "description": "The biggest 24 h warming in the next 72 h, and rain falling on snow.",
       "properties": {
@@ -3410,6 +3890,37 @@
         "rain_on_snow_mm"
       ],
       "title": "WarmingOut",
+      "type": "object"
+    },
+    "Webcam": {
+      "properties": {
+        "image_url": {
+          "anyOf": [
+            {
+              "pattern": "^https?://",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "maxLength": 60,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "pattern": "^https?://",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "title": "Webcam",
       "type": "object"
     },
     "WindowOut": {
@@ -3566,8 +4077,14 @@
     "snapshot": {
       "$ref": "#/$defs/Snapshot"
     },
+    "status": {
+      "$ref": "#/$defs/StatusOut"
+    },
     "trend": {
       "$ref": "#/$defs/TrendOut"
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationOut"
     }
   },
   "required": [
@@ -3586,7 +4103,9 @@
     "budget",
     "lookups",
     "avalanche",
-    "plan"
+    "plan",
+    "verification",
+    "status"
   ],
   "title": "ApiTypes",
   "type": "object"

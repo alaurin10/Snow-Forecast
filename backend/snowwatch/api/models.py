@@ -6,9 +6,10 @@ from pydantic import BaseModel
 
 from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
 from snowwatch.avalanche import AvalancheView
-from snowwatch.doc import DayOut, Snapshot
+from snowwatch.doc import DayOut, Flag, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.models import Location
+from snowwatch.verify import VerificationOut
 
 
 class BandSummary(BaseModel):
@@ -79,6 +80,9 @@ class OverviewRow(BaseModel):
     danger: DangerChip | None = None
     best_day: BestDay | None = None  # resorts: the best-rated day in the next 10
     powder_dates: list[str] = []  # resorts: days rated Powder
+    flags: list[Flag] = []  # most important first; avalanche danger added when served
+    lat: float | None = None  # mid band, for the map
+    lon: float | None = None
 
 
 class PlanDate(BaseModel):
@@ -130,6 +134,34 @@ class Me(BaseModel):
     is_owner: bool
 
 
+class SourceRow(BaseModel):
+    source: str
+    last_ok_at: str | None
+    last_error_at: str | None
+    last_error: str | None
+    calls_today: int
+    errors_today: int
+
+
+class LocationAge(BaseModel):
+    id: str
+    name: str
+    generated_at: str | None
+    station: str | None
+    station_obs_time: str | None
+    flags: int
+
+
+class StatusOut(BaseModel):
+    """The Status page: per-source health, runs, usage and data age."""
+
+    sources: list[SourceRow]
+    runs: list[RunOut]
+    weight_today: float
+    budget: float
+    locations: list[LocationAge]
+
+
 class ApiTypes(BaseModel):
     """Every response shape, exported as one JSON Schema for the TypeScript types."""
 
@@ -149,3 +181,5 @@ class ApiTypes(BaseModel):
     lookups: LookupStatus
     avalanche: dict[str, AvalancheView]
     plan: PlanOut
+    verification: VerificationOut
+    status: StatusOut

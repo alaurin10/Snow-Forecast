@@ -11,20 +11,21 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from snowwatch.analysis.build import build_snapshot
+from snowwatch.analysis.flags import flag_key
 from snowwatch.capture import load_fixture
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, FetchError
 from snowwatch.inputs import inputs_from_responses
 from snowwatch.locations import service
 from snowwatch.models import Location
-from snowwatch.sources import nws, snotel
+from snowwatch.sources import bc_asws, nws, snotel
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import (
     blend_request,
@@ -63,6 +64,7 @@ def fetch_responses(
     *,
     now: datetime,
     ensembles: bool | None,
+    bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Every response one location needs, keyed by request name, plus optional-source errors.
 
@@ -103,7 +105,16 @@ def fetch_responses(
         alerts = _try(fetcher, nws.alerts_request(mid.lat, mid.lon), key("nws_alerts"), errors)
         if alerts is not None:
             out["nws_alerts"] = alerts
-    if loc.snotel:
+    if loc.snotel and bc_asws.is_bc(loc.snotel):
+        if bc:
+            data = bc_asws.station_slice(
+                bc, bc_asws.station_id(loc.snotel), now - timedelta(days=46)
+            )
+            fetcher.cache(bc_asws.SOURCE, key("bc_asws"), data)
+            out["bc_asws"] = data
+        else:
+            errors.append("bc_asws: no BC snow-pillow data this run")
+    elif loc.snotel:
         today = now.date()
         daily = _try(
             fetcher,
@@ -129,6 +140,25 @@ def fetch_responses(
     return out, errors
 
 
+def fetch_bc(
+    fetcher: Fetcher, triplets: Iterable[str | None]
+) -> dict[str, dict[str, bc_asws.Series]] | None:
+    """BC snow-pillow CSVs, fetched once per run for every BC station in use."""
+    wanted = {bc_asws.station_id(t) for t in triplets if t and bc_asws.is_bc(t)}
+    if not wanted:
+        return None
+    out: dict[str, dict[str, bc_asws.Series]] = {}
+    for el in bc_asws.ELEMENTS:
+        req = bc_asws.csv_request(el)
+        try:
+            text = fetcher.get_text(req.url, source=req.source)
+        except FetchError as e:
+            log.warning("BC snow pillows %s: %s", el, e)
+            continue
+        out[el] = bc_asws.parse_wide_csv(text, wanted)
+    return out or None
+
+
 def run_location(
     conn: sqlite3.Connection,
     loc: Location,
@@ -139,13 +169,14 @@ def run_location(
     now: datetime,
     ensembles: bool | None,
     responses: dict[str, Any] | None = None,
+    bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
 ) -> LocationResult:
     """Fetch (unless responses are given), build and store one location."""
     result = LocationResult(loc.id, ok=False)
     try:
         if responses is None:
             responses, warnings = fetch_responses(
-                conn, loc, fetcher, cfg, now=now, ensembles=ensembles
+                conn, loc, fetcher, cfg, now=now, ensembles=ensembles, bc=bc
             )
         else:
             warnings = []
@@ -154,6 +185,9 @@ def run_location(
             stations[loc.snotel] = meta
         inputs = inputs_from_responses(loc, responses, cfg, stations=stations, warnings=warnings)
         snap, records = build_snapshot(loc, inputs, cfg, now, run_id=run_id)
+        first = repo.record_flags(conn, loc.id, run_id, [(f.type, flag_key(f)) for f in snap.flags])
+        for f in snap.flags:
+            f.first_run = first.get((f.type, flag_key(f)))
     except Exception as e:  # one location must never stop the run
         log.exception("location %s failed", loc.id)
         result.errors.append(f"{loc.id}: {type(e).__name__}: {e}")
@@ -190,6 +224,7 @@ def run_all(
     run_id = repo.start_run(conn, kind)
     weight_before = fetcher.total_weight
     results: list[LocationResult] = []
+    bc = fetch_bc(fetcher, [loc.snotel for loc in locs if bc_asws.is_bc(loc.snotel)])
     for i, loc in enumerate(locs):
         if i:
             sleep(spacing_s)
@@ -202,6 +237,7 @@ def run_all(
             run_id=run_id,
             now=now or datetime.now(UTC),
             ensembles=ensembles,
+            bc=bc,
         )
         log.info(
             "location %s %s in %.1fs (%d KB)",
@@ -218,6 +254,8 @@ def run_all(
     else:
         status = "partial" if n_ok else "failed"
     repo.finish_run(conn, run_id, status, errors, fetcher.total_weight - weight_before)
+    repo.save_source_status(conn, fetcher.sources)
+    fetcher.sources.clear()
     return run_id, results
 
 
