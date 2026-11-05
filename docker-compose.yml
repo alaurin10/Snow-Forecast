@@ -1,0 +1,35 @@
+# Snow Watch on the mini PC's Docker VM. See docs/RUNBOOK.md.
+#   docker compose up -d --build
+#   docker compose run --rm worker snowwatch init     # first time only
+name: snowwatch
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: snowwatch:local
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/data
+    ports:
+      - "8090:8000" # the Cloudflare tunnel points at http://<docker-vm-ip>:8090
+    mem_limit: 384m
+    restart: unless-stopped
+
+  worker:
+    # Same image, built once by the api service.
+    image: snowwatch:local
+    pull_policy: never
+    command: ["snowwatch", "worker"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/data
+    healthcheck:
+      disable: true # the image's check is for the api's HTTP port
+    mem_limit: 512m
+    restart: unless-stopped

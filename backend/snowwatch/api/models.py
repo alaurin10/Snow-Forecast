@@ -32,6 +32,34 @@ class LocationSummary(BaseModel):
     alerts: int = 0
 
 
+class OverviewPeriod(BaseModel):
+    key: str
+    label: str
+    kind: str
+    date: str
+    snow_cm: float | None
+
+
+class OverviewRow(BaseModel):
+    """One location on the Overview and Calendar pages (mid band)."""
+
+    id: str
+    name: str
+    kind: str
+    region: str
+    country: str
+    run_id: int | None = None
+    generated_at: str | None = None
+    last24_cm: float | None = None
+    next5_cm: float | None = None
+    next5_p10_cm: float | None = None
+    next5_p90_cm: float | None = None
+    d6_10_cm: float | None = None
+    alerts: list[str] = []
+    snow_depth_cm: float | None = None
+    periods: list[OverviewPeriod] = []
+
+
 class TrendRun(BaseModel):
     run_id: int
     issued_at: str
@@ -59,5 +87,6 @@ class ApiTypes(BaseModel):
 
     snapshot: Snapshot
     locations: list[LocationSummary]
+    overview: list[OverviewRow]
     trend: TrendOut
     runs: list[RunOut]

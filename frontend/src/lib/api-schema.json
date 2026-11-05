@@ -946,6 +946,172 @@
       "title": "LocationSummary",
       "type": "object"
     },
+    "OverviewPeriod": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "snow_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "kind",
+        "date",
+        "snow_cm"
+      ],
+      "title": "OverviewPeriod",
+      "type": "object"
+    },
+    "OverviewRow": {
+      "description": "One location on the Overview and Calendar pages (mid band).",
+      "properties": {
+        "alerts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "country": {
+          "type": "string"
+        },
+        "d6_10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "last24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "next5_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next5_p10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next5_p90_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "periods": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OverviewPeriod"
+          },
+          "type": "array"
+        },
+        "region": {
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snow_depth_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "region",
+        "country"
+      ],
+      "title": "OverviewRow",
+      "type": "object"
+    },
     "PeriodOut": {
       "properties": {
         "basis": {
@@ -1727,6 +1893,12 @@
       },
       "type": "array"
     },
+    "overview": {
+      "items": {
+        "$ref": "#/$defs/OverviewRow"
+      },
+      "type": "array"
+    },
     "runs": {
       "items": {
         "$ref": "#/$defs/RunOut"
@@ -1743,6 +1915,7 @@
   "required": [
     "snapshot",
     "locations",
+    "overview",
     "trend",
     "runs"
   ],

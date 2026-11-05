@@ -5,6 +5,7 @@
  */
 export interface ApiTypes {
 	locations: LocationSummary[];
+	overview: OverviewRow[];
 	runs: RunOut[];
 	snapshot: Snapshot;
 	trend: TrendOut;
@@ -38,6 +39,40 @@ export interface BandSummary {
 	band: string;
 	elev_m: number;
 	label: string;
+}
+/**
+ * One location on the Overview and Calendar pages (mid band).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OverviewRow".
+ */
+export interface OverviewRow {
+	alerts?: string[];
+	country: string;
+	d6_10_cm?: number | null;
+	generated_at?: string | null;
+	id: string;
+	kind: string;
+	last24_cm?: number | null;
+	name: string;
+	next5_cm?: number | null;
+	next5_p10_cm?: number | null;
+	next5_p90_cm?: number | null;
+	periods?: OverviewPeriod[];
+	region: string;
+	run_id?: number | null;
+	snow_depth_cm?: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OverviewPeriod".
+ */
+export interface OverviewPeriod {
+	date: string;
+	key: string;
+	kind: string;
+	label: string;
+	snow_cm: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

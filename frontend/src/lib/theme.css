@@ -34,6 +34,16 @@
 	--s6: #008300;
 	--s7: #6250d6;
 
+	/* Calendar ramp (ordinal, validated): more snow is darker. */
+	--c0: #ecebe7;
+	--c1: #86b6ef;
+	--c2: #5598e7;
+	--c3: #2a78d6;
+	--c4: #1c5cab;
+	--c5: #104281;
+	--c-ink-light: #0b0b0b; /* text on c1–c2 */
+	--c-ink-dark: #ffffff; /* text on c3–c5 */
+
 	--radius: 12px;
 	--shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 	--font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -70,6 +80,15 @@
 		--s5: #d55181;
 		--s6: #008300;
 		--s7: #9085e9;
+		/* Calendar ramp (ordinal, validated): more snow is lighter. */
+		--c0: #242422;
+		--c1: #184f95;
+		--c2: #256abf;
+		--c3: #3987e5;
+		--c4: #6da7ec;
+		--c5: #b7d3f6;
+		--c-ink-light: #ffffff;
+		--c-ink-dark: #0b0b0b;
 	}
 }
 
@@ -102,6 +121,15 @@
 	--s5: #d55181;
 	--s6: #008300;
 	--s7: #9085e9;
+	/* Calendar ramp (ordinal, validated): more snow is lighter. */
+	--c0: #242422;
+	--c1: #184f95;
+	--c2: #256abf;
+	--c3: #3987e5;
+	--c4: #6da7ec;
+	--c5: #b7d3f6;
+	--c-ink-light: #ffffff;
+	--c-ink-dark: #0b0b0b;
 }
 
 *,

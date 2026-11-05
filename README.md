@@ -3,6 +3,7 @@
 Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resorts and backcountry zones, running on a home mini PC and shared at `snow.andrewlaurin.com` through Cloudflare Tunnel and Access.
 
 - [`docs/PLAN.md`](docs/PLAN.md): the build plan (design, data sources, analysis, deployment, milestones).
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md): putting it on the mini PC at `snow.andrewlaurin.com` (Docker, Cloudflare Tunnel and Access, updates, backups).
 - [`docs/SOURCES.md`](docs/SOURCES.md): the latest live check of every data source.
 - [`docs/SPEC-draft.md`](docs/SPEC-draft.md) and [`docs/reference/`](docs/reference/): the original draft spec and the working prototype.
 
@@ -14,6 +15,7 @@ Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resort
 | `frontend/` | SvelteKit single-page app (static build served by the API) |
 | `config/forecast.yaml` | Models, ensembles, thresholds and schedule |
 | `config/seed-locations.yaml` | The six starting locations |
+| `docker/`, `docker-compose.yml`, `deploy/` | The image, the two services (api on port 8090, worker) and the auto-update timer |
 
 ## Development
 

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     site_spacing_s: float = 20.0
     stale_after_h: float = 12.0
 
+    # Healthchecks.io ping URLs (optional): one check for forecast runs, one for backups.
+    healthchecks_run_url: str = ""
+    healthchecks_backup_url: str = ""
+
     # Comma-separated; used from M4 for the owner role.
     admin_emails: str = ""
     cf_access_team: str = ""

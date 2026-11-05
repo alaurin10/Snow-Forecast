@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,13 +23,17 @@ def _last_good_run(db: Path) -> dict[str, Any] | None:
     try:
         conn = connect(db, readonly=True)
         row = conn.execute(
-            "SELECT id, kind, status, started_at, finished_at FROM runs "
+            "SELECT id, kind, status, started_at, finished_at, api_weight, errors_json FROM runs "
             "WHERE status IN ('ok', 'partial') AND finished_at IS NOT NULL "
             "ORDER BY finished_at DESC LIMIT 1"
         ).fetchone()
     except sqlite3.Error:
         return None
-    return dict(row) if row else None
+    if not row:
+        return None
+    out = dict(row)
+    out["errors"] = len(json.loads(out.pop("errors_json") or "[]"))
+    return out
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

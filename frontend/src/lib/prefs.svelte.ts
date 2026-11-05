@@ -4,6 +4,8 @@ import type { UnitSystem } from './units';
 
 export type Theme = 'auto' | 'light' | 'dark';
 export type BandName = 'base' | 'mid' | 'summit';
+export type SortKey = 'next5' | 'd6_10' | 'last24' | 'name';
+export type KindFilter = 'all' | 'resort' | 'backcountry';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
 	try {
@@ -26,6 +28,18 @@ class Prefs {
 	units = $state<UnitSystem>(load('sw.units', ['imperial', 'metric'] as const, 'imperial'));
 	theme = $state<Theme>(load('sw.theme', ['auto', 'light', 'dark'] as const, 'auto'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
+	sort = $state<SortKey>(load('sw.sort', ['next5', 'd6_10', 'last24', 'name'] as const, 'next5'));
+	kind = $state<KindFilter>(load('sw.kind', ['all', 'resort', 'backcountry'] as const, 'all'));
+
+	setSort(s: SortKey) {
+		this.sort = s;
+		save('sw.sort', s);
+	}
+
+	setKind(k: KindFilter) {
+		this.kind = k;
+		save('sw.kind', k);
+	}
 
 	setUnits(u: UnitSystem) {
 		this.units = u;

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 
+import httpx
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -21,14 +23,30 @@ from snowwatch.store.db import connect, migrate
 log = logging.getLogger("snowwatch.worker")
 
 
+def http_ping(url: str) -> None:
+    httpx.get(url, timeout=10)
+
+
 class Worker:
     """Holds one lock so a scheduled run and queued jobs never overlap."""
 
-    def __init__(self, settings: Settings, cfg: ForecastConfig) -> None:
+    def __init__(
+        self, settings: Settings, cfg: ForecastConfig, *, ping: Callable[[str], None] = http_ping
+    ) -> None:
         self.settings = settings
         self.cfg = cfg
         self.lock = threading.Lock()
+        self._ping = ping
         migrate(connect(settings.database))
+
+    def ping(self, url: str) -> None:
+        """Tell Healthchecks.io a job succeeded. Never lets a failed ping break the job."""
+        if not url:
+            return
+        try:
+            self._ping(url)
+        except Exception as e:
+            log.warning("healthcheck ping failed: %s", e)
 
     def _fetcher(self) -> Fetcher:
         return Fetcher(user_agent=self.settings.user_agent, raw_dir=self.settings.raw_dir)
@@ -40,6 +58,8 @@ class Worker:
                 conn, fetcher, self.cfg, ensembles=ensembles, spacing_s=self.settings.site_spacing_s
             )
             ok = sum(r.ok for r in results)
+            if ok:
+                self.ping(self.settings.healthchecks_run_url)
             log.info(
                 "run %d: %d/%d locations ok, weight %.0f",
                 run_id,
@@ -83,6 +103,7 @@ class Worker:
             conn = connect(self.settings.database)
             path = backup(conn, self.settings.backup_dir, today=datetime.now(UTC).date())
             log.info("backup written to %s", path)
+            self.ping(self.settings.healthchecks_backup_url)
             removed = prune_raw(self.settings.raw_dir)
             log.info("pruned %d cached raw responses", removed)
 

@@ -11,7 +11,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from snowwatch.api.models import BandSummary, LocationSummary, RunOut, TrendOut, TrendRun
+from snowwatch.api.models import (
+    BandSummary,
+    LocationSummary,
+    OverviewPeriod,
+    OverviewRow,
+    RunOut,
+    TrendOut,
+    TrendRun,
+)
+from snowwatch.doc import Snapshot
 from snowwatch.locations import service
 from snowwatch.settings import Settings
 from snowwatch.store import repo
@@ -33,13 +42,38 @@ def db(request: Request) -> Iterator[sqlite3.Connection]:
 
 Conn = Annotated[sqlite3.Connection, Depends(db)]
 
+# Decoded snapshots, by location: (run_id, snapshot). A newer run replaces the entry.
+_snapshots: dict[str, tuple[int, Snapshot]] = {}
+
+
+def latest_snapshots(conn: sqlite3.Connection) -> dict[str, Snapshot]:
+    """The newest snapshot of every location, decoding only those that changed."""
+    latest = {
+        r["location_id"]: r["run_id"]
+        for r in conn.execute(
+            "SELECT location_id, MAX(run_id) AS run_id FROM snapshots GROUP BY location_id"
+        )
+    }
+    out: dict[str, Snapshot] = {}
+    for loc_id, run_id in latest.items():
+        cached = _snapshots.get(loc_id)
+        if cached is None or cached[0] != run_id:
+            snap = repo.latest_snapshot(conn, loc_id)
+            if snap is None:
+                continue
+            _snapshots[loc_id] = cached = (run_id, snap)
+        out[loc_id] = cached[1]
+    return out
+
 
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/api")
+    _snapshots.clear()  # a new app may point at a different database
 
     @router.get("/locations", response_model=list[LocationSummary])
     def locations(conn: Conn, response: Response) -> list[LocationSummary]:
         out = []
+        snaps = latest_snapshots(conn)
         for loc in service.list_locations(conn):
             item = LocationSummary(
                 id=loc.id,
@@ -50,7 +84,7 @@ def make_router() -> APIRouter:
                 tz=loc.tz,
                 bands=[BandSummary(band=b.band, label=b.label, elev_m=b.elev_m) for b in loc.bands],
             )
-            snap = repo.latest_snapshot(conn, loc.id)
+            snap = snaps.get(loc.id)
             if snap is not None:
                 mid = snap.bands[1]
                 w5, w10 = mid.windows["next5"], mid.windows["d6_10"]
@@ -65,6 +99,38 @@ def make_router() -> APIRouter:
             out.append(item)
         response.headers["Cache-Control"] = CACHE
         return out
+
+    @router.get("/overview", response_model=list[OverviewRow])
+    def overview(conn: Conn, response: Response) -> list[OverviewRow]:
+        """Every active location with its headline numbers and 20 period totals."""
+        snaps = latest_snapshots(conn)
+        rows = []
+        for loc in service.list_locations(conn):
+            row = OverviewRow(
+                id=loc.id, name=loc.name, kind=loc.kind, region=loc.region, country=loc.country
+            )
+            snap = snaps.get(loc.id)
+            if snap is not None:
+                mid = snap.bands[1]
+                w5, w10 = mid.windows["next5"], mid.windows["d6_10"]
+                row.run_id = snap.run_id
+                row.generated_at = snap.generated_at
+                row.last24_cm = mid.stats.last24_cm
+                row.next5_cm = w5.snow_cm
+                row.next5_p10_cm = w5.ens.p10 if w5.ens else None
+                row.next5_p90_cm = w5.ens.p90 if w5.ens else None
+                row.d6_10_cm = w10.snow_cm
+                row.alerts = [a.event or "Alert" for a in snap.alerts]
+                row.snow_depth_cm = snap.snotel.depth_cm if snap.snotel else None
+                row.periods = [
+                    OverviewPeriod(
+                        key=p.key, label=p.label, kind=p.kind, date=p.date, snow_cm=p.snow_cm
+                    )
+                    for p in mid.periods
+                ]
+            rows.append(row)
+        response.headers["Cache-Control"] = CACHE
+        return rows
 
     @router.get("/locations/{location_id}")
     def location(location_id: str, conn: Conn, request: Request) -> Response:
