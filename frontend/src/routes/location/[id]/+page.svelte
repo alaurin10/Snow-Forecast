@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError, getSnapshot, getTrend } from '../../../lib/api';
+	import { ApiError, getAvalanche, getSnapshot, getTrend } from '../../../lib/api';
 	import { prefs, type BandName } from '../../../lib/prefs.svelte';
 	import { crosshair } from '../../../lib/crosshair.svelte';
-	import type { PeriodOut, Snapshot, TrendOut } from '../../../lib/types.gen';
+	import type { AvalancheView, PeriodOut, Snapshot, TrendOut } from '../../../lib/types.gen';
 	import { elevation, snow, type UnitSystem } from '../../../lib/units';
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
@@ -17,6 +17,10 @@
 	import Tiles from '../../../lib/components/Tiles.svelte';
 	import PeriodTable from '../../../lib/components/PeriodTable.svelte';
 	import BandTable from '../../../lib/components/BandTable.svelte';
+	import RatingChip from '../../../lib/components/RatingChip.svelte';
+	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
+	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
+	import { reasonText } from '../../../lib/conditions';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -26,6 +30,7 @@
 	let error = $state<string | null>(null);
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
+	let avy = $state<AvalancheView | null>(null);
 
 	$effect(() => {
 		const current = id;
@@ -52,6 +57,10 @@
 		getTrend(current)
 			.then((t) => (trend = t))
 			.catch(() => (trend = null));
+		avy = null;
+		getAvalanche()
+			.then((all) => (avy = all[current] ?? null))
+			.catch(() => (avy = null));
 	});
 
 	const tabs = $derived<Tab[]>(
@@ -76,6 +85,22 @@
 		const scale = band.band === 'mid' ? 1 : (band.windows[name]?.scale ?? null);
 		return scale === null ? [] : m.map((v) => v * scale);
 	};
+	const backcountry = $derived(snap?.location.kind === 'backcountry');
+	const powder = $derived(
+		(snap?.days ?? []).filter((d) => d.rating === 'Powder').map((d) => d.date)
+	);
+	const best = $derived.by(() => {
+		const rated = (snap?.days ?? []).filter((d) => d.score !== null && d.score !== undefined);
+		const top = Math.max(0, ...rated.map((d) => d.score ?? 0));
+		return top >= 3 ? (rated.find((d) => d.score === top) ?? null) : null;
+	});
+	const selectedDay = $derived(
+		selected && selected.kind === 'day'
+			? ((snap?.days ?? []).find((d) => d.date === selected!.date) ?? null)
+			: null
+	);
+	// Ridge wind on the wind chart for tours, and for any location's summit band.
+	const ridge = $derived(backcountry || band?.band === 'summit' ? (snap?.ridge ?? null) : null);
 	const updated = $derived(
 		snap
 			? new Date(snap.generated_at).toLocaleString('en-US', {
@@ -129,19 +154,35 @@
 
 	{#if tab === 'forecast'}
 		<div class="stackcol">
+			{#if backcountry}
+				<section class="card thin">
+					<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
+				</section>
+			{/if}
 			<Tiles {band} {units} />
+			{#if best}
+				<section class="card thin best">
+					<span class="lead">Best ski day</span>
+					<strong>{best.label === 'Today' ? 'Today' : weekday(best.date)}</strong>
+					<RatingChip rating={best.rating} score={best.score} />
+					<span class="muted"
+						>{(best.reasons ?? []).map((r) => reasonText(r, units)).join(' · ')}</span
+					>
+				</section>
+			{/if}
 			<section class="card">
 				<DayNightBars
 					periods={band.periods}
 					{units}
 					selected={selected?.key ?? null}
 					onselect={(p) => (selected = p)}
+					{powder}
 				/>
 			</section>
 			<div class="split">
 				<section class="card">
 					<h2>Hourly</h2>
-					<HourlyStack {band} bands={snap.bands} {units} />
+					<HourlyStack {band} bands={snap.bands} {units} {ridge} />
 				</section>
 				<aside class="side">
 					<section class="card">
@@ -213,13 +254,7 @@
 			</section>
 		</div>
 	{:else if tab === 'backcountry'}
-		<section class="card">
-			<h2>Backcountry</h2>
-			<p class="muted">
-				Avalanche danger, wind at ridge height, warming, refreeze, cloud layers and daylight arrive
-				in milestone M5. This page will never score whether a tour is safe.
-			</p>
-		</section>
+		<BackcountryTab {snap} {avy} {units} />
 	{:else}
 		<section class="card">
 			<h2>Observed</h2>
@@ -247,6 +282,7 @@
 			period={selected}
 			bandLabel={band.label}
 			{units}
+			day={selectedDay}
 			onclose={() => (selected = null)}
 		/>
 	{/if}
@@ -340,6 +376,21 @@
 	}
 	.small {
 		font-size: 0.85rem;
+	}
+	.thin {
+		padding-top: 8px;
+		padding-bottom: 8px;
+	}
+	.best {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 8px;
+		font-size: 0.88rem;
+	}
+	.best .lead {
+		font-weight: 600;
+		color: var(--text-2);
 	}
 	.section {
 		font-size: 0.95rem;

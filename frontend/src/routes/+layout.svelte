@@ -41,6 +41,7 @@
 	const tabs = [
 		{ href: '/', label: 'Overview', icon: 'M4 6h16M4 12h16M4 18h10' },
 		{ href: '/calendar', label: 'Calendar', icon: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4' },
+		{ href: '/plan', label: 'Plan', icon: 'M3 20l6-14 4 8 3-5 5 11zM9 6l2 4' },
 		{ href: '/more', label: 'More', icon: 'M5 12h.01M12 12h.01M19 12h.01' }
 	] as const;
 	const active = (href: string) =>
@@ -192,7 +193,7 @@
 		bottom: 0;
 		z-index: 30;
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		grid-template-columns: repeat(4, 1fr);
 		background: var(--surface);
 		border-top: 1px solid var(--border);
 		padding-bottom: env(safe-area-inset-bottom);

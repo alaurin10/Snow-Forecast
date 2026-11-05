@@ -78,12 +78,17 @@ docker compose run --rm worker snowwatch init
 docker compose run --rm worker snowwatch lookups refresh
 ```
 ```bash
+docker compose run --rm worker snowwatch avalanche refresh
+```
+```bash
 docker compose run --rm worker snowwatch pull
 ```
 
 `init` creates the database and adds the six starting locations. `lookups
 refresh` loads the ski-area catalog, the SNOTEL station list and the avalanche
-zones that the Manage page uses (the worker refreshes them weekly). `pull` fetches
+zones that the Manage page uses (the worker refreshes them weekly). `avalanche
+refresh` fetches today's avalanche forecasts; the worker checks again after every
+run and at 13:45, 15:45 and 17:45 UTC, when the centers publish. `pull` fetches
 the first forecast (about 2–3 minutes; it pauses 20 s between locations). After
 that the worker runs on its own at 03:30, 09:30, 15:30 and 21:30 UTC.
 

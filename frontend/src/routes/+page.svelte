@@ -5,6 +5,9 @@
 	import { converters, snowNum } from '../lib/units';
 	import { arrange } from '../lib/overview';
 	import Sparkline from '../lib/charts/Sparkline.svelte';
+	import DangerChip from '../lib/components/DangerChip.svelte';
+	import RatingChip from '../lib/components/RatingChip.svelte';
+	import { weekday } from '../lib/time';
 	import type { OverviewRow } from '../lib/types.gen';
 
 	let rows = $state<OverviewRow[] | null>(null);
@@ -38,6 +41,8 @@
 			? `${snowNum(r.next5_p10_cm, prefs.units)}–${snowNum(r.next5_p90_cm, prefs.units)} likely`
 			: 'no range';
 	const href = (id: string) => resolve('/location/[id]', { id });
+	const dayName = (d: { label: string; date: string }) =>
+		d.label === 'Today' ? 'Today' : weekday(d.date);
 </script>
 
 <svelte:head><title>Snow Watch</title></svelte:head>
@@ -79,8 +84,14 @@
 								>{r.region} · {r.kind === 'backcountry' ? 'Backcountry' : 'Resort'}</span
 							>
 						</div>
-						{#if r.alerts?.length}<span class="chip" title={r.alerts.join(', ')}>{r.alerts[0]}</span
-							>{/if}
+						<div class="chips">
+							{#if r.alerts?.length}<span class="chip" title={r.alerts.join(', ')}
+									>{r.alerts[0]}</span
+								>{/if}
+							{#if r.danger && r.danger.status !== 'none'}
+								<DangerChip level={r.danger.level} status={r.danger.status} />
+							{/if}
+						</div>
 					</div>
 					{#if r.run_id == null}
 						<div class="faint">No forecast yet</div>
@@ -110,6 +121,12 @@
 							max={sparkMax}
 							label={`${r.name}: 10-day snowfall`}
 						/>
+						{#if r.best_day}
+							<div class="best small">
+								Best ski day <strong>{dayName(r.best_day)}</strong>
+								<RatingChip rating={r.best_day.rating} score={r.best_day.score} />
+							</div>
+						{/if}
 					{/if}
 				</a>
 			</li>
@@ -126,6 +143,8 @@
 					<th>Next 5 days</th>
 					<th>Days 6–10</th>
 					<th class="sparkcol">Day and night, 10 days</th>
+					<th>Best ski day</th>
+					<th>Avalanche</th>
 					<th>Alerts</th>
 				</tr>
 			</thead>
@@ -153,6 +172,18 @@
 								label={`${r.name}: 10-day snowfall`}
 							/></td
 						>
+						<td>
+							{#if r.best_day}{dayName(r.best_day)}
+								<RatingChip rating={r.best_day.rating} score={r.best_day.score} />{:else}<span
+									class="faint">–</span
+								>{/if}
+						</td>
+						<td>
+							{#if r.danger && r.danger.status !== 'none'}<DangerChip
+									level={r.danger.level}
+									status={r.danger.status}
+								/>{:else}<span class="faint">–</span>{/if}
+						</td>
 						<td
 							>{#if r.alerts?.length}<span class="chip">{r.alerts.join(', ')}</span>{:else}<span
 									class="faint">–</span
@@ -231,6 +262,19 @@
 	.unit {
 		color: var(--text-2);
 		margin-left: 3px;
+	}
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 4px;
+	}
+	.best {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 4px;
+		color: var(--text-2);
 	}
 	.chip {
 		font-size: 0.75rem;

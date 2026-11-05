@@ -1,17 +1,21 @@
 <!-- The details of one period: a bottom sheet on phones, a side panel on desktop. -->
 <script lang="ts">
-	import type { PeriodOut } from '../types.gen';
+	import type { DayOut, PeriodOut } from '../types.gen';
 	import { elevation, snow, speed, temperature, water, type UnitSystem } from '../units';
 	import { MODEL_NAMES } from '../models';
+	import { reasonText } from '../conditions';
+	import RatingChip from '../components/RatingChip.svelte';
 
 	interface Props {
 		period: PeriodOut;
 		bandLabel: string;
 		units: UnitSystem;
+		/** The ski-day rating for a resort's day period. */
+		day?: DayOut | null;
 		onclose: () => void;
 	}
 
-	let { period: p, bandLabel, units, onclose }: Props = $props();
+	let { period: p, bandLabel, units, day = null, onclose }: Props = $props();
 
 	const basis = $derived(
 		p.basis === 'ensemble'
@@ -41,6 +45,12 @@
 		{/if}
 		{p.quality ?? 'no snow'}
 	</div>
+	{#if day?.rating}
+		<div class="rated">
+			<RatingChip rating={day.rating} score={day.score} />
+			<span class="muted">{(day.reasons ?? []).map((r) => reasonText(r, units)).join(' · ')}</span>
+		</div>
+	{/if}
 
 	<dl>
 		<dt>Ensemble 10–90%</dt>
@@ -78,6 +88,14 @@
 </div>
 
 <style>
+	.rated {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		align-items: center;
+		margin-top: 6px;
+		font-size: 0.85rem;
+	}
 	.scrim {
 		position: fixed;
 		inset: 0;

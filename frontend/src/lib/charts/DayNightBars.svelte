@@ -15,10 +15,25 @@
 		units: UnitSystem;
 		selected?: string | null;
 		onselect?: (p: PeriodOut) => void;
+		/** Dates rated Powder: their day label gets a star. */
+		powder?: string[];
+		/** A shared top for the y scale (cm), so several charts compare on one scale. */
+		maxCm?: number | null;
+		/** Chart title; defaults to "Snowfall, day and night". */
+		title?: string;
 		width?: number;
 	}
 
-	let { periods, units, selected = null, onselect, width: fixedWidth }: Props = $props();
+	let {
+		periods,
+		units,
+		selected = null,
+		onselect,
+		powder = [],
+		maxCm = null,
+		title = 'Snowfall, day and night',
+		width: fixedWidth
+	}: Props = $props();
 	let measured = $state(0);
 
 	const W = $derived(fixedWidth ?? measured);
@@ -39,7 +54,7 @@
 	const p90 = $derived(periods.map((p) => c.snow(p.ens?.p90 ?? null)));
 	const y = $derived(
 		scaleLinear()
-			.domain([0, maxOf([...snow, ...p90], units === 'imperial' ? 1 : 2.5)])
+			.domain([0, maxOf([...snow, ...p90, c.snow(maxCm)], units === 'imperial' ? 1 : 2.5)])
 			.range([ih, 0])
 			.nice(4)
 	);
@@ -60,7 +75,8 @@
 					p.label === 'Tonight' || p.label === 'Overnight'
 						? p.label
 						: p.label.replace(' night', '');
-				out.push({ date: p.date, label, x: x0, hi: p.tmax_c });
+				const star = p.kind === 'day' && powder.includes(p.date) ? ' ★' : '';
+				out.push({ date: p.date, label: label + star, x: x0, hi: p.tmax_c });
 			}
 		}
 		// Drop a label that would overlap the one before it (about 6 px per character).
@@ -92,7 +108,7 @@
 
 <div bind:clientWidth={measured}>
 	<Frame
-		title="Snowfall, day and night"
+		{title}
 		readout={`next 5 days ${total.toFixed(c.snowDigits)} ${c.snowUnit}`}
 		width={W}
 		height={H}
@@ -170,6 +186,7 @@
 		<span><i class="sw" style="background: var(--snow)"></i>Day</span>
 		<span><i class="sw" style="background: var(--snow-night)"></i>Night</span>
 		<span><i class="whisk"></i>Ensemble 10–90%</span>
+		{#if powder.length}<span>★ Powder day</span>{/if}
 	</div>
 </div>
 

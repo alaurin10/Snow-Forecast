@@ -43,6 +43,15 @@
 	--c5: #104281;
 	--c-ink-light: #0b0b0b; /* text on c1–c2 */
 	--c-ink-dark: #ffffff; /* text on c3–c5 */
+	/* North American avalanche danger scale (same in both themes); always with
+	   the number and the word. */
+	--d1: #50b848;
+	--d2: #fff200;
+	--d3: #f7941e;
+	--d4: #ed1c24;
+	--d5: #231f20;
+	--d-ink: #111111;
+	--d-ink-on-dark: #ffffff;
 
 	--radius: 12px;
 	--shadow: 0 1px 2px rgb(0 0 0 / 0.05);
@@ -273,4 +282,67 @@ table.data thead th {
 .btn.small {
 	padding: 3px 10px;
 	font-size: 0.8rem;
+}
+
+/* Avalanche danger and ski-day rating chips. */
+.danger,
+.rating {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border-radius: 999px;
+	padding: 1px 8px;
+	font-size: 0.78rem;
+	font-weight: 600;
+	white-space: nowrap;
+	border: 1px solid transparent;
+	line-height: 1.5;
+}
+.danger.d0 {
+	background: var(--surface-2);
+	color: var(--text-2);
+	border-color: var(--border);
+	font-weight: 500;
+}
+.danger.d1 {
+	background: var(--d1);
+	color: var(--d-ink);
+}
+.danger.d2 {
+	background: var(--d2);
+	color: var(--d-ink);
+}
+.danger.d3 {
+	background: var(--d3);
+	color: var(--d-ink);
+}
+.danger.d4 {
+	background: var(--d4);
+	color: var(--d-ink-on-dark);
+}
+.danger.d5 {
+	background: var(--d5);
+	color: var(--d-ink-on-dark);
+	border-color: var(--d4);
+}
+.rating.r1 {
+	background: var(--surface-2);
+	color: var(--text-2);
+	border-color: var(--border);
+}
+.rating.r2 {
+	background: var(--c1);
+	color: var(--c-ink-light);
+}
+.rating.r3 {
+	background: var(--c3);
+	color: var(--c-ink-dark);
+}
+.rating.r4 {
+	background: var(--c4);
+	color: var(--c-ink-dark);
+}
+.rating.r5 {
+	background: var(--c5);
+	color: var(--c-ink-dark);
 }

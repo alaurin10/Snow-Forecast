@@ -2,6 +2,7 @@
 // dry), checking that every data mark stays inside its plot area.
 import { describe, expect, it, afterEach } from 'vitest';
 import { cleanup, render } from '@testing-library/svelte';
+import { expectMarksInside } from './marks';
 import { flushSync } from 'svelte';
 import whistler from '../../fixtures/whistler.json';
 import crystal from '../../fixtures/crystal.json';
@@ -21,53 +22,6 @@ afterEach(() => {
 	cleanup();
 	crosshair.reset();
 });
-
-/** Points visited by an SVG path (absolute M/L/H/V/Q/C/Z, as our charts emit). */
-function pathPoints(d: string): [number, number][] {
-	const pts: [number, number][] = [];
-	let x = 0;
-	let y = 0;
-	for (const [, cmd, args] of d.matchAll(/([MLHVQCZ])([^MLHVQCZ]*)/g)) {
-		const n = (args.match(/-?\d*\.?\d+(e-?\d+)?/g) ?? []).map(Number);
-		if (cmd === 'H') n.forEach((v) => pts.push([(x = v), y]));
-		else if (cmd === 'V') n.forEach((v) => pts.push([x, (y = v)]));
-		else if (cmd !== 'Z')
-			for (let i = 0; i + 1 < n.length; i += 2) pts.push([(x = n[i]), (y = n[i + 1])]);
-	}
-	return pts;
-}
-
-/** Assert every `.mark` inside each plot group lies within [0, iw] × [0, ih] (+ slack). */
-function expectMarksInside(container: HTMLElement, slack = 1) {
-	const plots = container.querySelectorAll<SVGGElement>('g.plot');
-	expect(plots.length).toBeGreaterThan(0);
-	let checked = 0;
-	plots.forEach((g) => {
-		const iw = Number(g.dataset.iw);
-		const ih = Number(g.dataset.ih);
-		// The chance-of-precip and x-label rows sit just below the plot by design.
-		const below = 26;
-		g.querySelectorAll<SVGElement>('.mark').forEach((el) => {
-			const pts: [number, number][] = [];
-			const a = (n: string) => Number(el.getAttribute(n));
-			if (el.tagName === 'path') pts.push(...pathPoints(el.getAttribute('d') ?? ''));
-			if (el.tagName === 'rect')
-				pts.push([a('x'), a('y')], [a('x') + a('width'), a('y') + a('height')]);
-			if (el.tagName === 'line') pts.push([a('x1'), a('y1')], [a('x2'), a('y2')]);
-			if (el.tagName === 'circle') pts.push([a('cx'), a('cy')]);
-			const title = g.closest('figure')?.querySelector('.title')?.textContent;
-			for (const [x, y] of pts) {
-				const where = `${title}: <${el.tagName} class="${el.getAttribute('class')}"> at (${x.toFixed(1)}, ${y.toFixed(1)}) in ${iw}×${ih}`;
-				expect(x, where).toBeGreaterThanOrEqual(-slack);
-				expect(x, where).toBeLessThanOrEqual(iw + slack);
-				expect(y, where).toBeGreaterThanOrEqual(-slack);
-				expect(y, where).toBeLessThanOrEqual(ih + below);
-				checked++;
-			}
-		});
-	});
-	expect(checked).toBeGreaterThan(0);
-}
 
 describe.each([
 	['snowy', snowy],

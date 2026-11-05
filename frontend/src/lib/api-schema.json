@@ -74,6 +74,252 @@
       "title": "Alert",
       "type": "object"
     },
+    "AvalancheDoc": {
+      "description": "One location's forecast, normalised from either provider.",
+      "properties": {
+        "center": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "center_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "days": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AvyDay"
+          },
+          "type": "array"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issued_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "link": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "off_season": {
+          "default": false,
+          "type": "boolean"
+        },
+        "problems": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AvyProblem"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "zone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "center",
+        "center_id",
+        "zone",
+        "link",
+        "issued_at",
+        "expires_at"
+      ],
+      "title": "AvalancheDoc",
+      "type": "object"
+    },
+    "AvalancheView": {
+      "description": "What the app may show right now.",
+      "properties": {
+        "doc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvalancheDoc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "location_id": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "current",
+            "expired",
+            "no_rating",
+            "none"
+          ],
+          "type": "string"
+        },
+        "today_max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "location_id",
+        "status",
+        "doc",
+        "today_max"
+      ],
+      "title": "AvalancheView",
+      "type": "object"
+    },
+    "AvyDay": {
+      "properties": {
+        "alpine": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "below": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "treeline": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "alpine",
+        "treeline",
+        "below"
+      ],
+      "title": "AvyDay",
+      "type": "object"
+    },
+    "AvyProblem": {
+      "properties": {
+        "aspects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "elevations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "likelihood": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "AvyProblem",
+      "type": "object"
+    },
     "AvyRef": {
       "description": "Where to find the avalanche forecast. Canadian zones are looked up by point.",
       "properties": {
@@ -111,6 +357,43 @@
         "provider"
       ],
       "title": "AvyRef",
+      "type": "object"
+    },
+    "BackcountryOut": {
+      "properties": {
+        "refreeze": {
+          "items": {
+            "$ref": "#/$defs/RefreezeNight"
+          },
+          "type": "array"
+        },
+        "rose": {
+          "items": {
+            "$ref": "#/$defs/RoseOut"
+          },
+          "type": "array"
+        },
+        "sky": {
+          "items": {
+            "$ref": "#/$defs/SkyDay"
+          },
+          "type": "array"
+        },
+        "storm": {
+          "$ref": "#/$defs/StormOut"
+        },
+        "warming": {
+          "$ref": "#/$defs/WarmingOut"
+        }
+      },
+      "required": [
+        "rose",
+        "warming",
+        "refreeze",
+        "sky",
+        "storm"
+      ],
+      "title": "BackcountryOut",
       "type": "object"
     },
     "Band": {
@@ -213,6 +496,30 @@
         "elev_m"
       ],
       "title": "BandSummary",
+      "type": "object"
+    },
+    "BestDay": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "string"
+        },
+        "score": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "date",
+        "label",
+        "rating",
+        "score"
+      ],
+      "title": "BestDay",
       "type": "object"
     },
     "BudgetOut": {
@@ -470,6 +777,186 @@
         "snow_level_min_m"
       ],
       "title": "DailyRow",
+      "type": "object"
+    },
+    "DangerChip": {
+      "description": "The highest avalanche rating for a day, when the forecast is current.",
+      "properties": {
+        "level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "status"
+      ],
+      "title": "DangerChip",
+      "type": "object"
+    },
+    "DayOut": {
+      "description": "One day for Plan a day and the ski-day rating. Snow and temperatures at mid.",
+      "properties": {
+        "cloud_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "day_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gust_max_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "overnight_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rating": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "type": "array"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmax_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmin_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vis_min_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wcode": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "label",
+        "overnight_cm",
+        "day_cm",
+        "quality",
+        "rating",
+        "score",
+        "gust_max_kmh",
+        "rain_mm",
+        "tmax_c",
+        "tmin_c",
+        "cloud_low",
+        "vis_min_m",
+        "wcode"
+      ],
+      "title": "DayOut",
       "type": "object"
     },
     "ElevationOut": {
@@ -1407,6 +1894,17 @@
           },
           "type": "array"
         },
+        "best_day": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BestDay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "country": {
           "type": "string"
         },
@@ -1414,6 +1912,17 @@
           "anyOf": [
             {
               "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "danger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DangerChip"
             },
             {
               "type": "null"
@@ -1489,6 +1998,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/OverviewPeriod"
+          },
+          "type": "array"
+        },
+        "powder_dates": {
+          "default": [],
+          "items": {
+            "type": "string"
           },
           "type": "array"
         },
@@ -1831,6 +2347,154 @@
       "title": "Pin",
       "type": "object"
     },
+    "PlanDate": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "label"
+      ],
+      "title": "PlanDate",
+      "type": "object"
+    },
+    "PlanOut": {
+      "description": "Plan a day: every location on one date.",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "dates": {
+          "items": {
+            "$ref": "#/$defs/PlanDate"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/PlanRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "dates",
+        "rows"
+      ],
+      "title": "PlanOut",
+      "type": "object"
+    },
+    "PlanRow": {
+      "properties": {
+        "danger": {
+          "$ref": "#/$defs/DangerChip"
+        },
+        "day": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DayOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "region",
+        "day",
+        "danger"
+      ],
+      "title": "PlanRow",
+      "type": "object"
+    },
+    "Reason": {
+      "description": "Why a day got its rating. The browser words it in the viewer's units.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "Reason",
+      "type": "object"
+    },
+    "RefreezeNight": {
+      "properties": {
+        "band": {
+          "type": "string"
+        },
+        "clear_frac": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "low_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "band",
+        "status",
+        "low_c",
+        "clear_frac"
+      ],
+      "title": "RefreezeNight",
+      "type": "object"
+    },
     "ResolveIn": {
       "properties": {
         "catalog_id": {
@@ -1996,6 +2660,104 @@
       "title": "ResolveOut",
       "type": "object"
     },
+    "RidgeOut": {
+      "description": "Free-air wind at summit height, aligned with each band's `hourly.t`.",
+      "properties": {
+        "dir": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "kmh": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "level_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "level_m",
+        "kmh",
+        "dir"
+      ],
+      "title": "RidgeOut",
+      "type": "object"
+    },
+    "RoseOut": {
+      "description": "Where wind would drift new snow: snowfall \u00d7 ridge wind per sector (N first, clockwise).",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "loading": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mean_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sectors": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "snow_cm": {
+          "type": "number"
+        },
+        "wind_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "sectors",
+        "snow_cm",
+        "mean_kmh",
+        "wind_from",
+        "loading",
+        "label"
+      ],
+      "title": "RoseOut",
+      "type": "object"
+    },
     "RunOut": {
       "properties": {
         "api_weight": {
@@ -2065,6 +2827,63 @@
       "title": "SaveOut",
       "type": "object"
     },
+    "SkyDay": {
+      "description": "Daytime sky at the summit: mean cloud per layer (%) and the lowest visibility.",
+      "properties": {
+        "cloud_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cloud_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cloud_mid": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "vis_min_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "cloud_low",
+        "cloud_mid",
+        "cloud_high",
+        "vis_min_m"
+      ],
+      "title": "SkyDay",
+      "type": "object"
+    },
     "Snapshot": {
       "properties": {
         "alerts": {
@@ -2074,11 +2893,10 @@
           },
           "type": "array"
         },
-        "avalanche": {
+        "backcountry": {
           "anyOf": [
             {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/$defs/BackcountryOut"
             },
             {
               "type": "null"
@@ -2105,6 +2923,13 @@
         "daily": {
           "items": {
             "$ref": "#/$defs/DailyRow"
+          },
+          "type": "array"
+        },
+        "days": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DayOut"
           },
           "type": "array"
         },
@@ -2139,6 +2964,17 @@
         "now": {
           "type": "string"
         },
+        "ridge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RidgeOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "run_id": {
           "anyOf": [
             {
@@ -2167,7 +3003,7 @@
           "type": "array"
         },
         "version": {
-          "default": 1,
+          "default": 2,
           "type": "integer"
         },
         "warnings": {
@@ -2377,6 +3213,36 @@
       "title": "SnotelDay",
       "type": "object"
     },
+    "StormOut": {
+      "properties": {
+        "next48_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "past72_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "past72_cm",
+        "next48_cm"
+      ],
+      "title": "StormOut",
+      "type": "object"
+    },
     "SunDay": {
       "properties": {
         "date": {
@@ -2482,6 +3348,70 @@
       "title": "TrendRun",
       "type": "object"
     },
+    "WarmingOut": {
+      "description": "The biggest 24 h warming in the next 72 h, and rain falling on snow.",
+      "properties": {
+        "fl_rise_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fl_rise_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_on_snow_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temp_rise_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temp_rise_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fl_rise_m",
+        "fl_rise_at",
+        "temp_rise_c",
+        "temp_rise_at",
+        "rain_on_snow_mm"
+      ],
+      "title": "WarmingOut",
+      "type": "object"
+    },
     "WindowOut": {
       "properties": {
         "ens": {
@@ -2579,6 +3509,12 @@
       },
       "type": "array"
     },
+    "avalanche": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AvalancheView"
+      },
+      "type": "object"
+    },
     "budget": {
       "$ref": "#/$defs/BudgetOut"
     },
@@ -2608,6 +3544,9 @@
         "$ref": "#/$defs/OverviewRow"
       },
       "type": "array"
+    },
+    "plan": {
+      "$ref": "#/$defs/PlanOut"
     },
     "resolve_in": {
       "$ref": "#/$defs/ResolveIn"
@@ -2645,7 +3584,9 @@
     "save",
     "job",
     "budget",
-    "lookups"
+    "lookups",
+    "avalanche",
+    "plan"
   ],
   "title": "ApiTypes",
   "type": "object"

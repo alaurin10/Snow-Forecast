@@ -219,6 +219,24 @@ def cmd_lookups(args: argparse.Namespace, settings: Settings) -> int:
     return 1 if any(isinstance(v, str) for v in out.values()) else 0
 
 
+def cmd_avalanche(args: argparse.Namespace, settings: Settings) -> int:
+    from snowwatch.avalanche import refresh, views
+    from snowwatch.locations.service import list_locations
+
+    conn = connect(settings.database)
+    migrate(conn)
+    locs = list_locations(conn)
+    with _fetcher(settings) as fetcher:
+        out = refresh(conn, fetcher, locs)
+    for loc_id, v in views(conn, {loc.id: loc.tz or "UTC" for loc in locs}).items():
+        doc = v.doc
+        where = f"{doc.center_id} · {doc.zone}" if doc else "-"
+        print(f"{loc_id:14s} {v.status:10s} {v.today_max or '-'!s:3s} {where}")
+    for err in out.errors:
+        print(f"error: {err}", file=sys.stderr)
+    return 1 if out.errors else 0
+
+
 def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
     """JSON Schema of every API response, for the generated TypeScript types."""
     from snowwatch.api.models import ApiTypes
@@ -307,6 +325,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lookups", help="refresh the ski-area catalog, SNOTEL stations and zones")
     s.add_argument("action", choices=["refresh"])
     s.set_defaults(func=cmd_lookups)
+
+    s = sub.add_parser("avalanche", help="fetch the avalanche forecasts for every location")
+    s.add_argument("action", choices=["refresh"])
+    s.set_defaults(func=cmd_avalanche)
 
     s = sub.add_parser("schema", help="write the API's JSON Schema (for frontend types)")
     s.add_argument("--out", help="file to write (default stdout)")

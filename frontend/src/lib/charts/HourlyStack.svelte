@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
 	import { scaleLinear } from 'd3-scale';
-	import type { BandOut } from '../types.gen';
+	import type { BandOut, RidgeOut } from '../types.gen';
 	import { crosshair } from '../crosshair.svelte';
 	import { converters, type UnitSystem } from '../units';
 	import { dateOf, dayHour, hourOf, weekday } from '../time';
@@ -16,11 +16,13 @@
 		band: BandOut;
 		bands: BandOut[];
 		units: UnitSystem;
+		/** Free-air wind at summit height, drawn as a dashed second line on the wind chart. */
+		ridge?: RidgeOut | null;
 		/** Fixed width (tests); otherwise the container's width. */
 		width?: number;
 	}
 
-	let { band, bands, units, width: fixedWidth }: Props = $props();
+	let { band, bands, units, ridge = null, width: fixedWidth }: Props = $props();
 
 	let measured = $state(0);
 	let days = $state<5 | 10>(5);
@@ -127,9 +129,10 @@
 	// 5. Wind
 	const wind = $derived(idx.map((i) => c.speed(h.wind_kmh[i])));
 	const gust = $derived(idx.map((i) => c.speed(h.gust_kmh[i])));
+	const ridgeSpeed = $derived(ridge ? idx.map((i) => c.speed(ridge.kmh[i] ?? null)) : []);
 	const yWind = $derived(
 		scaleLinear()
-			.domain([0, maxOf([...gust, ...wind], units === 'imperial' ? 30 : 50)])
+			.domain([0, maxOf([...gust, ...wind, ...ridgeSpeed], units === 'imperial' ? 30 : 50)])
 			.range([ih, 0])
 			.nice(3)
 	);
@@ -325,7 +328,8 @@
 
 	<Frame
 		title="Wind"
-		readout={`${fmt(at(wind, ci))} ${c.speedUnit} · gusts ${fmt(at(gust, ci))}`}
+		readout={`${fmt(at(wind, ci))} ${c.speedUnit} · gusts ${fmt(at(gust, ci))}` +
+			(ridge ? ` · ridge ${fmt(at(ridgeSpeed, ci))}` : '')}
 		width={W}
 		height={H + 12}
 		margin={{ ...M, top: 16 }}
@@ -354,6 +358,16 @@
 					wind.map((v) => (v === null ? null : yWind(v)))
 				)}
 			/>
+			{#if ridge}
+				<path
+					class="mark line ridge"
+					stroke="var(--text-2)"
+					d={linePath(
+						xs,
+						ridgeSpeed.map((v) => (v === null ? null : yWind(v)))
+					)}
+				/>
+			{/if}
 			{#each arrows as i (i)}
 				<!-- Direction the wind blows toward (wdir is where it comes from). -->
 				<g class="arrow" transform="translate({mid(i)},-8) rotate({(h.wdir[i] ?? 0) + 180})">
@@ -432,6 +446,10 @@
 		fill: none;
 		stroke-width: 2;
 		stroke-linejoin: round;
+	}
+	.ridge {
+		stroke-width: 1.5;
+		stroke-dasharray: 5 3;
 	}
 	.freeze {
 		stroke: var(--text-3);

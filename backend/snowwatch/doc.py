@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-DOC_VERSION = 1
+DOC_VERSION = 2
 
 
 class EnsStats(BaseModel):
@@ -169,6 +169,94 @@ class Snotel(BaseModel):
     daily: list[SnotelDay]
 
 
+class RidgeOut(BaseModel):
+    """Free-air wind at summit height, aligned with each band's `hourly.t`."""
+
+    level_m: float
+    kmh: list[float | None]
+    dir: list[float | None]
+
+
+class RoseOut(BaseModel):
+    """Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise)."""
+
+    window: str  # "past72" or "next48"
+    sectors: list[float]  # share of the loading, wind blowing from that sector
+    snow_cm: float  # summit snowfall in the window
+    mean_kmh: float | None
+    wind_from: str | None
+    loading: list[str]  # lee aspects
+    label: str
+
+
+class WarmingOut(BaseModel):
+    """The biggest 24 h warming in the next 72 h, and rain falling on snow."""
+
+    fl_rise_m: float | None
+    fl_rise_at: str | None
+    temp_rise_c: float | None  # mid band
+    temp_rise_at: str | None
+    rain_on_snow_mm: float | None  # rain at mid in the next 48 h when snow is on the ground
+
+
+class RefreezeNight(BaseModel):
+    date: str  # the date the night starts
+    band: str
+    status: str  # Good, Partial, None, Unknown
+    low_c: float | None
+    clear_frac: float | None
+
+
+class SkyDay(BaseModel):
+    """Daytime sky at the summit: mean cloud per layer (%) and the lowest visibility."""
+
+    date: str
+    cloud_low: float | None
+    cloud_mid: float | None
+    cloud_high: float | None
+    vis_min_m: float | None
+
+
+class StormOut(BaseModel):
+    past72_cm: float | None  # summit, model snowfall
+    next48_cm: float | None
+
+
+class BackcountryOut(BaseModel):
+    rose: list[RoseOut]
+    warming: WarmingOut
+    refreeze: list[RefreezeNight]
+    sky: list[SkyDay]
+    storm: StormOut
+
+
+class Reason(BaseModel):
+    """Why a day got its rating. The browser words it in the viewer's units."""
+
+    code: str  # new_snow, heavy_wet, clear, grey, rain, gusts, flat_light, very_cold
+    value: float | None = None
+
+
+class DayOut(BaseModel):
+    """One day for Plan a day and the ski-day rating. Snow and temperatures at mid."""
+
+    date: str
+    label: str  # "Today", "Thu"
+    overnight_cm: float | None  # the night before
+    day_cm: float | None
+    quality: str | None
+    rating: str | None  # resorts only: Powder, Great, Good, Fair, Poor
+    score: int | None  # 5 = Powder … 1 = Poor
+    reasons: list[Reason] = []
+    gust_max_kmh: float | None  # summit, lift hours
+    rain_mm: float | None  # mid, lift hours
+    tmax_c: float | None
+    tmin_c: float | None
+    cloud_low: float | None
+    vis_min_m: float | None
+    wcode: float | None  # the day's most significant weather code at mid
+
+
 class LocationMeta(BaseModel):
     id: str
     name: str
@@ -196,6 +284,8 @@ class Snapshot(BaseModel):
     sun: list[SunDay]
     alerts: list[Alert] = []
     snotel: Snotel | None = None
+    ridge: RidgeOut | None = None
+    backcountry: BackcountryOut | None = None
+    days: list[DayOut] = []
     flags: list[dict[str, object]] = Field(default_factory=list)  # milestone M6
-    avalanche: dict[str, object] | None = None  # milestone M5
     warnings: list[str] = []

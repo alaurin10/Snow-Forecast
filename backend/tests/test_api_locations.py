@@ -3,7 +3,8 @@ from __future__ import annotations
 import gzip
 import json
 import sqlite3
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -157,3 +158,70 @@ def test_overview_cache_follows_new_runs(
 def test_health_reports_run_details(client: TestClient) -> None:
     body = client.get("/api/health").json()
     assert body["last_run"]["errors"] == 0 and "api_weight" in body["last_run"]
+
+
+def test_avalanche_endpoint_applies_expiry(client: TestClient, conn: sqlite3.Connection) -> None:
+    from snowwatch.avalanche import AvalancheDoc, AvyDay, save
+
+    now = datetime.now(UTC)
+    today = now.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    current = AvalancheDoc(
+        provider="nac",
+        center="Northwest Avalanche Center",
+        center_id="NWAC",
+        zone="West Slopes South",
+        link="https://nwac.us",
+        issued_at=(now - timedelta(hours=2)).isoformat(timespec="minutes"),
+        expires_at=(now + timedelta(hours=10)).isoformat(timespec="minutes"),
+        days=[
+            AvyDay(date=today.isoformat(), alpine=3, treeline=2, below=1),
+            AvyDay(date=(today + timedelta(days=1)).isoformat(), alpine=2, treeline=2, below=1),
+        ],
+    )
+    save(conn, "crystal", current)
+    expired = current.model_copy(
+        update={"expires_at": (now - timedelta(minutes=1)).isoformat(timespec="minutes")}
+    )
+    save(conn, "rainy", expired)
+    r = client.get("/api/avalanche")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["crystal"]["status"] == "current" and body["crystal"]["today_max"] == 3
+    assert body["rainy"]["status"] == "expired" and body["rainy"]["doc"]["days"] == []
+    assert body["whistler"]["status"] == "none"
+
+    rows = {row["id"]: row for row in client.get("/api/overview").json()}
+    assert rows["crystal"]["danger"] == {"level": 3, "status": "current"}
+    assert rows["rainy"]["danger"] == {"level": None, "status": "expired"}
+
+    plan = client.get("/api/plan").json()
+    by_id = {row["id"]: row for row in plan["rows"]}
+    if plan["date"] == today.isoformat():
+        assert by_id["crystal"]["danger"] == {"level": 3, "status": "current"}
+    else:
+        assert by_id["crystal"]["danger"]["status"] in ("current", "not_issued")
+
+
+def test_plan_a_day(client: TestClient) -> None:
+    r = client.get("/api/plan")
+    assert r.status_code == 200
+    plan = r.json()
+    assert len(plan["dates"]) == 10 and plan["date"] == plan["dates"][0]["date"]
+    rows = {row["id"]: row for row in plan["rows"]}
+    assert rows["sunshine"]["day"] is None  # never pulled
+    assert rows["crystal"]["day"]["rating"] in ("Powder", "Great", "Good", "Fair", "Poor")
+    assert rows["rainy"]["day"]["rating"] is None  # tours are never rated
+    second = plan["dates"][1]["date"]
+    assert client.get(f"/api/plan?date={second}").json()["date"] == second
+    assert client.get("/api/plan?date=1999-01-01").status_code == 400
+
+
+def test_overview_best_day(client: TestClient) -> None:
+    rows = {row["id"]: row for row in client.get("/api/overview").json()}
+    best = rows["whistler"]["best_day"]
+    assert best is not None and best["score"] >= 3
+    assert rows["rainy"]["best_day"] is None
+    assert all(
+        d in [p["date"] for p in rows["whistler"]["periods"]]
+        for d in rows["whistler"]["powder_dates"]
+    )

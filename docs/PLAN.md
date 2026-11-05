@@ -222,7 +222,7 @@ Open-Meteo's free tier is about 10,000 weighted calls per day, with per-hour and
 |---|---|
 | Blend, 3 points, 21 variables, 14 days | 6.3 |
 | Multi-model, 3 points, 9 variables × 6 models, 16 days | 18.5 |
-| Upper air, 1 point, 12 variables × 5 models, 16 days | 6.9 |
+| Upper air, 1 point, 12 variables × 5 models, 3 past + 16 days | 8.1 |
 | Ensembles, 1 point, 103 members, 16 days | 11.8 |
 | **Per location per day** (4 full runs, ensembles twice) | **~150** |
 | **25 locations per day** (the default cap) | **~3,750** (37% of the free tier) |
@@ -421,6 +421,7 @@ All JSON, metric units, with `run_id` and `generated_at`. `ETag` is the run id, 
 | `GET /api/locations/{id}` | The full snapshot: periods, hourly for all three bands, elevations, windows, flags, alerts, avalanche, links, SNOTEL for 30 days |
 | `GET /api/locations/{id}/trend`, `/verification` | Forecast history for the last 10 runs; scorecard and daily pairs |
 | `GET /api/plan?date=` | Plan-a-day rows |
+| `GET /api/avalanche` | Every location's avalanche forecast, with expiry applied at request time (kept apart from the snapshots so an expired rating is never served as current) |
 | `GET /api/runs?limit=20` | Run history and API usage |
 | `GET /api/admin/catalog/search?q=` | Catalog matches |
 | `POST /api/admin/locations/resolve` | Auto-detected fields for pins or a catalog pick |

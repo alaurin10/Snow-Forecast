@@ -75,10 +75,12 @@ Run from `backend/` with `uv run snowwatch …`:
 | `init` | Create or migrate the database and seed the locations |
 | `pull [--only ID …] [--ensembles]` | Fetch, analyse and store forecasts now |
 | `show ID [--band base\|mid\|summit]` | Print a location's latest forecast as a table (in, °F, ft) |
-| `worker [--run-now]` | The scheduler: runs at 03:30/09:30/15:30/21:30 UTC, the job queue, nightly backups |
+| `worker [--run-now]` | The scheduler: runs at 03:30/09:30/15:30/21:30 UTC, avalanche checks, the job queue, nightly backups |
 | `rebuild [--from FOLDER]` | Rebuild snapshots with no API calls, from the raw cache or saved fixtures |
 | `backup` | Write a database backup and a `locations.yaml` copy now |
 | `locations list\|import\|export`, `budget` | Manage the list; estimated Open-Meteo usage |
+| `avalanche refresh` | Fetch every location's avalanche forecast now and print its status |
+| `lookups refresh` | Reload the ski-area catalog, SNOTEL stations and avalanche zones (for Manage) |
 | `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and rewrite the report |
 | `schema --out FILE` | Write the API's JSON Schema (source of the frontend types) |
 | `capture-fixtures` | Save today's real responses to `backend/tests/fixtures/live-YYYYMMDD/` |

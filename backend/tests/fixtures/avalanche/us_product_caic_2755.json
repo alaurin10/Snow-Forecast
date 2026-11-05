@@ -1,0 +1,195 @@
+{
+ "id": 185688,
+ "published_time": "2026-11-04T23:30:00+00:00",
+ "expires_time": "2026-11-05T23:30:00+00:00",
+ "created_at": "2026-11-04T23:32:05+00:00",
+ "updated_at": "2026-11-05T13:05:05+00:00",
+ "author": "Spencer Logan",
+ "product_type": "forecast",
+ "bottom_line": "<p>Fresh snow means you could trigger avalanches above treeline. Look for and avoid spots where winds drift the new snow. Those spots will be just below ridgelines, along gully walls, or around terrain features like rock outcrops. Because wind speeds with this storm are light, the drifted snow may be softer and less obvious than the typical Colorado wind slab. Most slopes near and below treeline lack enough snow to produce an avalanche.</p>",
+ "announcement": null,
+ "status": "published",
+ "avalanche_center": {
+  "id": "CAIC",
+  "name": "Colorado Avalanche Information Center",
+  "url": "https://avalanche.state.co.us/",
+  "city": null,
+  "state": "CO"
+ },
+ "forecast_avalanche_problems": [
+  {
+   "id": 3057178,
+   "forecast_id": 185688,
+   "avalanche_problem_id": 3,
+   "rank": 1,
+   "likelihood": "possible",
+   "discussion": null,
+   "media": null,
+   "location": [
+    "north upper",
+    "northeast upper",
+    "east upper",
+    "northwest upper"
+   ],
+   "size": [
+    "1.0",
+    "1.5"
+   ],
+   "name": "Wind Slab",
+   "problem_description": "Wind Slab avalanches are the release of a cohesive layer of snow (a slab) formed by the wind. Wind typically transports snow from the upwind sides of terrain features and deposits snow on the downwind side. Wind slabs are often smooth and rounded and sometimes sound hollow, and can range from soft to hard. Wind slabs that form over a persistent weak layer (surface hoar, depth hoar, or near-surface facets) may be termed Persistent Slabs or may develop into Persistent Slabs.",
+   "icon": "http://api.avalanche.org/img/avalanche_problems/WindSlab.png"
+  }
+ ],
+ "danger": [
+  {
+   "lower": 1,
+   "upper": 2,
+   "middle": 1,
+   "valid_day": "current"
+  },
+  {
+   "lower": 1,
+   "upper": 1,
+   "middle": 1,
+   "valid_day": "tomorrow"
+  }
+ ],
+ "forecast_zone": [
+  {
+   "id": 2714,
+   "name": "Ten Mile Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "26532674-FF2E-46C9-9AB9-8F7F5EF2BE9D",
+   "config": null
+  },
+  {
+   "id": 2713,
+   "name": "Front Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "32B217C1-08DF-4196-87E6-6B0B30CD93BA",
+   "config": null
+  },
+  {
+   "id": 2753,
+   "name": "Elk Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "3302D495-0B02-4C2B-B7E2-04A5BC6B732E",
+   "config": null
+  },
+  {
+   "id": 2731,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "3B01946F-38F5-4E26-A0C1-85C92127D906",
+   "config": null
+  },
+  {
+   "id": 2730,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "474699E9-04AC-4A57-BDE4-DFD3E1F05E62",
+   "config": null
+  },
+  {
+   "id": 2732,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "4DE3A677-9C07-4804-A22B-82C01AE9BB64",
+   "config": null
+  },
+  {
+   "id": 2737,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "54577AA3-268F-4B10-8977-AB30C4206728",
+   "config": null
+  },
+  {
+   "id": 2716,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "5BAE9C3B-51C2-4149-964B-C9C13F94E4A5",
+   "config": null
+  },
+  {
+   "id": 2755,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "851AFED0-5CE2-4E56-8465-F4FC73BF8FE7",
+   "config": null
+  },
+  {
+   "id": 2754,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "8F48A7FC-A784-473E-BD34-0F789B505D14",
+   "config": null
+  },
+  {
+   "id": 2624,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "A2D787FE-207C-489C-83F1-63715DEF6E7A",
+   "config": null
+  },
+  {
+   "id": 2729,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "B53342B7-BE91-47AD-81A7-21E7074B3FF3",
+   "config": null
+  },
+  {
+   "id": 2733,
+   "name": "Front Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "BCFFEB80-C915-40FF-985D-5D7C7B99586A",
+   "config": null
+  },
+  {
+   "id": 2736,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "D15B6420-1FC0-4130-9AD2-760FD3F31DCD",
+   "config": null
+  },
+  {
+   "id": 2735,
+   "name": "Mosquito Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "D47A1D59-69BD-4DEE-9E6A-FCB28AC581B1",
+   "config": null
+  },
+  {
+   "id": 2615,
+   "name": "Sawatch Mountains",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "E431262C-0AE0-4E4B-9DA4-A2E35B49E671",
+   "config": null
+  },
+  {
+   "id": 2711,
+   "name": "Front Range",
+   "url": "https://avalanche.state.co.us/",
+   "state": "CO",
+   "zone_id": "00F5A524-1F4A-4318-9D53-9A3F42EAAD78",
+   "config": null
+  }
+ ]
+}

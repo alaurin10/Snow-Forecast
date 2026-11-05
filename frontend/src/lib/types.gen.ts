@@ -5,6 +5,9 @@
  */
 export interface ApiTypes {
 	admin_locations: Location[];
+	avalanche: {
+		[k: string]: AvalancheView;
+	};
 	budget: BudgetOut;
 	catalog: CatalogItem[];
 	job: JobOut;
@@ -12,6 +15,7 @@ export interface ApiTypes {
 	lookups: LookupStatus;
 	me: Me;
 	overview: OverviewRow[];
+	plan: PlanOut;
 	resolve_in: ResolveIn;
 	resolve_out: ResolveOut;
 	runs: RunOut[];
@@ -63,6 +67,58 @@ export interface Band {
 	label: string;
 	lat: number;
 	lon: number;
+}
+/**
+ * What the app may show right now.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AvalancheView".
+ */
+export interface AvalancheView {
+	doc: AvalancheDoc | null;
+	location_id: string;
+	status: 'current' | 'expired' | 'no_rating' | 'none';
+	today_max: number | null;
+}
+/**
+ * One location's forecast, normalised from either provider.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AvalancheDoc".
+ */
+export interface AvalancheDoc {
+	center: string | null;
+	center_id: string | null;
+	days?: AvyDay[];
+	expires_at: string | null;
+	issued_at: string | null;
+	link: string | null;
+	off_season?: boolean;
+	problems?: AvyProblem[];
+	provider: string;
+	summary?: string | null;
+	zone: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AvyDay".
+ */
+export interface AvyDay {
+	alpine: number | null;
+	below: number | null;
+	date: string;
+	treeline: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AvyProblem".
+ */
+export interface AvyProblem {
+	aspects?: string[];
+	elevations?: string[];
+	likelihood?: string | null;
+	name: string;
+	size?: string | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -160,8 +216,10 @@ export interface Me {
  */
 export interface OverviewRow {
 	alerts?: string[];
+	best_day?: BestDay | null;
 	country: string;
 	d6_10_cm?: number | null;
+	danger?: DangerChip | null;
 	generated_at?: string | null;
 	id: string;
 	kind: string;
@@ -171,9 +229,30 @@ export interface OverviewRow {
 	next5_p10_cm?: number | null;
 	next5_p90_cm?: number | null;
 	periods?: OverviewPeriod[];
+	powder_dates?: string[];
 	region: string;
 	run_id?: number | null;
 	snow_depth_cm?: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "BestDay".
+ */
+export interface BestDay {
+	date: string;
+	label: string;
+	rating: string;
+	score: number;
+}
+/**
+ * The highest avalanche rating for a day, when the forecast is current.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "DangerChip".
+ */
+export interface DangerChip {
+	level: number | null;
+	status: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -185,6 +264,70 @@ export interface OverviewPeriod {
 	kind: string;
 	label: string;
 	snow_cm: number | null;
+}
+/**
+ * Plan a day: every location on one date.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PlanOut".
+ */
+export interface PlanOut {
+	date: string;
+	dates: PlanDate[];
+	rows: PlanRow[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PlanDate".
+ */
+export interface PlanDate {
+	date: string;
+	label: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PlanRow".
+ */
+export interface PlanRow {
+	danger: DangerChip;
+	day: DayOut | null;
+	id: string;
+	kind: string;
+	name: string;
+	region: string;
+}
+/**
+ * One day for Plan a day and the ski-day rating. Snow and temperatures at mid.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "DayOut".
+ */
+export interface DayOut {
+	cloud_low: number | null;
+	date: string;
+	day_cm: number | null;
+	gust_max_kmh: number | null;
+	label: string;
+	overnight_cm: number | null;
+	quality: string | null;
+	rain_mm: number | null;
+	rating: string | null;
+	reasons?: Reason[];
+	score: number | null;
+	tmax_c: number | null;
+	tmin_c: number | null;
+	vis_min_m: number | null;
+	wcode: number | null;
+}
+/**
+ * Why a day got its rating. The browser words it in the viewer's units.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Reason".
+ */
+export interface Reason {
+	code: string;
+	value?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -270,12 +413,11 @@ export interface SaveOut {
  */
 export interface Snapshot {
 	alerts?: Alert[];
-	avalanche?: {
-		[k: string]: unknown;
-	} | null;
+	backcountry?: BackcountryOut | null;
 	bands: BandOut[];
 	basis_switch: string | null;
 	daily: DailyRow[];
+	days?: DayOut[];
 	depth_method: string;
 	ensembles: {
 		[k: string]: number;
@@ -287,6 +429,7 @@ export interface Snapshot {
 	location: LocationMeta;
 	models: string[];
 	now: string;
+	ridge?: RidgeOut | null;
 	run_id: number | null;
 	snotel?: Snotel | null;
 	sun: SunDay[];
@@ -304,6 +447,77 @@ export interface Alert {
 	onset: string | null;
 	severity: string | null;
 	url: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "BackcountryOut".
+ */
+export interface BackcountryOut {
+	refreeze: RefreezeNight[];
+	rose: RoseOut[];
+	sky: SkyDay[];
+	storm: StormOut;
+	warming: WarmingOut;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "RefreezeNight".
+ */
+export interface RefreezeNight {
+	band: string;
+	clear_frac: number | null;
+	date: string;
+	low_c: number | null;
+	status: string;
+}
+/**
+ * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "RoseOut".
+ */
+export interface RoseOut {
+	label: string;
+	loading: string[];
+	mean_kmh: number | null;
+	sectors: number[];
+	snow_cm: number;
+	wind_from: string | null;
+	window: string;
+}
+/**
+ * Daytime sky at the summit: mean cloud per layer (%) and the lowest visibility.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SkyDay".
+ */
+export interface SkyDay {
+	cloud_high: number | null;
+	cloud_low: number | null;
+	cloud_mid: number | null;
+	date: string;
+	vis_min_m: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "StormOut".
+ */
+export interface StormOut {
+	next48_cm: number | null;
+	past72_cm: number | null;
+}
+/**
+ * The biggest 24 h warming in the next 72 h, and rain falling on snow.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "WarmingOut".
+ */
+export interface WarmingOut {
+	fl_rise_at: string | null;
+	fl_rise_m: number | null;
+	rain_on_snow_mm: number | null;
+	temp_rise_at: string | null;
+	temp_rise_c: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -472,6 +686,17 @@ export interface LocationMeta {
 	name: string;
 	region: string;
 	tz: string;
+}
+/**
+ * Free-air wind at summit height, aligned with each band's `hourly.t`.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "RidgeOut".
+ */
+export interface RidgeOut {
+	dir: (number | null)[];
+	kmh: (number | null)[];
+	level_m: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

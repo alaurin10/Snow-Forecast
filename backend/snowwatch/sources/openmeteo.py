@@ -119,7 +119,10 @@ def multimodel_request(loc: Location, models: list[str], *, forecast_days: int =
     return Request("multi", SOURCE, FORECAST_URL, params, w)
 
 
-def upper_air_request(loc: Location, models: list[str], *, forecast_days: int = 16) -> Request:
+def upper_air_request(
+    loc: Location, models: list[str], *, forecast_days: int = 16, past_days: int = 3
+) -> Request:
+    """Free-air fields at the summit. The past days feed the wind-loading rose."""
     top = loc.band("summit")
     params = {
         "latitude": f"{top.lat:g}",
@@ -127,9 +130,12 @@ def upper_air_request(loc: Location, models: list[str], *, forecast_days: int = 
         **_common(),
         "hourly": ",".join(UPPER_HOURLY),
         "models": ",".join(models),
+        "past_days": str(past_days),
         "forecast_days": str(forecast_days),
     }
-    w = estimate_weight(points=1, days=forecast_days, variables=len(UPPER_HOURLY) * len(models))
+    w = estimate_weight(
+        points=1, days=forecast_days + past_days, variables=len(UPPER_HOURLY) * len(models)
+    )
     return Request("upper", SOURCE, FORECAST_URL, params, w)
 
 

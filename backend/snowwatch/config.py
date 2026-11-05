@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from snowwatch.analysis.backcountry import BackcountryConfig
+from snowwatch.analysis.skiday import SkiDayConfig
 from snowwatch.settings import get_settings
 
 
@@ -27,6 +29,8 @@ class Schedule(BaseModel):
     runs_utc: list[str]
     ensemble_runs_utc: list[str]
     backup_utc: str = "10:00"
+    # Avalanche centers publish 6–10 am Mountain time; check again after the runs.
+    avalanche_utc: list[str] = []
     vacuum_weekday: str = "sun"
 
 
@@ -48,6 +52,8 @@ class ForecastConfig(BaseModel):
     slr_bands: list[SlrBand]
     depth_method: str = "raw"
     schedule: Schedule
+    skiday: SkiDayConfig = SkiDayConfig()
+    backcountry: BackcountryConfig = BackcountryConfig()
 
     def models_for(self, country: str) -> list[str]:
         return [*self.models.global_, *self.models.short_range.get(country, [])]

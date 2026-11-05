@@ -47,3 +47,33 @@ schedule:
   ensemble_runs_utc: ["09:30", "21:30"]
   backup_utc: "10:00"
   vacuum_weekday: sun
+  # Extra avalanche-forecast checks (centers publish 6–10 am Mountain time).
+  # Every forecast run also refreshes them.
+  avalanche_utc: ["13:45", "15:45", "17:45"]
+
+# Ski-day rating for resorts (Powder / Great / Good / Fair / Poor).
+# New snow is the night before plus the day, at mid; the rest is during lift hours.
+skiday:
+  lift_start_hour: 9
+  lift_end_hour: 16
+  powder_cm: 15         # 6 in
+  great_cm: 8           # 3 in
+  good_cm: 3            # 1 in
+  clear_cloud_low_pct: 50  # a dry day with less low cloud than this is Good
+  dry_water_mm: 0.5
+  rain_fair_mm: 1       # rain at mid caps the day at Fair…
+  rain_poor_mm: 5       # …or Poor
+  gust_hold_kmh: 70     # 45 mph at the summit: lift holds likely (−1)
+  gust_closed_kmh: 90   # 55 mph (−2)
+  flat_light_vis_m: 1000
+  flat_light_cloud_low_pct: 80
+  very_cold_c: -18      # 0 °F high
+
+# Backcountry layer. Facts only: the app never rates whether a tour is safe.
+backcountry:
+  refreeze_good_c: -3        # Good: a low at or below this with a mostly clear night
+  refreeze_partial_c: 0      # Partial: a low at or below freezing
+  refreeze_clear_cloud_pct: 30
+  refreeze_clear_frac: 0.5
+  rose_min_snow_cm: 2        # less new snow than this: "little new snow to move"
+  rose_min_wind_kmh: 15
