@@ -78,6 +78,7 @@
     - {band: base, label: Village, lat: 50.06, lon: -122.95, elev_m: 675}
     - {band: mid, label: Roundhouse, lat: 50.06, lon: -122.95, elev_m: 1850}
     - {band: summit, label: Peak, lat: 50.06, lon: -122.95, elev_m: 2182}
+  snotel: "3A20P:BC:ASWS"  # BC snow pillow: Callaghan Creek, 14 km
   avy: {provider: avcan}
   links:
     Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSS
@@ -95,6 +96,7 @@
     - {band: base, label: Base, lat: 51.0, lon: -118.16, elev_m: 512}
     - {band: mid, label: Mid-mountain, lat: 51.0, lon: -118.16, elev_m: 1500}
     - {band: summit, label: Summit, lat: 51.0, lon: -118.16, elev_m: 2225}
+  snotel: "2A06P:BC:ASWS"  # BC snow pillow: Mount Revelstoke, 5 km
   avy: {provider: avcan}
   links:
     Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSR
@@ -112,6 +114,7 @@
     - {band: base, label: Parking lot, lat: 51.08, lon: -115.77, elev_m: 1658}
     - {band: mid, label: Village, lat: 51.08, lon: -115.77, elev_m: 2160}
     - {band: summit, label: Lookout Mtn, lat: 51.08, lon: -115.77, elev_m: 2730}
+  snotel: "2C14P:BC:ASWS"  # BC snow pillow: Floe Lake, 25 km (BC side of the divide)
   avy: {provider: avcan}
   links:
     Radar (ECCC): https://weather.gc.ca/radar/index_e.html?id=CASSM

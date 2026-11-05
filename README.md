@@ -78,8 +78,9 @@ Run from `backend/` with `uv run snowwatch …`:
 | `worker [--run-now]` | The scheduler: runs at 03:30/09:30/15:30/21:30 UTC, avalanche checks, the job queue, nightly backups |
 | `rebuild [--from FOLDER]` | Rebuild snapshots with no API calls, from the raw cache or saved fixtures |
 | `backup` | Write a database backup and a `locations.yaml` copy now |
-| `locations list\|import\|export`, `budget` | Manage the list; estimated Open-Meteo usage |
+| `locations list\|import\|export\|stations`, `budget` | Manage the list (`stations` fills in missing snow stations); estimated Open-Meteo usage |
 | `avalanche refresh` | Fetch every location's avalanche forecast now and print its status |
+| `push keys` | Print a new VAPID key pair for push alerts (see `docs/RUNBOOK.md` step 10) |
 | `lookups refresh` | Reload the ski-area catalog, SNOTEL stations and avalanche zones (for Manage) |
 | `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and rewrite the report |
 | `schema --out FILE` | Write the API's JSON Schema (source of the frontend types) |
@@ -87,4 +88,4 @@ Run from `backend/` with `uv run snowwatch …`:
 
 Try it offline: `uv run snowwatch init && uv run snowwatch rebuild --from tests/fixtures/live-20261104 && uv run snowwatch show whistler`.
 
-Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0), NWS, NRCS SNOTEL, avalanche.org and Avalanche Canada. Ski areas from [OpenSkiMap](https://openskimap.org/) (© OpenStreetMap contributors, ODbL).
+Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0), NWS, NRCS SNOTEL, the BC River Forecast Centre (Open Government Licence – British Columbia), avalanche.org and Avalanche Canada. Ski areas from [OpenSkiMap](https://openskimap.org/) (© OpenStreetMap contributors, ODbL).

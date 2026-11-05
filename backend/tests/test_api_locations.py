@@ -225,3 +225,43 @@ def test_overview_best_day(client: TestClient) -> None:
         d in [p["date"] for p in rows["whistler"]["periods"]]
         for d in rows["whistler"]["powder_dates"]
     )
+
+
+def test_overview_has_coordinates_and_flags(client: TestClient, conn: sqlite3.Connection) -> None:
+    from snowwatch.avalanche import AvalancheDoc, AvyDay, save
+
+    now = datetime.now(UTC)
+    today = now.astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    save(
+        conn,
+        "rainy",
+        AvalancheDoc(
+            provider="nac",
+            center="NWAC",
+            center_id="NWAC",
+            zone="East Slopes North",
+            link=None,
+            issued_at=None,
+            expires_at=(now + timedelta(hours=6)).isoformat(timespec="minutes"),
+            days=[AvyDay(date=today, alpine=4, treeline=3, below=2)],
+        ),
+    )
+    rows = {r["id"]: r for r in client.get("/api/overview").json()}
+    assert rows["crystal"]["lat"] and rows["crystal"]["lon"]
+    assert rows["whistler"]["flags"], "the fixture has a powder day at Whistler"
+    rainy = rows["rainy"]["flags"]
+    assert rainy[0]["type"] == "avalanche_danger" and rainy[0]["value"] == 4
+
+
+def test_status_page(client: TestClient) -> None:
+    body = client.get("/api/status").json()
+    assert body["budget"] == 10_000 and len(body["runs"]) >= 2
+    ages = {a["id"]: a for a in body["locations"]}
+    assert ages["crystal"]["generated_at"] and ages["sunshine"]["generated_at"] is None
+    assert isinstance(body["sources"], list)
+
+
+def test_verification_endpoint(client: TestClient) -> None:
+    body = client.get("/api/locations/crystal/verification").json()
+    assert body["station"] == "642:WA:SNTL" and body["needs_days"] >= 1
+    assert client.get("/api/locations/nope/verification").status_code == 404

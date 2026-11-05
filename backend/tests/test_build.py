@@ -124,3 +124,12 @@ def test_forecast_daily_records() -> None:
     # Days start today in the location's timezone (captured 4 Nov, early afternoon).
     assert min(r.target_date for r in recs) == "2026-11-04"
     assert all(r.snow_cm is None or r.snow_cm >= 0 for r in recs)
+
+
+def test_flags_are_in_the_snapshot() -> None:
+    whistler = fixture_snapshot("whistler")
+    assert any(f.type == "powder_day" for f in whistler.flags)
+    order = {"warning": 0, "notice": 1, "info": 2}
+    for loc_id in LOCS:
+        flags = fixture_snapshot(loc_id).flags
+        assert [order[f.severity] for f in flags] == sorted(order[f.severity] for f in flags)

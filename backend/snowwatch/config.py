@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from snowwatch.analysis.backcountry import BackcountryConfig
+from snowwatch.analysis.flags import FlagConfig
 from snowwatch.analysis.skiday import SkiDayConfig
 from snowwatch.settings import get_settings
 
@@ -54,6 +55,9 @@ class ForecastConfig(BaseModel):
     schedule: Schedule
     skiday: SkiDayConfig = SkiDayConfig()
     backcountry: BackcountryConfig = BackcountryConfig()
+    flags: FlagConfig = FlagConfig()
+    # Verification: the snow-to-water ratio for the observed-SWE depth estimate.
+    verify_swe_ratio: float = 10
 
     def models_for(self, country: str) -> list[str]:
         return [*self.models.global_, *self.models.short_range.get(country, [])]

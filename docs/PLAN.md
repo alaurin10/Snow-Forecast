@@ -570,7 +570,7 @@ M0–M3 is the first useful release, aimed at early-season use.
 
 1. **Data hosts:** the cloud build environment blocks them. Either add `api.open-meteo.com`, `ensemble-api.open-meteo.com`, `geocoding-api.open-meteo.com`, `api.weather.gov`, `wcc.sc.egov.usda.gov`, `api.avalanche.org`, `api.avalanche.ca` and `openskidata.org` to its allowed domains, or run `capture-fixtures` on the VM and commit the fixtures.
 2. **Which friends to invite**, and any locations to add beyond the 6 prototype ones. For each tour zone: trailhead, typical high point, and its avalanche forecast zone.
-3. **Push alerts** (ntfy) for powder days and incoming storms: in M6 or not at all?
+3. **Push alerts:** decided in M6. They use the browser's Web Push API (no third-party app), for flags first raised in a run; setup is RUNBOOK step 10.
 4. **The Claude-hosted prototype:** keep it running until M3 (recommended).
 
 ## 10. Risks

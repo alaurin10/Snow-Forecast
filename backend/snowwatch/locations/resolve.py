@@ -24,6 +24,7 @@ from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import FORECAST_URL, SOURCE, elevation_request
 
 SNOTEL_RADIUS_KM = 25.0
+CANADA_RADIUS_KM = 40.0  # BC snow pillows are sparser than SNOTEL
 MID_SHARE = 0.6  # mid = base + 60% of the vertical (the prototype's Crystal values)
 
 
@@ -181,27 +182,9 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
     tz = _timezone(fetcher, mid.lat, mid.lon, warnings)
 
     # Nearest SNOTEL stations, closest in elevation first.
-    candidates: list[SnotelCandidate] = []
-    if country == "US":
-        for r in conn.execute("SELECT triplet, name, lat, lon, elev_m FROM snotel_stations"):
-            d = haversine_km(mid.lat, mid.lon, r["lat"], r["lon"])
-            if d <= SNOTEL_RADIUS_KM:
-                candidates.append(
-                    SnotelCandidate(
-                        triplet=r["triplet"],
-                        name=r["name"],
-                        distance_km=round(d, 1),
-                        elev_m=r["elev_m"],
-                    )
-                )
-        # Near and at a similar height: every 50 m of elevation difference counts
-        # like 1 km of distance. (By elevation alone, a station across the crest
-        # can beat one beside the lifts.)
-        target = mid.elev_m or 0
-        candidates.sort(key=lambda c: c.distance_km + abs((c.elev_m or 0) - target) / 50)
-        candidates = candidates[:3]
-        if not conn.execute("SELECT 1 FROM snotel_stations LIMIT 1").fetchone():
-            warnings.append("SNOTEL station list is empty; run `snowwatch lookups refresh`")
+    candidates = rank_stations(conn, mid.lat, mid.lon, mid.elev_m or 0, country)
+    if not has_stations(conn, country):
+        warnings.append("snow station list is empty; run `snowwatch lookups refresh`")
 
     # Avalanche zone by point-in-polygon (bounding box first).
     avy = None
@@ -266,3 +249,45 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
         links=links,
         warnings=warnings,
     )
+
+
+def _network(country: str) -> str:
+    # SNOTEL in the US; BC River Forecast Centre snow pillows in Canada.
+    return "%:SNTL" if country == "US" else "%:BC:ASWS"
+
+
+def has_stations(conn: sqlite3.Connection, country: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM snotel_stations WHERE triplet LIKE ? LIMIT 1", (_network(country),)
+        ).fetchone()
+        is not None
+    )
+
+
+def rank_stations(
+    conn: sqlite3.Connection, lat: float, lon: float, elev_m: float, country: str, limit: int = 3
+) -> list[SnotelCandidate]:
+    """The best nearby snow stations: near and at a similar height.
+
+    Every 50 m of elevation difference counts like 1 km of distance (by
+    elevation alone, a station across the crest can beat one beside the lifts).
+    """
+    radius = SNOTEL_RADIUS_KM if country == "US" else CANADA_RADIUS_KM
+    out: list[SnotelCandidate] = []
+    for r in conn.execute(
+        "SELECT triplet, name, lat, lon, elev_m FROM snotel_stations WHERE triplet LIKE ?",
+        (_network(country),),
+    ):
+        d = haversine_km(lat, lon, r["lat"], r["lon"])
+        if d <= radius:
+            out.append(
+                SnotelCandidate(
+                    triplet=r["triplet"],
+                    name=r["name"],
+                    distance_km=round(d, 1),
+                    elev_m=r["elev_m"],
+                )
+            )
+    out.sort(key=lambda c: c.distance_km + abs((c.elev_m or 0) - elev_m) / 50)
+    return out[:limit]

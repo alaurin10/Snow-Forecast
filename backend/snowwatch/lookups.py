@@ -12,7 +12,7 @@ from typing import Any
 
 from snowwatch.geo import bbox, centroid
 from snowwatch.http import Fetcher, FetchError
-from snowwatch.sources import avalanche_ca, avalanche_us, catalog, snotel
+from snowwatch.sources import avalanche_ca, avalanche_us, bc_asws, catalog, snotel
 from snowwatch.sources.base import fetch
 from snowwatch.store import repo
 from snowwatch.store.db import utcnow_iso
@@ -138,6 +138,11 @@ def refresh(conn: sqlite3.Connection, fetcher: Fetcher) -> dict[str, int | str]:
         out["snotel_stations"] = repo.save_stations(conn, stations)
     except FetchError as e:
         out["snotel_stations"] = f"failed: {e}"
+    try:
+        wfs = fetch(fetcher, bc_asws.stations_request())
+        out["bc_stations"] = repo.save_station_rows(conn, bc_asws.station_rows(wfs))
+    except FetchError as e:
+        out["bc_stations"] = f"failed: {e}"
     us = ca = None
     try:
         us = fetch(fetcher, avalanche_us.map_layer_request())

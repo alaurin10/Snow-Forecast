@@ -72,3 +72,30 @@ describe('LocationForm', () => {
 		expect(submit(container).disabled).toBe(false);
 	});
 });
+
+describe('LocationForm webcams', () => {
+	it('adds a webcam, rejects a bad link and saves a good one', async () => {
+		const onsave = vi.fn();
+		const { container, getByText } = render(LocationForm, {
+			initial: loc([950, 1200, 1500]),
+			isNew: true,
+			onsave,
+			oncancel: () => {}
+		});
+		await fireEvent.click(getByText('+ Add a webcam'));
+		flushSync();
+		const cam = container.querySelector('.cam') as HTMLElement;
+		const [name, page] = cam.querySelectorAll('input');
+		await fireEvent.input(name, { target: { value: 'Summit' } });
+		await fireEvent.input(page, { target: { value: 'javascript:alert(1)' } });
+		flushSync();
+		expect(submit(container).disabled).toBe(true);
+		await fireEvent.input(page, { target: { value: 'https://example.com/cam' } });
+		flushSync();
+		expect(submit(container).disabled).toBe(false);
+		await fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+		expect(onsave.mock.calls[0][0].webcams).toEqual([
+			{ name: 'Summit', url: 'https://example.com/cam', image_url: null }
+		]);
+	});
+});

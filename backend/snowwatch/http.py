@@ -20,6 +20,18 @@ class FetchError(RuntimeError):
     """An upstream request failed after all retries, or was rejected outright."""
 
 
+@dataclass
+class SourceStat:
+    """What happened with one upstream source during this fetcher's life (for Status)."""
+
+    ok: int = 0
+    errors: int = 0
+    weight: float = 0.0
+    last_error: str | None = None
+    last_ok_at: str | None = None
+    last_error_at: str | None = None
+
+
 @dataclass(frozen=True)
 class CallRecord:
     source: str
@@ -64,6 +76,7 @@ class Fetcher:
         self.on_call = on_call
         self.calls: list[CallRecord] = []
         self.rate_limited = 0  # 429 responses seen (each costs a 65 s wait)
+        self.sources: dict[str, SourceStat] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -87,6 +100,27 @@ class Fetcher:
         cache_key: str | None = None,
         weight: float = 0.0,
     ) -> Any:
+        resp = self._get(url, params, source=source, weight=weight)
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise self._fail(source, f"response is not JSON ({url})") from e
+        if isinstance(data, dict) and data.get("error") is True:
+            raise self._fail(source, f"{data.get('reason', 'error')} ({url})")
+        self._ok(source, weight)
+        if self.raw_dir is not None and cache_key:
+            self.cache(source, cache_key, data)
+        return data
+
+    def get_text(self, url: str, params: dict[str, str] | None = None, *, source: str) -> str:
+        """GET a text body (CSV) with the same retries. Callers cache what they keep."""
+        resp = self._get(url, params, source=source, weight=0.0)
+        self._ok(source, 0.0)
+        return resp.text
+
+    def _get(
+        self, url: str, params: dict[str, str] | None, *, source: str, weight: float
+    ) -> httpx.Response:
         last: str = ""
         started = time.monotonic()
         for i in range(self.tries):
@@ -106,26 +140,36 @@ class Fetcher:
                 self._sleep(2 + 3 * i)
                 continue
             if resp.status_code >= 400:
-                raise FetchError(f"{source}: HTTP {resp.status_code} {_reason(resp)} ({url})")
-            try:
-                data = resp.json()
-            except ValueError as e:
-                raise FetchError(f"{source}: response is not JSON ({url})") from e
-            if isinstance(data, dict) and data.get("error") is True:
-                raise FetchError(f"{source}: {data.get('reason', 'error')} ({url})")
+                raise self._fail(source, f"HTTP {resp.status_code} {_reason(resp)} ({url})")
             record = CallRecord(
                 source, str(resp.url), resp.status_code, weight, time.monotonic() - started, i + 1
             )
             self.calls.append(record)
             if self.on_call:
                 self.on_call(record)
-            if self.raw_dir is not None and cache_key:
-                self._cache(source, cache_key, data)
-            return data
-        raise FetchError(f"{source}: failed after {self.tries} tries: {last} ({url})")
+            return resp
+        raise self._fail(source, f"failed after {self.tries} tries: {last} ({url})")
 
-    def _cache(self, source: str, key: str, data: Any) -> None:
-        assert self.raw_dir is not None
+    def _stat(self, source: str) -> SourceStat:
+        return self.sources.setdefault(source, SourceStat())
+
+    def _ok(self, source: str, weight: float) -> None:
+        st = self._stat(source)
+        st.ok += 1
+        st.weight += weight
+        st.last_ok_at = datetime.now(UTC).isoformat(timespec="seconds")
+
+    def _fail(self, source: str, message: str) -> FetchError:
+        st = self._stat(source)
+        st.errors += 1
+        st.last_error = message[:300]
+        st.last_error_at = datetime.now(UTC).isoformat(timespec="seconds")
+        return FetchError(f"{source}: {message}")
+
+    def cache(self, source: str, key: str, data: Any) -> None:
+        """Keep a raw response for 24 h (for `snowwatch rebuild`)."""
+        if self.raw_dir is None:
+            return
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         path = self.raw_dir / source / key / f"{stamp}.json.gz"
         path.parent.mkdir(parents=True, exist_ok=True)

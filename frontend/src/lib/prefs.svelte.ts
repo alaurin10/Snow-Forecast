@@ -7,6 +7,7 @@ export type BandName = 'base' | 'mid' | 'summit';
 export type SortKey = 'next5' | 'd6_10' | 'last24' | 'name';
 export type KindFilter = 'all' | 'resort' | 'backcountry';
 export type PlanSort = 'rating' | 'snow' | 'name';
+export type OverviewView = 'list' | 'map';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
 	try {
@@ -40,6 +41,13 @@ class Prefs {
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	sort = $state<SortKey>(load('sw.sort', ['next5', 'd6_10', 'last24', 'name'] as const, 'next5'));
 	kind = $state<KindFilter>(load('sw.kind', ['all', 'resort', 'backcountry'] as const, 'all'));
+	view = $state<OverviewView>(load('sw.view', ['list', 'map'] as const, 'list'));
+
+	setView(v: OverviewView) {
+		this.view = v;
+		save('sw.view', v);
+	}
+
 	planSort = $state<PlanSort>(load('sw.planSort', ['rating', 'snow', 'name'] as const, 'rating'));
 	/** Locations picked for Plan's compare view (2–4). */
 	compare = $state<string[]>(loadList('sw.compare'));

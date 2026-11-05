@@ -10,7 +10,9 @@ from snowwatch.analysis.build import ForecastInputs
 from snowwatch.analysis.series import parse_point, parse_points
 from snowwatch.capture import load_fixture
 from snowwatch.config import ForecastConfig
+from snowwatch.geo import haversine_km
 from snowwatch.models import Location
+from snowwatch.sources import bc_asws
 from snowwatch.sources.nws import parse_alerts
 from snowwatch.sources.snotel import parse_snotel
 
@@ -46,10 +48,19 @@ def inputs_from_responses(
     )
     if "nws_alerts" in responses:
         inputs.alerts = parse_alerts(responses["nws_alerts"])
-    if loc.snotel and "snotel_daily" in responses and "snotel_hourly" in responses:
-        station = (stations or {}).get(loc.snotel)
+    station = (stations or {}).get(loc.snotel) if loc.snotel else None
+    if loc.snotel and bc_asws.is_bc(loc.snotel) and "bc_asws" in responses:
+        tz = loc.tz or blend[1].tz
+        inputs.snotel = bc_asws.parse_station(loc.snotel, responses["bc_asws"], station, tz)
+    elif loc.snotel and "snotel_daily" in responses and "snotel_hourly" in responses:
         inputs.snotel = parse_snotel(
             loc.snotel, responses["snotel_daily"], responses["snotel_hourly"], station
+        )
+    if inputs.snotel is not None and station and station.get("latitude") is not None:
+        mid = loc.band("mid")
+        inputs.snotel.distance_km = round(
+            haversine_km(mid.lat, mid.lon, float(station["latitude"]), float(station["longitude"])),
+            1,
         )
     return inputs
 

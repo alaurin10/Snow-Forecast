@@ -21,7 +21,9 @@ export interface ApiTypes {
 	runs: RunOut[];
 	save: SaveOut;
 	snapshot: Snapshot;
+	status: StatusOut;
 	trend: TrendOut;
+	verification: VerificationOut;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -45,6 +47,7 @@ export interface Location {
 	snotel?: string | null;
 	sort_order?: number;
 	tz?: string | null;
+	webcams?: Webcam[];
 }
 /**
  * Where to find the avalanche forecast. Canadian zones are looked up by point.
@@ -67,6 +70,15 @@ export interface Band {
 	label: string;
 	lat: number;
 	lon: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Webcam".
+ */
+export interface Webcam {
+	image_url?: string | null;
+	name: string;
+	url: string;
 }
 /**
  * What the app may show right now.
@@ -220,10 +232,13 @@ export interface OverviewRow {
 	country: string;
 	d6_10_cm?: number | null;
 	danger?: DangerChip | null;
+	flags?: Flag[];
 	generated_at?: string | null;
 	id: string;
 	kind: string;
 	last24_cm?: number | null;
+	lat?: number | null;
+	lon?: number | null;
 	name: string;
 	next5_cm?: number | null;
 	next5_p10_cm?: number | null;
@@ -253,6 +268,23 @@ export interface BestDay {
 export interface DangerChip {
 	level: number | null;
 	status: string;
+}
+/**
+ * Something worth a look (section 4.7 of the plan). The browser words it in your units.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Flag".
+ */
+export interface Flag {
+	date?: string | null;
+	detail?: string | null;
+	first_run?: number | null;
+	model?: string | null;
+	period_key?: string | null;
+	severity: string;
+	type: string;
+	value?: number | null;
+	value2?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -422,9 +454,7 @@ export interface Snapshot {
 	ensembles: {
 		[k: string]: number;
 	};
-	flags?: {
-		[k: string]: unknown;
-	}[];
+	flags?: Flag[];
 	generated_at: string;
 	location: LocationMeta;
 	models: string[];
@@ -686,6 +716,7 @@ export interface LocationMeta {
 	name: string;
 	region: string;
 	tz: string;
+	webcams?: Webcam[];
 }
 /**
  * Free-air wind at summit height, aligned with each band's `hourly.t`.
@@ -707,8 +738,10 @@ export interface Snotel {
 	change72_cm: number | null;
 	daily: SnotelDay[];
 	depth_cm: number | null;
+	distance_km?: number | null;
 	elev_m: number | null;
 	name: string | null;
+	network?: string;
 	obs_time: string | null;
 	swe_mm: number | null;
 	triplet: string;
@@ -735,6 +768,43 @@ export interface SunDay {
 	sunset: string | null;
 }
 /**
+ * The Status page: per-source health, runs, usage and data age.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "StatusOut".
+ */
+export interface StatusOut {
+	budget: number;
+	locations: LocationAge[];
+	runs: RunOut[];
+	sources: SourceRow[];
+	weight_today: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "LocationAge".
+ */
+export interface LocationAge {
+	flags: number;
+	generated_at: string | null;
+	id: string;
+	name: string;
+	station: string | null;
+	station_obs_time: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SourceRow".
+ */
+export interface SourceRow {
+	calls_today: number;
+	errors_today: number;
+	last_error: string | null;
+	last_error_at: string | null;
+	last_ok_at: string | null;
+	source: string;
+}
+/**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "TrendOut".
  */
@@ -753,4 +823,45 @@ export interface TrendRun {
 	issued_at: string;
 	next5_cm: number | null;
 	run_id: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "VerificationOut".
+ */
+export interface VerificationOut {
+	band_elev_m: number;
+	location_id: string;
+	n_days: number;
+	needs_days: number;
+	pairs: VerificationPair[];
+	ready: boolean;
+	rows: VerificationRow[];
+	since: string | null;
+	station: string | null;
+	station_elev_m: number | null;
+	station_name: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "VerificationPair".
+ */
+export interface VerificationPair {
+	cons_cm: number | null;
+	cons_slr_cm: number | null;
+	date: string;
+	from_swe: boolean;
+	observed_cm: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "VerificationRow".
+ */
+export interface VerificationRow {
+	bias_cm: number | null;
+	false_alarms: number;
+	hits: number;
+	mae_cm: number | null;
+	misses: number;
+	n: number;
+	source: string;
 }

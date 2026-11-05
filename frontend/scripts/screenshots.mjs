@@ -29,12 +29,17 @@ const pages = [
 	{ name: `${loc}-backcountry`, path: `/location/${loc}`, tab: 'Backcountry' },
 	{ name: `${tour}-forecast`, path: `/location/${tour}` },
 	{ name: `${tour}-backcountry`, path: `/location/${tour}`, tab: 'Backcountry' },
+	{ name: `${loc}-observed`, path: `/location/${loc}`, tab: 'Observed' },
+	{ name: 'crystal-forecast', path: '/location/crystal' },
+	{ name: 'crystal-observed', path: '/location/crystal', tab: 'Observed' },
+	{ name: 'status', path: '/status' },
+	{ name: 'overview-map', path: '/', storage: { 'sw.view': 'map' } },
 	{ name: 'plan', path: '/plan' },
 	{
 		name: 'plan-compare',
 		path: '/plan',
 		tab: 'Compare',
-		storage: { 'sw.compare': JSON.stringify([loc, tour]) }
+		storage: { 'sw.compare': JSON.stringify([loc, tour]), 'sw.view': 'list' }
 	}
 ];
 

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from snowwatch.analysis import backcountry as bc
 from snowwatch.analysis import ensemble as ens
 from snowwatch.analysis.consensus import PeriodConsensus, period_consensus
+from snowwatch.analysis.flags import compute_flags
 from snowwatch.analysis.freezing import LEVELS, freezing_level_m
 from snowwatch.analysis.hourly import consensus_line, scale_to_total, shape_value, support_counts
 from snowwatch.analysis.periods import Period, build_periods
@@ -364,6 +365,7 @@ def build_snapshot(
             lat=loc.band("mid").lat,
             lon=loc.band("mid").lon,
             links=loc.links,
+            webcams=loc.webcams,
         ),
         run_id=run_id,
         generated_at=now.isoformat(timespec="seconds"),
@@ -382,6 +384,17 @@ def build_snapshot(
         days=days,
         warnings=warnings,
     )
+    # Chance that 48 h (4 periods) bring a storm's worth of snow, from the members.
+    chances: list[float | None] = []
+    for j in range(max(0, min(10, len(periods)) - 3)):
+        hours = [h for p in periods[j : j + 4] for h in p.hours]
+        totals = ens.member_totals(members, hours)
+        chances.append(
+            sum(1 for t in totals if t * k >= cfg.flags.storm_cm) / len(totals)
+            if len(totals) >= cfg.ensemble_min_members
+            else None
+        )
+    snap.flags = compute_flags(snap, cfg.flags, chances)
     return snap, records
 
 
@@ -840,9 +853,11 @@ def _daily(
     offset = cfg.snow_level_offset_m
 
     # Consensus per date from the periods (day + night of that date).
-    cons_by_date: dict[str, list[tuple[float | None, float | None]]] = defaultdict(list)
-    for p, c, lq in zip(periods, mid.sw, mid.liq, strict=True):
-        cons_by_date[p.date.isoformat()].append((c.value, lq.value))
+    cons_by_date: dict[str, list[tuple[float | None, float | None, float | None]]] = defaultdict(
+        list
+    )
+    for p, c, lq, (ratio, _) in zip(periods, mid.sw, mid.liq, mid.ratios, strict=True):
+        cons_by_date[p.date.isoformat()].append((c.value, lq.value, ratio))
 
     rows: list[DailyRow] = []
     records: list[DailyRecord] = []
@@ -880,10 +895,14 @@ def _daily(
             ):
                 records.append(DailyRecord(d, name, r(None if val is None else val * k), None))
         parts = cons_by_date.get(d)
-        if parts and all(sv is not None for sv, _ in parts):
-            swe = sum(sv or 0.0 for sv, _ in parts)
-            liq = sum(lv or 0.0 for _, lv in parts)
+        if parts and all(sv is not None for sv, _, _ in parts):
+            swe = sum(sv or 0.0 for sv, _, _ in parts)
+            liq = sum(lv or 0.0 for _, lv, _ in parts)
             records.append(DailyRecord(d, "cons", r(swe * k), r(swe + liq)))
+            # The same snow with the temperature-based snow-to-liquid ratio, so the
+            # scorecard can compare the two depth methods.
+            slr = sum(_depth(sv, rt, k) or 0.0 for sv, _, rt in parts)
+            records.append(DailyRecord(d, "cons_slr", r(slr), r(swe + liq)))
     return rows, records
 
 

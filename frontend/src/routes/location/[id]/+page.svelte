@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError, getAvalanche, getSnapshot, getTrend } from '../../../lib/api';
+	import { ApiError, getAvalanche, getSnapshot, getTrend, getVerification } from '../../../lib/api';
 	import { prefs, type BandName } from '../../../lib/prefs.svelte';
 	import { crosshair } from '../../../lib/crosshair.svelte';
-	import type { AvalancheView, PeriodOut, Snapshot, TrendOut } from '../../../lib/types.gen';
+	import type {
+		AvalancheView,
+		Flag,
+		PeriodOut,
+		Snapshot,
+		TrendOut,
+		VerificationOut
+	} from '../../../lib/types.gen';
 	import { elevation, snow, type UnitSystem } from '../../../lib/units';
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
@@ -19,6 +26,11 @@
 	import BandTable from '../../../lib/components/BandTable.svelte';
 	import RatingChip from '../../../lib/components/RatingChip.svelte';
 	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
+	import StationPanel from '../../../lib/observed/StationPanel.svelte';
+	import Scorecard from '../../../lib/observed/Scorecard.svelte';
+	import TrendDays from '../../../lib/components/TrendDays.svelte';
+	import Webcams from '../../../lib/components/Webcams.svelte';
+	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
 	import { reasonText } from '../../../lib/conditions';
 
@@ -31,6 +43,7 @@
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
 	let avy = $state<AvalancheView | null>(null);
+	let scores = $state<VerificationOut | null>(null);
 
 	$effect(() => {
 		const current = id;
@@ -57,6 +70,10 @@
 		getTrend(current)
 			.then((t) => (trend = t))
 			.catch(() => (trend = null));
+		scores = null;
+		getVerification(current)
+			.then((v) => (scores = v))
+			.catch(() => (scores = null));
 		avy = null;
 		getAvalanche()
 			.then((all) => (avy = all[current] ?? null))
@@ -93,6 +110,13 @@
 		const rated = (snap?.days ?? []).filter((d) => d.score !== null && d.score !== undefined);
 		const top = Math.max(0, ...rated.map((d) => d.score ?? 0));
 		return top >= 3 ? (rated.find((d) => d.score === top) ?? null) : null;
+	});
+	// Flags for "Heads up", plus avalanche danger 4+ while the center's rating is current.
+	const headsUp = $derived.by(() => {
+		const out: Flag[] = (snap?.flags ?? []).filter((f) => f.type !== 'best_day');
+		if (avy?.status === 'current' && (avy.today_max ?? 0) >= 4)
+			out.unshift({ type: 'avalanche_danger', severity: 'warning', value: avy.today_max });
+		return out;
 	});
 	const selectedDay = $derived(
 		selected && selected.kind === 'day'
@@ -160,6 +184,21 @@
 				</section>
 			{/if}
 			<Tiles {band} {units} />
+			{#if headsUp.length}
+				<section class="card thin heads">
+					<h2>Heads up</h2>
+					<ul>
+						{#each headsUp as f, i (i)}
+							<li class={f.severity}>
+								<strong>{flagTitle(f)}</strong>{#if isNew(f, snap.run_id)}<span class="new"
+										>New</span
+									>{/if}
+								<span class="muted">{flagText(f, units)}</span>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
 			{#if best}
 				<section class="card thin best">
 					<span class="lead">Best ski day</span>
@@ -214,6 +253,7 @@
 							</ul>
 						</section>
 					{/if}
+					<Webcams cams={snap.location.webcams ?? []} />
 				</aside>
 			</div>
 			<section class="card">
@@ -247,6 +287,7 @@
 			</div>
 			<section class="card">
 				<TrendChart runs={trend?.runs ?? []} {units} />
+				<TrendDays runs={trend?.runs ?? []} {units} />
 			</section>
 			<section class="card">
 				<h2>Base, mid and summit</h2>
@@ -256,25 +297,15 @@
 	{:else if tab === 'backcountry'}
 		<BackcountryTab {snap} {avy} {units} />
 	{:else}
-		<section class="card">
-			<h2>Observed</h2>
-			{#if snap.snotel}
-				<p>
-					SNOTEL <strong>{snap.snotel.name ?? snap.snotel.triplet}</strong>{#if snap.snotel.elev_m}
-						({elevation(snap.snotel.elev_m, units)}){/if}: snow depth
-					<strong class="num">{snow(snap.snotel.depth_cm, units)}</strong>, 24 h change
-					{snow(snap.snotel.change24_cm, units)}, 72 h change {snow(
-						snap.snotel.change72_cm,
-						units
-					)}.
-				</p>
-			{:else}
-				<p class="muted">No snow station is configured for this location.</p>
-			{/if}
-			<p class="faint small">
-				Charts of observed depth and the forecast scorecard arrive in milestone M6.
-			</p>
-		</section>
+		<div class="stackcol">
+			<StationPanel
+				station={snap.snotel ?? null}
+				bandLabel={snap.bands[1].label}
+				bandElev={snap.bands[1].elev_m}
+				{units}
+			/>
+			<Scorecard data={scores} {units} />
+		</div>
 	{/if}
 
 	{#if selected}
@@ -376,6 +407,37 @@
 	}
 	.small {
 		font-size: 0.85rem;
+	}
+	.heads h2 {
+		margin: 0 0 4px;
+		font-size: 0.95rem;
+	}
+	.heads ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: grid;
+		gap: 6px;
+		font-size: 0.88rem;
+	}
+	.heads li {
+		display: grid;
+		gap: 1px;
+		padding-left: 10px;
+		border-left: 3px solid var(--border);
+	}
+	.heads li.notice {
+		border-left-color: var(--snow);
+	}
+	.heads li.warning {
+		border-left-color: var(--temp);
+	}
+	.heads .new {
+		margin-left: 6px;
+		font-size: 0.65rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		color: var(--snow);
 	}
 	.thin {
 		padding-top: 8px;
