@@ -207,6 +207,18 @@ def cmd_show(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_lookups(args: argparse.Namespace, settings: Settings) -> int:
+    from snowwatch.lookups import refresh
+
+    conn = connect(settings.database)
+    migrate(conn)
+    with _fetcher(settings) as fetcher:
+        out = refresh(conn, fetcher)
+    for k, v in out.items():
+        print(f"{k:16s} {v}")
+    return 1 if any(isinstance(v, str) for v in out.values()) else 0
+
+
 def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
     """JSON Schema of every API response, for the generated TypeScript types."""
     from snowwatch.api.models import ApiTypes
@@ -291,6 +303,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id")
     s.add_argument("--band", choices=["base", "mid", "summit"], default="mid")
     s.set_defaults(func=cmd_show)
+
+    s = sub.add_parser("lookups", help="refresh the ski-area catalog, SNOTEL stations and zones")
+    s.add_argument("action", choices=["refresh"])
+    s.set_defaults(func=cmd_lookups)
 
     s = sub.add_parser("schema", help="write the API's JSON Schema (for frontend types)")
     s.add_argument("--out", help="file to write (default stdout)")

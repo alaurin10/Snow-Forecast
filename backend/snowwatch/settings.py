@@ -33,10 +33,14 @@ class Settings(BaseSettings):
     healthchecks_run_url: str = ""
     healthchecks_backup_url: str = ""
 
-    # Comma-separated; used from M4 for the owner role.
+    # Owner role. ADMIN_EMAILS is comma-separated. CF_ACCESS_TEAM is the Zero Trust
+    # team name (<team>.cloudflareaccess.com); CF_ACCESS_AUDS lists the AUD tags of
+    # the Access applications in front of the site.
     admin_emails: str = ""
     cf_access_team: str = ""
     cf_access_auds: str = ""
+    # Development only (ENV=dev and no CF_ACCESS_TEAM): treat every request as this owner.
+    dev_admin_email: str = ""
 
     @property
     def static_root(self) -> Path | None:
@@ -61,6 +65,10 @@ class Settings(BaseSettings):
     @property
     def user_agent(self) -> str:
         return f"snowwatch/0.1 ({self.nws_contact})"
+
+    @property
+    def access_aud_list(self) -> list[str]:
+        return [a.strip() for a in self.cf_access_auds.split(",") if a.strip()]
 
     @property
     def admin_email_list(self) -> list[str]:

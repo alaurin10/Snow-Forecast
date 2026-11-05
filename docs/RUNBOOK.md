@@ -75,10 +75,15 @@ docker compose up -d --build
 docker compose run --rm worker snowwatch init
 ```
 ```bash
+docker compose run --rm worker snowwatch lookups refresh
+```
+```bash
 docker compose run --rm worker snowwatch pull
 ```
 
-`init` creates the database and adds the six starting locations. `pull` fetches
+`init` creates the database and adds the six starting locations. `lookups
+refresh` loads the ski-area catalog, the SNOTEL station list and the avalanche
+zones that the Manage page uses (the worker refreshes them weekly). `pull` fetches
 the first forecast (about 2–3 minutes; it pauses 20 s between locations). After
 that the worker runs on its own at 03:30, 09:30, 15:30 and 21:30 UTC.
 
@@ -163,7 +168,11 @@ On a phone with **Wi-Fi off**:
 `snow-viewers` group) → add their email. They sign in with a one-time PIN sent
 to that address.
 
-**Add or change locations:** until the Manage page (M4), edit a YAML export:
+**Add or change locations:** open **More → Manage locations** (owner only).
+Search the catalog for a resort, or drop a trailhead and a high-point pin for a
+tour; the app fills in elevations, timezone, NWS office, the nearest SNOTEL
+station and the avalanche zone for you to check. The first forecast appears
+within about 2 minutes of saving. The terminal route still works with a YAML export:
 ```bash
 docker compose run --rm worker snowwatch locations export /data/locations.yaml
 ```

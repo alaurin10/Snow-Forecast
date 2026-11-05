@@ -124,7 +124,7 @@ Design principles:
 - **Auto-detect** (`POST /api/admin/locations/resolve`) fills in:
   - the timezone and country;
   - the NWS office and radar station (from NWS `/points`, US only);
-  - the 3 nearest SNOTEL stations within 25 km, ranked by elevation difference;
+  - the 3 best SNOTEL stations within 25 km, ranked by distance plus elevation difference (50 m counts like 1 km), so a station across a crest doesn't beat one beside the lifts;
   - the avalanche center and zone, found by point-in-polygon on the zone polygons;
   - default links (NWS forecast, radar, avalanche center, ECCC for Canada).
 

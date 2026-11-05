@@ -4,11 +4,106 @@
  * Every response shape, exported as one JSON Schema for the TypeScript types.
  */
 export interface ApiTypes {
+	admin_locations: Location[];
+	budget: BudgetOut;
+	catalog: CatalogItem[];
+	job: JobOut;
 	locations: LocationSummary[];
+	lookups: LookupStatus;
+	me: Me;
 	overview: OverviewRow[];
+	resolve_in: ResolveIn;
+	resolve_out: ResolveOut;
 	runs: RunOut[];
+	save: SaveOut;
 	snapshot: Snapshot;
 	trend: TrendOut;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Location".
+ */
+export interface Location {
+	active?: boolean;
+	avy?: AvyRef | null;
+	bands: Band[];
+	catalog_ref?: string | null;
+	country: 'US' | 'CA';
+	id: string;
+	kind: 'resort' | 'backcountry';
+	links?: {
+		[k: string]: string;
+	};
+	name: string;
+	nws_office?: string | null;
+	radar_station?: string | null;
+	region?: string;
+	snotel?: string | null;
+	sort_order?: number;
+	tz?: string | null;
+}
+/**
+ * Where to find the avalanche forecast. Canadian zones are looked up by point.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AvyRef".
+ */
+export interface AvyRef {
+	center_id?: string | null;
+	provider: 'nac' | 'avcan';
+	zone_id?: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Band".
+ */
+export interface Band {
+	band: 'base' | 'mid' | 'summit';
+	elev_m: number;
+	label: string;
+	lat: number;
+	lon: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "BudgetOut".
+ */
+export interface BudgetOut {
+	active: number;
+	budget: number;
+	max_locations: number;
+	per_location: {
+		[k: string]: number;
+	};
+	total: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CatalogItem".
+ */
+export interface CatalogItem {
+	country: string | null;
+	id: string;
+	lat: number;
+	lon: number;
+	max_elev_m: number | null;
+	min_elev_m: number | null;
+	name: string;
+	region: string | null;
+	website: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "JobOut".
+ */
+export interface JobOut {
+	created_at: string;
+	error: string | null;
+	finished_at: string | null;
+	id: number;
+	kind: string;
+	location_id: string | null;
+	status: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -39,6 +134,23 @@ export interface BandSummary {
 	band: string;
 	elev_m: number;
 	label: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "LookupStatus".
+ */
+export interface LookupStatus {
+	avy_zones: number;
+	ski_areas: number;
+	snotel_stations: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Me".
+ */
+export interface Me {
+	email: string | null;
+	is_owner: boolean;
 }
 /**
  * One location on the Overview and Calendar pages (mid band).
@@ -76,6 +188,63 @@ export interface OverviewPeriod {
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ResolveIn".
+ */
+export interface ResolveIn {
+	catalog_id?: string | null;
+	kind?: 'resort' | 'backcountry';
+	name?: string;
+	/**
+	 * @minItems 1
+	 */
+	pins: [Pin, ...Pin[]];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Pin".
+ */
+export interface Pin {
+	band: 'base' | 'mid' | 'summit';
+	elev_m?: number | null;
+	label?: string | null;
+	lat: number;
+	lon: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ResolveOut".
+ */
+export interface ResolveOut {
+	avy: AvyRef | null;
+	avy_name: string | null;
+	bands: Band[];
+	country: 'US' | 'CA';
+	id: string;
+	kind: string;
+	links: {
+		[k: string]: string;
+	};
+	name: string;
+	nws_office: string | null;
+	radar_station: string | null;
+	region: string;
+	snotel: string | null;
+	snotel_candidates: SnotelCandidate[];
+	tz: string | null;
+	warnings: string[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SnotelCandidate".
+ */
+export interface SnotelCandidate {
+	distance_km: number;
+	elev_m: number | null;
+	name: string;
+	triplet: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "RunOut".
  */
 export interface RunOut {
@@ -86,6 +255,14 @@ export interface RunOut {
 	kind: string;
 	started_at: string;
 	status: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SaveOut".
+ */
+export interface SaveOut {
+	job_id: number | null;
+	location: Location;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

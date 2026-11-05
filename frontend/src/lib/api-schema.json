@@ -74,6 +74,85 @@
       "title": "Alert",
       "type": "object"
     },
+    "AvyRef": {
+      "description": "Where to find the avalanche forecast. Canadian zones are looked up by point.",
+      "properties": {
+        "center_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provider": {
+          "enum": [
+            "nac",
+            "avcan"
+          ],
+          "type": "string"
+        },
+        "zone_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "AvyRef",
+      "type": "object"
+    },
+    "Band": {
+      "properties": {
+        "band": {
+          "enum": [
+            "base",
+            "mid",
+            "summit"
+          ],
+          "type": "string"
+        },
+        "elev_m": {
+          "maximum": 9000,
+          "minimum": -500,
+          "type": "number"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "lat": {
+          "maximum": 90,
+          "minimum": -90,
+          "type": "number"
+        },
+        "lon": {
+          "maximum": 180,
+          "minimum": -180,
+          "type": "number"
+        }
+      },
+      "required": [
+        "band",
+        "label",
+        "lat",
+        "lon",
+        "elev_m"
+      ],
+      "title": "Band",
+      "type": "object"
+    },
     "BandOut": {
       "properties": {
         "band": {
@@ -134,6 +213,116 @@
         "elev_m"
       ],
       "title": "BandSummary",
+      "type": "object"
+    },
+    "BudgetOut": {
+      "properties": {
+        "active": {
+          "type": "integer"
+        },
+        "budget": {
+          "type": "integer"
+        },
+        "max_locations": {
+          "type": "integer"
+        },
+        "per_location": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "per_location",
+        "total",
+        "budget",
+        "active",
+        "max_locations"
+      ],
+      "title": "BudgetOut",
+      "type": "object"
+    },
+    "CatalogItem": {
+      "properties": {
+        "country": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "max_elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "website": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "country",
+        "region",
+        "lat",
+        "lon",
+        "min_elev_m",
+        "max_elev_m",
+        "website"
+      ],
+      "title": "CatalogItem",
       "type": "object"
     },
     "DailyEns": {
@@ -772,6 +961,190 @@
       "title": "HourlyOut",
       "type": "object"
     },
+    "JobOut": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location_id",
+        "status",
+        "created_at",
+        "finished_at",
+        "error"
+      ],
+      "title": "JobOut",
+      "type": "object"
+    },
+    "Location": {
+      "properties": {
+        "active": {
+          "default": true,
+          "type": "boolean"
+        },
+        "avy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvyRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/Band"
+          },
+          "type": "array"
+        },
+        "catalog_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "country": {
+          "enum": [
+            "US",
+            "CA"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{1,39}$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "resort",
+            "backcountry"
+          ],
+          "type": "string"
+        },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "nws_office": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "radar_station": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "region": {
+          "default": "",
+          "type": "string"
+        },
+        "snotel": {
+          "anyOf": [
+            {
+              "pattern": "^\\d+:[A-Z]{2}:SNTL$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sort_order": {
+          "default": 0,
+          "type": "integer"
+        },
+        "tz": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "country",
+        "bands"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
     "LocationMeta": {
       "properties": {
         "country": {
@@ -944,6 +1317,49 @@
         "bands"
       ],
       "title": "LocationSummary",
+      "type": "object"
+    },
+    "LookupStatus": {
+      "properties": {
+        "avy_zones": {
+          "type": "integer"
+        },
+        "ski_areas": {
+          "type": "integer"
+        },
+        "snotel_stations": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ski_areas",
+        "snotel_stations",
+        "avy_zones"
+      ],
+      "title": "LookupStatus",
+      "type": "object"
+    },
+    "Me": {
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_owner": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "email",
+        "is_owner"
+      ],
+      "title": "Me",
       "type": "object"
     },
     "OverviewPeriod": {
@@ -1364,6 +1780,222 @@
       "title": "PeriodOut",
       "type": "object"
     },
+    "Pin": {
+      "properties": {
+        "band": {
+          "enum": [
+            "base",
+            "mid",
+            "summit"
+          ],
+          "type": "string"
+        },
+        "elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lat": {
+          "maximum": 90,
+          "minimum": -90,
+          "type": "number"
+        },
+        "lon": {
+          "maximum": 180,
+          "minimum": -180,
+          "type": "number"
+        }
+      },
+      "required": [
+        "band",
+        "lat",
+        "lon"
+      ],
+      "title": "Pin",
+      "type": "object"
+    },
+    "ResolveIn": {
+      "properties": {
+        "catalog_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "default": "resort",
+          "enum": [
+            "resort",
+            "backcountry"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "pins": {
+          "items": {
+            "$ref": "#/$defs/Pin"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "pins"
+      ],
+      "title": "ResolveIn",
+      "type": "object"
+    },
+    "ResolveOut": {
+      "properties": {
+        "avy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvyRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "avy_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/Band"
+          },
+          "type": "array"
+        },
+        "country": {
+          "enum": [
+            "US",
+            "CA"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nws_office": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "radar_station": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "region": {
+          "type": "string"
+        },
+        "snotel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snotel_candidates": {
+          "items": {
+            "$ref": "#/$defs/SnotelCandidate"
+          },
+          "type": "array"
+        },
+        "tz": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "region",
+        "country",
+        "tz",
+        "bands",
+        "snotel",
+        "snotel_candidates",
+        "nws_office",
+        "radar_station",
+        "avy",
+        "avy_name",
+        "links",
+        "warnings"
+      ],
+      "title": "ResolveOut",
+      "type": "object"
+    },
     "RunOut": {
       "properties": {
         "api_weight": {
@@ -1408,6 +2040,29 @@
         "errors"
       ],
       "title": "RunOut",
+      "type": "object"
+    },
+    "SaveOut": {
+      "properties": {
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        }
+      },
+      "required": [
+        "location",
+        "job_id"
+      ],
+      "title": "SaveOut",
       "type": "object"
     },
     "Snapshot": {
@@ -1633,6 +2288,37 @@
         "daily"
       ],
       "title": "Snotel",
+      "type": "object"
+    },
+    "SnotelCandidate": {
+      "properties": {
+        "distance_km": {
+          "type": "number"
+        },
+        "elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "triplet": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "triplet",
+        "name",
+        "distance_km",
+        "elev_m"
+      ],
+      "title": "SnotelCandidate",
       "type": "object"
     },
     "SnotelDay": {
@@ -1887,11 +2573,35 @@
   },
   "description": "Every response shape, exported as one JSON Schema for the TypeScript types.",
   "properties": {
+    "admin_locations": {
+      "items": {
+        "$ref": "#/$defs/Location"
+      },
+      "type": "array"
+    },
+    "budget": {
+      "$ref": "#/$defs/BudgetOut"
+    },
+    "catalog": {
+      "items": {
+        "$ref": "#/$defs/CatalogItem"
+      },
+      "type": "array"
+    },
+    "job": {
+      "$ref": "#/$defs/JobOut"
+    },
     "locations": {
       "items": {
         "$ref": "#/$defs/LocationSummary"
       },
       "type": "array"
+    },
+    "lookups": {
+      "$ref": "#/$defs/LookupStatus"
+    },
+    "me": {
+      "$ref": "#/$defs/Me"
     },
     "overview": {
       "items": {
@@ -1899,11 +2609,20 @@
       },
       "type": "array"
     },
+    "resolve_in": {
+      "$ref": "#/$defs/ResolveIn"
+    },
+    "resolve_out": {
+      "$ref": "#/$defs/ResolveOut"
+    },
     "runs": {
       "items": {
         "$ref": "#/$defs/RunOut"
       },
       "type": "array"
+    },
+    "save": {
+      "$ref": "#/$defs/SaveOut"
     },
     "snapshot": {
       "$ref": "#/$defs/Snapshot"
@@ -1917,7 +2636,16 @@
     "locations",
     "overview",
     "trend",
-    "runs"
+    "runs",
+    "me",
+    "admin_locations",
+    "catalog",
+    "resolve_in",
+    "resolve_out",
+    "save",
+    "job",
+    "budget",
+    "lookups"
   ],
   "title": "ApiTypes",
   "type": "object"

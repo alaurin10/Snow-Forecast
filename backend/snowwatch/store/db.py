@@ -14,15 +14,17 @@ def utcnow_iso() -> str:
 
 
 def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
-    """Open the database in WAL mode. Read-only connections never create the file."""
+    """Open the database in WAL mode. Read-only connections never create the file.
+
+    FastAPI opens a request's connection in a dependency, which can run on a
+    different worker thread from the endpoint, so connections may cross threads.
+    Each one still serves a single request (or job) at a time, which is safe.
+    """
     if readonly:
-        # API requests open their connection in a FastAPI dependency, which can run
-        # on a different worker thread from the endpoint. Each connection still
-        # serves one request at a time, so cross-thread use is safe here.
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path, timeout=5)
+        conn = sqlite3.connect(path, timeout=5, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
     conn.row_factory = sqlite3.Row
