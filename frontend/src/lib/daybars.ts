@@ -65,3 +65,36 @@ export function dayPairs(periods: OverviewPeriod[], limit = 10): DayPair[] {
 		};
 	});
 }
+
+export interface DayTotal {
+	date: string;
+	/** "Today", or a short weekday such as "Thu". */
+	label: string;
+	weekend: boolean;
+	/** Snow for the calendar day, day plus night (cm). */
+	cm: number;
+	kind: PrecipKind;
+}
+
+/** One total per calendar day, coloured by the type that brought the most of it. */
+export function dailyTotals(periods: OverviewPeriod[], limit = 7): DayTotal[] {
+	const today = periods.find((p) => p.label === 'Today' || p.label === 'Tonight')?.date;
+	return dayPairs(periods, limit).map((d) => {
+		const byKind: Partial<Record<PrecipKind, number>> = {};
+		for (const h of [d.day, d.night]) {
+			if (!h || h.kind === 'none') continue;
+			const k = h.kind === 'heavy' ? 'snow' : h.kind;
+			byKind[k] = (byKind[k] ?? 0) + Math.max(h.cm, 0.001);
+		}
+		const top = (Object.entries(byKind) as [PrecipKind, number][]).sort((a, b) => b[1] - a[1])[0];
+		let kind: PrecipKind = top ? top[0] : 'none';
+		if (kind === 'snow' && d.total >= HEAVY_CM) kind = 'heavy';
+		return {
+			date: d.date,
+			label: d.date === today ? 'Today' : weekday(d.date),
+			weekend: d.weekend,
+			cm: d.total,
+			kind
+		};
+	});
+}

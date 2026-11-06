@@ -43,8 +43,8 @@
 	const path = $derived(page.url.pathname);
 	const tabs = [
 		{ href: '/', label: 'Overview', icon: 'M4 6h16M4 12h16M4 18h10' },
+		{ href: '/map', label: 'Map', icon: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14' },
 		{ href: '/calendar', label: 'Calendar', icon: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4' },
-		{ href: '/plan', label: 'Plan', icon: 'M3 20l6-14 4 8 3-5 5 11zM9 6l2 4' },
 		{ href: '/more', label: 'More', icon: 'M5 12h.01M12 12h.01M19 12h.01' }
 	] as const;
 	const active = (href: string) =>

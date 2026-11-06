@@ -4,7 +4,6 @@
 	import { prefs } from '../../lib/prefs.svelte';
 	import { converters, snowNum } from '../../lib/units';
 	import { bucket, labelled, EDGES_CM } from '../../lib/calendar';
-	import { arrange } from '../../lib/overview';
 	import { weekday } from '../../lib/time';
 	import type { OverviewRow } from '../../lib/types.gen';
 
@@ -18,7 +17,8 @@
 	});
 
 	const c = $derived(converters(prefs.units));
-	const shown = $derived(rows ? arrange(rows, prefs.sort, prefs.kind) : []);
+	// In the order set on the admin page.
+	const shown = $derived(rows ?? []);
 	// The column layout comes from the location with the most periods.
 	const cols = $derived(
 		(shown.find((r) => (r.periods ?? []).length === 20)?.periods ?? shown[0]?.periods ?? []).map(

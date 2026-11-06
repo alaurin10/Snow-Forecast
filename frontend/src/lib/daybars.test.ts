@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayPairs, precipKind } from './daybars';
+import { dailyTotals, dayPairs, precipKind } from './daybars';
 import type { OverviewPeriod } from './types.gen';
 
 const p = (date: string, kind: string, snow_cm: number, ptype = 'snow'): OverviewPeriod => ({
@@ -48,5 +48,24 @@ describe('dayPairs', () => {
 			p(`2026-11-${String(i + 1).padStart(2, '0')}`, 'day', 1)
 		);
 		expect(dayPairs(ps, 10)).toHaveLength(10);
+	});
+});
+
+describe('dailyTotals', () => {
+	it('adds day and night and colours each day by its main type', () => {
+		const days = dailyTotals([
+			{ ...p('2026-11-05', 'day', 1), label: 'Today' },
+			p('2026-11-05', 'night', 2),
+			p('2026-11-06', 'day', 9),
+			p('2026-11-06', 'night', 8),
+			p('2026-11-07', 'day', 0.5, 'rain'),
+			p('2026-11-07', 'night', 0, 'none')
+		]);
+		expect(days.map((d) => d.label)).toEqual(['Today', 'Fri', 'Sat']);
+		expect(days.map((d) => d.cm)).toEqual([3, 17, 0.5]);
+		expect(days.map((d) => d.kind)).toEqual(['snow', 'heavy', 'rain']);
+	});
+	it('marks a dry day as none', () => {
+		expect(dailyTotals([p('2026-11-08', 'day', 0, 'none')])[0].kind).toBe('none');
 	});
 });

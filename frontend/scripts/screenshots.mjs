@@ -33,14 +33,7 @@ const pages = [
 	{ name: 'crystal-forecast', path: '/location/crystal' },
 	{ name: 'crystal-observed', path: '/location/crystal', tab: 'Observed' },
 	{ name: 'status', path: '/status' },
-	{ name: 'overview-map', path: '/', storage: { 'sw.view': 'map' } },
-	{ name: 'plan', path: '/plan' },
-	{
-		name: 'plan-compare',
-		path: '/plan',
-		tab: 'Compare',
-		storage: { 'sw.compare': JSON.stringify([loc, tour]), 'sw.view': 'list' }
-	}
+	{ name: 'map', path: '/map' }
 ];
 
 const browser = await chromium.launch();
