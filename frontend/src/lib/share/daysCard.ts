@@ -123,7 +123,10 @@ export function drawDaysCard(ctx: Ctx, shape: Shape, d: DaysShare, p: Palette): 
 		[
 			{ label: 'Day', color: p.snow },
 			{ label: 'Night (lighter)', color: p.snow, alpha: 0.55 },
-			{ label: `Snow on a ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} day`, color: p.heavy },
+			{
+				label: `Heavy: ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} in a day or night`,
+				color: p.heavy
+			},
 			{ label: 'Mixed', color: p.mix },
 			{ label: 'Rain', color: p.rain }
 		],
@@ -176,7 +179,6 @@ export function drawDaysCard(ctx: Ctx, shape: Shape, d: DaysShare, p: Palette): 
 		text(ctx, monthDay(row.date), r.x, cy + (big ? 24 : 19), p.text3);
 
 		// Split bar: day then night, each in its own type colour (night lighter).
-		const heavy = row.total >= HEAVY_CM;
 		const trackW = barEnd - barX;
 		const bh = big ? 16 : 12;
 		fillRound(ctx, barX, cy - bh / 2, trackW, bh, bh / 2, p.surface2);
@@ -190,7 +192,15 @@ export function drawDaysCard(ctx: Ctx, shape: Shape, d: DaysShare, p: Palette): 
 			const w = Math.min(Math.max(bh, (cm / max) * trackW), barX + trackW - x);
 			if (w <= 0) continue;
 			ctx.globalAlpha = alpha;
-			fillRound(ctx, x, cy - bh / 2, w, bh, bh / 2, color[precipKind(half.ptype, cm, heavy)]);
+			fillRound(
+				ctx,
+				x,
+				cy - bh / 2,
+				w,
+				bh,
+				bh / 2,
+				color[precipKind(half.ptype, cm, cm >= HEAVY_CM)]
+			);
 			ctx.globalAlpha = 1;
 			x += w;
 		}

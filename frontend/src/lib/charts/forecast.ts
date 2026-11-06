@@ -3,7 +3,7 @@
 // halves for 10+ days). Values stay metric; the chart converts for display.
 import type { HourlyOut } from '../types.gen';
 import { HEAVY_CM, type PrecipKind } from '../daybars';
-import { dateOf, hourOf } from '../time';
+import { hourOf } from '../time';
 
 export type Metric = 'precip' | 'slr' | 'temp' | 'wind' | 'cloud' | 'fl';
 export const RANGES = [1, 3, 5, 10, 15] as const;
@@ -70,13 +70,6 @@ function band(lo: number[], hi: number[], kind: Step['tempKind']) {
 	return { tempLo: f(lo), tempHi: f(hi) };
 }
 
-/** Snow (cm) per calendar date, for the 6+ in heavy-snow rule. */
-function dailySnow(h: HourlyOut): Map<string, number> {
-	const out = new Map<string, number>();
-	h.t.forEach((t, i) => out.set(dateOf(t), (out.get(dateOf(t)) ?? 0) + (h.snow_cm[i] ?? 0)));
-	return out;
-}
-
 export function buildSteps(h: HourlyOut, range: Range): Step[] {
 	const step = STEP[range];
 	const len = h.t.length;
@@ -88,7 +81,6 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 	let start = 0;
 	while (start < len && !aligned(start)) start++;
 	const n = Math.min((range * 24) / step, Math.floor((len - start) / step));
-	const daily = dailySnow(h);
 	const steps: Step[] = [];
 	let cum = 0;
 	for (let k = 0; k < n; k++) {
@@ -108,8 +100,8 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 		const rainShare = asSnow > 0 ? (rainCm * SLR) / asSnow : 0;
 		let kind: PrecipKind =
 			asSnow < 0.05 ? 'none' : rainShare < 0.2 ? 'snow' : rainShare > 0.8 ? 'rain' : 'mix';
-		// Orange is for snow only, on a 6+ in day.
-		if (kind === 'snow' && (daily.get(dateOf(h.t[mid])) ?? 0) >= HEAVY_CM) kind = 'heavy';
+		// Orange is for a bar that is itself 6+ in of snow, not every bar on a snowy day.
+		if (kind === 'snow' && snow >= HEAVY_CM) kind = 'heavy';
 		const temps = idx.map((i) => h.temp_c[i]).filter(num);
 		const night = h.is_day[mid] === 0;
 		const tempKind = step === 12 ? (night ? 'low' : 'high') : 'mean';

@@ -22,8 +22,6 @@
 	const c = $derived(converters(units));
 
 	const rows = $derived.by(() => {
-		const dayTotal: Record<string, number> = {};
-		for (const p of periods) dayTotal[p.date] = (dayTotal[p.date] ?? 0) + (p.snow_cm ?? 0);
 		const max = Math.max(2.54, ...periods.map((p) => p.snow_cm ?? 0));
 		return periods.map((p, i) => {
 			const first = i === 0 || periods[i - 1].date !== p.date;
@@ -40,7 +38,8 @@
 				temp: night ? p.tmin_c : p.tmax_c,
 				icon: wxIcon(p, wx.wcode),
 				dir: wx.wdir,
-				kind: precipKind(p.ptype, p.snow_cm ?? 0, (dayTotal[p.date] ?? 0) >= HEAVY_CM),
+				// Orange only when this period is itself 6+ in.
+				kind: precipKind(p.ptype, p.snow_cm ?? 0, (p.snow_cm ?? 0) >= HEAVY_CM),
 				barW: `${(((p.snow_cm ?? 0) / max) * 100).toFixed(1)}%`
 			};
 		});

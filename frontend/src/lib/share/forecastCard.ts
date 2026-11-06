@@ -230,7 +230,7 @@ function legendItems(d: ForecastShare, p: Palette): LegendItem[] {
 		case 'precip':
 			return [
 				{ label: 'Snow', color: p.snow },
-				{ label: `Snow on a ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} day`, color: p.heavy },
+				{ label: `Heavy: ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} in one bar`, color: p.heavy },
 				{ label: 'Mixed', color: p.mix },
 				{ label: `Rain (${c.waterUnit} of water)`, color: p.rain },
 				{ label: 'Running total', color: p.text, line: 'solid' },
