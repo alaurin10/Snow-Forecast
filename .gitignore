@@ -1,5 +1,6 @@
 # Runtime data (database, raw cache, backups)
 /data/
+backend/data/
 .env
 
 # Python
