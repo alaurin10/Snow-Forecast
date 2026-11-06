@@ -77,6 +77,19 @@ describe('buildSteps', () => {
 	});
 });
 
+describe('model range and precipitation chance', () => {
+	it('carries the temperature spread and the highest chance in each step', () => {
+		const h = hourly();
+		h.temp_lo = h.temp_c.map((v) => (v ?? 0) - 2);
+		h.temp_hi = h.temp_c.map((v) => (v ?? 0) + 3);
+		h.pop = h.t.map((_, i) => i);
+		const s = buildSteps(h, 10);
+		expect(s[1].tempKind).toBe('high');
+		expect([s[1].tempLo, s[1].tempHi]).toEqual([-3, 2]);
+		expect(s[0].pop).toBe(16);
+	});
+});
+
 describe('niceAxis', () => {
 	it('rounds to tidy ticks', () => {
 		expect(niceAxis(0, 2.3)).toEqual({ min: 0, max: 2.5, ticks: [0, 0.5, 1, 1.5, 2, 2.5] });

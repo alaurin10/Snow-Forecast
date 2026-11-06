@@ -72,8 +72,11 @@
 		if (metric === 'precip')
 			axis = niceAxis(0, Math.max(units === 'imperial' ? 0.2 : 0.5, ...vals));
 		else if (metric === 'temp') {
-			const lo = Math.min(c.freezing, ...vals);
-			const hi = Math.max(c.freezing, ...vals);
+			const spread = steps
+				.flatMap((st) => [c.temp(st.tempLo), c.temp(st.tempHi)])
+				.filter((v): v is number => v !== null);
+			const lo = Math.min(c.freezing, ...vals, ...spread);
+			const hi = Math.max(c.freezing, ...vals, ...spread);
 			axis = niceAxis(lo - 2, hi + 2, 4);
 		} else if (metric === 'wind') {
 			const g = steps.map((st) => c.speed(st.gust)).filter((v): v is number => v !== null);
@@ -81,6 +84,8 @@
 		} else if (metric === 'cloud') axis = { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
 		else {
 			const e = elevs.map((x) => c.height(x.m) ?? 0);
+			for (const st of steps)
+				for (const v of [c.height(st.flLo), c.height(st.flHi)]) if (v !== null) e.push(v);
 			axis = niceAxis(Math.min(...vals, ...e) * 0.9, Math.max(...vals, ...e) * 1.05, 4);
 		}
 		return { val, axis };
@@ -133,6 +138,7 @@
 		let line: string;
 		let line2 = '';
 		let area = '';
+		let band = '';
 		if (metric === 'precip') {
 			const bw = W * 0.72;
 			steps.forEach((st, k) => {
@@ -149,9 +155,57 @@
 			if (metric === 'cloud' && line)
 				area = `M${(W / 2).toFixed(1)} ${H}${line.replace('M', 'L')}L${(1000 - W / 2).toFixed(1)} ${H}Z`;
 		}
-		return { bars, line, line2, area };
+		// Model spread as a band behind the line.
+		const range =
+			metric === 'temp'
+				? (st: Step) => [c.temp(st.tempLo), c.temp(st.tempHi)]
+				: metric === 'fl'
+					? (st: Step) => [c.height(st.flLo), c.height(st.flHi)]
+					: null;
+		if (range) {
+			const ok = steps
+				.map((st, k) => ({ x: k * W + W / 2, r: range(st) }))
+				.filter((p) => p.r[0] !== null && p.r[1] !== null);
+			if (ok.length > 1)
+				band =
+					ok
+						.map((p, k) => `${k ? 'L' : 'M'}${p.x.toFixed(1)} ${y(p.r[1] as number).toFixed(1)}`)
+						.join('') +
+					[...ok]
+						.reverse()
+						.map((p) => `L${p.x.toFixed(1)} ${y(p.r[0] as number).toFixed(1)}`)
+						.join('') +
+					'Z';
+		}
+		return { bars, line, line2, area, band };
 	});
 
+	// Lower panel: chance of precipitation as bars (coloured by type) over cloud cover.
+	const lower = $derived.by(() => {
+		const H2 = 100;
+		const bars: Record<string, string> = { snow: '', heavy: '', mix: '', rain: '', none: '' };
+		const bw = W * 0.56;
+		steps.forEach((st, k) => {
+			const hh = ((st.pop ?? 0) / 100) * H2;
+			if (hh > 0.5)
+				bars[st.kind] +=
+					`M${(k * W + W * 0.22).toFixed(2)} ${(H2 - hh).toFixed(1)}h${bw.toFixed(2)}v${hh.toFixed(1)}h-${bw.toFixed(2)}z`;
+		});
+		const pts = steps
+			.map((st, k) =>
+				st.cloud === null ? null : `${(k * W + W / 2).toFixed(1)} ${(H2 - st.cloud).toFixed(1)}`
+			)
+			.filter((p): p is string => p !== null);
+		const cloud = pts.length
+			? `M${(W / 2).toFixed(1)} ${H2}L${pts.join('L')}L${(1000 - W / 2).toFixed(1)} ${H2}Z`
+			: '';
+		const shadeL = steps
+			.map((st, k) =>
+				st.night ? `M${(k * W).toFixed(2)} 0h${W.toFixed(2)}v${H2}h-${W.toFixed(2)}z` : ''
+			)
+			.join('');
+		return { bars, cloud, shade: shadeL };
+	});
 	const shade = $derived(
 		steps
 			.map((st, k) =>
@@ -253,7 +307,7 @@
 				label: 'Precipitation',
 				color: 'var(--snow)',
 				value: amount(s.precip, s),
-				sub: `${KIND[s.kind]} · ${cum}`
+				sub: `${s.pop === null ? KIND[s.kind] : `${Math.round(s.pop)}% chance`} · ${cum}`
 			},
 			{
 				id: 'temp' as Metric,
@@ -388,6 +442,7 @@
 				<path d={paths.bars.heavy} class="b-heavy" />
 				<path d={paths.bars.mix} class="b-mix" />
 				<path d={paths.bars.rain} class="b-rain" />
+				<path d={paths.band} class="band m-{metric}" />
 				<path d={paths.area} class="area m-{metric}" />
 				<path d={paths.line2} class="line2 m-{metric}" />
 				<path d={paths.line} class="line m-{metric}" />
@@ -412,6 +467,23 @@
 					>{/each}
 			{/if}
 		</div>
+	</div>
+	<div class="lower" aria-hidden="true">
+		<div class="yaxis left lowaxis">
+			{#each [0, 50, 100] as v (v)}<span style:top="{100 - v}%">{v}%</span>{/each}
+		</div>
+		<div class="lplot">
+			<svg viewBox="0 0 1000 100" preserveAspectRatio="none">
+				<path d={lower.shade} class="night" />
+				<path d="M0 50H1000M0 0H1000" class="grid" />
+				<path d={lower.cloud} class="cloudarea" />
+				{#each ['snow', 'heavy', 'mix', 'rain', 'none'] as k (k)}
+					<path d={lower.bars[k]} class="pop pop-{k}" />
+				{/each}
+			</svg>
+			{#if s}<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>{/if}
+		</div>
+		<div class="yaxis right lowaxis"></div>
 	</div>
 	<div class="xaxis">
 		{#each xlabels as x (x.left)}
@@ -440,6 +512,13 @@
 		{:else}
 			<span>Dashed lines: this location's elevations</span>
 		{/if}
+		{#if metric === 'temp' || metric === 'fl'}<span
+				><i class="sw band-sw m-{metric}"></i>Range across the weather models</span
+			>{/if}
+		<span class="lower-key"
+			><i class="sw cloud-sw"></i>Lower panel: cloud cover, and chance of precipitation as bars by
+			type</span
+		>
 	</div>
 </div>
 
@@ -627,6 +706,72 @@
 		stroke-width: 2;
 		stroke-dasharray: 6 5;
 	}
+	.band {
+		stroke: none;
+		fill-opacity: 0.16;
+	}
+	.band.m-temp {
+		fill: var(--temp);
+	}
+	.band.m-fl {
+		fill: var(--level);
+	}
+	.band-sw.m-temp {
+		background: color-mix(in srgb, var(--temp) 25%, transparent);
+	}
+	.band-sw.m-fl {
+		background: color-mix(in srgb, var(--level) 25%, transparent);
+	}
+	/* Lower panel: cloud cover and chance of precipitation; wide screens only. */
+	.lower {
+		display: flex;
+		gap: 8px;
+		margin-top: -2px;
+	}
+	.yaxis.lowaxis {
+		height: 84px;
+	}
+	.lplot {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+		height: 84px;
+		border-bottom: 1px solid var(--border);
+		overflow: clip;
+	}
+	.lplot svg {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+	}
+	.lplot path {
+		vector-effect: non-scaling-stroke;
+	}
+	.cloudarea {
+		fill: rgb(var(--cloud) / 0.28);
+		stroke: rgb(var(--cloud) / 0.7);
+		stroke-width: 1.5;
+	}
+	.pop-snow {
+		fill: var(--snow);
+	}
+	.pop-heavy {
+		fill: var(--snow-heavy);
+	}
+	.pop-mix {
+		fill: var(--mix);
+	}
+	.pop-rain {
+		fill: var(--rain);
+	}
+	.pop-none {
+		fill: rgb(var(--cloud) / 0.6);
+	}
+	.cloud-sw {
+		background: rgb(var(--cloud) / 0.35);
+		border: 1px solid rgb(var(--cloud) / 0.7);
+	}
 	.area {
 		fill-opacity: 0.18;
 		stroke: none;
@@ -763,6 +908,12 @@
 		width: 14px;
 		background: var(--night);
 		border: 1px solid var(--border);
+	}
+	@media (max-width: 899px) {
+		.lower,
+		.legend .lower-key {
+			display: none;
+		}
 	}
 	@media (max-width: 640px) {
 		.mcard {

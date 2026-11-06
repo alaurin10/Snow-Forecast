@@ -25,6 +25,13 @@ export interface Step {
 	temp: number | null;
 	/** Day halves of 12 h steps show the high, nights the low. */
 	tempKind: 'mean' | 'high' | 'low';
+	/** Spread across the weather models (the range band on the chart). */
+	tempLo: number | null;
+	tempHi: number | null;
+	flLo: number | null;
+	flHi: number | null;
+	/** Highest chance of precipitation in the step (%). */
+	pop: number | null;
 	wind: number | null;
 	gust: number | null;
 	dir: number | null;
@@ -41,6 +48,12 @@ const num = (v: number | null | undefined): v is number => v !== null && v !== u
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const max = (xs: number[]) => (xs.length ? Math.max(...xs) : null);
 const min = (xs: number[]) => (xs.length ? Math.min(...xs) : null);
+
+/** The model range for a step's temperature: the spread of the highs, the lows, or the means. */
+function band(lo: number[], hi: number[], kind: Step['tempKind']) {
+	const f = kind === 'high' ? max : kind === 'low' ? min : mean;
+	return { tempLo: f(lo), tempHi: f(hi) };
+}
 
 /** Snow (cm) per calendar date, for the 6+ in heavy-snow rule. */
 function dailySnow(h: HourlyOut): Map<string, number> {
@@ -98,6 +111,14 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 			cum,
 			temp: tempKind === 'high' ? max(temps) : tempKind === 'low' ? min(temps) : mean(temps),
 			tempKind,
+			...band(
+				idx.map((i) => h.temp_lo?.[i]).filter(num),
+				idx.map((i) => h.temp_hi?.[i]).filter(num),
+				tempKind
+			),
+			flLo: mean(idx.map((i) => h.fl_lo?.[i]).filter(num)),
+			flHi: mean(idx.map((i) => h.fl_hi?.[i]).filter(num)),
+			pop: max(idx.map((i) => h.pop?.[i]).filter(num)),
 			wind: max(idx.map((i) => h.wind_kmh[i]).filter(num)),
 			gust: max(idx.map((i) => h.gust_kmh[i]).filter(num)),
 			dir: h.wdir[mid] ?? null,
