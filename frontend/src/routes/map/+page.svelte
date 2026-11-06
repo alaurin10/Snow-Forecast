@@ -26,7 +26,7 @@
 {:else if !rows}
 	<p class="muted">Loading…</p>
 {:else}
-	<MapView {rows} units={prefs.units} {href} />
+	<MapView {rows} units={prefs.units} {href} radar />
 {/if}
 
 <style>
