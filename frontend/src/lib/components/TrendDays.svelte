@@ -1,5 +1,6 @@
 <!-- How each of the next few days changed over the last few runs (consensus, mid band). -->
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import type { TrendRun } from '../types.gen';
 	import { snowNum, type UnitSystem } from '../units';
 	import { weekday } from '../time';
@@ -30,7 +31,7 @@
 
 {#if recent.length >= 2 && dates.length}
 	<h2>How each day changed</h2>
-	<div class="table-wrap">
+	<div class="table-wrap" use:hscroll>
 		<table class="data">
 			<thead>
 				<tr>

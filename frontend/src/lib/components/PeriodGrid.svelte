@@ -2,6 +2,7 @@
      beside them. Columns: temperature and sky, 12-hour snow, snow ratio, snow level,
      chance and amount of precipitation, wind and gust, cloud. Night rows are shaded. -->
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import type { HourlyOut, PeriodOut } from '../types.gen';
 	import { HEAVY_CM, precipKind } from '../daybars';
 	import { periodWeather, wxIcon } from '../periodwx';
@@ -68,7 +69,7 @@
 	};
 </script>
 
-<div class="wrap">
+<div class="wrap" use:hscroll>
 	<table>
 		<thead>
 			<tr>
@@ -325,6 +326,15 @@
 	}
 	.slr.z3 {
 		background: color-mix(in srgb, var(--snow) 48%, transparent);
+	}
+	/* Phones: a shorter snow bar lets the next column peek in, a hint to swipe. */
+	@media (max-width: 640px) {
+		td.snow {
+			min-width: 128px;
+		}
+		.track {
+			min-width: 36px;
+		}
 	}
 	.sr {
 		position: absolute;

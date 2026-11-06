@@ -4,6 +4,7 @@
   published and linked.
 -->
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import type { AvalancheView, Snapshot } from '../types.gen';
 	import { compass } from '../conditions';
 	import { dateOf, dayHour, weekday } from '../time';
@@ -128,7 +129,7 @@
 
 		<section class="card">
 			<h2>Overnight refreeze</h2>
-			<div class="table-wrap">
+			<div class="table-wrap" use:hscroll>
 				<table class="data">
 					<thead>
 						<tr>
@@ -162,7 +163,7 @@
 
 		<section class="card">
 			<h2>Sky above treeline</h2>
-			<div class="table-wrap">
+			<div class="table-wrap" use:hscroll>
 				<table class="data">
 					<thead>
 						<tr>
@@ -204,7 +205,7 @@
 
 	<section class="card">
 		<h2>Daylight</h2>
-		<div class="table-wrap">
+		<div class="table-wrap" use:hscroll>
 			<table class="data">
 				<thead>
 					<tr><th></th><th>Sunrise</th><th>Sunset</th><th>Daylight</th></tr>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import type { BandOut } from '../types.gen';
 	import { converters, elevation, type UnitSystem } from '../units';
 
@@ -7,7 +8,7 @@
 	const f = (v: number | null, d = 0) => (v === null ? '–' : v.toFixed(d));
 </script>
 
-<div class="table-wrap">
+<div class="table-wrap" use:hscroll>
 	<table class="data">
 		<thead>
 			<tr>

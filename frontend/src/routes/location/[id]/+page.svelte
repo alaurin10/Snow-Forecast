@@ -207,11 +207,15 @@
 			<a class="back faint" href={resolve('/')}>← All locations</a>
 			<h1>{snap.location.name}</h1>
 			<div class="muted sub">
-				{snap.location.region} · {band.label}
-				{elevation(band.elev_m, units)} · updated {updated}
+				{snap.location.region} ·
+				<span class="nw"
+					>{band.label}
+					{elevation(band.elev_m, units)}</span
+				>
+				· <span class="nw">updated {updated}</span>
 			</div>
 		</div>
-		<div class="seg" role="group" aria-label="Elevation">
+		<div class="seg elev" role="group" aria-label="Elevation">
 			{#each snap.bands as b (b.band)}
 				<button
 					aria-pressed={band.band === b.band}
@@ -268,7 +272,8 @@
 						>
 					{/if}
 					<span class="faint small"
-						>{`Days 6–10: ${snow(band.windows['d6_10'].snow_cm, units)} · 24 h: ${snow(band.stats.last24_cm, units)}`}</span
+						><span class="nw">Days 6–10: {snow(band.windows['d6_10'].snow_cm, units)}</span> ·
+						<span class="nw">Last 24 h: {snow(band.stats.last24_cm, units)}</span></span
 					>
 				</div>
 				<div class="half storm">
@@ -277,16 +282,18 @@
 						<span class="big num">{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span>
 						<span class="small">
 							<strong
-								>{periodName(storm.first)}{storm.periods > 1
-									? ` → ${periodName(storm.last)}`
-									: ''}</strong
+								><span class="nw">{periodName(storm.first)}</span
+								>{#if storm.periods > 1}&#32;→&#32;<span class="nw">{periodName(storm.last)}</span
+									>{/if}</strong
 							>
-							· {startsIn(dateOf(snap.now), storm.first)}<br />
-							heaviest {periodName(storm.peak)}
-							{snow(storm.peak.snow_cm, units)}
-							{#if storm.snow_level_min_m !== null}
-								· snow level {elevation(storm.snow_level_min_m, units)}
-							{/if}
+							· <span class="nw">{startsIn(dateOf(snap.now), storm.first)}</span>
+						</span>
+						<span class="small muted">
+							<span class="nw"
+								>Heaviest {periodName(storm.peak)}: {snow(storm.peak.snow_cm, units)}</span
+							>{#if storm.snow_level_min_m !== null}&nbsp;·&#32;<span class="nw"
+									>snow level {elevation(storm.snow_level_min_m, units)}</span
+								>{/if}
 						</span>
 					{:else}
 						<span class="big">Quiet</span>
@@ -441,6 +448,9 @@
 	.sub {
 		font-size: 0.85rem;
 	}
+	.nw {
+		white-space: nowrap;
+	}
 	.alert {
 		background: var(--warn-bg);
 		border: 1px solid var(--warn-border);
@@ -469,6 +479,35 @@
 		border-radius: 999px;
 		white-space: nowrap;
 		font-size: 0.88rem;
+	}
+	/* Phones: the section tabs and elevation picker span the width so every option shows. */
+	@media (max-width: 640px) {
+		.tabs,
+		.seg.elev {
+			display: flex;
+			width: 100%;
+		}
+		.tabs button,
+		.seg.elev button {
+			flex: 1 1 auto;
+			min-width: 0;
+			padding-left: 8px;
+			padding-right: 8px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.tabs button {
+			padding-top: 7px;
+			padding-bottom: 7px;
+			font-size: 0.85rem;
+		}
+		.seg.elev button {
+			padding-top: 5px;
+			padding-bottom: 5px;
+		}
+		.loc-head {
+			padding-bottom: 12px;
+		}
 	}
 	.tabs button[aria-current='page'] {
 		color: var(--text);
@@ -518,6 +557,15 @@
 		border: 1px solid var(--border);
 		font-size: 0.85rem;
 		scrollbar-width: none;
+	}
+	/* Phones: let the "Now" items wrap rather than hide off the right edge. */
+	@media (max-width: 640px) {
+		.now {
+			flex-wrap: wrap;
+			gap: 4px 14px;
+			border-radius: 14px;
+			padding: 8px 12px;
+		}
 	}
 	.now strong {
 		font-size: 1rem;

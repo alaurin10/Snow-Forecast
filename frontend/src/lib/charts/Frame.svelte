@@ -94,19 +94,25 @@
 	.frame {
 		margin: 0;
 	}
+	/* Title left, value right; on a narrow card the value drops to its own line
+	   instead of being cut off. */
 	figcaption {
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
 		align-items: baseline;
-		gap: 8px;
+		gap: 0 8px;
 		font-size: 0.8rem;
 		margin: 0 0 2px;
 	}
 	.title {
 		color: var(--text-2);
 		font-weight: 600;
+		white-space: nowrap;
 	}
 	.readout {
+		margin-left: auto;
+		max-width: 100%;
 		color: var(--text);
 		font-size: 0.9rem;
 		text-align: right;

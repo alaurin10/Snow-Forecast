@@ -216,6 +216,22 @@
 	.map.tall {
 		height: min(78vh, 760px);
 	}
+	/* Phones and tablets: leave room for the header, the bottom tab bar and the legend,
+	   so the whole map and its key fit on one screen. */
+	@media (max-width: 1099px) {
+		.map.tall {
+			height: clamp(340px, calc(100dvh - 290px), 760px);
+		}
+	}
+	/* The map credits wrap to two lines on phones; keep the radar bar above them. */
+	@media (max-width: 640px) {
+		.radar {
+			bottom: 44px;
+			left: 8px;
+			right: 8px;
+			gap: 8px;
+		}
+	}
 	.radar {
 		position: absolute;
 		left: 12px;
