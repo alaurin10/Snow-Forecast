@@ -328,15 +328,88 @@
 				p += `M${(pos(i) * 1000).toFixed(1)} 0V${H}`;
 		return p;
 	});
+	// Reference lines (freezing; this location's elevations) and their labels. Each label
+	// takes the spot along its line, just above or just below it, where the data line comes
+	// least close; then labels are nudged apart so close elevations never overprint.
+	let plotH = $state(280);
+	let plotW = $state(600);
+	const LABEL_H = 15; // px
+	const labelW = (name: string, elev: string) => 12 + name.length * 5.6 + elev.length * 6.2;
 	const refs = $derived.by(() => {
-		if (metric === 'temp')
-			return [{ label: `${c.freezing}${c.tempUnit}`, top: toPct(y(c.freezing)) }];
-		if (metric === 'fl')
-			return elevs.map((e) => ({
-				label: `${e.label} ${elevation(e.m, units)}`,
-				top: toPct(y(c.height(e.m) ?? 0))
-			}));
-		return [];
+		const raw =
+			metric === 'temp'
+				? [{ name: `${c.freezing}${c.tempUnit}`, elev: '', y: y(c.freezing) }]
+				: metric === 'fl'
+					? elevs.map((e) => ({
+							// On a phone-width plot the full name won't fit beside the line; the
+							// label shows the elevation and the legend below names each line.
+							name: plotW < 420 ? '' : e.label,
+							elev: elevation(e.m, units),
+							y: y(c.height(e.m) ?? 0)
+						}))
+					: [];
+		if (!raw.length) return [];
+		const px = (yy: number) => (yy / H) * plotH;
+		// The data line's height (px) at x, joining the step points.
+		const pts = steps
+			.map((st, k) => {
+				const v = view.val(st);
+				return v === null ? null : { x: ((k + 0.5) / N) * plotW, y: px(y(v)) };
+			})
+			.filter((q): q is { x: number; y: number } => q !== null);
+		const lineAt = (x: number) => {
+			if (!pts.length) return null;
+			if (x <= pts[0].x) return pts[0].y;
+			for (let k = 1; k < pts.length; k++)
+				if (x <= pts[k].x) {
+					const a = pts[k - 1];
+					const b = pts[k];
+					return a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
+				}
+			return pts[pts.length - 1].y;
+		};
+		// How close the data line comes to a label box.
+		const gapTo = (x: number, w: number, top: number) => {
+			let gap = Infinity;
+			for (let xx = x - 4; xx <= x + w + 4; xx += 4) {
+				const ly = lineAt(xx);
+				if (ly === null) continue;
+				gap = Math.min(gap, ly < top ? top - ly : ly > top + LABEL_H ? ly - top - LABEL_H : 0);
+			}
+			return gap;
+		};
+		const clampTop = (t: number) => Math.min(Math.max(t, 1), plotH - LABEL_H - 1);
+		const placed = raw.map((r) => {
+			const line = px(r.y);
+			const w = Math.min(labelW(r.name, r.elev), plotW - 8);
+			let best = { x: plotW - w - 4, top: clampTop(line - LABEL_H - 2), gap: -1 };
+			// Above first, and the right-hand end first, so ties keep the usual spot.
+			for (const top of [clampTop(line - LABEL_H - 2), clampTop(line + 3)])
+				for (let x = plotW - w - 4; x >= 4; x -= 6) {
+					const gap = gapTo(x, w, top);
+					if (gap > best.gap + 2) best = { x, top, gap };
+				}
+			return { r, w, x: best.x, top: best.top };
+		});
+		// Nudge apart labels that would overprint, top to bottom.
+		placed.sort((a, b) => a.top - b.top);
+		for (let k = 1; k < placed.length; k++) {
+			const p = placed[k];
+			for (let j = 0; j < k; j++) {
+				const q = placed[j];
+				const sideBySide = p.x >= q.x + q.w + 4 || q.x >= p.x + p.w + 4;
+				if (!sideBySide && p.top < q.top + LABEL_H + 2) p.top = q.top + LABEL_H + 2;
+			}
+		}
+		const over = Math.max(0, ...placed.map((p) => p.top + LABEL_H + 1 - plotH));
+		return placed.map((p) => ({
+			key: p.r.name + p.r.elev,
+			name: p.r.name,
+			elev: p.r.elev,
+			top: toPct(p.r.y),
+			labelTop: `${(p.top - over).toFixed(1)}px`,
+			labelLeft: `${p.x.toFixed(1)}px`
+		}));
 	});
 	// Days 6 and on are less certain.
 	const conf = $derived.by(() => {
@@ -543,6 +616,8 @@
 		</div>
 		<div
 			class="plot"
+			bind:clientHeight={plotH}
+			bind:clientWidth={plotW}
 			role="slider"
 			tabindex="0"
 			aria-label="Forecast chart: {axisTitle}"
@@ -576,6 +651,12 @@
 				<path d={paths.line2} class="line2 m-{metric}" />
 				<path d={paths.line} class="line m-{metric}" />
 			</svg>
+			{#each refs as r (r.key)}
+				<div class="ref" style:top={r.top}></div>
+				<span class="reflbl" style:top={r.labelTop} style:left={r.labelLeft}
+					>{r.name}{#if r.elev}<b class="num">{r.elev}</b>{/if}</span
+				>
+			{/each}
 			{#each rainMarks as m (m.left)}<span class="rainlbl" style:left={m.left} style:top={m.top}
 					>{m.label}</span
 				>{/each}
@@ -590,9 +671,6 @@
 					{#if conf.roomy}<span>Less certain →</span>{/if}
 				</div>
 			{/if}
-			{#each refs as r (r.label)}
-				<div class="ref" style:top={r.top}><span>{r.label}</span></div>
-			{/each}
 			{#if s}
 				<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>
 				{#if metric !== 'cloud'}
@@ -664,7 +742,12 @@
 		{:else if metric === 'cloud'}
 			<span>The thicker the band, the more of the sky is covered at that height</span>
 		{:else}
-			<span>Dashed lines: this location's elevations</span>
+			<span
+				>Dashed lines: {[...elevs]
+					.reverse()
+					.map((e) => `${e.label} ${elevation(e.m, units)}`)
+					.join(' · ')}</span
+			>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
 				><i class="sw band-sw b-{metric}"></i>Range across the weather models</span
@@ -1055,23 +1138,33 @@
 		color: var(--text-2);
 		white-space: nowrap;
 	}
+	/* Quiet guide lines, so the data line stays the thing you read. */
 	.ref {
 		position: absolute;
 		left: 0;
 		right: 0;
-		border-top: 1.5px dashed var(--text-2);
+		border-top: 1px dashed color-mix(in srgb, var(--text-2) 55%, transparent);
 		pointer-events: none;
 	}
-	.ref span {
+	.reflbl {
 		position: absolute;
-		right: 6px;
-		bottom: 3px;
-		font-size: 0.7rem;
-		font-weight: 600;
-		background: color-mix(in srgb, var(--surface) 90%, transparent);
-		padding: 1px 6px;
-		border-radius: 6px;
+		height: 15px;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 0 5px;
+		border-radius: 5px;
+		font-size: 0.66rem;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--text-2);
+		background: color-mix(in srgb, var(--surface) 88%, transparent);
 		white-space: nowrap;
+		pointer-events: none;
+	}
+	.reflbl b {
+		font-weight: 600;
+		color: var(--text);
 	}
 	.cursor {
 		position: absolute;
