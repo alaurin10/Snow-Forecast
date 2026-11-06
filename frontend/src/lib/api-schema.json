@@ -2042,6 +2042,17 @@
           "default": "none",
           "type": "string"
         },
+        "rain_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "snow_cm": {
           "anyOf": [
             {

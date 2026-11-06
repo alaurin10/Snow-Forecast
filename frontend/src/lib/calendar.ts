@@ -11,6 +11,3 @@ export function bucket(cm: number | null | undefined): number {
 	for (let i = 1; i < EDGES_CM.length; i++) if (cm >= EDGES_CM[i]) b = i + 1;
 	return b;
 }
-
-/** Print the number in cells of at least 1 in (2.54 cm). */
-export const labelled = (cm: number | null | undefined): boolean => (cm ?? 0) >= 2.54;

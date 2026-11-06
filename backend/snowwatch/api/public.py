@@ -192,6 +192,7 @@ def make_router() -> APIRouter:
                         date=p.date,
                         snow_cm=p.snow_cm,
                         ptype=p.ptype,
+                        rain_mm=p.rain_mm,
                     )
                     for p in mid.periods
                 ]

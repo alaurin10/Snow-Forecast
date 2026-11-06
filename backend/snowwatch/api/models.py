@@ -44,6 +44,7 @@ class OverviewPeriod(BaseModel):
     date: str
     snow_cm: float | None
     ptype: str = "none"  # snow, mix, rain or none, as on the snapshot's periods
+    rain_mm: float | None = None
 
 
 class DangerChip(BaseModel):

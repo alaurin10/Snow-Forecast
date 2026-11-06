@@ -296,6 +296,7 @@ export interface OverviewPeriod {
 	kind: string;
 	label: string;
 	ptype?: string;
+	rain_mm?: number | null;
 	snow_cm: number | null;
 }
 /**
