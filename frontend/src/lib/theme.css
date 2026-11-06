@@ -86,7 +86,7 @@
 		--text-2: #aebbcd;
 		--text-3: #8593a8;
 		--grid: #1e2a3f;
-		--night: rgb(255 255 255 / 0.035);
+		--night: rgb(0 0 0 / 0.28);
 		--focus: #a99cf5;
 		--accent: #a99cf5;
 		--accent-soft: #1e2142;
@@ -131,7 +131,7 @@
 	--text-2: #aebbcd;
 	--text-3: #8593a8;
 	--grid: #1e2a3f;
-	--night: rgb(255 255 255 / 0.035);
+	--night: rgb(0 0 0 / 0.28);
 	--focus: #a99cf5;
 	--accent: #a99cf5;
 	--accent-soft: #1e2142;

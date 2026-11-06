@@ -20,6 +20,11 @@ export interface Step {
 	/** Snow depth in cm, or rain as liquid cm when it rains. */
 	precip: number;
 	kind: PrecipKind;
+	/** Snow depth (cm) and rain as liquid (cm), kept apart because their inches differ. */
+	snow: number;
+	rain: number;
+	/** Colour for the snow part: snow, heavy snow, or mixed. */
+	snowKind: PrecipKind;
 	/** Running total of snow (cm) from the chart's first step. */
 	cum: number;
 	temp: number | null;
@@ -112,6 +117,9 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 			night,
 			precip: kind === 'rain' ? rainCm : snow > 0 ? snow : rainCm,
 			kind,
+			snow,
+			rain: rainCm,
+			snowKind: snow <= 0 ? 'none' : kind === 'rain' ? 'mix' : kind,
 			cum,
 			temp: tempKind === 'high' ? max(temps) : tempKind === 'low' ? min(temps) : mean(temps),
 			tempKind,

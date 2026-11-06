@@ -10,6 +10,7 @@
 	import { resolve } from '$app/paths';
 	import { prefs } from '../lib/prefs.svelte';
 	import { session } from '../lib/session.svelte';
+	import { pageBar } from '../lib/pagebar.svelte';
 	import { getHealth, type Health } from '../lib/api';
 	import type { LayoutProps } from './$types';
 
@@ -49,6 +50,8 @@
 	] as const;
 	const active = (href: string) =>
 		href === '/' ? path === '/' || path.startsWith('/location') : path.startsWith(href);
+	// A page's controls take the nav's place once its own copy scrolls away.
+	const docked = $derived(pageBar.show && !!pageBar.snippet);
 	const staleHours = $derived(
 		health?.status === 'stale' && health.age_s ? Math.round(health.age_s / 3600) : null
 	);
@@ -72,11 +75,18 @@
 			</span>
 			Snow Watch
 		</a>
-		<nav class="topnav glass" aria-label="Main">
-			{#each tabs as t (t.href)}
-				<a href={resolve(t.href)} aria-current={active(t.href) ? 'page' : undefined}>{t.label}</a>
-			{/each}
-		</nav>
+		<div class="center">
+			<nav class="topnav glass" class:away={docked} aria-label="Main" inert={docked}>
+				{#each tabs as t (t.href)}
+					<a href={resolve(t.href)} aria-current={active(t.href) ? 'page' : undefined}>{t.label}</a>
+				{/each}
+			</nav>
+			{#if pageBar.snippet}
+				<div class="pagebar glass" class:on={docked} inert={!docked}>
+					{@render pageBar.snippet()}
+				</div>
+			{/if}
+		</div>
 		<div class="seg glass units" role="group" aria-label="Units">
 			<button aria-pressed={prefs.units === 'imperial'} onclick={() => prefs.setUnits('imperial')}
 				>in · °F</button
@@ -178,11 +188,42 @@
 	.units button {
 		padding: 7px 12px;
 	}
-	.topnav {
+	.center {
 		display: none;
+	}
+	.topnav,
+	.pagebar {
+		grid-area: 1 / 1;
+		display: flex;
 		gap: 2px;
 		padding: 4px;
 		border-radius: 999px;
+		transition:
+			opacity 0.28s ease,
+			transform 0.28s ease,
+			visibility 0.28s;
+	}
+	.topnav.away {
+		opacity: 0;
+		transform: translateY(-10px) scale(0.98);
+		visibility: hidden;
+	}
+	.pagebar {
+		opacity: 0;
+		transform: translateY(10px) scale(0.98);
+		visibility: hidden;
+		padding: 4px 6px;
+	}
+	.pagebar.on {
+		opacity: 1;
+		transform: none;
+		visibility: visible;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.topnav,
+		.pagebar {
+			transition: none;
+		}
 	}
 	.topnav a {
 		color: var(--text-2);
@@ -283,8 +324,10 @@
 		footer {
 			padding: 8px 32px 28px;
 		}
-		.topnav {
-			display: flex;
+		.center {
+			display: grid;
+			justify-items: center;
+			align-items: center;
 		}
 		.tabbar {
 			display: none;

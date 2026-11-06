@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextStorm } from './storm';
+import { nextStorm, periodName, startsIn } from './storm';
 import type { PeriodOut } from './types.gen';
 
 const p = (label: string, snow_cm: number, snow_level_min_m: number | null = null) =>
@@ -26,5 +26,20 @@ describe('nextStorm', () => {
 	});
 	it('handles a storm running to the end of the forecast', () => {
 		expect(nextStorm([p('Thu', 0), p('Thu night', 6)])?.total_cm).toBe(6);
+	});
+});
+
+describe('periodName and startsIn', () => {
+	const per = (date: string, kind: string, label: string) =>
+		({ date, kind, label }) as unknown as PeriodOut;
+	it('names periods by their date', () => {
+		expect(periodName(per('2026-11-13', 'day', 'Fri'))).toBe('Fri Nov 13');
+		expect(periodName(per('2026-11-13', 'night', 'Fri night'))).toBe('Fri Nov 13 night');
+		expect(periodName(per('2026-11-05', 'night', 'Tonight'))).toBe('Tonight');
+	});
+	it('says how far away the storm is', () => {
+		expect(startsIn('2026-11-05', per('2026-11-05', 'night', 'Tonight'))).toBe('starts tonight');
+		expect(startsIn('2026-11-05', per('2026-11-06', 'day', 'Fri'))).toBe('starts tomorrow');
+		expect(startsIn('2026-11-05', per('2026-11-13', 'day', 'Fri'))).toBe('starts in 8 days');
 	});
 });

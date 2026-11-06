@@ -24,6 +24,8 @@
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
 	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
+	import { availableRanges, type Range } from '../../../lib/charts/forecast';
+	import { pageBar } from '../../../lib/pagebar.svelte';
 	import PeriodGrid from '../../../lib/components/PeriodGrid.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
 	import Exceedance from '../../../lib/charts/Exceedance.svelte';
@@ -38,7 +40,7 @@
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
 	import { compass, skyWord } from '../../../lib/conditions';
-	import { nextStorm, STORM_CM } from '../../../lib/storm';
+	import { nextStorm, periodName, startsIn, STORM_CM } from '../../../lib/storm';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -48,6 +50,26 @@
 	let error = $state<string | null>(null);
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
+	let range = $state<Range>(5);
+	let tabsEl = $state<HTMLElement>();
+
+	// Desktop: once the section tabs scroll away, the page's controls dock into the header.
+	$effect(() => {
+		pageBar.snippet = dock;
+		return () => {
+			pageBar.snippet = null;
+			pageBar.show = false;
+		};
+	});
+	$effect(() => {
+		if (!tabsEl) return;
+		const io = new IntersectionObserver(
+			([e]) => (pageBar.show = !e.isIntersecting && e.boundingClientRect.top < 80),
+			{ rootMargin: '-72px 0px 0px 0px' }
+		);
+		io.observe(tabsEl);
+		return () => io.disconnect();
+	});
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
@@ -147,6 +169,34 @@
 	><title>{snap ? `${snap.location.name} · Snow Watch` : 'Snow Watch'}</title></svelte:head
 >
 
+{#snippet dock()}
+	{#if snap && band}
+		<div class="dock">
+			<span class="dock-name">{snap.location.name}</span>
+			<div class="seg mini" role="group" aria-label="Elevation">
+				{#each snap.bands as b (b.band)}
+					<button
+						aria-pressed={band.band === b.band}
+						onclick={() => prefs.setBand(b.band as BandName)}>{b.label}</button
+					>
+				{/each}
+			</div>
+			<div class="seg mini" role="group" aria-label="Sections">
+				{#each tabs as t (t)}
+					<button aria-pressed={tab === t} onclick={() => (tab = t)}>{names[t]}</button>
+				{/each}
+			</div>
+			{#if tab === 'forecast'}
+				<div class="seg mini" role="group" aria-label="Time range">
+					{#each availableRanges(band.hourly.t.length) as r (r)}
+						<button aria-pressed={range === r} onclick={() => (range = r)}>{r}d</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
+{/snippet}
+
 {#if error}
 	<p class="card">{error} <a href={resolve('/')}>All locations</a></p>
 {:else if !snap || !band}
@@ -189,7 +239,7 @@
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
 
-	<nav class="tabs" aria-label="Sections">
+	<nav class="tabs" aria-label="Sections" bind:this={tabsEl}>
 		{#each tabs as t (t)}
 			<button aria-current={tab === t ? 'page' : undefined} onclick={() => (tab = t)}
 				>{names[t]}</button
@@ -226,9 +276,13 @@
 					{#if storm}
 						<span class="big num">{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span>
 						<span class="small">
-							<strong>{storm.first.label}{storm.periods > 1 ? ` → ${storm.last.label}` : ''}</strong
+							<strong
+								>{periodName(storm.first)}{storm.periods > 1
+									? ` → ${periodName(storm.last)}`
+									: ''}</strong
 							>
-							· heaviest {storm.peak.label}
+							· {startsIn(dateOf(snap.now), storm.first)}<br />
+							heaviest {periodName(storm.peak)}
 							{snow(storm.peak.snow_cm, units)}
 							{#if storm.snow_level_min_m !== null}
 								· snow level {elevation(storm.snow_level_min_m, units)}
@@ -241,51 +295,17 @@
 				</div>
 			</section>
 			<section class="card">
-				<ForecastChart {band} bands={snap.bands} {units} onpick={pickTime} />
+				<ForecastChart {band} bands={snap.bands} {units} onpick={pickTime} bind:range />
 			</section>
-			<div class="split">
-				<section class="card">
-					<h2>Day by day</h2>
-					<PeriodGrid
-						periods={band.periods}
-						hourly={band.hourly}
-						{units}
-						onselect={(p) => (selected = p)}
-					/>
-				</section>
-				<aside class="side">
-					<section class="card">
-						<h2>About this forecast</h2>
-						<p class="muted small">
-							Snow is the median of {snap.models.length} weather models, switching to the ensemble mean
-							{#if snap.basis_switch}from {weekday(dateOf(snap.basis_switch))}{/if}
-							when fewer than three models still run. Ranges come from
-							{Object.entries(snap.ensembles)
-								.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)
-								.join(', ') || 'no ensembles'}.
-						</p>
-						{#if band.windows['next5'].snow_cm_slr !== null && band.windows['next5'].snow_cm_slr !== band.windows['next5'].snow_cm}
-							<p class="muted small">
-								With a temperature-based snow-to-liquid ratio the next 5 days would be
-								<strong>{snow(band.windows['next5'].snow_cm_slr, units)}</strong>.
-							</p>
-						{/if}
-					</section>
-					{#if Object.keys(snap.location.links).length}
-						<section class="card">
-							<h2>Links</h2>
-							<ul class="links">
-								{#each Object.entries(snap.location.links) as [name, url] (name)}
-									<!-- External site: resolve() is only for routes in this app. -->
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-									<li><a href={url} rel="noopener" target="_blank">{name}</a></li>
-								{/each}
-							</ul>
-						</section>
-					{/if}
-					<Webcams cams={snap.location.webcams ?? []} />
-				</aside>
-			</div>
+			<section class="card">
+				<h2>Day by day</h2>
+				<PeriodGrid
+					periods={band.periods}
+					hourly={band.hourly}
+					{units}
+					onselect={(p) => (selected = p)}
+				/>
+			</section>
 			{#if headsUp.length}
 				<section class="card heads">
 					<h2>Heads up</h2>
@@ -303,6 +323,38 @@
 					</ul>
 				</section>
 			{/if}
+			<div class="extras">
+				<section class="card">
+					<h2>About this forecast</h2>
+					<p class="muted small">
+						Snow is the median of {snap.models.length} weather models, switching to the ensemble mean
+						{#if snap.basis_switch}from {weekday(dateOf(snap.basis_switch))}{/if}
+						when fewer than three models still run. Ranges come from
+						{Object.entries(snap.ensembles)
+							.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)
+							.join(', ') || 'no ensembles'}.
+					</p>
+					{#if band.windows['next5'].snow_cm_slr !== null && band.windows['next5'].snow_cm_slr !== band.windows['next5'].snow_cm}
+						<p class="muted small">
+							With a temperature-based snow-to-liquid ratio the next 5 days would be
+							<strong>{snow(band.windows['next5'].snow_cm_slr, units)}</strong>.
+						</p>
+					{/if}
+				</section>
+				{#if Object.keys(snap.location.links).length}
+					<section class="card">
+						<h2>Links</h2>
+						<ul class="links">
+							{#each Object.entries(snap.location.links) as [name, url] (name)}
+								<!-- External site: resolve() is only for routes in this app. -->
+								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+								<li><a href={url} rel="noopener" target="_blank">{name}</a></li>
+							{/each}
+						</ul>
+					</section>
+				{/if}
+				<Webcams cams={snap.location.webcams ?? []} />
+			</div>
 		</div>
 	{:else if tab === 'models'}
 		<div class="stackcol">
@@ -424,6 +476,34 @@
 		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
 		font-weight: 600;
 	}
+	.dock {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		white-space: nowrap;
+	}
+	.dock-name {
+		font-family: var(--font-num);
+		font-weight: 600;
+		font-size: 0.9rem;
+		padding: 0 6px 0 8px;
+		max-width: 180px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.seg.mini {
+		background: transparent;
+		border-color: var(--border);
+	}
+	.seg.mini button {
+		padding: 4px 9px;
+		font-size: 0.78rem;
+	}
+	@media (max-width: 1279px) {
+		.dock-name {
+			display: none;
+		}
+	}
 	.now {
 		display: flex;
 		gap: 8px 18px;
@@ -495,21 +575,11 @@
 		display: grid;
 		gap: 12px;
 	}
-	.split {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 12px;
-		min-width: 0;
-	}
-	.side {
+	.extras {
 		display: grid;
 		gap: 12px;
-		align-content: start;
-	}
-	@media (min-width: 1100px) {
-		.split {
-			grid-template-columns: minmax(0, 1fr) 300px;
-		}
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+		align-items: start;
 	}
 	.two {
 		display: grid;

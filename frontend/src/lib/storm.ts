@@ -1,4 +1,5 @@
 // The next storm: the first run of snowy periods that adds up to a real amount.
+import { monthDay, weekday } from './time';
 import type { PeriodOut } from './types.gen';
 
 /** A period counts as snowing from 1 cm; a storm needs 5 cm (2 in) in total. */
@@ -40,4 +41,18 @@ export function nextStorm(periods: PeriodOut[]): Storm | null {
 		run = [];
 	}
 	return finish();
+}
+
+/** A period named by its date, e.g. "Fri Nov 13", "Fri Nov 13 night", "Today", "Tonight". */
+export function periodName(p: PeriodOut): string {
+	if (p.label === 'Today' || p.label === 'Tonight') return p.label;
+	return `${weekday(p.date)} ${monthDay(p.date)}${p.kind === 'night' ? ' night' : ''}`;
+}
+
+/** When the storm starts, relative to the forecast's "now" date (YYYY-MM-DD). */
+export function startsIn(today: string, first: PeriodOut): string {
+	const days = Math.round((Date.parse(first.date) - Date.parse(today)) / 86400e3);
+	if (days <= 0) return first.kind === 'night' ? 'starts tonight' : 'starts today';
+	if (days === 1) return 'starts tomorrow';
+	return `starts in ${days} days`;
 }
