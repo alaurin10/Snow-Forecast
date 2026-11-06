@@ -1,4 +1,4 @@
-<!-- A week of daily snow totals: one bar per day with its amount on top, coloured by
+<!-- The next five days of snow: one bar per day with its amount on top, coloured by
      precipitation type. Kept simple so a row reads at a glance. -->
 <script lang="ts">
 	import type { OverviewPeriod } from '../types.gen';
@@ -14,7 +14,7 @@
 	}
 
 	let { periods, max, units, label }: Props = $props();
-	const days = $derived(dailyTotals(periods, 7));
+	const days = $derived(dailyTotals(periods, 5));
 	const H = 44;
 	const h = (cm: number) => (cm > 0.1 ? Math.max(3, Math.round((Math.min(cm, max) / max) * H)) : 0);
 	// Hide amounts that round to zero at display precision.
@@ -36,7 +36,7 @@
 <style>
 	.week {
 		display: grid;
-		grid-template-columns: repeat(7, minmax(0, 1fr));
+		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 6px;
 	}
 	.day {
@@ -56,7 +56,7 @@
 	}
 	.track {
 		width: 100%;
-		max-width: 34px;
+		max-width: 40px;
 		height: 44px;
 		display: flex;
 		align-items: flex-end;

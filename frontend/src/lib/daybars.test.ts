@@ -68,4 +68,17 @@ describe('dailyTotals', () => {
 	it('marks a dry day as none', () => {
 		expect(dailyTotals([p('2026-11-08', 'day', 0, 'none')])[0].kind).toBe('none');
 	});
+	it('always makes five bars from ten periods, pairing each night with the next day', () => {
+		// Starts in the evening: Thu night + Fri, Fri night + Sat, ...
+		const ps = [{ ...p('2026-11-05', 'night', 2), label: 'Tonight' }];
+		for (let d = 6; d <= 10; d++) {
+			ps.push(p(`2026-11-${String(d).padStart(2, '0')}`, 'day', 1));
+			ps.push(p(`2026-11-${String(d).padStart(2, '0')}`, 'night', 1));
+		}
+		const days = dailyTotals(ps);
+		expect(days.map((d) => d.label)).toEqual(['Fri', 'Sat', 'Sun', 'Mon', 'Tue']);
+		const total = days.reduce((a, d) => a + d.cm, 0);
+		expect(total).toBe(ps.slice(0, 10).reduce((a, x) => a + (x.snow_cm ?? 0), 0));
+		expect(days[0].cm).toBe(3);
+	});
 });

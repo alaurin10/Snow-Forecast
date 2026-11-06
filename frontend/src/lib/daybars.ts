@@ -71,30 +71,39 @@ export interface DayTotal {
 	/** "Today", or a short weekday such as "Thu". */
 	label: string;
 	weekend: boolean;
-	/** Snow for the calendar day, day plus night (cm). */
+	/** Snow for the two periods in this bar (cm). */
 	cm: number;
 	kind: PrecipKind;
 }
 
-/** One total per calendar day, coloured by the type that brought the most of it. */
-export function dailyTotals(periods: OverviewPeriod[], limit = 7): DayTotal[] {
-	const today = periods.find((p) => p.label === 'Today' || p.label === 'Tonight')?.date;
-	return dayPairs(periods, limit).map((d) => {
+/**
+ * The next `days` days as bars that add up to the "next N days" total: the first
+ * 2 × `days` periods, paired in order. A forecast that starts in the evening pairs
+ * each night with the next day, which is the snow you ski on that day.
+ */
+export function dailyTotals(periods: OverviewPeriod[], days = 5): DayTotal[] {
+	const out: DayTotal[] = [];
+	for (let i = 0; i < days * 2 && i < periods.length; i += 2) {
+		const pair = periods.slice(i, i + 2);
+		const cm = pair.reduce((a, p) => a + (p.snow_cm ?? 0), 0);
+		const heavy = cm >= HEAVY_CM;
 		const byKind: Partial<Record<PrecipKind, number>> = {};
-		for (const h of [d.day, d.night]) {
-			if (!h || h.kind === 'none') continue;
-			const k = h.kind === 'heavy' ? 'snow' : h.kind;
-			byKind[k] = (byKind[k] ?? 0) + Math.max(h.cm, 0.001);
+		for (const p of pair) {
+			const k = precipKind(p.ptype, p.snow_cm ?? 0, false);
+			if (k !== 'none') byKind[k] = (byKind[k] ?? 0) + Math.max(p.snow_cm ?? 0, 0.001);
 		}
 		const top = (Object.entries(byKind) as [PrecipKind, number][]).sort((a, b) => b[1] - a[1])[0];
 		let kind: PrecipKind = top ? top[0] : 'none';
-		if (kind === 'snow' && d.total >= HEAVY_CM) kind = 'heavy';
-		return {
-			date: d.date,
-			label: d.date === today ? 'Today' : weekday(d.date),
-			weekend: d.weekend,
-			cm: d.total,
+		if (kind === 'snow' && heavy) kind = 'heavy';
+		const day = pair.find((p) => p.kind !== 'night') ?? pair[0];
+		const wd = weekday(day.date);
+		out.push({
+			date: day.date,
+			label: day.label === 'Today' ? 'Today' : wd,
+			weekend: wd === 'Sat' || wd === 'Sun',
+			cm,
 			kind
-		};
-	});
+		});
+	}
+	return out;
 }

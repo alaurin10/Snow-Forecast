@@ -5,6 +5,7 @@
 	import { converters, snowNum } from '../lib/units';
 	import { dangerWord } from '../lib/conditions';
 	import DailyBars from '../lib/components/DailyBars.svelte';
+	import { dailyTotals } from '../lib/daybars';
 	import type { OverviewRow } from '../lib/types.gen';
 
 	let rows = $state<OverviewRow[] | null>(null);
@@ -18,14 +19,9 @@
 
 	const c = $derived(converters(prefs.units));
 	// One scale for every card, so bars compare across locations.
-	const barMax = $derived.by(() => {
-		const totals = (rows ?? []).flatMap((r) => {
-			const byDate: Record<string, number> = {};
-			for (const p of r.periods ?? []) byDate[p.date] = (byDate[p.date] ?? 0) + (p.snow_cm ?? 0);
-			return Object.values(byDate);
-		});
-		return Math.max(5, ...totals);
-	});
+	const barMax = $derived(
+		Math.max(5, ...(rows ?? []).flatMap((r) => dailyTotals(r.periods ?? []).map((d) => d.cm)))
+	);
 	const href = (id: string) => resolve('/location/[id]', { id });
 	const today = new Date().toLocaleDateString('en-US', {
 		weekday: 'long',
@@ -76,7 +72,7 @@
 							periods={r.periods ?? []}
 							max={barMax}
 							units={prefs.units}
-							label={`${r.name}: snow for the next 7 days`}
+							label={`${r.name}: snow for the next 5 days`}
 						/>
 					{/if}
 					{#if r.alerts?.length || rated(r)}
