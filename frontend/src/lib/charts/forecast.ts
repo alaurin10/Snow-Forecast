@@ -32,6 +32,10 @@ export interface Step {
 	flHi: number | null;
 	/** Highest chance of precipitation in the step (%). */
 	pop: number | null;
+	/** Cloud cover by height (%): low below about 3 km, mid 3–8 km, high above. */
+	cloudLow: number | null;
+	cloudMid: number | null;
+	cloudHigh: number | null;
 	wind: number | null;
 	gust: number | null;
 	dir: number | null;
@@ -119,6 +123,9 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 			flLo: mean(idx.map((i) => h.fl_lo?.[i]).filter(num)),
 			flHi: mean(idx.map((i) => h.fl_hi?.[i]).filter(num)),
 			pop: max(idx.map((i) => h.pop?.[i]).filter(num)),
+			cloudLow: mean(idx.map((i) => h.cloud_low?.[i]).filter(num)),
+			cloudMid: mean(idx.map((i) => h.cloud_mid?.[i]).filter(num)),
+			cloudHigh: mean(idx.map((i) => h.cloud_high?.[i]).filter(num)),
 			wind: max(idx.map((i) => h.wind_kmh[i]).filter(num)),
 			gust: max(idx.map((i) => h.gust_kmh[i]).filter(num)),
 			dir: h.wdir[mid] ?? null,

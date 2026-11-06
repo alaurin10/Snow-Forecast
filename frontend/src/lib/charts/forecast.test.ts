@@ -88,6 +88,15 @@ describe('model range and precipitation chance', () => {
 		expect([s[1].tempLo, s[1].tempHi]).toEqual([-3, 2]);
 		expect(s[0].pop).toBe(16);
 	});
+	it('averages cloud cover at each height', () => {
+		const h = hourly();
+		h.cloud_low = h.t.map(() => 90);
+		h.cloud_mid = h.t.map((_, i) => (i % 2 ? 40 : 60));
+		h.cloud_high = h.t.map(() => 10);
+		const [s] = buildSteps(h, 1);
+		expect([s.cloudLow, s.cloudMid, s.cloudHigh]).toEqual([90, 60, 10]);
+		expect(buildSteps(h, 3)[0].cloudMid).toBeCloseTo(53.33, 1);
+	});
 });
 
 describe('niceAxis', () => {

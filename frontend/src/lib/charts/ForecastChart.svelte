@@ -107,7 +107,7 @@
 			precip: `Precipitation ${per[STEP[R]]} (${c.snowUnit})`,
 			temp: `Temperature (${c.tempUnit})`,
 			wind: `Wind (${c.speedUnit})`,
-			cloud: 'Cloud cover (%)',
+			cloud: 'Cloud cover by height (%)',
 			fl: `Freezing level (${c.heightUnit})`
 		}[metric]
 	);
@@ -152,8 +152,8 @@
 		} else {
 			line = linePath(view.val, y);
 			if (metric === 'wind') line2 = linePath((st) => c.speed(st.gust), y);
-			if (metric === 'cloud' && line)
-				area = `M${(W / 2).toFixed(1)} ${H}${line.replace('M', 'L')}L${(1000 - W / 2).toFixed(1)} ${H}Z`;
+			// Cloud is drawn as three lanes by height instead of one line.
+			if (metric === 'cloud') line = '';
 		}
 		// Model spread as a band behind the line.
 		const range =
@@ -223,7 +223,28 @@
 				p += `M${(pos(i) * 1000).toFixed(1)} 0V${H}`;
 		return p;
 	});
-	const grid = $derived(view.axis.ticks.map((v) => `M0 ${y(v).toFixed(1)}H1000`).join(''));
+	const grid = $derived(
+		metric === 'cloud' ? '' : view.axis.ticks.map((v) => `M0 ${y(v).toFixed(1)}H1000`).join('')
+	);
+	// Cloud by height: three lanes (high on top), each step shaded by its cover.
+	const LANES = [
+		{ name: 'High', key: 'cloudHigh', y0: 6 },
+		{ name: 'Mid', key: 'cloudMid', y0: 104 },
+		{ name: 'Low', key: 'cloudLow', y0: 202 }
+	] as const;
+	const LANE_H = 92;
+	const lanes = $derived(
+		metric !== 'cloud'
+			? []
+			: LANES.map((l) => ({
+					...l,
+					cells: steps.map((st, k) => ({
+						x: k * W + 0.6,
+						w: Math.max(0, W - 1.2),
+						o: st[l.key] === null ? 0 : 0.06 + ((st[l.key] as number) / 100) * 0.84
+					}))
+				}))
+	);
 	const refs = $derived.by(() => {
 		if (metric === 'temp') return [{ label: `${c.freezing}${c.tempUnit}`, top: pct(c.freezing) }];
 		if (metric === 'fl')
@@ -297,6 +318,7 @@
 			? `${(c.water(cm * 10) ?? 0).toFixed(c.waterDigits)} ${c.waterUnit}`
 			: `${(c.snow(cm) ?? 0).toFixed(STEP[R] <= 3 ? c.snowDigits + 1 : c.snowDigits)} ${c.snowUnit}`;
 
+	const pc = (v: number | null) => (v === null ? '–' : `${Math.round(v)}%`);
 	const cards = $derived.by(() => {
 		if (!s) return [];
 		const cum = `${(c.snow(s.cum) ?? 0).toFixed(c.snowDigits)} ${c.snowUnit} so far`;
@@ -335,14 +357,7 @@
 				label: 'Cloud cover',
 				color: 'rgb(var(--cloud))',
 				value: s.cloud === null ? '–' : `${Math.round(s.cloud)}%`,
-				sub:
-					s.cloud === null
-						? ''
-						: s.cloud > 85
-							? 'overcast'
-							: s.cloud > 50
-								? 'mostly cloudy'
-								: 'partly sunny'
+				sub: `low ${pc(s.cloudLow)} · mid ${pc(s.cloudMid)} · high ${pc(s.cloudHigh)}`
 			},
 			{
 				id: 'fl' as Metric,
@@ -418,7 +433,14 @@
 	</div>
 	<div class="plotrow">
 		<div class="yaxis left">
-			{#each view.axis.ticks as v (v)}<span style:top={pct(v)}>{tickLabel(v)}</span>{/each}
+			{#if metric === 'cloud'}
+				{#each LANES as l (l.name)}<span
+						class="lane"
+						style:top="{(((l.y0 + LANE_H / 2) / H) * 100).toFixed(2)}%">{l.name}</span
+					>{/each}
+			{:else}
+				{#each view.axis.ticks as v (v)}<span style:top={pct(v)}>{tickLabel(v)}</span>{/each}
+			{/if}
 		</div>
 		<div
 			class="plot"
@@ -442,6 +464,18 @@
 				<path d={paths.bars.heavy} class="b-heavy" />
 				<path d={paths.bars.mix} class="b-mix" />
 				<path d={paths.bars.rain} class="b-rain" />
+				{#each lanes as lane (lane.name)}
+					{#each lane.cells as cell, k (k)}
+						<rect
+							class="cloudcell"
+							x={cell.x}
+							y={lane.y0}
+							width={cell.w}
+							height={LANE_H}
+							fill-opacity={cell.o}
+						/>
+					{/each}
+				{/each}
 				<path d={paths.band} class="band m-{metric}" />
 				<path d={paths.area} class="area m-{metric}" />
 				<path d={paths.line2} class="line2 m-{metric}" />
@@ -457,7 +491,13 @@
 			{/each}
 			{#if s}
 				<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>
-				<div class="dot m-{metric}" style:left="{((hv + 0.5) / N) * 100}%" style:top={hoverY}></div>
+				{#if metric !== 'cloud'}
+					<div
+						class="dot m-{metric}"
+						style:left="{((hv + 0.5) / N) * 100}%"
+						style:top={hoverY}
+					></div>
+				{/if}
 			{/if}
 		</div>
 		<div class="yaxis right">
@@ -508,7 +548,12 @@
 		{:else if metric === 'wind'}
 			<span>Solid: strongest sustained wind · Dashed: peak gust</span>
 		{:else if metric === 'cloud'}
-			<span>Average share of the sky covered</span>
+			<span
+				><i class="sw ramp"></i>Cloud cover by height, darker = more cloud · low below {units ===
+				'imperial'
+					? '10,000 ft'
+					: '3 km'}, mid to {units === 'imperial' ? '26,000 ft' : '8 km'}, high above</span
+			>
 		{:else}
 			<span>Dashed lines: this location's elevations</span>
 		{/if}
@@ -747,6 +792,17 @@
 	}
 	.lplot path {
 		vector-effect: non-scaling-stroke;
+	}
+	.cloudcell {
+		fill: rgb(var(--cloud));
+	}
+	.yaxis span.lane {
+		font-weight: 600;
+		color: var(--text-2);
+	}
+	.sw.ramp {
+		width: 34px;
+		background: linear-gradient(90deg, rgb(var(--cloud) / 0.08), rgb(var(--cloud) / 0.9));
 	}
 	.cloudarea {
 		fill: rgb(var(--cloud) / 0.28);
