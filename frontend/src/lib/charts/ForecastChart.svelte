@@ -71,25 +71,20 @@
 	);
 	const RAIN_H = 36; // tallest rain mark, in chart units (out of 300)
 	const rainy = (st: Step) => rainIn(st) >= (units === 'imperial' ? 0.01 : 0.2);
+	// Only all-rain steps get a green mark; snow and mixed steps show just their snow.
+	const rainOnly = (st: Step) => st.kind === 'rain' && rainy(st);
 	const rainMax = $derived(Math.max(units === 'imperial' ? 0.1 : 2.5, ...steps.map(rainIn)));
 	const rainH = (st: Step) => Math.max(3, (rainIn(st) / rainMax) * RAIN_H);
 	const showRain = $derived(metric === 'precip' || metric === 'slr');
-	// Where a step's rain mark sits: beside the snow bar when both fall, centred otherwise.
-	const hasSnowBar = (st: Step) =>
-		metric === 'precip' &&
-		(st.kind === 'snow' || st.kind === 'heavy' || st.kind === 'mix') &&
-		snowIn(st) > 0;
-	const rainBox = (st: Step, k: number) => {
-		const both = hasSnowBar(st);
-		const rw = W * (both ? 0.24 : 0.5);
-		const x = k * W + (both ? W * 0.64 : (W - rw) / 2);
-		return { x, rw };
+	const rainBox = (_st: Step, k: number) => {
+		const rw = W * 0.5;
+		return { x: k * W + (W - rw) / 2, rw };
 	};
 	const rainMarks = $derived(
 		showRain
 			? steps
 					.map((st, k) => ({ st, k }))
-					.filter(({ st }) => rainy(st))
+					.filter(({ st }) => rainOnly(st))
 					.map(({ st, k }) => ({
 						left: `${(((rainBox(st, k).x + rainBox(st, k).rw / 2) / 1000) * 100).toFixed(2)}%`,
 						top: toPct(H - rainH(st)),
@@ -213,7 +208,7 @@
 		if (showRain) {
 			// Rain: short solid marks on their own small scale, never on the snow axis.
 			steps.forEach((st, k) => {
-				if (!rainy(st)) return;
+				if (!rainOnly(st)) return;
 				const hh = rainH(st);
 				const { x, rw } = rainBox(st, k);
 				bars.rain += `M${x.toFixed(2)} ${(H - hh).toFixed(1)}h${rw.toFixed(2)}V${H}h-${rw.toFixed(2)}z`;
@@ -226,12 +221,9 @@
 				const v = snowIn(st);
 				const kind = st.kind === 'rain' || st.kind === 'none' ? null : st.kind;
 				if (!kind || H - yP(v) < 0.3) return;
-				// Full height on the snow axis; when it also rains, the bar narrows to make room
-				// for the rain mark beside it.
-				const both = rainy(st);
-				const x = k * W + W * (both ? 0.12 : 0.14);
-				const w = both ? W * 0.5 : bw;
-				bars[kind] += `M${x.toFixed(2)} ${yP(v).toFixed(1)}h${w.toFixed(2)}V${H}h-${w.toFixed(2)}z`;
+				const x = k * W + W * 0.14;
+				bars[kind] +=
+					`M${x.toFixed(2)} ${yP(v).toFixed(1)}h${bw.toFixed(2)}V${H}h-${bw.toFixed(2)}z`;
 			});
 			line = linePath((st) => c.snow(st.cum), yCum);
 		} else if (metric === 'slr') {
@@ -414,7 +406,7 @@
 				color: 'var(--snow)',
 				value: snowIn(s) > 0.04 ? snowTxt(s) : rainy(s) ? rainTxt(s) : `0 ${c.snowUnit}`,
 				sub: [
-					snowIn(s) > 0.04 && rainy(s) ? `+${rainTxt(s)}` : null,
+					s.kind === 'mix' && rainy(s) ? `+${rainTxt(s)}` : null,
 					s.pop === null ? null : `${Math.round(s.pop)}% chance`,
 					cum
 				]
@@ -641,7 +633,8 @@
 			>
 			<span><i class="sw" style:background="var(--mix)"></i>Mixed (snow part)</span>
 			<span
-				><i class="sw" style:background="var(--rain)"></i>Rain: marks along the bottom, labelled in
+				><i class="sw" style:background="var(--rain)"></i>All rain: marks along the bottom, labelled
+				in
 				{units === 'imperial' ? 'inches' : 'mm'} of water (not on the snow scale)</span
 			>
 			<span>Line: running snow total, right axis</span>
