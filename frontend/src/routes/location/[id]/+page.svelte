@@ -24,12 +24,11 @@
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
 	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
-	import DayList from '../../../lib/components/DayList.svelte';
+	import PeriodGrid from '../../../lib/components/PeriodGrid.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
 	import Exceedance from '../../../lib/charts/Exceedance.svelte';
 	import TrendChart from '../../../lib/charts/TrendChart.svelte';
 	import PeriodSheet from '../../../lib/charts/PeriodSheet.svelte';
-	import PeriodTable from '../../../lib/components/PeriodTable.svelte';
 	import BandTable from '../../../lib/components/BandTable.svelte';
 	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
 	import StationPanel from '../../../lib/observed/StationPanel.svelte';
@@ -49,7 +48,6 @@
 	let error = $state<string | null>(null);
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
-	let fullTable = $state(false);
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
@@ -247,20 +245,13 @@
 			</section>
 			<div class="split">
 				<section class="card">
-					<div class="dbd-head">
-						<h2>Day by day</h2>
-						<div class="seg" role="group" aria-label="Day by day view">
-							<button aria-pressed={!fullTable} onclick={() => (fullTable = false)}>Days</button>
-							<button aria-pressed={fullTable} onclick={() => (fullTable = true)}
-								>All details</button
-							>
-						</div>
-					</div>
-					{#if fullTable}
-						<PeriodTable periods={band.periods} {units} />
-					{:else}
-						<DayList periods={band.periods} {units} onselect={(p) => (selected = p)} />
-					{/if}
+					<h2>Day by day</h2>
+					<PeriodGrid
+						periods={band.periods}
+						hourly={band.hourly}
+						{units}
+						onselect={(p) => (selected = p)}
+					/>
 				</section>
 				<aside class="side">
 					<section class="card">
@@ -499,16 +490,6 @@
 		letter-spacing: 0;
 		margin-left: 3px;
 		color: var(--text-2);
-	}
-	.dbd-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 10px;
-		margin-bottom: 4px;
-	}
-	.dbd-head h2 {
-		margin: 0;
 	}
 	.stackcol {
 		display: grid;

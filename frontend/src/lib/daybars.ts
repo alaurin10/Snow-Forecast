@@ -1,6 +1,6 @@
 // Day and night snowfall pairs for the compact bars on the Overview, coloured by
 // precipitation type. A day with 15.24 cm (6 in) or more counts as heavy snow.
-import type { OverviewPeriod, PeriodOut } from './types.gen';
+import type { OverviewPeriod } from './types.gen';
 import { weekday } from './time';
 
 export const HEAVY_CM = 15.24;
@@ -106,61 +106,4 @@ export function dailyTotals(periods: OverviewPeriod[], days = 5): DayTotal[] {
 		});
 	}
 	return out;
-}
-
-export interface ForecastDay {
-	date: string;
-	label: string;
-	day: PeriodOut | null;
-	night: PeriodOut | null;
-	/** Snow, day plus night (cm). */
-	cm: number;
-	dayKind: PrecipKind;
-	nightKind: PrecipKind;
-	tmax: number | null;
-	tmin: number | null;
-	gust: number | null;
-	snowLevel: number | null;
-	/** "Rain" or "Mixed" when either half isn't snow. */
-	note: string | null;
-	/** Rain, day plus night (mm). */
-	rain_mm: number;
-}
-
-/** The snapshot's day and night periods grouped by calendar date, for the day-by-day list. */
-export function forecastDays(periods: PeriodOut[]): ForecastDay[] {
-	const byDate = new Map<string, { day?: PeriodOut; night?: PeriodOut }>();
-	for (const p of periods) {
-		const slot = byDate.get(p.date) ?? {};
-		if (p.kind === 'night') slot.night = p;
-		else slot.day = p;
-		byDate.set(p.date, slot);
-	}
-	const pick = (xs: (number | null | undefined)[], f: (...v: number[]) => number) => {
-		const v = xs.filter((x): x is number => x !== null && x !== undefined);
-		return v.length ? f(...v) : null;
-	};
-	return [...byDate.entries()].map(([date, { day, night }]) => {
-		const cm = (day?.snow_cm ?? 0) + (night?.snow_cm ?? 0);
-		const heavy = cm >= HEAVY_CM;
-		const halves = [day, night].filter((p): p is PeriodOut => !!p);
-		const types = halves.map((p) => p.ptype);
-		const note = types.includes('rain') ? 'Rain' : types.includes('mix') ? 'Mixed' : null;
-		const first = halves[0];
-		return {
-			date,
-			label: first?.label === 'Today' || first?.label === 'Tonight' ? 'Today' : weekday(date),
-			day: day ?? null,
-			night: night ?? null,
-			cm,
-			dayKind: day ? precipKind(day.ptype, day.snow_cm ?? 0, heavy) : 'none',
-			nightKind: night ? precipKind(night.ptype, night.snow_cm ?? 0, heavy) : 'none',
-			tmax: pick([day?.tmax_c, night?.tmax_c], Math.max),
-			tmin: pick([day?.tmin_c, night?.tmin_c], Math.min),
-			gust: pick([day?.gust_max_kmh, night?.gust_max_kmh], Math.max),
-			snowLevel: pick([day?.snow_level_min_m, night?.snow_level_min_m], Math.min),
-			note,
-			rain_mm: (day?.rain_mm ?? 0) + (night?.rain_mm ?? 0)
-		};
-	});
 }
