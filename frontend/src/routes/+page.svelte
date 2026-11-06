@@ -7,6 +7,9 @@
 	import DailyBars from '../lib/components/DailyBars.svelte';
 	import { dailyTotals } from '../lib/daybars';
 	import type { OverviewRow } from '../lib/types.gen';
+	import ShareButton from '../lib/share/ShareButton.svelte';
+	import { paint } from '../lib/share/canvas';
+	import { drawOverviewCard } from '../lib/share/overviewCard';
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
@@ -32,6 +35,13 @@
 		month: 'long',
 		day: 'numeric'
 	});
+	// The newest forecast run among the locations, for the share image's footer.
+	const latest = $derived(
+		(rows ?? [])
+			.map((r) => r.generated_at ?? '')
+			.sort()
+			.at(-1) ?? ''
+	);
 	const rated = (r: OverviewRow) => r.danger?.status === 'current' && !!r.danger.level;
 </script>
 
@@ -39,7 +49,24 @@
 
 <div class="head">
 	<span class="faint small">{today}</span>
-	<h1>Where the snow is</h1>
+	<div class="titlerow">
+		<h1>Where the snow is</h1>
+		{#if rows?.length}
+			<ShareButton
+				label="Share the overview"
+				filename="snow-watch-overview"
+				render={(shape) =>
+					paint(shape, (ctx, p) =>
+						drawOverviewCard(
+							ctx,
+							shape,
+							{ rows: rows ?? [], units: prefs.units, days: DAYS, generatedAt: latest },
+							p
+						)
+					)}
+			/>
+		{/if}
+	</div>
 </div>
 
 {#if error}
@@ -113,6 +140,12 @@
 		display: grid;
 		gap: 2px;
 		margin: 4px 0 16px;
+	}
+	.titlerow {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
 	}
 	h1 {
 		font-family: var(--font-num);

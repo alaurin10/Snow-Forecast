@@ -41,6 +41,9 @@
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
 	import { compass, skyWord } from '../../../lib/conditions';
 	import { nextStorm, periodName, startsIn, STORM_CM } from '../../../lib/storm';
+	import ShareButton from '../../../lib/share/ShareButton.svelte';
+	import { paint, slug } from '../../../lib/share/canvas';
+	import { drawDaysCard } from '../../../lib/share/daysCard';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -152,6 +155,22 @@
 	const selectedDay = $derived(
 		selected && selected.kind === 'day'
 			? ((snap?.days ?? []).find((d) => d.date === selected!.date) ?? null)
+			: null
+	);
+	// Day by day as an image: as many days as the chart shows (at least 3), up to the data.
+	const SHARE_DAYS = [3, 5, 7, 10] as const;
+	const daysAvailable = $derived(new Set((band?.periods ?? []).map((p) => p.date)).size);
+	const shareDayChoices = $derived(SHARE_DAYS.filter((n) => n <= Math.max(3, daysAvailable)));
+	let shareDaysPick = $state<number | null>(null);
+	const shareDays = $derived(
+		shareDaysPick ??
+			shareDayChoices.find((n) => n >= range) ??
+			shareDayChoices[shareDayChoices.length - 1] ??
+			5
+	);
+	const place = $derived(
+		snap
+			? { name: snap.location.name, region: snap.location.region, generatedAt: snap.generated_at }
 			: null
 	);
 	const updated = $derived(
@@ -302,10 +321,39 @@
 				</div>
 			</section>
 			<section class="card">
-				<ForecastChart {band} bands={snap.bands} {units} onpick={pickTime} bind:range />
+				<ForecastChart
+					{band}
+					bands={snap.bands}
+					{units}
+					onpick={pickTime}
+					bind:range
+					place={place ?? undefined}
+				/>
 			</section>
 			<section class="card">
-				<h2>Day by day</h2>
+				<div class="cardhead">
+					<h2>Day by day</h2>
+					{#if place}
+						<ShareButton
+							label="Share day by day"
+							filename={slug(`${place.name} day by day ${shareDays} days`)}
+							render={(shape) =>
+								paint(shape, (ctx, p) =>
+									drawDaysCard(ctx, shape, { ...place, band, units, days: shareDays }, p)
+								)}
+						>
+							{#snippet options()}
+								<div class="seg" role="group" aria-label="Days to share">
+									{#each shareDayChoices as n (n)}
+										<button aria-pressed={shareDays === n} onclick={() => (shareDaysPick = n)}
+											>{n} days</button
+										>
+									{/each}
+								</div>
+							{/snippet}
+						</ShareButton>
+					{/if}
+				</div>
 				<PeriodGrid
 					periods={band.periods}
 					hourly={band.hourly}
@@ -640,6 +688,16 @@
 	}
 	.small {
 		font-size: 0.85rem;
+	}
+	.cardhead {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+	.cardhead h2 {
+		margin: 0;
 	}
 	.heads h2 {
 		margin: 0 0 4px;
