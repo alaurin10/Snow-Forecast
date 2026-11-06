@@ -62,27 +62,23 @@
 	const elevs = $derived(bands.map((b) => ({ label: b.label, m: b.elev_m })));
 	const toPct = (yy: number) => `${((yy / H) * 100).toFixed(2)}%`;
 
-	// Precipitation: snow above the zero line, rain below it, each on its own scale.
+	// Precipitation: one scale in inches of snow; rain counts as the snow it would make at 10:1.
 	const snowIn = (st: Step) => c.snow(st.snow) ?? 0;
 	const rainIn = (st: Step) => c.water(st.rain * 10) ?? 0;
-	const hasRain = $derived(steps.some((st) => rainIn(st) >= (units === 'imperial' ? 0.01 : 0.2)));
-	const pz = $derived.by(() => {
-		const y0 = hasRain ? H * 0.66 : H;
-		const sAx = niceAxis(0, Math.max(units === 'imperial' ? 0.2 : 0.5, ...steps.map(snowIn)), 4);
-		const rAx = niceAxis(0, Math.max(units === 'imperial' ? 0.05 : 1, ...steps.map(rainIn)), 2);
-		return { y0, sAx, rAx };
-	});
-	const ySnow = (v: number) => pz.y0 - (v / pz.sAx.max) * (pz.y0 - 4);
-	const yRain = (v: number) => pz.y0 + (v / pz.rAx.max) * (H - pz.y0);
+	const asSnowIn = (st: Step) => c.snow(st.precip) ?? 0;
+	const pAx = $derived(
+		niceAxis(0, Math.max(units === 'imperial' ? 0.2 : 0.5, ...steps.map(asSnowIn)), 4)
+	);
+	const yP = (v: number) => H - (v / pAx.max) * (H - 4);
 	const cumAxis = $derived(
 		niceAxis(0, Math.max(1, c.snow(steps[steps.length - 1]?.cum ?? 0) ?? 1), 4)
 	);
-	const yCum = (v: number) => pz.y0 - (v / cumAxis.max) * (pz.y0 - 4);
+	const yCum = (v: number) => H - (v / cumAxis.max) * (H - 4);
 
 	// Scale for the other metrics, in display units.
 	const view = $derived.by(() => {
 		const val = (st: Step): number | null => {
-			if (metric === 'precip') return snowIn(st);
+			if (metric === 'precip') return asSnowIn(st);
 			if (metric === 'temp') return c.temp(st.temp);
 			if (metric === 'wind') return c.speed(st.wind);
 			if (metric === 'cloud') return st.cloud;
@@ -119,7 +115,7 @@
 	};
 	const axisTitle = $derived(
 		{
-			precip: `Snow ${per[STEP[R]]} (${c.snowUnit} of snow)`,
+			precip: `Snow ${per[STEP[R]]} (${c.snowUnit}) · rain shown as the snow it would make`,
 			temp: `Temperature (${c.tempUnit})`,
 			wind: `Wind (${c.speedUnit})`,
 			cloud: 'Cloud by height: thicker = more of the sky covered',
@@ -144,18 +140,8 @@
 	const yticks = $derived.by(() => {
 		if (metric === 'cloud')
 			return LANES.map((l) => ({ label: l.name, sub: l.sub, y: l.y0 + LANE_H / 2, cls: 'lane' }));
-		if (metric === 'precip') {
-			const out = pz.sAx.ticks.map((v) => ({
-				label: `${v} ${c.snowUnit}`,
-				sub: '',
-				y: ySnow(v),
-				cls: ''
-			}));
-			if (hasRain)
-				for (const v of pz.rAx.ticks.slice(1))
-					out.push({ label: `${v} ${c.waterUnit}`, sub: '', y: yRain(v), cls: 'rainlbl' });
-			return out;
-		}
+		if (metric === 'precip')
+			return pAx.ticks.map((v) => ({ label: `${v} ${c.snowUnit}`, sub: '', y: yP(v), cls: '' }));
 		return view.axis.ticks.map((v) => ({ label: tickLabel(v), sub: '', y: y(v), cls: '' }));
 	});
 	const grid = $derived(yticks.map((t) => `M0 ${t.y.toFixed(1)}H1000`).join(''));
@@ -180,22 +166,16 @@
 		let line = '';
 		let line2 = '';
 		let band = '';
-		let zero = '';
 		const clouds: string[] = [];
 		if (metric === 'precip') {
 			const bw = W * 0.72;
 			steps.forEach((st, k) => {
-				const x = (k * W + W * 0.14).toFixed(2);
-				const sv = snowIn(st);
-				if (sv > 0 && st.snowKind !== 'none' && pz.y0 - ySnow(sv) > 0.3)
-					bars[st.snowKind] +=
-						`M${x} ${ySnow(sv).toFixed(1)}h${bw.toFixed(2)}V${pz.y0}h-${bw.toFixed(2)}z`;
-				const rv = rainIn(st);
-				if (hasRain && rv > 0 && yRain(rv) - pz.y0 > 0.3)
-					bars.rain += `M${x} ${pz.y0}h${bw.toFixed(2)}V${yRain(rv).toFixed(1)}h-${bw.toFixed(2)}z`;
+				const v = asSnowIn(st);
+				if (st.kind === 'none' || H - yP(v) < 0.3) return;
+				bars[st.kind] +=
+					`M${(k * W + W * 0.14).toFixed(2)} ${yP(v).toFixed(1)}h${bw.toFixed(2)}V${H}h-${bw.toFixed(2)}z`;
 			});
 			line = linePath((st) => c.snow(st.cum), yCum);
-			if (hasRain) zero = `M0 ${pz.y0.toFixed(1)}H1000`;
 		} else if (metric === 'cloud') {
 			for (const l of LANES) {
 				const mid = l.y0 + LANE_H / 2;
@@ -242,10 +222,10 @@
 						.join('') +
 					'Z';
 		}
-		return { bars, line, line2, band, zero, clouds };
+		return { bars, line, line2, band, clouds };
 	});
 
-	// Lower panel (wide screens): cloud cover as an area, chance of precipitation as a line.
+	// Lower panel (wide screens): cloud cover as a faint area, chance of precipitation as bars.
 	const lower = $derived.by(() => {
 		const H2 = 100;
 		const at = (k: number) => (k * W + W / 2).toFixed(1);
@@ -255,9 +235,13 @@
 		const cloud = cl.length
 			? `M${(W / 2).toFixed(1)} ${H2}L${cl.join('L')}L${(1000 - W / 2).toFixed(1)} ${H2}Z`
 			: '';
+		// Chance of precipitation as thin neutral bars, so it reads apart from the main chart.
 		let pop = '';
+		const pw = Math.min(W * 0.3, 14);
 		steps.forEach((st, k) => {
-			if (st.pop !== null) pop += `${pop ? 'L' : 'M'}${at(k)} ${(H2 - st.pop).toFixed(1)}`;
+			const hh = st.pop ?? 0;
+			if (hh > 0.5)
+				pop += `M${(k * W + (W - pw) / 2).toFixed(2)} ${(H2 - hh).toFixed(1)}h${pw.toFixed(2)}V${H2}h-${pw.toFixed(2)}z`;
 		});
 		const shadeL = steps
 			.map((st, k) =>
@@ -348,23 +332,20 @@
 	const snowTxt = (st: Step) =>
 		`${snowIn(st).toFixed(STEP[R] <= 3 ? c.snowDigits + 1 : c.snowDigits)} ${c.snowUnit}`;
 	const rainTxt = (st: Step) => `${rainIn(st).toFixed(c.waterDigits)} ${c.waterUnit} rain`;
-	const wet = (v: number) => v >= (units === 'imperial' ? 0.005 : 0.1);
 
 	const pc = (v: number | null) => (v === null ? '–' : `${Math.round(v)}%`);
 	const cards = $derived.by(() => {
 		if (!s) return [];
 		const cum = `${(c.snow(s.cum) ?? 0).toFixed(c.snowDigits)} ${c.snowUnit} snow so far`;
 		const t = c.temp(s.temp);
-		const snowy = snowIn(s) > 0.04;
-		const rainy = wet(rainIn(s));
 		return [
 			{
 				id: 'precip' as Metric,
 				label: 'Snow and rain',
 				color: 'var(--snow)',
-				value: snowy ? snowTxt(s) : rainy ? rainTxt(s) : `0 ${c.snowUnit}`,
+				value: s.kind === 'rain' ? rainTxt(s) : s.kind === 'none' ? `0 ${c.snowUnit}` : snowTxt(s),
 				sub: [
-					snowy && rainy ? `+${rainTxt(s)}` : null,
+					s.kind === 'mix' ? `+${rainTxt(s)}` : null,
 					s.pop === null ? null : `${Math.round(s.pop)}% chance`,
 					cum
 				]
@@ -492,6 +473,19 @@
 			onkeydown={onkey}
 		>
 			<svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+				<defs>
+					<!-- Rain is striped: its height is the snow it would make, not snow on the ground. -->
+					<pattern
+						id="rain-stripes"
+						width="7"
+						height="7"
+						patternUnits="userSpaceOnUse"
+						patternTransform="rotate(45)"
+					>
+						<rect width="7" height="7" class="stripe-bg" />
+						<rect width="3.5" height="7" class="stripe" />
+					</pattern>
+				</defs>
 				<path d={shade} class="night" />
 				<path d={grid} class="grid" class:lanegrid={metric === 'cloud'} />
 				<path d={midnights} class="midnight" />
@@ -499,18 +493,11 @@
 				<path d={paths.bars.snow} class="b-snow" />
 				<path d={paths.bars.heavy} class="b-heavy" />
 				<path d={paths.bars.mix} class="b-mix" />
-				<path d={paths.bars.rain} class="b-rain" />
-				<path d={paths.zero} class="zero" />
+				<path d={paths.bars.rain} class="b-rain" fill="url(#rain-stripes)" />
 				<path d={paths.band} class="band b-{metric}" />
 				<path d={paths.line2} class="line2 m-{metric}" />
 				<path d={paths.line} class="line m-{metric}" />
 			</svg>
-			{#if metric === 'precip' && hasRain}
-				<span class="zonelbl snowz" style:top="calc({toPct(pz.y0)} - 18px)">Snow ↑</span>
-				<span class="zonelbl rainz" style:top="calc({toPct(pz.y0)} + 4px)"
-					>Rain ↓ ({c.waterUnit} of water)</span
-				>
-			{/if}
 			{#if conf}
 				<div class="conf" style:left={conf.left}>
 					{#if conf.roomy}<span>Less certain →</span>{/if}
@@ -545,7 +532,7 @@
 				<path d={lower.shade} class="night" />
 				<path d="M0 50H1000M0 0H1000" class="grid" />
 				<path d={lower.cloud} class="cloudarea" />
-				<path d={lower.pop} class="popline" />
+				<path d={lower.pop} class="popbars" />
 			</svg>
 			{#if s}<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>{/if}
 		</div>
@@ -562,15 +549,14 @@
 		<span><i class="sw night"></i>Night (shaded)</span>
 		{#if metric === 'precip'}
 			<span><i class="sw" style:background="var(--snow)"></i>Snow</span>
-			<span><i class="sw" style:background="var(--snow-heavy)"></i>Heavy snow (6+ in in a day)</span
-			>
-			<span><i class="sw" style:background="var(--mix)"></i>Mixed (snow part)</span>
 			<span
-				><i class="sw" style:background="var(--rain)"></i>Rain, below the line ({units ===
-				'imperial'
-					? 'inches'
-					: 'mm'} of water)</span
+				><i class="sw" style:background="var(--snow-heavy)"></i>Snow on a 6+ {c.snowUnit === 'in'
+					? 'in'
+					: '15 cm'} day</span
 			>
+			<span><i class="sw" style:background="var(--mix)"></i>Mixed snow and rain</span>
+			<span><i class="sw rain-sw"></i>Rain (striped)</span>
+			<span>Rain and mixed bars show the snow that much water would make (10:1)</span>
 			<span>Line: running snow total, right axis</span>
 		{:else if metric === 'temp'}
 			<span
@@ -587,8 +573,8 @@
 				><i class="sw band-sw b-{metric}"></i>Range across the weather models</span
 			>{/if}
 		<span class="lower-key"
-			><i class="sw cloud-sw"></i>Lower panel: cloud cover (shaded) and chance of precipitation
-			(line)</span
+			><i class="sw cloud-sw"></i>Cloud cover <i class="sw pop-sw"></i>Chance of precipitation
+			(lower panel)</span
 		>
 	</div>
 </div>
@@ -766,7 +752,21 @@
 		fill: var(--mix);
 	}
 	.b-rain {
+		stroke: var(--rain);
+		stroke-width: 1;
+	}
+	.stripe-bg {
+		fill: color-mix(in srgb, var(--rain) 35%, var(--surface));
+	}
+	.stripe {
 		fill: var(--rain);
+	}
+	.rain-sw {
+		background: repeating-linear-gradient(
+			45deg,
+			var(--rain) 0 2px,
+			color-mix(in srgb, var(--rain) 35%, var(--surface)) 2px 4px
+		);
 	}
 	.line,
 	.line2 {
@@ -795,28 +795,6 @@
 	.band-sw.b-fl {
 		background: color-mix(in srgb, var(--level) 16%, transparent);
 	}
-	.zero {
-		fill: none;
-		stroke: var(--text-2);
-		stroke-width: 1.5;
-	}
-	.zonelbl {
-		position: absolute;
-		left: 6px;
-		font-size: 0.68rem;
-		font-weight: 600;
-		pointer-events: none;
-		white-space: nowrap;
-	}
-	.snowz {
-		color: var(--snow);
-	}
-	.rainz {
-		color: var(--rain);
-	}
-	.yaxis span.rainlbl {
-		color: var(--rain);
-	}
 	.yaxis span small {
 		display: block;
 		font-size: 0.62rem;
@@ -831,11 +809,15 @@
 	.grid.lanegrid {
 		stroke-dasharray: 3 4;
 	}
-	.popline {
-		fill: none;
-		stroke: var(--text-2);
-		stroke-width: 2;
-		stroke-linejoin: round;
+	.popbars {
+		fill: var(--text-2);
+		fill-opacity: 0.75;
+	}
+	.pop-sw {
+		width: 4px;
+		height: 12px;
+		background: var(--text-2);
+		margin-left: 10px;
 	}
 	/* Lower panel: cloud cover and chance of precipitation; wide screens only. */
 	.lower {
@@ -868,13 +850,11 @@
 		color: var(--text-2);
 	}
 	.cloudarea {
-		fill: rgb(var(--cloud) / 0.28);
-		stroke: rgb(var(--cloud) / 0.7);
-		stroke-width: 1.5;
+		fill: rgb(var(--cloud) / 0.22);
+		stroke: none;
 	}
 	.cloud-sw {
-		background: rgb(var(--cloud) / 0.35);
-		border-bottom: 2px solid var(--text-2);
+		background: rgb(var(--cloud) / 0.3);
 	}
 	.area {
 		fill-opacity: 0.18;

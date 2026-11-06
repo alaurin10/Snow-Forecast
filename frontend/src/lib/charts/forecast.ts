@@ -7,6 +7,8 @@ import { dateOf, hourOf } from '../time';
 
 export type Metric = 'precip' | 'temp' | 'wind' | 'cloud' | 'fl';
 export const RANGES = [1, 3, 5, 10, 15] as const;
+/** Snow-to-liquid ratio used to show rain on the snow scale. */
+export const SLR = 10;
 export type Range = (typeof RANGES)[number];
 /** Hours per step for each range. */
 export const STEP: Record<Range, number> = { 1: 1, 3: 3, 5: 6, 10: 12, 15: 12 };
@@ -17,14 +19,16 @@ export interface Step {
 	t: string;
 	hours: number;
 	night: boolean;
-	/** Snow depth in cm, or rain as liquid cm when it rains. */
+	/**
+	 * All precipitation as snow depth (cm): snow as it falls, rain at the snow it would
+	 * make at 10:1. One scale, in inches of snow, for every bar.
+	 */
 	precip: number;
 	kind: PrecipKind;
 	/** Snow depth (cm) and rain as liquid (cm), kept apart because their inches differ. */
 	snow: number;
 	rain: number;
-	/** Colour for the snow part: snow, heavy snow, or mixed. */
-	snowKind: PrecipKind;
+
 	/** Running total of snow (cm) from the chart's first step. */
 	cum: number;
 	temp: number | null;
@@ -89,23 +93,20 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 		const i0 = start + k * step;
 		const idx = Array.from({ length: step }, (_, j) => i0 + j);
 		const mid = i0 + Math.floor(step / 2);
-		// Precipitation: the type with the most water decides the colour.
-		const byType: Record<string, number> = {};
+		// One type per step, from how much of the snow-equivalent total is rain:
+		// under a fifth is snow, over four fifths is rain, anything between is mixed.
 		let snow = 0;
 		let rainCm = 0;
 		for (const i of idx) {
-			const s = h.snow_cm[i] ?? 0;
-			const r = (h.rain_mm[i] ?? 0) / 10;
-			snow += s;
-			rainCm += r;
-			const type = h.ptype[i] && h.ptype[i] !== 'none' ? h.ptype[i] : s > 0 ? 'snow' : 'none';
-			byType[type] = (byType[type] ?? 0) + s + r;
+			snow += h.snow_cm[i] ?? 0;
+			rainCm += (h.rain_mm[i] ?? 0) / 10;
 		}
 		cum += snow;
-		const top = Object.entries(byType)
-			.filter(([type, v]) => type !== 'none' && v > 0)
-			.sort((a, b) => b[1] - a[1])[0]?.[0];
-		let kind: PrecipKind = top === 'rain' ? 'rain' : top === 'mix' ? 'mix' : top ? 'snow' : 'none';
+		const asSnow = snow + rainCm * SLR;
+		const rainShare = asSnow > 0 ? (rainCm * SLR) / asSnow : 0;
+		let kind: PrecipKind =
+			asSnow < 0.05 ? 'none' : rainShare < 0.2 ? 'snow' : rainShare > 0.8 ? 'rain' : 'mix';
+		// Orange is for snow only, on a 6+ in day.
 		if (kind === 'snow' && (daily.get(dateOf(h.t[mid])) ?? 0) >= HEAVY_CM) kind = 'heavy';
 		const temps = idx.map((i) => h.temp_c[i]).filter(num);
 		const night = h.is_day[mid] === 0;
@@ -115,11 +116,10 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 			t: h.t[i0],
 			hours: step,
 			night,
-			precip: kind === 'rain' ? rainCm : snow > 0 ? snow : rainCm,
+			precip: asSnow,
 			kind,
 			snow,
 			rain: rainCm,
-			snowKind: snow <= 0 ? 'none' : kind === 'rain' ? 'mix' : kind,
 			cum,
 			temp: tempKind === 'high' ? max(temps) : tempKind === 'low' ? min(temps) : mean(temps),
 			tempKind,

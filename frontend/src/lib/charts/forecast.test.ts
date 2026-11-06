@@ -54,7 +54,9 @@ describe('buildSteps', () => {
 		const s = buildSteps(hourly(), 1);
 		expect(s).toHaveLength(24);
 		expect(s[0].kind).toBe('rain');
-		expect(s[0].precip).toBeCloseTo(0.2);
+		// 2 mm of rain is 0.2 cm of water, shown as 2 cm of snow at 10:1.
+		expect(s[0].rain).toBeCloseTo(0.2);
+		expect(s[0].precip).toBeCloseTo(2);
 	});
 	it('starts 3-hour steps on a boundary', () => {
 		const s = buildSteps(hourly(), 3);
@@ -96,6 +98,21 @@ describe('model range and precipitation chance', () => {
 		const [s] = buildSteps(h, 1);
 		expect([s.cloudLow, s.cloudMid, s.cloudHigh]).toEqual([90, 60, 10]);
 		expect(buildSteps(h, 3)[0].cloudMid).toBeCloseTo(53.33, 1);
+	});
+});
+
+describe('precipitation type', () => {
+	it('gives each step one type and keeps orange for snow', () => {
+		const h = hourly();
+		// Friday: 1 cm of snow an hour; add 0.5 mm of rain an hour on Friday morning only.
+		h.rain_mm = h.t.map((t) => (t.startsWith('2026-11-06T0') ? 0.5 : 0));
+		const s = buildSteps(h, 1);
+		const fri = s.filter((x) => x.t.startsWith('2026-11-06'));
+		// 1 cm snow + 0.05 cm water (0.5 cm as snow) per hour: a third is rain, so mixed.
+		expect(fri.filter((x) => x.t.slice(11, 12) === '0').every((x) => x.kind === 'mix')).toBe(true);
+		expect(fri.filter((x) => x.t.slice(11, 12) === '1').every((x) => x.kind === 'heavy')).toBe(
+			true
+		);
 	});
 });
 
