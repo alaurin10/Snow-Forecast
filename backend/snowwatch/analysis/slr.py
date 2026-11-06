@@ -37,6 +37,17 @@ def period_ratio(
     return ratio_for(t, bands)
 
 
+# Warmer than this the precipitation is rain, so an hour has no snow ratio.
+SNOW_MAX_C = 1.0
+
+
+def hourly_slr(temp_c: float | None, bands: Sequence[SlrBand]) -> float | None:
+    """The ratio snow would fall at this hour, or None when it is too warm for snow."""
+    if temp_c is None or temp_c > SNOW_MAX_C:
+        return None
+    return ratio_for(temp_c, bands)[0]
+
+
 def raw_depth_cm(swe_mm: float, cm_per_mm: float = 0.7) -> float:
     return swe_mm * cm_per_mm
 

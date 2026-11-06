@@ -92,6 +92,9 @@ class HourlyOut(BaseModel):
     visibility_m: list[float | None]
     is_day: list[float | None]
     wcode: list[float | None]
+    # Snow-to-liquid ratio from the temperature (the configured bands); None when it is
+    # too warm for snow. Empty in snapshots built before this field existed.
+    slr: list[float | None] = []
 
 
 class ElevationOut(BaseModel):

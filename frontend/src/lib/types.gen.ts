@@ -582,6 +582,7 @@ export interface HourlyOut {
 	pop: (number | null)[];
 	ptype: string[];
 	rain_mm: (number | null)[];
+	slr?: (number | null)[];
 	snow_cm: (number | null)[];
 	snow_level_m: (number | null)[];
 	swe_mm: (number | null)[];

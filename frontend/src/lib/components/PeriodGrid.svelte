@@ -52,6 +52,8 @@
 		m === null
 			? '–'
 			: roundTo(c.height(m) ?? 0, units === 'imperial' ? 50 : 10).toLocaleString('en-US');
+	// Snow ratio zones, as on the chart: 0 heavy & wet … 3 dry powder.
+	const zoneOf = (v: number) => (v < 9.5 ? 0 : v < 12.5 ? 1 : v < 15.5 ? 2 : 3);
 	const ICON_WORD: Record<string, string> = {
 		'clear-day': 'Clear',
 		'clear-night': 'Clear',
@@ -118,8 +120,12 @@
 							>
 						</span>
 					</td>
-					<td class="num">{r.p.slr && (r.p.snow_cm ?? 0) > 0 ? `${Math.round(r.p.slr)}:1` : '–'}</td
-					>
+					<td class="num ratio">
+						{#if r.p.slr && (r.p.snow_cm ?? 0) > 0}
+							<span class="slr z{zoneOf(r.p.slr)}">{Math.round(r.p.slr)}:1</span>
+							<small>{(r.p.quality ?? '').toLowerCase()}</small>
+						{:else}–{/if}
+					</td>
 					<td class="num">{level(r.p.snow_level_min_m)}</td>
 					<td class="num">{r.p.pop_max === null ? '–' : `${Math.round(r.p.pop_max)}%`}</td>
 					<td class="num">{num(r.p.water_mm, c.water, c.waterDigits)}</td>
@@ -292,6 +298,33 @@
 	.sbar.rain,
 	.fill.rain {
 		background: var(--rain);
+	}
+	td.ratio {
+		line-height: 1.15;
+	}
+	td.ratio small {
+		display: block;
+		font-size: 0.66rem;
+		color: var(--text-3);
+	}
+	.slr {
+		display: inline-block;
+		padding: 1px 6px;
+		border-radius: 6px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.slr.z0 {
+		background: color-mix(in srgb, var(--mix) 22%, transparent);
+	}
+	.slr.z1 {
+		background: color-mix(in srgb, var(--snow) 16%, transparent);
+	}
+	.slr.z2 {
+		background: color-mix(in srgb, var(--snow) 30%, transparent);
+	}
+	.slr.z3 {
+		background: color-mix(in srgb, var(--snow) 48%, transparent);
 	}
 	.sr {
 		position: absolute;

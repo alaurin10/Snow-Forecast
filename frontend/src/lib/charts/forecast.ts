@@ -5,7 +5,7 @@ import type { HourlyOut } from '../types.gen';
 import { HEAVY_CM, type PrecipKind } from '../daybars';
 import { dateOf, hourOf } from '../time';
 
-export type Metric = 'precip' | 'temp' | 'wind' | 'cloud' | 'fl';
+export type Metric = 'precip' | 'slr' | 'temp' | 'wind' | 'cloud' | 'fl';
 export const RANGES = [1, 3, 5, 10, 15] as const;
 /** Snow-to-liquid ratio used to show rain on the snow scale. */
 export const SLR = 10;
@@ -39,6 +39,8 @@ export interface Step {
 	tempHi: number | null;
 	flLo: number | null;
 	flHi: number | null;
+	/** Snow-to-liquid ratio (e.g. 11 for 11:1) from the temperature; null when too warm. */
+	slr: number | null;
 	/** Highest chance of precipitation in the step (%). */
 	pop: number | null;
 	/** Cloud cover by height (%): low below about 3 km, mid 3–8 km, high above. */
@@ -131,6 +133,7 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 			flLo: mean(idx.map((i) => h.fl_lo?.[i]).filter(num)),
 			flHi: mean(idx.map((i) => h.fl_hi?.[i]).filter(num)),
 			pop: max(idx.map((i) => h.pop?.[i]).filter(num)),
+			slr: mean(idx.map((i) => h.slr?.[i]).filter(num)),
 			cloudLow: mean(idx.map((i) => h.cloud_low?.[i]).filter(num)),
 			cloudMid: mean(idx.map((i) => h.cloud_mid?.[i]).filter(num)),
 			cloudHigh: mean(idx.map((i) => h.cloud_high?.[i]).filter(num)),

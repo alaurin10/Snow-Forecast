@@ -32,7 +32,7 @@ from snowwatch.analysis.series import (
     total,
 )
 from snowwatch.analysis.skiday import DayFacts, rate
-from snowwatch.analysis.slr import period_ratio, ptype
+from snowwatch.analysis.slr import hourly_slr, period_ratio, ptype
 from snowwatch.config import ForecastConfig
 from snowwatch.doc import (
     Alert,
@@ -742,6 +742,7 @@ def _band_out(
         visibility_m=[blend.get("visibility").get(h) for h in hours],
         is_day=[blend.get("is_day").get(h) for h in hours],
         wcode=[blend.get("weather_code").get(h) for h in hours],
+        slr=[hourly_slr(w.temp[0].get(h), cfg.slr_bands) for h in hours],
     )
 
     first24 = hours[:24]

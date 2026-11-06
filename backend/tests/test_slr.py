@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from snowwatch.analysis.slr import period_ratio, ptype, ratio_for, slr_depth_cm
+from snowwatch.analysis.slr import hourly_slr, period_ratio, ptype, ratio_for, slr_depth_cm
 from snowwatch.config import ForecastConfig
 
 
@@ -46,3 +46,11 @@ def test_depth() -> None:
 )
 def test_ptype(snow: float, liquid: float, expected: str) -> None:
     assert ptype(snow, liquid) == expected
+
+
+def test_hourly_slr(cfg: ForecastConfig) -> None:
+    assert hourly_slr(None, cfg.slr_bands) is None
+    assert hourly_slr(3.0, cfg.slr_bands) is None  # too warm: rain
+    assert hourly_slr(0.5, cfg.slr_bands) == 8
+    assert hourly_slr(-5.0, cfg.slr_bands) == 14
+    assert hourly_slr(-12.0, cfg.slr_bands) == 17

@@ -116,6 +116,17 @@ describe('precipitation type', () => {
 	});
 });
 
+describe('snow ratio', () => {
+	it('averages the hourly ratio and leaves warm steps empty', () => {
+		const h = hourly();
+		h.slr = h.t.map((_, i) => (i < 6 ? null : i % 2 ? 11 : 14));
+		const s = buildSteps(h, 3);
+		expect(s[0].slr).toBeNull(); // hours 2–4: all warm
+		expect(s[1].slr).toBeCloseTo(12.5, 1); // hours 5–7: one warm hour, then 14 and 11
+		expect(s[2].slr).toBeCloseTo(13, 1);
+	});
+});
+
 describe('niceAxis', () => {
 	it('rounds to tidy ticks', () => {
 		expect(niceAxis(0, 2.3)).toEqual({ min: 0, max: 2.5, ticks: [0, 0.5, 1, 1.5, 2, 2.5] });
