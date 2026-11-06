@@ -310,14 +310,19 @@
 				pop += `M${(k * W + (W - pw) / 2).toFixed(2)} ${(H2 - hh).toFixed(1)}h${pw.toFixed(2)}V${H2}h-${pw.toFixed(2)}z`;
 		});
 		const shadeL = steps
+			.filter(() => showNight)
 			.map((st, k) =>
 				st.night ? `M${(k * W).toFixed(2)} 0h${W.toFixed(2)}v${H2}h-${W.toFixed(2)}z` : ''
 			)
 			.join('');
 		return { cloud, pop, shade: shadeL };
 	});
+	// Night shading helps on the 1 and 3 day views, where bars are hours. On 5 and 10 days
+	// each bar is already a 6 or 12 hour block, and shading every other one just makes stripes.
+	const showNight = $derived(STEP[R] < 6);
 	const shade = $derived(
 		steps
+			.filter(() => showNight)
 			.map((st, k) =>
 				st.night ? `M${(k * W).toFixed(2)} 0h${W.toFixed(2)}v${H}h-${W.toFixed(2)}z` : ''
 			)
@@ -786,7 +791,7 @@
 		{/each}
 	</div>
 	<div class="legend">
-		<span><i class="sw night"></i>Night (shaded)</span>
+		{#if showNight}<span><i class="sw night"></i>Night (shaded)</span>{/if}
 		{#if metric === 'precip'}
 			<span><i class="sw" style:background="var(--snow)"></i>Snow</span>
 			<span
@@ -794,33 +799,30 @@
 					? '6+ in'
 					: '15+ cm'} in one bar</span
 			>
-			<span><i class="sw" style:background="var(--mix)"></i>Mixed (snow part)</span>
+			<span><i class="sw" style:background="var(--mix)"></i>Mixed</span>
 			<span
-				><i class="sw" style:background="var(--rain)"></i>All rain: marks along the bottom, labelled
-				in
-				{units === 'imperial' ? 'inches' : 'mm'} of water (not on the snow scale)</span
+				><i class="sw" style:background="var(--rain)"></i>Rain ({units === 'imperial' ? 'in' : 'mm'} of
+				water)</span
 			>
-			<span>Line: running snow total, right axis</span>
+			<span><i class="sw line-sw"></i>Total snow (right axis)</span>
 		{:else if metric === 'slr'}
 			<span><i class="sw z-dry-sw"></i>Dry powder</span>
 			<span><i class="sw z-light-sw"></i>Light</span>
 			<span><i class="sw z-avg-sw"></i>Average</span>
 			<span><i class="sw z-wet-sw"></i>Heavy & wet</span>
-			<span>Solid line while snow falls; faint when dry (the ratio if it snowed)</span>
-			<span><i class="sw" style:background="var(--rain)"></i>Too warm: rain marks</span>
+			<span>Faint line: the ratio if it snowed</span>
+			<span><i class="sw" style:background="var(--rain)"></i>Rain</span>
 		{:else if metric === 'temp'}
-			<span
-				>{STEP[R] === 12 ? 'Days show the high, nights the low · ' : ''}Dashed line: freezing</span
-			>
+			<span>{STEP[R] === 12 ? 'Day highs, night lows · ' : ''}Dashed: freezing</span>
 		{:else if metric === 'wind'}
-			<span>Solid: strongest sustained wind · Dashed: peak gust</span>
+			<span>Solid: wind · Dashed: gusts</span>
 		{:else if metric === 'cloud'}
-			<span>The thicker the band, the more of the sky is covered at that height</span>
+			<span>Thicker band: more of the sky covered</span>
 		{:else}
 			<span>Dashed lines: this location's elevations</span>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
-				><i class="sw band-sw b-{metric}"></i>Range across the weather models</span
+				><i class="sw band-sw b-{metric}"></i>Model range</span
 			>{/if}
 		<span class="lower-key"
 			><i class="sw cloud-sw"></i>Cloud cover <i class="sw pop-sw"></i>Chance of precipitation
@@ -1003,13 +1005,14 @@
 	.night {
 		fill: var(--night);
 	}
+	/* Guide lines stay quiet: one faint colour, so the data is what you read. */
 	.grid {
 		fill: none;
 		stroke: var(--grid);
 	}
 	.midnight {
 		fill: none;
-		stroke: var(--border);
+		stroke: var(--grid);
 	}
 	.b-snow {
 		fill: var(--snow);
@@ -1203,8 +1206,16 @@
 		bottom: 0;
 		right: 0;
 		background: color-mix(in srgb, var(--surface) 45%, transparent);
-		border-left: 1px dashed var(--text-3);
 		pointer-events: none;
+	}
+	/* A short tick marks where "less certain" starts, instead of a full-height line. */
+	.conf::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		height: 22px;
+		border-left: 1px solid var(--text-3);
 	}
 	.conf span {
 		position: absolute;
@@ -1314,6 +1325,12 @@
 		width: 10px;
 		height: 10px;
 		border-radius: 2px;
+	}
+	.sw.line-sw {
+		width: 14px;
+		height: 2.5px;
+		border-radius: 2px;
+		background: var(--text);
 	}
 	.sw.night {
 		width: 14px;
