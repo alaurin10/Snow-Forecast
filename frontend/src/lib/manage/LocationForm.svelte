@@ -1,5 +1,6 @@
 <!-- Review and edit a location before saving (new from auto-detect, or existing). -->
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import type { Location, SnotelCandidate } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
 
@@ -86,7 +87,7 @@
 	</div>
 
 	<h4>Elevation bands</h4>
-	<div class="table-wrap">
+	<div class="table-wrap" use:hscroll>
 		<table class="data bands">
 			<thead>
 				<tr

@@ -249,6 +249,13 @@ button {
 	-webkit-overflow-scrolling: touch;
 }
 
+/* A sideways-scrolling box with more hidden to the right (set by the hscroll action):
+   fade that edge so it reads as "swipe for more" rather than cut off. */
+[data-more] {
+	-webkit-mask-image: linear-gradient(to left, transparent, #000 36px);
+	mask-image: linear-gradient(to left, transparent, #000 36px);
+}
+
 table.data {
 	border-collapse: collapse;
 	width: 100%;

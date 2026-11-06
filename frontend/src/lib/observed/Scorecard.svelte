@@ -4,6 +4,7 @@
   days with at least 3 in (7.6 cm) observed or forecast.
 -->
 <script lang="ts">
+	import { hscroll } from '../hscroll';
 	import { scaleBand, scaleLinear } from 'd3-scale';
 	import type { VerificationOut } from '../types.gen';
 	import { MODEL_NAMES } from '../models';
@@ -91,7 +92,7 @@
 			{c.snowUnit} per day. Bias: forecast minus observed. Error: the average miss. Big days (3 in or
 			more): caught / missed / false alarms.
 		</p>
-		<div class="table-wrap">
+		<div class="table-wrap" use:hscroll>
 			<table class="data">
 				<thead>
 					<tr>

@@ -403,6 +403,7 @@
 			{
 				id: 'precip' as Metric,
 				label: 'Snow and rain',
+				short: 'Snow/rain',
 				color: 'var(--snow)',
 				value: snowIn(s) > 0.04 ? snowTxt(s) : rainy(s) ? rainTxt(s) : `0 ${c.snowUnit}`,
 				sub: [
@@ -416,6 +417,7 @@
 			{
 				id: 'temp' as Metric,
 				label: 'Temperature',
+				short: 'Temperature',
 				color: 'var(--temp)',
 				value: t === null ? '–' : `${Math.round(t)}${c.tempUnit}`,
 				sub:
@@ -430,6 +432,7 @@
 			{
 				id: 'wind' as Metric,
 				label: 'Wind',
+				short: 'Wind',
 				color: 'var(--wind)',
 				value: `${compass(s.dir)} ${speed(s.wind, units)}`,
 				sub: `gusts ${speed(s.gust, units)}`
@@ -437,6 +440,7 @@
 			{
 				id: 'cloud' as Metric,
 				label: 'Cloud cover',
+				short: 'Cloud cover',
 				color: 'rgb(var(--cloud))',
 				value: s.cloud === null ? '–' : `${Math.round(s.cloud)}%`,
 				sub: `low ${pc(s.cloudLow)} · mid ${pc(s.cloudMid)} · high ${pc(s.cloudHigh)}`
@@ -444,6 +448,7 @@
 			{
 				id: 'fl' as Metric,
 				label: 'Freezing level',
+				short: 'Freezing',
 				color: 'var(--level)',
 				value: elevation(s.fl, units),
 				sub: zone(s.fl)
@@ -451,6 +456,7 @@
 			{
 				id: 'slr' as Metric,
 				label: 'Snow ratio',
+				short: 'Snow ratio',
 				color: 'var(--snow)',
 				value: s.kind === 'rain' ? 'Rain' : s.slr === null ? 'Too warm' : `${Math.round(s.slr)}:1`,
 				sub:
@@ -514,7 +520,11 @@
 				aria-selected={metric === k.id}
 				onclick={() => (metric = k.id)}
 			>
-				<span class="mlabel"><i style:background={k.color}></i>{k.label}</span>
+				<span class="mlabel"
+					><i style:background={k.color}></i><span class="mtxt long">{k.label}</span><span
+						class="mtxt short">{k.short}</span
+					></span
+				>
 				<span class="mval num">{k.value}</span>
 				<span class="msub">{k.sub}</span>
 			</button>
@@ -703,27 +713,29 @@
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
 	}
-	/* One row of cards that scrolls sideways; fixed sizes so values never reflow. */
+	/* Metric cards: every card visible at once (6 across on desktop, 3 + 3 below), fixed
+	   heights so the values never reflow while you scrub the chart. */
 	.cards {
-		display: flex;
-		flex-wrap: nowrap;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 8px;
-		overflow-x: auto;
-		scrollbar-width: thin;
-		padding-bottom: 2px;
-		-webkit-overflow-scrolling: touch;
+	}
+	@media (min-width: 1100px) {
+		.cards {
+			grid-template-columns: repeat(6, minmax(0, 1fr));
+		}
 	}
 	.mcard {
-		flex: 1 0 196px;
-		max-width: 260px;
-		height: 86px;
+		min-width: 0;
+		height: 100px;
 		box-sizing: border-box;
 		overflow: hidden;
 		text-align: left;
 		display: flex;
 		flex-direction: column;
-		justify-content: space-between;
-		padding: 11px 14px;
+		justify-content: flex-start;
+		gap: 4px;
+		padding: 10px 12px;
 		border-radius: 14px;
 		border: 1px solid var(--border);
 		background: var(--surface);
@@ -742,6 +754,14 @@
 		color: var(--text-2);
 		white-space: nowrap;
 	}
+	.mtxt {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mtxt.short {
+		display: none;
+	}
 	.mlabel i {
 		width: 10px;
 		height: 10px;
@@ -755,12 +775,14 @@
 		white-space: nowrap;
 	}
 	.msub {
-		display: block;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
 		font-size: 0.75rem;
+		line-height: 1.25;
 		color: var(--text-3);
-		white-space: nowrap;
 		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 	.axes {
 		display: flex;
@@ -1135,13 +1157,36 @@
 		}
 	}
 	@media (max-width: 640px) {
+		.cards {
+			gap: 6px;
+		}
 		.mcard {
-			flex: 0 0 132px;
-			height: 74px;
-			padding: 9px 11px;
+			height: 58px;
+			padding: 8px 9px;
+			gap: 3px;
+			border-radius: 12px;
+		}
+		.mlabel {
+			gap: 5px;
+			font-size: 0.7rem;
+		}
+		.mlabel i {
+			width: 8px;
+			height: 8px;
+			border-radius: 2px;
 		}
 		.mval {
 			font-size: 1.05rem;
+		}
+		.mtxt.long {
+			display: none;
+		}
+		.mtxt.short {
+			display: inline;
+		}
+		/* Too narrow for the detail line; the period sheet has it. */
+		.msub {
+			display: none;
 		}
 		.yaxis,
 		.plot {

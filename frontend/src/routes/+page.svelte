@@ -97,10 +97,14 @@
 	</ul>
 	<div class="legend">
 		<span><i style:background="var(--snow)"></i>Snow</span>
-		<span><i style:background="var(--snow-heavy)"></i>Heavy snow (6+ in in a day)</span>
+		<span
+			><i style:background="var(--snow-heavy)"></i>Heavy snow ({c.snowUnit === 'in'
+				? '6+ inches'
+				: '15+ cm'} in a day)</span
+		>
 		<span><i style:background="var(--mix)"></i>Mixed</span>
 		<span><i style:background="var(--rain)"></i>Rain</span>
-		<span>Daily snow in {c.snowUnit}</span>
+		<span>Daily snow ({c.snowUnit === 'in' ? 'inches' : 'cm'})</span>
 	</div>
 {/if}
 

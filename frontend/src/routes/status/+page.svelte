@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { hscroll } from '../../lib/hscroll';
 	import { resolve } from '$app/paths';
 	import { getStatus } from '../../lib/api';
 	import type { StatusOut } from '../../lib/types.gen';
@@ -67,7 +68,7 @@
 		<section class="card">
 			<h2>Sources</h2>
 			{#if status.sources.length}
-				<div class="table-wrap">
+				<div class="table-wrap" use:hscroll>
 					<table class="data">
 						<thead>
 							<tr><th>Source</th><th>Last success</th><th>Calls today</th><th>Last error</th></tr>
@@ -95,7 +96,7 @@
 
 		<section class="card">
 			<h2>Locations</h2>
-			<div class="table-wrap">
+			<div class="table-wrap" use:hscroll>
 				<table class="data">
 					<thead>
 						<tr><th>Location</th><th>Forecast</th><th>Station</th><th>Flags</th></tr>
@@ -116,7 +117,7 @@
 
 		<section class="card">
 			<h2>Recent runs</h2>
-			<div class="table-wrap">
+			<div class="table-wrap" use:hscroll>
 				<table class="data">
 					<thead>
 						<tr><th>Started</th><th>Kind</th><th>Status</th><th>Errors</th><th>Calls</th></tr>

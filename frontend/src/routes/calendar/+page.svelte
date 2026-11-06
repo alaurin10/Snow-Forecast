@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { hscroll } from '../../lib/hscroll';
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
@@ -112,7 +113,7 @@
 	</section>
 
 	<section class="card gridcard">
-		<div class="scroller">
+		<div class="scroller" use:hscroll>
 			<table class="cal">
 				<thead>
 					<tr>
@@ -333,9 +334,33 @@
 		overflow: hidden;
 		clip: rect(0 0 0 0);
 	}
+	/* Wide screens: the grid fills the card and full names fit. */
+	@media (min-width: 900px) {
+		.cal {
+			width: 100%;
+		}
+		.loc {
+			max-width: 240px;
+		}
+		.cal td:not(.tot) .tile {
+			width: 100%;
+			min-width: 48px;
+		}
+	}
+	/* Phones: names wrap onto two lines rather than cut to a few letters. */
 	@media (max-width: 600px) {
 		.loc {
-			max-width: 110px;
+			max-width: 96px;
+			min-width: 96px;
+		}
+		.loc a {
+			white-space: normal;
+			display: -webkit-box;
+			-webkit-box-orient: vertical;
+			-webkit-line-clamp: 2;
+			line-clamp: 2;
+			font-size: 0.8rem;
+			line-height: 1.2;
 		}
 		.tile {
 			width: 42px;
