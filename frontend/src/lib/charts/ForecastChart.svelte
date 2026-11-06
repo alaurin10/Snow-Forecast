@@ -17,6 +17,9 @@
 		type Range,
 		type Step
 	} from './forecast';
+	import ShareButton from '../share/ShareButton.svelte';
+	import { paint, slug } from '../share/canvas';
+	import { drawForecastCard, METRIC_NAME } from '../share/forecastCard';
 
 	interface Props {
 		band: BandOut;
@@ -27,9 +30,11 @@
 		onpick?: (t: string) => void;
 		/** Days shown; bindable so the page header can change it too. */
 		range?: Range;
+		/** The location, for sharing the chart as an image; no share button without it. */
+		place?: { name: string; region: string; generatedAt: string };
 	}
 
-	let { band, bands, units, onpick, range = $bindable(5) }: Props = $props();
+	let { band, bands, units, onpick, range = $bindable(5), place }: Props = $props();
 	const c = $derived(converters(units));
 	const ranges = $derived(availableRanges(band.hourly.t.length));
 	let metric = $state<Metric>('precip');
@@ -568,7 +573,19 @@
 
 <div class="fc">
 	<div class="top">
-		<h2>Forecast</h2>
+		<div class="titlerow">
+			<h2>Forecast</h2>
+			{#if place}
+				<ShareButton
+					label="Share this chart"
+					filename={slug(`${place.name} ${METRIC_NAME[metric]} ${R} day`)}
+					render={(shape) =>
+						paint(shape, (ctx, p) =>
+							drawForecastCard(ctx, shape, { ...place, band, bands, units, metric, range: R }, p)
+						)}
+				/>
+			{/if}
+		</div>
 		<div class="seg" role="group" aria-label="Time range">
 			{#each ranges as r (r)}
 				<button aria-pressed={R === r} onclick={() => (range = r)}
@@ -771,6 +788,13 @@
 		align-items: center;
 		gap: 10px;
 		flex-wrap: wrap;
+	}
+	.titlerow {
+		flex: 1 1 auto;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
 	}
 	h2 {
 		margin: 0;
