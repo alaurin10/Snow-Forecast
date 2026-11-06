@@ -24,6 +24,7 @@
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
 	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
+	import DayList from '../../../lib/components/DayList.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
 	import Exceedance from '../../../lib/charts/Exceedance.svelte';
 	import TrendChart from '../../../lib/charts/TrendChart.svelte';
@@ -48,6 +49,7 @@
 	let error = $state<string | null>(null);
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
+	let fullTable = $state(false);
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
@@ -171,6 +173,20 @@
 		</div>
 	</div>
 
+	<div class="now" aria-label="Right now">
+		<span class="now-lbl">Now</span>
+		<span
+			><strong class="num">{temperature(band.hourly.temp_c[0], units)}</strong>
+			{skyWord(band.hourly.wcode[0])}</span
+		>
+		<span><span class="faint">Freezing level</span> {elevation(band.hourly.fl_m[0], units)}</span>
+		<span
+			><span class="faint">Wind</span>
+			{compass(band.hourly.wdir[0])}
+			{speed(band.hourly.wind_kmh[0], units)}, gusts {speed(band.hourly.gust_kmh[0], units)}</span
+		>
+	</div>
+
 	{#each snap.alerts as a, i (i)}
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
@@ -190,90 +206,61 @@
 					<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
 				</section>
 			{/if}
-			<div class="hero">
-				<section class="card stat">
+			<section class="card outlook">
+				<div class="half">
 					<span class="eyebrow">Next 5 days</span>
-					<span class="hero-n num"
+					<span class="big num"
 						>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
 					>
 					{#if band.windows['next5'].ens}
 						{@const e = band.windows['next5'].ens}
 						<span class="faint small"
 							>{snowNum(e.p10, units)}–{snowNum(e.p90, units)}
-							{c.snowUnit} likely range{e.estimated ? ' (est.)' : ''}</span
+							{c.snowUnit} likely{e.estimated ? ' (est.)' : ''}</span
 						>
 					{/if}
-					<div class="minis">
-						<div>
-							<span class="num">{snow(band.windows['d6_10'].snow_cm, units)}</span>
-							<span class="faint small">days 6–10</span>
-						</div>
-						<div>
-							<span class="num">{snow(band.stats.last24_cm, units)}</span>
-							<span class="faint small">last 24 h</span>
-						</div>
-					</div>
-				</section>
-				<section class="card storm">
+					<span class="faint small"
+						>{`Days 6–10: ${snow(band.windows['d6_10'].snow_cm, units)} · 24 h: ${snow(band.stats.last24_cm, units)}`}</span
+					>
+				</div>
+				<div class="half storm">
 					<span class="eyebrow">Next storm</span>
 					{#if storm}
-						<span class="hero-n num"
-							>{snowNum(storm.total_cm, units)}<small>{c.snowUnit} storm total</small></span
-						>
-						<strong>{storm.first.label}{storm.periods > 1 ? ` → ${storm.last.label}` : ''}</strong>
-						<ul>
-							<li>Heaviest {storm.peak.label}: {snow(storm.peak.snow_cm, units)}</li>
-							{#if storm.snow_level_min_m !== null}
-								<li>Snow level down to {elevation(storm.snow_level_min_m, units)}</li>
-							{/if}
-						</ul>
-					{:else}
-						<span class="hero-n">Quiet</span>
-						<span>No storm of {snow(STORM_CM, units)} or more in the forecast.</span>
-					{/if}
-				</section>
-				<section class="card stat">
-					<span class="eyebrow">Right now</span>
-					<span class="hero-n num"
-						>{temperature(band.hourly.temp_c[0], units)}
-						<small>{skyWord(band.hourly.wcode[0])}</small></span
-					>
-					<div class="minis">
-						<div>
-							<span class="num">{elevation(band.hourly.fl_m[0], units)}</span>
-							<span class="faint small">freezing level</span>
-						</div>
-						<div>
-							<span class="num"
-								>{compass(band.hourly.wdir[0])} {speed(band.hourly.wind_kmh[0], units)}</span
+						<span class="big num">{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span>
+						<span class="small">
+							<strong>{storm.first.label}{storm.periods > 1 ? ` → ${storm.last.label}` : ''}</strong
 							>
-							<span class="faint small">gusts {speed(band.hourly.gust_kmh[0], units)}</span>
-						</div>
-					</div>
-				</section>
-			</div>
-			{#if headsUp.length}
-				<section class="card thin heads">
-					<h2>Heads up</h2>
-					<ul>
-						{#each headsUp as f, i (i)}
-							<li class={f.severity}>
-								<strong>{flagTitle(f)}</strong>{#if isNew(f, snap.run_id)}<span class="new"
-										>New</span
-									>{/if}
-								<span class="muted">{flagText(f, units)}</span>
-							</li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
+							· heaviest {storm.peak.label}
+							{snow(storm.peak.snow_cm, units)}
+							{#if storm.snow_level_min_m !== null}
+								· snow level {elevation(storm.snow_level_min_m, units)}
+							{/if}
+						</span>
+					{:else}
+						<span class="big">Quiet</span>
+						<span class="small">No storm of {snow(STORM_CM, units)}+ in sight</span>
+					{/if}
+				</div>
+			</section>
 			<section class="card">
 				<ForecastChart {band} bands={snap.bands} {units} onpick={pickTime} />
 			</section>
 			<div class="split">
 				<section class="card">
-					<h2>Day by day</h2>
-					<PeriodTable periods={band.periods} {units} />
+					<div class="dbd-head">
+						<h2>Day by day</h2>
+						<div class="seg" role="group" aria-label="Day by day view">
+							<button aria-pressed={!fullTable} onclick={() => (fullTable = false)}>Days</button>
+							<button aria-pressed={fullTable} onclick={() => (fullTable = true)}
+								>All details</button
+							>
+						</div>
+					</div>
+					{#if fullTable}
+						<PeriodTable periods={band.periods} {units} />
+					{:else}
+						<DayList periods={band.periods} {units} onselect={(p) => (selected = p)} />
+					{/if}
 				</section>
 				<aside class="side">
 					<section class="card">
@@ -308,6 +295,23 @@
 					<Webcams cams={snap.location.webcams ?? []} />
 				</aside>
 			</div>
+			{#if headsUp.length}
+				<section class="card heads">
+					<h2>Heads up</h2>
+					<ul>
+						{#each headsUp as f, i (i)}
+							<li class={f.severity}>
+								<span
+									><strong>{flagTitle(f)}</strong>{#if isNew(f, snap.run_id)}<span class="new"
+											>New</span
+										>{/if}</span
+								>
+								<span class="muted">{flagText(f, units)}</span>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
 		</div>
 	{:else if tab === 'models'}
 		<div class="stackcol">
@@ -429,74 +433,82 @@
 		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
 		font-weight: 600;
 	}
-	.hero {
-		display: grid;
-		gap: 12px;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	.now {
+		display: flex;
+		gap: 8px 18px;
+		align-items: center;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		white-space: nowrap;
+		margin: -4px 0 14px;
+		padding: 8px 14px;
+		border-radius: 999px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		font-size: 0.85rem;
+		scrollbar-width: none;
 	}
-	.hero .card {
+	.now strong {
+		font-size: 1rem;
+		font-weight: 600;
+	}
+	.now-lbl {
+		font-size: 0.7rem;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+	.outlook {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		padding: 0;
+		overflow: hidden;
+	}
+	.half {
 		display: grid;
 		align-content: start;
-		gap: 8px;
-		padding: 18px 20px;
+		gap: 4px;
+		padding: 14px 16px;
+		min-width: 0;
+	}
+	.half.storm {
+		background: var(--accent-soft);
 	}
 	.eyebrow {
-		font-size: 0.72rem;
+		font-size: 0.7rem;
 		font-weight: 600;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--text-3);
 	}
-	.hero-n {
+	.storm .eyebrow {
+		color: var(--accent);
+	}
+	.big {
 		font-family: var(--font-num);
-		font-size: 2.6rem;
+		font-size: 1.9rem;
 		font-weight: 600;
-		line-height: 1;
+		line-height: 1.05;
 		letter-spacing: -0.02em;
 	}
-	.hero-n small {
+	.big small {
 		font-family: var(--font-ui);
-		font-size: 0.9rem;
+		font-size: 0.8rem;
 		font-weight: 500;
 		letter-spacing: 0;
-		margin-left: 6px;
+		margin-left: 3px;
 		color: var(--text-2);
 	}
-	.minis {
+	.dbd-head {
 		display: flex;
-		gap: 24px;
-		border-top: 1px solid var(--grid);
-		padding-top: 10px;
-		margin-top: 4px;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 4px;
 	}
-	.minis div {
-		display: grid;
-		gap: 1px;
-	}
-	.minis .num {
-		font-weight: 600;
-		font-size: 1.05rem;
-	}
-	.storm {
-		background: var(--feature-bg);
-		border-color: var(--feature-bg);
-		color: var(--feature-ink);
-	}
-	.storm .eyebrow,
-	.storm .hero-n small,
-	.storm ul,
-	.storm span {
-		color: var(--feature-2);
-	}
-	.storm .hero-n {
-		color: var(--feature-ink);
-	}
-	.storm ul {
+	.dbd-head h2 {
 		margin: 0;
-		padding-left: 18px;
-		font-size: 0.85rem;
-		display: grid;
-		gap: 3px;
 	}
 	.stackcol {
 		display: grid;

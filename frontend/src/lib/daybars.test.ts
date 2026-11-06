@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { dailyTotals, dayPairs, precipKind } from './daybars';
-import type { OverviewPeriod } from './types.gen';
+import { dailyTotals, dayPairs, forecastDays, precipKind } from './daybars';
+import type { OverviewPeriod, PeriodOut } from './types.gen';
 
 const p = (date: string, kind: string, snow_cm: number, ptype = 'snow'): OverviewPeriod => ({
 	key: `${date}-${kind}`,
@@ -80,5 +80,35 @@ describe('dailyTotals', () => {
 		const total = days.reduce((a, d) => a + d.cm, 0);
 		expect(total).toBe(ps.slice(0, 10).reduce((a, x) => a + (x.snow_cm ?? 0), 0));
 		expect(days[0].cm).toBe(3);
+	});
+});
+
+describe('forecastDays', () => {
+	const per = (date: string, kind: string, o: Partial<PeriodOut>) =>
+		({ date, kind, label: kind, ptype: 'snow', snow_cm: 0, ...o }) as unknown as PeriodOut;
+	it('groups day and night and keeps the extremes', () => {
+		const [d] = forecastDays([
+			per('2026-11-06', 'day', {
+				snow_cm: 4,
+				tmax_c: -1,
+				tmin_c: -4,
+				gust_max_kmh: 30,
+				snow_level_min_m: 900
+			}),
+			per('2026-11-06', 'night', {
+				snow_cm: 12,
+				tmax_c: -3,
+				tmin_c: -7,
+				gust_max_kmh: 45,
+				snow_level_min_m: 700,
+				ptype: 'mix'
+			})
+		]);
+		expect(d.label).toBe('Fri');
+		expect(d.cm).toBe(16);
+		expect(d.dayKind).toBe('heavy');
+		expect(d.nightKind).toBe('mix');
+		expect([d.tmax, d.tmin, d.gust, d.snowLevel]).toEqual([-1, -7, 45, 700]);
+		expect(d.note).toBe('Mixed');
 	});
 });
