@@ -74,7 +74,12 @@ export function drawForecastCard(ctx: Ctx, shape: Shape, d: ForecastShare, p: Pa
 		return;
 	}
 	const used = statRow(ctx, r, stats(d, steps, p), p);
-	const legendH = legend(ctx, r, legendItems(d, p), p);
+	const legendH = legend(
+		ctx,
+		r,
+		legendItems(d, p).filter((i) => STEP[d.range] < 6 || i.label !== 'Night'),
+		p
+	);
 	const chart = { x: r.x, y: r.y + used + 20, w: r.w, h: r.h - used - 20 - legendH - 18 };
 	drawChart(ctx, chart, d, steps, p);
 }
@@ -230,7 +235,7 @@ function legendItems(d: ForecastShare, p: Palette): LegendItem[] {
 		case 'precip':
 			return [
 				{ label: 'Snow', color: p.snow },
-				{ label: `Snow on a ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} day`, color: p.heavy },
+				{ label: `Heavy: ${c.snowUnit === 'in' ? '6+ in' : '15+ cm'} in one bar`, color: p.heavy },
 				{ label: 'Mixed', color: p.mix },
 				{ label: `Rain (${c.waterUnit} of water)`, color: p.rain },
 				{ label: 'Running total', color: p.text, line: 'solid' },
@@ -340,11 +345,12 @@ function drawChart(ctx: Ctx, r: Rect, d: ForecastShare, steps: Step[], p: Palett
 	else axis = { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
 	const yAt = (v: number) => plot.y + plot.h - ((v - axis.min) / (axis.max - axis.min)) * plot.h;
 
-	// Night shading and midnight lines.
+	// Night shading (1 and 3 day views only, as in the app) and midnight lines.
 	ctx.fillStyle = p.night;
-	steps.forEach((s, k) => {
-		if (s.night) ctx.fillRect(plot.x + k * colW, plot.y, colW + 0.5, plot.h);
-	});
+	if (STEP[d.range] < 6)
+		steps.forEach((s, k) => {
+			if (s.night) ctx.fillRect(plot.x + k * colW, plot.y, colW + 0.5, plot.h);
+		});
 	ctx.fillStyle = p.grid;
 	for (let k = 1; k < N; k++)
 		if (dateOf(steps[k].t) !== dateOf(steps[k - 1].t))

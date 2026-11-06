@@ -310,14 +310,19 @@
 				pop += `M${(k * W + (W - pw) / 2).toFixed(2)} ${(H2 - hh).toFixed(1)}h${pw.toFixed(2)}V${H2}h-${pw.toFixed(2)}z`;
 		});
 		const shadeL = steps
+			.filter(() => showNight)
 			.map((st, k) =>
 				st.night ? `M${(k * W).toFixed(2)} 0h${W.toFixed(2)}v${H2}h-${W.toFixed(2)}z` : ''
 			)
 			.join('');
 		return { cloud, pop, shade: shadeL };
 	});
+	// Night shading helps on the 1 and 3 day views, where bars are hours. On 5 and 10 days
+	// each bar is already a 6 or 12 hour block, and shading every other one just makes stripes.
+	const showNight = $derived(STEP[R] < 6);
 	const shade = $derived(
 		steps
+			.filter(() => showNight)
 			.map((st, k) =>
 				st.night ? `M${(k * W).toFixed(2)} 0h${W.toFixed(2)}v${H}h-${W.toFixed(2)}z` : ''
 			)
@@ -334,24 +339,60 @@
 		return p;
 	});
 	// Reference lines (freezing; this location's elevations) and their labels. Each label
-	// takes the spot along its line, just above or just below it, where the data line comes
-	// least close; then labels are nudged apart so close elevations never overprint.
+	// tries its full name, then a short name, then the elevation alone, and keeps the longest
+	// that fits beside its line (just above or below it) in a spot the data line stays clear
+	// of. Then labels are nudged apart so close elevations never overprint.
 	let plotH = $state(280);
 	let plotW = $state(600);
 	const LABEL_H = 15; // px
-	const labelW = (name: string, elev: string) => 12 + name.length * 5.6 + elev.length * 6.2;
+	let measureCtx: CanvasRenderingContext2D | null = null;
+	/** Width (px) of a label: name in the UI font, elevation in bold numerals, plus padding. */
+	const labelW = (name: string, elev: string) => {
+		if (!measureCtx && typeof document !== 'undefined')
+			measureCtx = document.createElement('canvas').getContext('2d');
+		const m = measureCtx;
+		const fallback = 12 + name.length * 5.6 + elev.length * 6.2;
+		if (!m) return fallback;
+		m.font = '500 10px Inter, system-ui, sans-serif';
+		const a = name ? m.measureText(name).width : 0;
+		m.font = "600 10px 'Space Grotesk', Inter, system-ui, sans-serif";
+		const b = elev ? m.measureText(elev).width : 0;
+		return Math.ceil(a + b + (name && elev ? 4 : 0) + 12);
+	};
+	/** "Rainy Pass trailhead" → "Rainy Pass": as few leading words as keep names apart. */
+	const shortNames = (names: string[]) =>
+		names.map((n) => {
+			const words = n.split(/\s+/);
+			for (let k = 1; k < words.length; k++) {
+				const short = words.slice(0, k).join(' ');
+				const clash = names.some((o) => o !== n && o.split(/\s+/).slice(0, k).join(' ') === short);
+				if (!clash && short.length >= 4) return short;
+			}
+			return n;
+		});
 	const refs = $derived.by(() => {
+		const shorts = shortNames(elevs.map((e) => e.label));
 		const raw =
 			metric === 'temp'
-				? [{ name: `${c.freezing}${c.tempUnit}`, elev: '', y: y(c.freezing) }]
+				? [{ key: 'freezing', options: [[`${c.freezing}${c.tempUnit}`, '']], y: y(c.freezing) }]
 				: metric === 'fl'
-					? elevs.map((e) => ({
-							// On a phone-width plot the full name won't fit beside the line; the
-							// label shows the elevation and the legend below names each line.
-							name: plotW < 420 ? '' : e.label,
-							elev: elevation(e.m, units),
-							y: y(c.height(e.m) ?? 0)
-						}))
+					? elevs.map((e, i) => {
+							// Longest first: "Roundhouse 6,050 ft", then without the unit (the axis
+							// gives it), then a short name.
+							const full = elevation(e.m, units);
+							const bare = full.replace(/\s*(ft|m)$/, '');
+							const names = [...new Set([e.label, shorts[i]])];
+							const options = [
+								...names.flatMap((n) => [
+									[n, full],
+									[n, bare]
+								]),
+								// Then the name alone (the axis gives the height), and last the number.
+								...names.map((n) => [n, '']),
+								['', full]
+							];
+							return { key: e.label, options, y: y(c.height(e.m) ?? 0) };
+						})
 					: [];
 		if (!raw.length) return [];
 		const px = (yy: number) => (yy / H) * plotH;
@@ -384,17 +425,39 @@
 			return gap;
 		};
 		const clampTop = (t: number) => Math.min(Math.max(t, 1), plotH - LABEL_H - 1);
-		const placed = raw.map((r) => {
-			const line = px(r.y);
-			const w = Math.min(labelW(r.name, r.elev), plotW - 8);
+		// The best spot for a label of width w: above first, right-hand end first on ties.
+		const spot = (line: number, w: number) => {
 			let best = { x: plotW - w - 4, top: clampTop(line - LABEL_H - 2), gap: -1 };
-			// Above first, and the right-hand end first, so ties keep the usual spot.
 			for (const top of [clampTop(line - LABEL_H - 2), clampTop(line + 3)])
 				for (let x = plotW - w - 4; x >= 4; x -= 6) {
 					const gap = gapTo(x, w, top);
 					if (gap > best.gap + 2) best = { x, top, gap };
 				}
-			return { r, w, x: best.x, top: best.top };
+			return best;
+		};
+		const CLEAR = 2; // px between a label and the data line
+		const placed = raw.map((r) => {
+			const line = px(r.y);
+			let pick: {
+				name: string;
+				elev: string;
+				w: number;
+				x: number;
+				top: number;
+				gap: number;
+			} | null = null;
+			for (const [name, elev] of r.options) {
+				const w = Math.min(labelW(name, elev), plotW - 8);
+				const at = spot(line, w);
+				const option = { name, elev, w, ...at };
+				if (at.gap >= CLEAR) {
+					pick = option;
+					break;
+				}
+				// Nothing fits cleanly: keep the shortest, which covers the least.
+				pick = option;
+			}
+			return { key: r.key, line: r.y, ...pick! };
 		});
 		// Nudge apart labels that would overprint, top to bottom.
 		placed.sort((a, b) => a.top - b.top);
@@ -408,10 +471,10 @@
 		}
 		const over = Math.max(0, ...placed.map((p) => p.top + LABEL_H + 1 - plotH));
 		return placed.map((p) => ({
-			key: p.r.name + p.r.elev,
-			name: p.r.name,
-			elev: p.r.elev,
-			top: toPct(p.r.y),
+			key: p.key,
+			name: p.name,
+			elev: p.elev,
+			top: toPct(p.line),
 			labelTop: `${(p.top - over).toFixed(1)}px`,
 			labelLeft: `${p.x.toFixed(1)}px`
 		}));
@@ -668,12 +731,6 @@
 				<path d={paths.line2} class="line2 m-{metric}" />
 				<path d={paths.line} class="line m-{metric}" />
 			</svg>
-			{#each refs as r (r.key)}
-				<div class="ref" style:top={r.top}></div>
-				<span class="reflbl" style:top={r.labelTop} style:left={r.labelLeft}
-					>{r.name}{#if r.elev}<b class="num">{r.elev}</b>{/if}</span
-				>
-			{/each}
 			{#each rainMarks as m (m.left)}<span class="rainlbl" style:left={m.left} style:top={m.top}
 					>{m.label}</span
 				>{/each}
@@ -688,6 +745,12 @@
 					{#if conf.roomy}<span>Less certain →</span>{/if}
 				</div>
 			{/if}
+			{#each refs as r (r.key)}
+				<div class="ref" style:top={r.top}></div>
+				<span class="reflbl" style:top={r.labelTop} style:left={r.labelLeft}
+					>{r.name}{#if r.elev}<b class="num">{r.elev}</b>{/if}</span
+				>
+			{/each}
 			{#if s}
 				<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>
 				{#if metric !== 'cloud'}
@@ -728,46 +791,38 @@
 		{/each}
 	</div>
 	<div class="legend">
-		<span><i class="sw night"></i>Night (shaded)</span>
+		{#if showNight}<span><i class="sw night"></i>Night (shaded)</span>{/if}
 		{#if metric === 'precip'}
 			<span><i class="sw" style:background="var(--snow)"></i>Snow</span>
 			<span
-				><i class="sw" style:background="var(--snow-heavy)"></i>Snow on a 6+ {c.snowUnit === 'in'
-					? 'in'
-					: '15 cm'} day</span
+				><i class="sw" style:background="var(--snow-heavy)"></i>Heavy: {c.snowUnit === 'in'
+					? '6+ in'
+					: '15+ cm'} in one bar</span
 			>
-			<span><i class="sw" style:background="var(--mix)"></i>Mixed (snow part)</span>
+			<span><i class="sw" style:background="var(--mix)"></i>Mixed</span>
 			<span
-				><i class="sw" style:background="var(--rain)"></i>All rain: marks along the bottom, labelled
-				in
-				{units === 'imperial' ? 'inches' : 'mm'} of water (not on the snow scale)</span
+				><i class="sw" style:background="var(--rain)"></i>Rain ({units === 'imperial' ? 'in' : 'mm'} of
+				water)</span
 			>
-			<span>Line: running snow total, right axis</span>
+			<span><i class="sw line-sw"></i>Total snow (right axis)</span>
 		{:else if metric === 'slr'}
 			<span><i class="sw z-dry-sw"></i>Dry powder</span>
 			<span><i class="sw z-light-sw"></i>Light</span>
 			<span><i class="sw z-avg-sw"></i>Average</span>
 			<span><i class="sw z-wet-sw"></i>Heavy & wet</span>
-			<span>Solid line while snow falls; faint when dry (the ratio if it snowed)</span>
-			<span><i class="sw" style:background="var(--rain)"></i>Too warm: rain marks</span>
+			<span>Faint line: the ratio if it snowed</span>
+			<span><i class="sw" style:background="var(--rain)"></i>Rain</span>
 		{:else if metric === 'temp'}
-			<span
-				>{STEP[R] === 12 ? 'Days show the high, nights the low · ' : ''}Dashed line: freezing</span
-			>
+			<span>{STEP[R] === 12 ? 'Day highs, night lows · ' : ''}Dashed: freezing</span>
 		{:else if metric === 'wind'}
-			<span>Solid: strongest sustained wind · Dashed: peak gust</span>
+			<span>Solid: wind · Dashed: gusts</span>
 		{:else if metric === 'cloud'}
-			<span>The thicker the band, the more of the sky is covered at that height</span>
+			<span>Thicker band: more of the sky covered</span>
 		{:else}
-			<span
-				>Dashed lines: {[...elevs]
-					.reverse()
-					.map((e) => `${e.label} ${elevation(e.m, units)}`)
-					.join(' · ')}</span
-			>
+			<span>Dashed lines: this location's elevations</span>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
-				><i class="sw band-sw b-{metric}"></i>Range across the weather models</span
+				><i class="sw band-sw b-{metric}"></i>Model range</span
 			>{/if}
 		<span class="lower-key"
 			><i class="sw cloud-sw"></i>Cloud cover <i class="sw pop-sw"></i>Chance of precipitation
@@ -950,13 +1005,14 @@
 	.night {
 		fill: var(--night);
 	}
+	/* Guide lines stay quiet: one faint colour, so the data is what you read. */
 	.grid {
 		fill: none;
 		stroke: var(--grid);
 	}
 	.midnight {
 		fill: none;
-		stroke: var(--border);
+		stroke: var(--grid);
 	}
 	.b-snow {
 		fill: var(--snow);
@@ -1150,8 +1206,16 @@
 		bottom: 0;
 		right: 0;
 		background: color-mix(in srgb, var(--surface) 45%, transparent);
-		border-left: 1px dashed var(--text-3);
 		pointer-events: none;
+	}
+	/* A short tick marks where "less certain" starts, instead of a full-height line. */
+	.conf::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		height: 22px;
+		border-left: 1px solid var(--text-3);
 	}
 	.conf span {
 		position: absolute;
@@ -1178,7 +1242,7 @@
 		gap: 4px;
 		padding: 0 5px;
 		border-radius: 5px;
-		font-size: 0.66rem;
+		font-size: 10px;
 		font-weight: 500;
 		line-height: 1;
 		color: var(--text-2);
@@ -1261,6 +1325,12 @@
 		width: 10px;
 		height: 10px;
 		border-radius: 2px;
+	}
+	.sw.line-sw {
+		width: 14px;
+		height: 2.5px;
+		border-radius: 2px;
+		background: var(--text);
 	}
 	.sw.night {
 		width: 14px;

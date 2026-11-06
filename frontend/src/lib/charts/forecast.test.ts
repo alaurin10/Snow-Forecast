@@ -64,11 +64,17 @@ describe('buildSteps', () => {
 		expect(s).toHaveLength(15);
 		expect(s[0].hours).toBe(3);
 	});
-	it('marks a 6+ in day as heavy snow', () => {
+	it('colours a bar heavy only when that bar itself is 6+ in', () => {
+		// Friday has 13 cm by noon on the hourly view, but no single hour is anywhere near 6 in.
 		const s = buildSteps(hourly(), 1);
 		const fri = s.filter((x) => x.t.startsWith('2026-11-06'));
-		expect(fri.every((x) => x.kind === 'heavy')).toBe(true);
+		expect(fri.every((x) => x.kind === 'snow')).toBe(true);
 		expect(s[s.length - 1].cum).toBeCloseTo(13);
+		// 1.5 cm an hour: each hour is plain snow, but Friday's 12-hour day bar (18 cm) is heavy.
+		const h = hourly();
+		h.snow_cm = h.snow_cm.map((v) => (v ? 1.5 : 0));
+		expect(buildSteps(h, 1).find((x) => x.t.startsWith('2026-11-06T08'))?.kind).toBe('snow');
+		expect(buildSteps(h, 10).find((x) => x.t.startsWith('2026-11-06T06'))?.kind).toBe('heavy');
 	});
 	it('splits 10 days into day and night halves with highs and lows', () => {
 		const s = buildSteps(hourly(), 10);
@@ -110,9 +116,7 @@ describe('precipitation type', () => {
 		const fri = s.filter((x) => x.t.startsWith('2026-11-06'));
 		// 1 cm snow + 0.05 cm water (0.5 cm as snow) per hour: a third is rain, so mixed.
 		expect(fri.filter((x) => x.t.slice(11, 12) === '0').every((x) => x.kind === 'mix')).toBe(true);
-		expect(fri.filter((x) => x.t.slice(11, 12) === '1').every((x) => x.kind === 'heavy')).toBe(
-			true
-		);
+		expect(fri.filter((x) => x.t.slice(11, 12) === '1').every((x) => x.kind === 'snow')).toBe(true);
 	});
 });
 
