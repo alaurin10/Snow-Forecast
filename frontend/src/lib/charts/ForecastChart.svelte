@@ -422,18 +422,6 @@
 					.join(' · ')
 			},
 			{
-				id: 'slr' as Metric,
-				label: 'Snow ratio',
-				color: 'var(--snow)',
-				value: s.kind === 'rain' ? 'Rain' : s.slr === null ? 'Too warm' : `${Math.round(s.slr)}:1`,
-				sub:
-					s.kind === 'rain'
-						? 'too warm for snow'
-						: s.slr === null
-							? 'no snow at this temperature'
-							: `${slrWord(s.slr)}${s.snow > 0.05 ? '' : ' (if it snows)'}`
-			},
-			{
 				id: 'temp' as Metric,
 				label: 'Temperature',
 				color: 'var(--temp)',
@@ -467,6 +455,18 @@
 				color: 'var(--level)',
 				value: elevation(s.fl, units),
 				sub: zone(s.fl)
+			},
+			{
+				id: 'slr' as Metric,
+				label: 'Snow ratio',
+				color: 'var(--snow)',
+				value: s.kind === 'rain' ? 'Rain' : s.slr === null ? 'Too warm' : `${Math.round(s.slr)}:1`,
+				sub:
+					s.kind === 'rain'
+						? 'too warm for snow'
+						: s.slr === null
+							? 'no snow at this temperature'
+							: `${slrWord(s.slr)}${s.snow > 0.05 ? '' : ' (if it snows)'}`
 			}
 		];
 	});

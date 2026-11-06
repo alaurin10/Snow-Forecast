@@ -20,8 +20,12 @@
 	const c = $derived(converters(prefs.units));
 	// One scale for every card, so bars compare across locations.
 	const barMax = $derived(
-		Math.max(5, ...(rows ?? []).flatMap((r) => dailyTotals(r.periods ?? []).map((d) => d.cm)))
+		Math.max(5, ...(rows ?? []).flatMap((r) => dailyTotals(r.periods ?? [], DAYS).map((d) => d.cm)))
 	);
+	// The card's total is the sum of its bars, so the two always cover the same days.
+	const DAYS = 7;
+	const weekTotal = (r: OverviewRow) =>
+		dailyTotals(r.periods ?? [], DAYS).reduce((a, d) => a + d.cm, 0);
 	const href = (id: string) => resolve('/location/[id]', { id });
 	const today = new Date().toLocaleDateString('en-US', {
 		weekday: 'long',
@@ -59,9 +63,9 @@
 						{#if r.run_id != null}
 							<div class="total">
 								<span class="big num"
-									>{snowNum(r.next5_cm, prefs.units)}<small>{c.snowUnit}</small></span
+									>{snowNum(weekTotal(r), prefs.units)}<small>{c.snowUnit}</small></span
 								>
-								<span class="faint small">next 5 days</span>
+								<span class="faint small">next {DAYS} days</span>
 							</div>
 						{/if}
 					</div>
@@ -72,7 +76,8 @@
 							periods={r.periods ?? []}
 							max={barMax}
 							units={prefs.units}
-							label={`${r.name}: snow for the next 5 days`}
+							days={DAYS}
+							label={`${r.name}: snow for the next ${DAYS} days`}
 						/>
 					{/if}
 					{#if r.alerts?.length || rated(r)}
