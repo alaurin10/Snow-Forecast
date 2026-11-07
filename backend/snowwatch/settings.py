@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         return self.data_dir / "backups"
 
     @property
+    def precip_dir(self) -> Path:
+        """Precipitation frames for the map (see snowwatch/precip.py)."""
+        return self.data_dir / "precip"
+
+    @property
     def user_agent(self) -> str:
         return f"snowwatch/0.1 ({self.nws_contact})"
 
