@@ -35,5 +35,6 @@ services:
       - ./data:/data
     healthcheck:
       disable: true # the image's check is for the api's HTTP port
-    mem_limit: 512m
+    # Forecast runs plus the map's precipitation frames (~350 MB at peak) can overlap.
+    mem_limit: 1g
     restart: unless-stopped
