@@ -229,3 +229,10 @@ def test_api_serves_index_and_frames(settings: Settings) -> None:
     assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
     assert client.get("/api/precip/index.json.tmp").status_code == 404
     assert client.get("/api/precip/..%2Fsnowwatch.db").status_code == 404
+
+
+def test_numpy_runs_on_plain_x86_64() -> None:
+    """The mini PC's Docker VM reports a basic CPU type; NumPy 2.4+ needs x86-64-v2 and
+    fails to import there ("your machine doesn't support X86_V2"). Keep a build that doesn't."""
+    simd = np.show_config(mode="dicts")["SIMD Extensions"]  # type: ignore[no-untyped-call]
+    assert "X86_V2" not in simd.get("baseline", [])
