@@ -2,30 +2,38 @@
   Every location on a map. Each marker shows the next-5-day snow on the
   Calendar's colour ramp, with a ring in the avalanche danger colour when the
   center's rating is current. Tap a marker for the numbers and a link.
-  With `radar`, a precipitation layer plays over the map: the last two hours of
-  observed radar, or the next ~48 hours of model forecast with rain, freezing rain
-  and snow in their own colours.
+  With `radar`, precipitation plays over the map on one timeline: the last two hours
+  of observed radar, then the next ~48 hours of forecast, with rain, mix and snow in
+  their own colours. See ../radar.ts for the sources and how they're blended.
 -->
 <script lang="ts">
 	import 'leaflet/dist/leaflet.css';
-	import type { Map as LeafletMap, TileLayer } from 'leaflet';
+	import type { Map as LeafletMap, GridLayer, WMSOptions } from 'leaflet';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
-	import { prefs, type MapLayer } from '../prefs.svelte';
+	import { prefs } from '../prefs.svelte';
 	import {
-		FORECAST_WMS,
-		forecastLabel,
 		frameLabel,
-		loadForecastTimes,
-		loadRadar,
+		GEOMET,
+		hrrrSlot,
+		loadTimeline,
+		MODEL_LAYERS,
 		RADAR_MAX_NATIVE_ZOOM,
+		radarUrl,
 		RAMPS,
 		rampTop,
+		resetSouthCache,
 		sldBody,
-		type RadarFrame
+		UNTYPED,
+		untypedTop,
+		wpcFor,
+		type Frame,
+		type Timeline,
+		type WmsLayer
 	} from '../radar';
+	import { radarLayer, southLayer } from '../southLayer';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -57,106 +65,123 @@
 		return () => mq.removeEventListener('change', on);
 	});
 
-	// ---- Precipitation frames ------------------------------------------------
-	const mode = $derived<MapLayer>(radar ? prefs.mapLayer : 'off');
-	let radarFrames = $state<RadarFrame[]>([]);
-	let fcTimes = $state<number[]>([]);
-	let radarError = $state(false);
-	let fcError = $state(false);
+	// ---- Precipitation timeline ------------------------------------------------
+	const on = $derived(radar && prefs.mapPrecip === 'on');
+	let timeline = $state<Timeline>({ frames: [], now: -1 });
+	let loadError = $state(false);
 	let frame = $state(0);
 	let playing = $state(true);
 	let now = $state(Date.now());
+	/** The current frame's US forecast fell back to 6-hour totals (no type). */
+	let untypedShown = $state(false);
 
-	const times = $derived(
-		mode === 'radar' ? radarFrames.map((f) => f.time) : mode === 'forecast' ? fcTimes : []
-	);
-	const count = $derived(times.length);
-	const label = $derived.by(() => {
-		const t = times[Math.min(frame, count - 1)];
-		if (t === undefined) return null;
-		return mode === 'radar' ? frameLabel(t, now) : forecastLabel(t, now);
-	});
-	// Day names under the forecast slider, at each local midnight.
-	const dayTicks = $derived.by(() => {
-		if (mode !== 'forecast' || count < 2) return [];
-		const out: { at: number; name: string }[] = [];
-		times.forEach((t, i) => {
-			const start = new Date((t - 3600) * 1000);
-			if (i > 0 && start.getHours() === 0)
-				out.push({
-					at: (i / (count - 1)) * 100,
-					name: start.toLocaleDateString('en-US', { weekday: 'short' })
-				});
+	const frames = $derived(timeline.frames);
+	const count = $derived(frames.length);
+	const current = $derived<Frame | undefined>(frames[Math.min(frame, count - 1)]);
+	const label = $derived(current ? frameLabel(current, now) : null);
+	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
+	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
+	const ticks = $derived.by(() => {
+		const out: { at: number; name: string; now?: boolean }[] = [];
+		if (timeline.now >= 0 && timeline.now < count - 1)
+			out.push({ at: pct(timeline.now), name: 'Now', now: true });
+		frames.forEach((f, i) => {
+			if (f.past || i === 0) return;
+			const start = new Date((f.t - 3600) * 1000);
+			// Skip a day name that would crowd "Now".
+			if (start.getHours() === 0 && !(out[0]?.now && pct(i) - out[0].at < 9))
+				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
 		});
 		return out;
 	});
 
-	const OPACITY = { radar: 0.75, forecast: 0.8 };
-	// Built frames, by key. Each holds one tile layer (radar) or one per precip type
-	// (forecast), kept on the map at opacity 0 until shown so the loop doesn't flash.
+	const OPACITY = 0.8;
+	const ECCC =
+		'<a href="https://eccc-msc.github.io/open-data/">Environment and Climate Change Canada</a>';
+	// Built frames, by key, each a few layers kept on the map at opacity 0 until shown
+	// so the loop doesn't flash.
 	interface Built {
-		layers: TileLayer[];
-		loaded: Set<TileLayer>;
+		layers: GridLayer[];
+		loaded: Set<GridLayer>;
+		untyped: Promise<boolean>;
 	}
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Leaflet bookkeeping, not UI state
 	const built = new Map<string, Built>();
-	const keyFor = (i: number) => `${mode}:${times[i]}`;
+	const keyFor = (f: Frame) => `${f.past ? 'p' : 'f'}${f.t}`;
+
+	function wms(w: WmsLayer, time: number, attribution: string): GridLayer {
+		return L!.tileLayer.wms(GEOMET, {
+			layers: w.layer,
+			styles: '',
+			format: 'image/png',
+			transparent: true,
+			version: '1.3.0',
+			// Big images: GeoMet rate-limits, so ask for few of them.
+			tileSize: 1024,
+			pane: 'precip',
+			opacity: 0,
+			maxZoom: 15,
+			maxNativeZoom: 10,
+			attribution,
+			// Extra WMS parameters.
+			time: new Date(time * 1000).toISOString().replace('.000Z', 'Z'),
+			sld_body: sldBody(w.layer, w.ramp.steps)
+		} as WMSOptions);
+	}
 
 	function ensure(i: number): Built | null {
-		if (!map || !L || mode === 'off' || i < 0 || i >= count) return null;
-		const key = keyFor(i);
-		const have = built.get(key);
+		if (!map || !L || !on || i < 0 || i >= count) return null;
+		const f = frames[i];
+		const have = built.get(keyFor(f));
 		if (have) return have;
-		const t = times[i];
-		let layers: TileLayer[];
-		if (mode === 'radar') {
-			const f = radarFrames[i];
-			layers = [
-				L.tileLayer(f.url, {
-					pane: 'precip',
-					opacity: 0,
-					maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
-					maxZoom: 15,
-					attribution: 'Radar © <a href="https://www.rainviewer.com">RainViewer</a>'
-				})
-			];
+		let layers: GridLayer[];
+		let untyped = Promise.resolve(false);
+		if (f.past) {
+			const url = radarUrl(f.t);
+			layers = url
+				? [
+						radarLayer(L, url, {
+							pane: 'precip',
+							opacity: 0,
+							maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
+							maxZoom: 15,
+							attribution: 'Radar © <a href="https://www.rainviewer.com">RainViewer</a>'
+						})
+					]
+				: [];
 		} else {
-			const time = new Date(t * 1000).toISOString().replace('.000Z', 'Z');
-			layers = RAMPS.map((r) =>
-				L!.tileLayer.wms(FORECAST_WMS, {
-					layers: r.layer,
-					styles: '',
-					format: 'image/png',
-					transparent: true,
-					version: '1.3.0',
-					// Big images: GeoMet rate-limits, so ask for few of them.
-					tileSize: 1024,
-					pane: 'precip',
-					opacity: 0,
-					maxZoom: 15,
-					maxNativeZoom: 10,
-					attribution:
-						'Forecast © <a href="https://eccc-msc.github.io/open-data/">Environment and Climate Change Canada</a>',
-					// Extra WMS parameters.
-					time,
-					sld_body: sldBody(r)
-				} as import('leaflet').WMSOptions)
-			);
+			const hrrr = hrrrSlot(f.t);
+			untyped = hrrr.then((m) => m === null);
+			layers = [
+				// Under the Canadian model; clipped to outside its domain anyway.
+				southLayer(
+					L,
+					{ hrrr, wpc: () => wpcFor(f.t) },
+					{
+						pane: 'precip',
+						opacity: 0,
+						maxZoom: 15,
+						attribution:
+							'US forecast: NOAA HRRR via <a href="https://mesonet.agron.iastate.edu">Iowa Environmental Mesonet</a>, NWS WPC'
+					}
+				),
+				...MODEL_LAYERS.map((w) => wms(w, f.t, `Forecast © ${ECCC}`))
+			];
 		}
-		const b: Built = { layers, loaded: new Set() };
+		const b: Built = { layers, loaded: new Set(), untyped };
 		for (const l of layers) {
 			l.on('loading', () => b.loaded.delete(l));
 			l.on('load', () => b.loaded.add(l));
 			l.on('tileerror', retryTile);
 			l.addTo(map);
 		}
-		built.set(key, b);
+		built.set(keyFor(f), b);
 		return b;
 	}
 	/** One more try for a tile that failed (GeoMet answers 429 when busy). */
 	function retryTile(e: import('leaflet').TileErrorEvent) {
 		const img = e.tile as HTMLImageElement;
-		if (img.dataset.retried) return;
+		if (!img.src || img.dataset.retried) return;
 		img.dataset.retried = '1';
 		const src = img.src;
 		const sep = src.includes('?') ? '&' : '?';
@@ -169,105 +194,80 @@
 		built.clear();
 	}
 
-	/** Show the current frame, preload the next ones, and drop those far behind. */
+	/** Show the current frame, preload the next, and drop the rest. */
 	function show() {
-		if (!map || mode === 'off' || !count) return;
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local scratch, not state
-		const keep = new Set<string>();
-		for (const d of mode === 'radar' ? [-1, 0, 1, 2] : [0, 1]) {
-			const i = (frame + d + count) % count;
-			ensure(i);
-			keep.add(keyFor(i));
-		}
-		const current = keyFor(frame);
+		if (!map) return;
+		if (!on || !count) return clearFrames();
+		const want = [frame, (frame + 1) % count].map((i) => keyFor(frames[i]));
+		for (const i of [frame, (frame + 1) % count]) ensure(i);
+		const cur = keyFor(frames[frame]);
 		for (const [k, b] of built) {
-			if (!keep.has(k)) {
+			if (!want.includes(k)) {
 				for (const l of b.layers) l.remove();
 				built.delete(k);
 			} else {
-				const op = k === current ? OPACITY[mode as 'radar' | 'forecast'] : 0;
-				for (const l of b.layers) l.setOpacity(op);
+				for (const l of b.layers) l.setOpacity(k === cur ? OPACITY : 0);
+				if (k === cur) b.untyped.then((u) => keyFor(frames[frame]) === k && (untypedShown = u));
 			}
 		}
+		if (frames[frame].past) untypedShown = false;
 	}
 
-	async function refreshRadar() {
+	async function refresh() {
 		try {
-			radarFrames = await loadRadar();
-			radarError = false;
+			const before = current?.t;
+			const atNow = frame === timeline.now;
+			resetSouthCache();
+			const tl = await loadTimeline();
+			timeline = tl;
+			loadError = false;
+			// Keep the viewer's place if that time still exists; otherwise go to "now".
+			const same = tl.frames.findIndex((f) => f.t === before);
+			frame = atNow || same < 0 ? Math.max(0, tl.now) : same;
 		} catch {
-			radarError = true;
-		}
-	}
-	async function refreshForecast() {
-		try {
-			fcTimes = await loadForecastTimes();
-			fcError = false;
-		} catch {
-			fcError = true;
+			loadError = true;
 		}
 	}
 
-	function choose(m: MapLayer) {
-		if (m === mode) return;
-		prefs.setMapLayer(m);
-	}
-
-	// A new layer: start the radar at the latest frame and the forecast at this hour.
-	let lastMode: MapLayer | null = null;
-	let lastCount = 0;
-	$effect(() => {
-		const m = mode;
-		const n = count;
-		if (!ready) return;
-		if (m !== lastMode) {
-			clearFrames();
-			frame = m === 'radar' ? Math.max(0, n - 1) : 0;
-			playing = true;
-			lastMode = m;
-		} else if (n !== lastCount) {
-			frame = m === 'radar' ? Math.max(0, n - 1) : Math.min(frame, Math.max(0, n - 1));
-		}
-		lastCount = n;
-	});
 	$effect(() => {
 		void frame;
-		void mode;
+		void on;
 		void count;
 		if (!ready) return;
-		// Scrubbing the forecast: wait until the slider settles before asking for images.
-		if (mode === 'forecast' && !playing) {
+		// Scrubbing: wait until the slider settles before asking for images.
+		if (!playing) {
 			const id = setTimeout(show, 150);
 			return () => clearTimeout(id);
 		}
 		show();
 	});
 
-	// Play: step when the next frame's images are in (or after a short wait), and
-	// hold a moment on the last frame before looping.
+	// Play: step when the next frame's images are in (or after a short wait), quicker
+	// through the radar, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || mode === 'off' || count < 2) return;
+		if (!ready || !playing || !on || count < 2) return;
 		let hold = 0;
 		let waits = 0;
-		const id = setInterval(
-			() => {
-				if (hold > 0) return void hold--;
-				const next = (frame + 1) % count;
-				if (!isLoaded(ensure(next)) && waits++ < 4) return;
-				waits = 0;
-				frame = next;
-				if (next === count - 1) hold = 3;
-			},
-			mode === 'radar' ? 500 : 900
-		);
-		return () => clearInterval(id);
+		let id: ReturnType<typeof setTimeout>;
+		const tick = () => {
+			const past = frames[frame]?.past;
+			id = setTimeout(tick, past ? 450 : 800);
+			if (hold > 0) return void hold--;
+			const next = (frame + 1) % count;
+			if (!isLoaded(ensure(next)) && waits++ < 5) return;
+			waits = 0;
+			frame = next;
+			if (next === count - 1) hold = 3;
+			else if (next === timeline.now) hold = 2;
+		};
+		id = setTimeout(tick, 600);
+		return () => clearTimeout(id);
 	});
 
 	$effect(() => {
 		if (!radar) return;
 		const ids = [
-			setInterval(refreshRadar, 10 * 60 * 1000),
-			setInterval(refreshForecast, 30 * 60 * 1000),
+			setInterval(refresh, 10 * 60 * 1000),
 			setInterval(() => (now = Date.now()), 60 * 1000)
 		];
 		return () => ids.forEach(clearInterval);
@@ -290,10 +290,7 @@
 			// Precipitation between the terrain and the markers.
 			map.createPane('precip').style.zIndex = '350';
 			markers = L.layerGroup().addTo(map);
-			if (radar) {
-				refreshRadar();
-				refreshForecast();
-			}
+			if (radar) refresh();
 			ready = true;
 			draw();
 		});
@@ -301,7 +298,6 @@
 			cancelled = true;
 			ready = false;
 			built.clear();
-			lastMode = null;
 			map?.remove();
 			map = null;
 		};
@@ -343,12 +339,16 @@
 	}
 
 	const unit = $derived(units === 'imperial' ? 'in' : 'cm');
-	const legendRamps = [...RAMPS].reverse();
-	const modes: { id: MapLayer; name: string }[] = [
-		{ id: 'radar', name: 'Radar' },
-		{ id: 'forecast', name: 'Forecast' },
-		{ id: 'off', name: 'Off' }
-	];
+	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
+	const source = $derived(
+		!current
+			? ''
+			: current.past
+				? 'Observed by radar'
+				: untypedShown
+					? 'Forecast: Canadian HRDPS model; rest of US, NWS 6-hour totals'
+					: 'Forecast: Canadian HRDPS model; rest of US, NOAA HRRR'
+	);
 </script>
 
 <div class="wrap" class:with-controls={radar}>
@@ -362,21 +362,9 @@
 		aria-label="Map of locations"
 	></div>
 	{#if radar}
-		<section class="controls" aria-label="Precipitation layer">
-			<div class="row">
-				<div class="seg" role="group" aria-label="Precipitation">
-					{#each modes as m (m.id)}
-						<button aria-pressed={mode === m.id} onclick={() => choose(m.id)}>{m.name}</button>
-					{/each}
-				</div>
-				<div class="seg" role="group" aria-label="Map colours">
-					<button aria-pressed={muted} onclick={() => prefs.setBasemap('muted')}>Muted</button>
-					<button aria-pressed={!muted} onclick={() => prefs.setBasemap('color')}>Colour</button>
-				</div>
-			</div>
-
-			{#if mode !== 'off'}
-				{#if count && label}
+		<section class="controls" aria-label="Precipitation">
+			{#if on}
+				{#if count && label && current}
 					<div class="player">
 						<button
 							class="play"
@@ -394,55 +382,62 @@
 								max={Math.max(0, count - 1)}
 								bind:value={frame}
 								oninput={() => (playing = false)}
-								aria-label={mode === 'radar' ? 'Radar time' : 'Forecast hour'}
+								aria-label="Time"
 								aria-valuetext={`${label.when}, ${label.rel}`}
+								style:--now="{timeline.now >= 0 ? pct(timeline.now) : 0}%"
+								class:has-past={timeline.now >= 0}
 							/>
-							{#if dayTicks.length}
-								<div class="ticks" aria-hidden="true">
-									{#each dayTicks as d (d.at)}
-										<span style:left="{d.at}%">{d.name}</span>
-									{/each}
-								</div>
-							{/if}
+							<div class="ticks" aria-hidden="true">
+								{#each ticks as d (d.at)}
+									<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
+								{/each}
+							</div>
 						</div>
 						<div class="time" aria-live="off">
 							<strong class="num">{label.when}</strong>
-							<span>{label.rel}</span>
+							<span class:fc={!current.past}>{label.rel}</span>
 						</div>
 					</div>
-				{:else if (mode === 'radar' && radarError) || (mode === 'forecast' && fcError)}
-					<p class="note">
-						{mode === 'radar' ? 'Radar' : 'The forecast layer'} is unavailable right now.
-					</p>
+				{:else if loadError}
+					<p class="note">Precipitation is unavailable right now.</p>
 				{:else}
 					<p class="note">Loading…</p>
 				{/if}
 
 				<div class="key">
-					{#if mode === 'radar'}
+					{#each legendRamps as r (r.kind)}
 						<span class="kind">
-							<span class="name">Snow</span>
-							<span class="ramp grad snow" aria-hidden="true"></span>
-						</span>
-						<span class="kind">
-							<span class="name">Rain</span>
-							<span class="ramp grad rain" aria-hidden="true"></span>
-						</span>
-						<span class="faint src">Light → heavy · observed by radar, last 2 hours</span>
-					{:else}
-						{#each legendRamps as r (r.kind)}
-							<span class="kind">
-								<span class="name">{r.label}</span>
-								<span class="ramp" aria-hidden="true">
-									{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
-								</span>
-								<span class="faint">{rampTop(r, units)}</span>
+							<span class="name">{r.label}</span>
+							<span class="ramp" aria-hidden="true">
+								{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
 							</span>
-						{/each}
-						<span class="faint src">Hourly amounts · Canadian HRDPS model, 2.5 km</span>
+							<span class="faint">{rampTop(r, units)}</span>
+						</span>
+					{/each}
+					{#if untypedShown}
+						<span class="kind">
+							<span class="name">Type unknown</span>
+							<span class="ramp" aria-hidden="true">
+								{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
+							</span>
+							<span class="faint">{untypedTop(units)}</span>
+						</span>
 					{/if}
+					<span class="faint src">{source}</span>
 				</div>
 			{/if}
+			<div class="row">
+				<button
+					class="toggle"
+					aria-pressed={on}
+					onclick={() => prefs.setMapPrecip(!on)}
+					title="Show or hide precipitation">Precipitation</button
+				>
+				<div class="seg" role="group" aria-label="Map colours">
+					<button aria-pressed={muted} onclick={() => prefs.setBasemap('muted')}>Muted</button>
+					<button aria-pressed={!muted} onclick={() => prefs.setBasemap('color')}>Colour</button>
+				</div>
+			</div>
 		</section>
 	{/if}
 </div>
@@ -542,6 +537,16 @@
 		height: 14px;
 		margin: 0 8px;
 	}
+	/* The radar part of the track, before "now", in a lighter shade. */
+	.track input.has-past {
+		background: linear-gradient(90deg, var(--accent-soft) var(--now), transparent var(--now));
+		border-radius: 999px;
+	}
+	.ticks span.now {
+		color: var(--accent-ink);
+		font-weight: 600;
+		border-left-color: var(--accent);
+	}
 	.ticks span {
 		position: absolute;
 		top: 0;
@@ -567,6 +572,24 @@
 		color: var(--text-3);
 		font-size: 0.75rem;
 		white-space: nowrap;
+	}
+	.time span.fc {
+		color: var(--accent-ink);
+	}
+	.toggle {
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 4px 12px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		background: var(--surface-2);
+		color: var(--text-2);
+	}
+	.toggle[aria-pressed='true'] {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--surface);
+		font-weight: 600;
 	}
 	.note {
 		margin: 0;
@@ -598,16 +621,6 @@
 	}
 	.ramp i {
 		width: 12px;
-	}
-	/* RainViewer's "Universal Blue" scheme, sampled from its tiles. */
-	.ramp.grad {
-		width: 72px;
-	}
-	.ramp.rain {
-		background: linear-gradient(90deg, #88ddee, #0099cc, #004e78, #ffee00, #ff9f00, #ff4400);
-	}
-	.ramp.snow {
-		background: linear-gradient(90deg, #c3e3ff, #85c5ff, #5b9bff, #3b7bef);
 	}
 	.src {
 		flex-basis: 100%;

@@ -4,7 +4,6 @@ import type { UnitSystem } from './units';
 
 export type Theme = 'auto' | 'light' | 'dark';
 export type BandName = 'base' | 'mid' | 'summit';
-export type MapLayer = 'radar' | 'forecast' | 'off';
 export type Basemap = 'muted' | 'color';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -28,7 +27,7 @@ class Prefs {
 	units = $state<UnitSystem>(load('sw.units', ['imperial', 'metric'] as const, 'imperial'));
 	theme = $state<Theme>(load('sw.theme', ['auto', 'light', 'dark'] as const, 'auto'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
-	mapLayer = $state<MapLayer>(load('sw.mapLayer', ['radar', 'forecast', 'off'] as const, 'radar'));
+	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
 	basemap = $state<Basemap>(load('sw.basemap', ['muted', 'color'] as const, 'muted'));
 
 	setUnits(u: UnitSystem) {
@@ -46,9 +45,9 @@ class Prefs {
 		save('sw.band', b);
 	}
 
-	setMapLayer(m: MapLayer) {
-		this.mapLayer = m;
-		save('sw.mapLayer', m);
+	setMapPrecip(on: boolean) {
+		this.mapPrecip = on ? 'on' : 'off';
+		save('sw.mapPrecip', this.mapPrecip);
 	}
 
 	setBasemap(b: Basemap) {
