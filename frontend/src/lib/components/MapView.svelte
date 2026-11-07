@@ -18,6 +18,7 @@
 	import {
 		frameLabel,
 		loadTimeline,
+		PrecipError,
 		RAMPS,
 		rampTop,
 		UNTYPED,
@@ -72,7 +73,8 @@
 	// The mini PC draws every frame; here we download them all once and swap them.
 	const on = $derived(radar && prefs.mapPrecip === 'on');
 	let timeline = $state<Timeline | null>(null);
-	let loadError = $state(false);
+	/** Why precipitation isn't showing, in words; null when it is. */
+	let loadError = $state<string | null>(null);
 	let frame = $state(0);
 	let playing = $state(true);
 	let now = $state(Date.now());
@@ -162,7 +164,7 @@
 			const before = current?.t;
 			const atNow = !timeline || frame === timeline.now;
 			const tl = await loadTimeline();
-			loadError = false;
+			loadError = null;
 			// The pictures' box only changes when locations do.
 			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
 			timeline = tl;
@@ -177,10 +179,21 @@
 			}
 			void show();
 			void fetchAll();
-		} catch {
-			loadError = true;
+		} catch (e) {
+			loadError =
+				e instanceof PrecipError
+					? e.message
+					: `Precipitation couldn't be shown (${e instanceof Error ? e.message : e}).`;
+			console.error('precipitation', e);
 		}
 	}
+
+	// While it isn't showing, try again every 30 seconds (the server may be mid-build).
+	$effect(() => {
+		if (!loadError || !ready) return;
+		const id = setTimeout(refresh, 30 * 1000);
+		return () => clearTimeout(id);
+	});
 
 	$effect(() => {
 		void frame;
@@ -429,7 +442,7 @@
 						</div>
 					</div>
 				{:else if loadError}
-					<p class="note">Precipitation is unavailable right now.</p>
+					<p class="note">{loadError}</p>
 				{:else}
 					<p class="note">Loading…</p>
 				{/if}

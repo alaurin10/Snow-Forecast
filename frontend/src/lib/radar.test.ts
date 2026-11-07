@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	frameLabel,
+	loadTimeline,
 	RAMPS,
 	rampTop,
 	toTimeline,
@@ -70,5 +71,44 @@ describe('legend', () => {
 		expect(untypedColor(0.05)).toBeNull();
 		expect(untypedColor(0.1)).toBe('#e6d3b3');
 		expect(untypedColor(3)).toBe('#8f612c');
+	});
+});
+
+describe('loadTimeline errors', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const answer = (status: number, body: unknown) =>
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response(JSON.stringify(body), { status }))
+		);
+
+	it('says the frames are still being drawn', async () => {
+		answer(503, { detail: 'precipitation frames not ready yet' });
+		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'building' });
+	});
+	it('tells being offline apart', async () => {
+		answer(503, { detail: 'offline' });
+		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'offline' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => Promise.reject(new TypeError('network')))
+		);
+		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'offline' });
+	});
+	it('names a server error', async () => {
+		answer(500, {});
+		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'server' });
+	});
+	it('treats an empty list as not drawn yet', async () => {
+		answer(200, {
+			bounds: [
+				[0, 0],
+				[1, 1]
+			],
+			width: 1,
+			height: 1,
+			frames: []
+		});
+		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'building' });
 	});
 });

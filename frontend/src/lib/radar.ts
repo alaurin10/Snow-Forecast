@@ -119,11 +119,48 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 	return { frames, bounds: ix.bounds, width: ix.width, height: ix.height, now };
 }
 
+/** Why the timeline isn't available, in words for the map. */
+export class PrecipError extends Error {
+	constructor(
+		readonly kind: 'building' | 'offline' | 'server',
+		message: string
+	) {
+		super(message);
+	}
+}
+
 export async function loadTimeline(): Promise<Timeline> {
-	const res = await fetch('/api/precip', { cache: 'no-cache' });
-	if (!res.ok) throw new Error(`precip ${res.status}`);
+	let res: Response;
+	try {
+		res = await fetch('/api/precip', { cache: 'no-cache' });
+	} catch {
+		throw new PrecipError('offline', "Can't reach Snow Watch right now.");
+	}
+	if (res.status === 503) {
+		// The server says the frames aren't drawn yet; the offline cache says "offline".
+		const detail = await res
+			.json()
+			.then((j: { detail?: string }) => j.detail ?? '')
+			.catch(() => '');
+		if (detail === 'offline') throw new PrecipError('offline', "Can't reach Snow Watch right now.");
+		throw new PrecipError(
+			'building',
+			'The server is still drawing the precipitation frames (about a minute and a half after an update).'
+		);
+	}
+	if (!res.ok) {
+		throw new PrecipError(
+			'server',
+			`Precipitation is unavailable (server answered ${res.status}).`
+		);
+	}
 	const tl = toTimeline((await res.json()) as PrecipIndex);
-	if (!tl.frames.length) throw new Error('no precipitation frames yet');
+	if (!tl.frames.length) {
+		throw new PrecipError(
+			'building',
+			"The server hasn't drawn any precipitation frames yet: it may not reach the weather sources."
+		);
+	}
 	return tl;
 }
 
