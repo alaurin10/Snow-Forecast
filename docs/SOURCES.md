@@ -68,3 +68,10 @@ One `dangerRatings` entry: `{'date': {'value': '2026-10-07T19:00:00Z', 'display'
 12402 ski areas worldwide; 845 named, operating downhill areas in the US and Canada, 784 with elevation statistics.
 
 Properties: `activities`, `id`, `name`, `places`, `runConvention`, `sources`, `statistics`, `status`, `type`, `viewportHint`, `websites`, `wikidataID`.
+
+### Map precipitation layers (browser only)
+
+The Map page loads these straight from the browser; the backend never touches them.
+
+- **Radar (past):** RainViewer public API, `weather-maps.json`. Free tier: last ~2 h in 10-min frames, colour scheme 2 only, real detail to zoom 7. Its `nowcast` list is empty, so it has no future frames.
+- **Forecast (next ~48 h):** MSC GeoMet WMS (`geo.weather.gc.ca/geomet`), HRDPS 2.5 km, hourly layers `HRDPS.CONTINENTAL.DIAG_{RN,FR,SN}_PT1H` (rain, freezing rain, snow water equivalent, mm per hour ending at `time`). Free, no key, CORS open, Open Government Licence – Canada. Covers Canada and the northern US. One layer per request (multiple `LAYERS` is refused); colours are sent as an SLD in `sld_body`, where each `ColorMapEntry` is the lower bound of its band and values below the first entry are transparent. It answers 429 when hit hard, so the map asks for 1024 px tiles and preloads one frame ahead.
