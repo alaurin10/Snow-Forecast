@@ -268,6 +268,12 @@ docker compose run --rm worker snowwatch precip
 The frames cover a box around your locations, so adding a location elsewhere moves
 the box at the next pass.
 
+If the worker's log shows `NumPy was built with baseline optimizations ... X86_V2`,
+the VM's virtual CPU type hides the processor's features. The project pins NumPy
+below 2.4 so this can't happen, but setting the Docker VM's CPU type to `host` (in
+Proxmox: VM → Hardware → Processors → Type) is still worth doing: it also speeds up
+the forecast runs.
+
 **Add or change locations:** open **More → Manage locations** (owner only).
 Search the catalog for a resort, or drop a trailhead and a high-point pin for a
 tour; the app fills in elevations, timezone, NWS office, the nearest SNOTEL
