@@ -4,7 +4,6 @@ import type { UnitSystem } from './units';
 
 export type Theme = 'auto' | 'light' | 'dark';
 export type BandName = 'base' | 'mid' | 'summit';
-export type Basemap = 'muted' | 'color';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
 	try {
@@ -28,7 +27,6 @@ class Prefs {
 	theme = $state<Theme>(load('sw.theme', ['auto', 'light', 'dark'] as const, 'auto'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
-	basemap = $state<Basemap>(load('sw.basemap', ['muted', 'color'] as const, 'muted'));
 
 	setUnits(u: UnitSystem) {
 		this.units = u;
@@ -48,11 +46,6 @@ class Prefs {
 	setMapPrecip(on: boolean) {
 		this.mapPrecip = on ? 'on' : 'off';
 		save('sw.mapPrecip', this.mapPrecip);
-	}
-
-	setBasemap(b: Basemap) {
-		this.basemap = b;
-		save('sw.basemap', b);
 	}
 }
 
