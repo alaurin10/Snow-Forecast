@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
 	import 'leaflet/dist/leaflet.css';
-	import type { Map as LeafletMap, GridLayer, WMSOptions } from 'leaflet';
+	import type { Map as LeafletMap, GridLayer } from 'leaflet';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -17,8 +17,8 @@
 	import { prefs } from '../prefs.svelte';
 	import {
 		frameLabel,
-		GEOMET,
 		hrrrSlot,
+		hrrrTileUrl,
 		loadTimeline,
 		MODEL_LAYERS,
 		RADAR_MAX_NATIVE_ZOOM,
@@ -34,7 +34,14 @@
 		type Timeline,
 		type WmsLayer
 	} from '../radar';
-	import { radarLayer, southLayer } from '../southLayer';
+	import {
+		radarLayer,
+		southLayer,
+		visibleTiles,
+		warmUrl,
+		wmsLayer,
+		wmsTileUrl
+	} from '../precipLayers';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -140,24 +147,21 @@
 		return `${f.past ? 'p' : 'f'}${f.t}`;
 	}
 
+	/** Forecast images: smaller on phones, where decoded pixels are what runs out. */
+	const wmsSize = () => ((el?.clientWidth ?? 0) < 700 ? 512 : 1024);
+	const isoTime = (t: number) => new Date(t * 1000).toISOString().replace('.000Z', 'Z');
+
 	function wms(w: WmsLayer, time: number, attribution: string): GridLayer {
-		return L!.tileLayer.wms(GEOMET, {
-			layers: w.layer,
-			styles: '',
-			format: 'image/png',
-			transparent: true,
-			version: '1.3.0',
-			// Big images: GeoMet rate-limits, so ask for few of them.
-			tileSize: 1024,
-			pane: 'precip',
-			opacity: 0,
-			maxZoom: 15,
-			maxNativeZoom: 10,
-			attribution,
-			// Extra WMS parameters.
-			time: new Date(time * 1000).toISOString().replace('.000Z', 'Z'),
-			sld_body: sldBody(w.layer, w.ramp.steps)
-		} as WMSOptions);
+		return wmsLayer(
+			L!,
+			{
+				layer: w.layer,
+				sld: sldBody(w.layer, w.ramp.steps),
+				time: isoTime(time),
+				tileSize: wmsSize()
+			},
+			{ pane: 'precip', opacity: 0, maxZoom: 15, maxNativeZoom: 10, attribution }
+		);
 	}
 
 	/** The layers for frame `f`, created and added (hidden) on first use. */
@@ -211,7 +215,6 @@
 				loaded.add(l);
 				check();
 			});
-			l.on('tileerror', retryTile);
 			l.addTo(map);
 		}
 		check();
@@ -223,16 +226,6 @@
 		});
 		return b;
 	}
-	/** One more try for a tile that failed (GeoMet answers 429 when busy). */
-	function retryTile(e: import('leaflet').TileErrorEvent) {
-		const img = e.tile as HTMLImageElement;
-		if (!img.src || img.dataset.retried) return;
-		img.dataset.retried = '1';
-		const src = img.src;
-		const sep = src.includes('?') ? '&' : '?';
-		setTimeout(() => (img.src = `${src}${sep}retry=1`), 1500 + Math.random() * 1500);
-	}
-
 	function drop(key: string) {
 		const b = built.get(key);
 		if (!b) return;
@@ -244,12 +237,12 @@
 		shown = null;
 	}
 
-	/** Frames kept on the map: the one showing, the one wanted, and the next two. */
+	/** Frames kept on the map: the one showing, the one wanted, and the next. */
 	function keepKeys(): Set<string> {
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale or local bookkeeping
 		const keep = new Set<string>();
 		if (shown) keep.add(shown);
-		for (const d of [0, 1, 2]) {
+		for (const d of [0, 1]) {
 			const f = frames[(frame + d) % count];
 			if (f) keep.add(keyFor(f));
 		}
@@ -266,7 +259,7 @@
 
 	/**
 	 * Show the wanted frame. The old one stays up until the new one's images are in
-	 * (or a second and a half passes), so scrubbing never flashes an empty map.
+	 * (or five seconds pass), so scrubbing never flashes an empty map.
 	 */
 	let swapToken = 0;
 	function show() {
@@ -274,52 +267,65 @@
 		if (!on || !current) return clearFrames();
 		const key = keyFor(current);
 		const b = ensure(current);
-		for (const d of [1, 2]) {
-			const f = frames[(frame + d) % count];
-			if (f) ensure(f);
-		}
+		const after = frames[(frame + 1) % count];
+		if (after) ensure(after);
 		const keep = keepKeys();
-		for (const k of [...built.keys()]) if (!keep.has(k) && !warming.has(k)) drop(k);
+		for (const k of [...built.keys()]) if (!keep.has(k)) drop(k);
 		if (!b) return;
 		const token = ++swapToken;
 		if (b.loaded.size === b.layers.length || !shown) setVisible(key);
 		else
-			Promise.race([b.done, new Promise((r) => setTimeout(r, 1500))]).then(() => {
+			Promise.race([b.done, new Promise((r) => setTimeout(r, 5000))]).then(() => {
 				if (token === swapToken) {
 					setVisible(key);
-					for (const k of [...built.keys()]) if (!keepKeys().has(k) && !warming.has(k)) drop(k);
+					for (const k of [...built.keys()]) if (!keepKeys().has(k)) drop(k);
 				}
 			});
 	}
 
 	// ---- Background loading ----------------------------------------------------
-	// Walk the whole timeline from the current frame on, two frames at a time: load
-	// each one's images (the browser caches them), then let it go unless it's near
-	// the current frame. Scrubbing to a loaded frame is then quick. Starts over when
-	// the view moves, since the images differ.
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping, not UI state
-	const warming = new Set<string>();
+	// Walk the whole timeline from the current frame on and download each frame's
+	// images for the current view into the browser's cache, without decoding or
+	// drawing them: memory stays flat, and scrubbing to a frame later is quick.
+	// Starts over when the view moves, since the images differ.
 	let warmRun = 0;
-	function warmAll() {
+	function frameUrls(f: Frame): Promise<string[]> {
+		if (!map) return Promise.resolve([]);
+		if (f.past) {
+			const url = radarUrl(f.t);
+			if (!url) return Promise.resolve([]);
+			return Promise.resolve(
+				visibleTiles(map, 256, RADAR_MAX_NATIVE_ZOOM).map((c) => L!.Util.template(url, c))
+			);
+		}
+		const size = wmsSize();
+		const model = MODEL_LAYERS.flatMap((w) =>
+			visibleTiles(map!, size).map((c) =>
+				wmsTileUrl(w.layer, sldBody(w.layer, w.ramp.steps), isoTime(f.t), c.x, c.y, c.z, size)
+			)
+		);
+		return hrrrSlot(f.t).then((minute) => {
+			if (minute === null) {
+				void wpcFor(f.t);
+				return model;
+			}
+			const south = visibleTiles(map!, 256).map((c) => L!.Util.template(hrrrTileUrl(minute), c));
+			return [...model, ...south];
+		});
+	}
+	async function warmAll() {
 		const run = ++warmRun;
 		warm = new Set();
-		if (!on || !count) return;
+		if (!on || !count || !map) return;
 		const order = frames.map((_, d) => frames[(frame + d) % count]);
-		let next = 0;
-		const worker = async () => {
-			while (run === warmRun && next < order.length) {
-				const f = order[next++];
-				const key = keyFor(f);
-				const b = ensure(f);
-				if (!b) return;
-				warming.add(key);
-				await Promise.race([b.done, new Promise((r) => setTimeout(r, 12000))]);
-				warming.delete(key);
-				if (!keepKeys().has(key)) drop(key);
-			}
-		};
-		worker();
-		worker();
+		for (const f of order) {
+			if (run !== warmRun) return;
+			const urls = await frameUrls(f).catch(() => [] as string[]);
+			await Promise.all(urls.map((u) => warmUrl(u)));
+			if (run !== warmRun) return;
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale
+			warm = new Set(warm).add(keyFor(f));
+		}
 	}
 
 	async function refresh() {
@@ -369,6 +375,7 @@
 		if (!ready || !playing || !on || count < 2) return;
 		let hold = 0;
 		let waits = 0;
+		let loops = 0;
 		let id: ReturnType<typeof setTimeout>;
 		const tick = () => {
 			const past = frames[frame]?.past;
@@ -379,12 +386,26 @@
 			const b = ensure(frames[next]);
 			if (b && b.loaded.size < b.layers.length && waits++ < 6) return;
 			waits = 0;
+			// A few loops, then rest on "now": endless playback keeps the phone busy
+			// (battery, data and memory) for a map nobody may be watching.
+			if (next === 0 && ++loops >= 3) {
+				playing = false;
+				frame = Math.max(0, timeline.now);
+				return;
+			}
 			frame = next;
 			if (next === count - 1) hold = 3;
 			else if (next === timeline.now) hold = 2;
 		};
 		id = setTimeout(tick, 600);
 		return () => clearTimeout(id);
+	});
+
+	// Stop playing when the app goes to the background.
+	$effect(() => {
+		const onHide = () => document.hidden && (playing = false);
+		document.addEventListener('visibilitychange', onHide);
+		return () => document.removeEventListener('visibilitychange', onHide);
 	});
 
 	$effect(() => {
