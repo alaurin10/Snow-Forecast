@@ -92,7 +92,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = settings.precip_dir / "index.json"
         if not path.exists():
             raise HTTPException(503, "precipitation frames not ready yet")
-        return FileResponse(path, media_type="application/json", headers={"Cache-Control": "no-cache"})
+        return FileResponse(
+            path, media_type="application/json", headers={"Cache-Control": "no-cache"}
+        )
 
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
@@ -103,7 +105,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not path.exists():
             raise HTTPException(404)
         return FileResponse(
-            path, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable"}
+            path,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
     app.include_router(make_router())

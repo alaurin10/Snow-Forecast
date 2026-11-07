@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
 	import 'leaflet/dist/leaflet.css';
-	import type { Map as LeafletMap, GridLayer } from 'leaflet';
+	import type { Map as LeafletMap } from 'leaflet';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -17,31 +17,15 @@
 	import { prefs } from '../prefs.svelte';
 	import {
 		frameLabel,
-		hrrrSlot,
-		hrrrTileUrl,
 		loadTimeline,
-		MODEL_LAYERS,
-		RADAR_MAX_NATIVE_ZOOM,
-		radarUrl,
 		RAMPS,
 		rampTop,
-		resetSouthCache,
-		sldBody,
 		UNTYPED,
 		untypedTop,
-		wpcFor,
 		type Frame,
-		type Timeline,
-		type WmsLayer
+		type Timeline
 	} from '../radar';
-	import {
-		radarLayer,
-		southLayer,
-		visibleTiles,
-		warmUrl,
-		wmsLayer,
-		wmsTileUrl
-	} from '../precipLayers';
+	import { FrameStore, PrecipCanvas } from '../precipOverlay';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -85,30 +69,30 @@
 	});
 
 	// ---- Precipitation timeline ------------------------------------------------
+	// The mini PC draws every frame; here we download them all once and swap them.
 	const on = $derived(radar && prefs.mapPrecip === 'on');
-	let timeline = $state<Timeline>({ frames: [], now: -1 });
+	let timeline = $state<Timeline | null>(null);
 	let loadError = $state(false);
 	let frame = $state(0);
 	let playing = $state(true);
 	let now = $state(Date.now());
-	/** The frame on screen, which lags `frame` while the next one loads. */
+	/** The frame on screen (file name), which lags `frame` for the moment it takes to decode. */
 	let shown = $state<string | null>(null);
-	/** Frames whose images are in for the current view (fetched, so cached). */
-	let warm = $state<Set<string>>(new Set());
-	/** The current frame's US forecast fell back to 6-hour totals (no type). */
-	let untypedShown = $state(false);
+	/** Frames downloaded so far. */
+	let ready_ = $state<Set<string>>(new Set());
 
-	const frames = $derived(timeline.frames);
+	const frames = $derived(timeline?.frames ?? []);
 	const count = $derived(frames.length);
 	const current = $derived<Frame | undefined>(frames[Math.min(frame, count - 1)]);
 	const label = $derived(current ? frameLabel(current, now) : null);
-	const waiting = $derived(!!current && shown !== keyFor(current));
+	const waiting = $derived(!!current && shown !== current.file);
+	const untypedShown = $derived(current?.south === 'wpc');
 	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
 	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
 	const ticks = $derived.by(() => {
 		const out: { at: number; name: string; now?: boolean }[] = [];
-		if (timeline.now >= 0 && timeline.now < count - 1)
-			out.push({ at: pct(timeline.now), name: 'Now', now: true });
+		const nowAt = timeline?.now ?? -1;
+		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
 		frames.forEach((f, i) => {
 			if (f.past || i === 0) return;
 			const start = new Date((f.t - 3600) * 1000);
@@ -118,230 +102,81 @@
 		});
 		return out;
 	});
-	// The slider track: loaded frames shaded, like a video's buffered range.
+	// The slider track: downloaded frames shaded, like a video's buffered range.
 	const buffered = $derived.by(() => {
-		if (count < 2) return 'none';
+		if (count < 2 || ready_.size >= count) return 'none';
 		const w = 100 / (count - 1);
 		const stops: string[] = [];
 		frames.forEach((f, i) => {
-			const c = warm.has(keyFor(f)) ? 'var(--buffered)' : 'transparent';
-			const a = Math.max(0, (i - 0.5) * w);
-			const b = Math.min(100, (i + 0.5) * w);
-			stops.push(`${c} ${a}%`, `${c} ${b}%`);
+			const c = ready_.has(f.file) ? 'var(--buffered)' : 'transparent';
+			stops.push(`${c} ${Math.max(0, (i - 0.5) * w)}%`, `${c} ${Math.min(100, (i + 0.5) * w)}%`);
 		});
 		return `linear-gradient(90deg, ${stops.join(', ')})`;
 	});
 
 	const OPACITY = 0.8;
-	const ECCC =
-		'<a href="https://eccc-msc.github.io/open-data/">Environment and Climate Change Canada</a>';
-	interface Built {
-		layers: GridLayer[];
-		loaded: Set<GridLayer>;
-		done: Promise<void>;
-		untyped: Promise<boolean>;
-	}
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Leaflet bookkeeping, not UI state
-	const built = new Map<string, Built>();
-	function keyFor(f: Frame) {
-		return `${f.past ? 'p' : 'f'}${f.t}`;
-	}
+	const store = new FrameStore();
+	let overlay: PrecipCanvas | null = null;
 
-	/** Forecast images: smaller on phones, where decoded pixels are what runs out. */
-	const wmsSize = () => ((el?.clientWidth ?? 0) < 700 ? 512 : 1024);
-	const isoTime = (t: number) => new Date(t * 1000).toISOString().replace('.000Z', 'Z');
-
-	function wms(w: WmsLayer, time: number, attribution: string): GridLayer {
-		return wmsLayer(
-			L!,
-			{
-				layer: w.layer,
-				sld: sldBody(w.layer, w.ramp.steps),
-				time: isoTime(time),
-				tileSize: wmsSize()
-			},
-			{ pane: 'precip', opacity: 0, maxZoom: 15, maxNativeZoom: 10, attribution }
-		);
-	}
-
-	/** The layers for frame `f`, created and added (hidden) on first use. */
-	function ensure(f: Frame): Built | null {
-		if (!map || !L || !on) return null;
-		const key = keyFor(f);
-		const have = built.get(key);
-		if (have) return have;
-		let layers: GridLayer[];
-		let untyped = Promise.resolve(false);
-		if (f.past) {
-			const url = radarUrl(f.t);
-			layers = url
-				? [
-						radarLayer(L, url, {
-							pane: 'precip',
-							opacity: 0,
-							maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
-							maxZoom: 15,
-							attribution: 'Radar © <a href="https://www.rainviewer.com">RainViewer</a>'
-						})
-					]
-				: [];
-		} else {
-			const hrrr = hrrrSlot(f.t);
-			untyped = hrrr.then((m) => m === null);
-			layers = [
-				// Under the Canadian model; clipped to outside its domain anyway.
-				southLayer(
-					L,
-					{ hrrr, wpc: () => wpcFor(f.t) },
-					{
-						pane: 'precip',
-						opacity: 0,
-						maxZoom: 15,
-						attribution:
-							'US forecast: NOAA HRRR via <a href="https://mesonet.agron.iastate.edu">IEM</a>, NWS WPC'
-					}
-				),
-				...MODEL_LAYERS.map((w) => wms(w, f.t, `Forecast © ${ECCC}`))
-			];
+	/** Put the wanted frame on screen; the old one stays until the new one is decoded. */
+	let showToken = 0;
+	async function show() {
+		if (!map || !L || !timeline) return;
+		if (!on || !current) {
+			overlay?.draw(null, null);
+			shown = null;
+			return;
 		}
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale or local bookkeeping
-		const loaded = new Set<GridLayer>();
-		let resolve!: () => void;
-		const done = new Promise<void>((r) => (resolve = r));
-		const check = () => loaded.size === layers.length && resolve();
-		for (const l of layers) {
-			l.on('loading', () => loaded.delete(l));
-			l.on('load', () => {
-				loaded.add(l);
-				check();
-			});
-			l.addTo(map);
-		}
-		check();
-		const b: Built = { layers, loaded, done, untyped };
-		built.set(key, b);
-		done.then(() => {
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale or local bookkeeping
-			if (built.get(key) === b) warm = new Set(warm).add(key);
-		});
-		return b;
-	}
-	function drop(key: string) {
-		const b = built.get(key);
-		if (!b) return;
-		for (const l of b.layers) l.remove();
-		built.delete(key);
-	}
-	function clearFrames() {
-		for (const k of [...built.keys()]) drop(k);
-		shown = null;
+		const f = current;
+		const token = ++showToken;
+		const bmp = await store.bitmap(f);
+		if (token !== showToken || !overlay) return;
+		overlay.draw(f.file, bmp);
+		shown = f.file;
+		// Have the next one decoded before it's asked for.
+		const next = frames[(frame + 1) % count];
+		if (next) void store.bitmap(next);
 	}
 
-	/** Frames kept on the map: the one showing, the one wanted, and the next. */
-	function keepKeys(): Set<string> {
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale or local bookkeeping
-		const keep = new Set<string>();
-		if (shown) keep.add(shown);
-		for (const d of [0, 1]) {
-			const f = frames[(frame + d) % count];
-			if (f) keep.add(keyFor(f));
-		}
-		return keep;
-	}
-
-	function setVisible(key: string) {
-		for (const [k, b] of built) for (const l of b.layers) l.setOpacity(k === key ? OPACITY : 0);
-		shown = key;
-		const b = built.get(key);
-		b?.untyped.then((u) => shown === key && (untypedShown = u));
-		if (key.startsWith('p')) untypedShown = false;
-	}
-
-	/**
-	 * Show the wanted frame. The old one stays up until the new one's images are in
-	 * (or five seconds pass), so scrubbing never flashes an empty map.
-	 */
-	let swapToken = 0;
-	function show() {
-		if (!map) return;
-		if (!on || !current) return clearFrames();
-		const key = keyFor(current);
-		const b = ensure(current);
-		const after = frames[(frame + 1) % count];
-		if (after) ensure(after);
-		const keep = keepKeys();
-		for (const k of [...built.keys()]) if (!keep.has(k)) drop(k);
-		if (!b) return;
-		const token = ++swapToken;
-		if (b.loaded.size === b.layers.length || !shown) setVisible(key);
-		else
-			Promise.race([b.done, new Promise((r) => setTimeout(r, 5000))]).then(() => {
-				if (token === swapToken) {
-					setVisible(key);
-					for (const k of [...built.keys()]) if (!keepKeys().has(k)) drop(k);
-				}
-			});
-	}
-
-	// ---- Background loading ----------------------------------------------------
-	// Walk the whole timeline from the current frame on and download each frame's
-	// images for the current view into the browser's cache, without decoding or
-	// drawing them: memory stays flat, and scrubbing to a frame later is quick.
-	// Starts over when the view moves, since the images differ.
-	let warmRun = 0;
-	function frameUrls(f: Frame): Promise<string[]> {
-		if (!map) return Promise.resolve([]);
-		if (f.past) {
-			const url = radarUrl(f.t);
-			if (!url) return Promise.resolve([]);
-			return Promise.resolve(
-				visibleTiles(map, 256, RADAR_MAX_NATIVE_ZOOM).map((c) => L!.Util.template(url, c))
-			);
-		}
-		const size = wmsSize();
-		const model = MODEL_LAYERS.flatMap((w) =>
-			visibleTiles(map!, size).map((c) =>
-				wmsTileUrl(w.layer, sldBody(w.layer, w.ramp.steps), isoTime(f.t), c.x, c.y, c.z, size)
+	/** Download every frame, nearest to the one on screen first. */
+	let fetchRun = 0;
+	async function fetchAll() {
+		const run = ++fetchRun;
+		if (!timeline) return;
+		const order = frames
+			.map((f, i) => ({ f, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
+			.sort((a, b) => a.d - b.d)
+			.map((x) => x.f);
+		await Promise.all(
+			order.map((f) =>
+				store.blob(f).then(() => {
+					// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale
+					if (run === fetchRun) ready_ = new Set(ready_).add(f.file);
+				})
 			)
 		);
-		return hrrrSlot(f.t).then((minute) => {
-			if (minute === null) {
-				void wpcFor(f.t);
-				return model;
-			}
-			const south = visibleTiles(map!, 256).map((c) => L!.Util.template(hrrrTileUrl(minute), c));
-			return [...model, ...south];
-		});
-	}
-	async function warmAll() {
-		const run = ++warmRun;
-		warm = new Set();
-		if (!on || !count || !map) return;
-		const order = frames.map((_, d) => frames[(frame + d) % count]);
-		for (const f of order) {
-			if (run !== warmRun) return;
-			const urls = await frameUrls(f).catch(() => [] as string[]);
-			await Promise.all(urls.map((u) => warmUrl(u)));
-			if (run !== warmRun) return;
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale
-			warm = new Set(warm).add(keyFor(f));
-		}
 	}
 
 	async function refresh() {
 		try {
 			const before = current?.t;
-			const atNow = frame === timeline.now;
-			resetSouthCache();
+			const atNow = !timeline || frame === timeline.now;
 			const tl = await loadTimeline();
-			timeline = tl;
 			loadError = false;
+			// The pictures' box only changes when locations do.
+			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
+			timeline = tl;
+			store.keepOnly(tl.frames);
+			ready_ = new Set(tl.frames.filter((f) => store.has(f)).map((f) => f.file));
 			// Keep the viewer's place if that time still exists; otherwise go to "now".
 			const same = tl.frames.findIndex((f) => f.t === before);
 			frame = atNow || same < 0 ? Math.max(0, tl.now) : same;
-			clearFrames();
-			show();
-			warmAll();
+			if (map && L && (!overlay || !sameBox)) {
+				overlay?.remove();
+				overlay = new PrecipCanvas(L, tl.bounds, tl.width, tl.height, OPACITY).addTo(map);
+			}
+			void show();
+			void fetchAll();
 		} catch {
 			loadError = true;
 		}
@@ -351,25 +186,10 @@
 		void frame;
 		void on;
 		void count;
-		if (!ready) return;
-		// Scrubbing: a short pause so dragging past frames doesn't ask for each of them.
-		if (!playing) {
-			const id = setTimeout(show, 60);
-			return () => clearTimeout(id);
-		}
-		show();
-	});
-	$effect(() => {
-		void on;
-		if (!ready) return;
-		if (on) warmAll();
-		else {
-			warmRun++;
-			clearFrames();
-		}
+		if (ready) void show();
 	});
 
-	// Play: step when the next frame is in (or after a short wait), quicker through
+	// Play: step when the next frame is on hand (or after a short wait), quicker through
 	// the radar, and hold a moment on "now" and on the last frame.
 	$effect(() => {
 		if (!ready || !playing || !on || count < 2) return;
@@ -379,23 +199,20 @@
 		let id: ReturnType<typeof setTimeout>;
 		const tick = () => {
 			const past = frames[frame]?.past;
-			id = setTimeout(tick, past ? 450 : 750);
+			id = setTimeout(tick, past ? 300 : 450);
 			if (hold > 0) return void hold--;
-			if (waiting && waits++ < 6) return;
 			const next = (frame + 1) % count;
-			const b = ensure(frames[next]);
-			if (b && b.loaded.size < b.layers.length && waits++ < 6) return;
+			if ((waiting || !store.has(frames[next])) && waits++ < 10) return;
 			waits = 0;
-			// A few loops, then rest on "now": endless playback keeps the phone busy
-			// (battery, data and memory) for a map nobody may be watching.
+			// A few loops, then rest on "now": endless playback keeps the phone busy.
 			if (next === 0 && ++loops >= 3) {
 				playing = false;
-				frame = Math.max(0, timeline.now);
+				frame = Math.max(0, timeline?.now ?? 0);
 				return;
 			}
 			frame = next;
-			if (next === count - 1) hold = 3;
-			else if (next === timeline.now) hold = 2;
+			if (next === count - 1) hold = 4;
+			else if (next === timeline?.now) hold = 3;
 		};
 		id = setTimeout(tick, 600);
 		return () => clearTimeout(id);
@@ -411,7 +228,7 @@
 	$effect(() => {
 		if (!radar) return;
 		const ids = [
-			setInterval(refresh, 10 * 60 * 1000),
+			setInterval(refresh, 5 * 60 * 1000),
 			setInterval(() => (now = Date.now()), 60 * 1000)
 		];
 		return () => ids.forEach(clearInterval);
@@ -444,12 +261,6 @@
 			// Precipitation between the terrain and the markers.
 			map.createPane('precip').style.zIndex = '350';
 			markers = L.layerGroup().addTo(map);
-			// A new view needs new images: load the timeline again for it.
-			let moveId: ReturnType<typeof setTimeout>;
-			map.on('moveend', () => {
-				clearTimeout(moveId);
-				moveId = setTimeout(() => ready && on && warmAll(), 500);
-			});
 			if (radar) refresh();
 			ready = true;
 			draw();
@@ -457,8 +268,9 @@
 		return () => {
 			cancelled = true;
 			ready = false;
-			warmRun++;
-			built.clear();
+			fetchRun++;
+			overlay = null;
+			store.clear();
 			map?.remove();
 			map = null;
 		};

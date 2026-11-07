@@ -89,7 +89,9 @@ def ramp_color(ramp: list[tuple[float, str]], value: float) -> RGB | None:
 
 
 # Every colour a frame can hold: index 0 is transparent.
-PALETTE: list[RGB] = [(0, 0, 0)] + [hex_rgb(c) for ramp in (SNOW, MIX, RAIN, UNTYPED) for _, c in ramp]
+PALETTE: list[RGB] = [(0, 0, 0)] + [
+    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, UNTYPED) for _, c in ramp
+]
 
 # ---- Region ------------------------------------------------------------------
 
@@ -122,7 +124,10 @@ class Region:
     def bounds(self) -> list[list[float]]:
         """[[south, west], [north, east]] in degrees, as Leaflet wants."""
         w, e = self.x0 * 180 / WORLD, self.x1 * 180 / WORLD
-        return [[round(merc_lat(self.y0), 5), round(w, 5)], [round(merc_lat(self.y1), 5), round(e, 5)]]
+        return [
+            [round(merc_lat(self.y0), 5), round(w, 5)],
+            [round(merc_lat(self.y1), 5), round(e, 5)],
+        ]
 
     @property
     def key(self) -> str:
@@ -134,8 +139,8 @@ def region_for(points: Iterable[tuple[float, float]], width: int = WIDTH) -> Reg
     pts = list(points) or [(47.4, -121.4)]
     lats = [p[0] for p in pts]
     lons = [p[1] for p in pts]
-    south, north = min(lats) - 4, max(lats) + 4
-    west, east = min(lons) - 8, max(lons) + 6
+    south, north = min(lats) - 5, max(lats) + 6
+    west, east = min(lons) - 10, max(lons) + 8
     # At least ~12 x 18 degrees, so a single location still gets context.
     if north - south < 12:
         mid = (north + south) / 2
@@ -159,18 +164,21 @@ class Net:
         self.client = client
         self.sleep = sleep
 
-    def get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response | None:
-        for attempt in range(3):
+    def get(
+        self, url: str, params: dict[str, str] | None = None, tries: int = 3
+    ) -> httpx.Response | None:
+        for attempt in range(tries):
+            if attempt:
+                self.sleep(2 + 3 * attempt)
             try:
-                r = self.client.get(url, params=params, timeout=30)
+                r = self.client.get(url, params=params, timeout=20)
             except httpx.HTTPError as e:
                 log.debug("GET %s failed: %s", url, e)
                 r = None
             if r is not None and r.status_code == 200:
                 return r
-            if r is not None and r.status_code not in (429,) and r.status_code < 500:
+            if r is not None and r.status_code != 429 and r.status_code < 500:
                 return None
-            self.sleep(2 + 3 * attempt)
         return None
 
     def json(self, url: str, params: dict[str, str] | None = None) -> Any:
@@ -180,9 +188,11 @@ class Net:
         except ValueError:
             return None
 
-    def image(self, url: str, params: dict[str, str] | None = None) -> np.ndarray | None:
+    def image(
+        self, url: str, params: dict[str, str] | None = None, tries: int = 3
+    ) -> np.ndarray | None:
         """RGBA pixels, or None."""
-        r = self.get(url, params)
+        r = self.get(url, params, tries)
         if r is None or not r.headers.get("content-type", "").startswith("image/"):
             return None
         return np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA"))
@@ -200,7 +210,9 @@ def sld(layer: str, ramp: list[tuple[float, str]]) -> str:
     )
 
 
-def geomet_map(net: Net, layer: str, style: str, region: Region, time_: str | None) -> np.ndarray | None:
+def geomet_map(
+    net: Net, layer: str, style: str, region: Region, time_: str | None
+) -> np.ndarray | None:
     params = {
         "service": "WMS",
         "version": "1.3.0",
@@ -272,8 +284,13 @@ def ts_iso(t: int) -> str:
 def stitch(net: Net, template: str, region: Region, z: int = TILE_ZOOM) -> np.ndarray | None:
     """XYZ tiles covering the region, resampled onto its pixel grid. None if none came."""
     world_px = 256 * 2**z
-    px = lambda x: (x + WORLD) / (2 * WORLD) * world_px  # noqa: E731
-    py = lambda y: (WORLD - y) / (2 * WORLD) * world_px  # noqa: E731
+
+    def px(x: float) -> float:
+        return float((x + WORLD) / (2 * WORLD) * world_px)
+
+    def py(y: float) -> float:
+        return float((WORLD - y) / (2 * WORLD) * world_px)
+
     gx0, gx1 = px(region.x0), px(region.x1)
     gy0, gy1 = py(region.y1), py(region.y0)
     tx0, tx1 = int(gx0 // 256), int((gx1 - 1) // 256)
@@ -283,32 +300,48 @@ def stitch(net: Net, template: str, region: Region, z: int = TILE_ZOOM) -> np.nd
 
     def one(c: tuple[int, int]) -> tuple[tuple[int, int], np.ndarray | None]:
         x, y = c
-        return c, net.image(template.format(z=z, x=x, y=y))
+        # Tile caches serve or they don't: no retries (a missing hour can take 20 s to fail).
+        return c, net.image(template.format(z=z, x=x, y=y), tries=1)
 
+    # One tile from the middle first: if the source has nothing, don't ask for the rest.
+    probe = coords[len(coords) // 2]
+    if one(probe)[1] is None and one(coords[0])[1] is None:
+        return None
     got = 0
     with ThreadPoolExecutor(6) as pool:
         for (x, y), img in pool.map(one, coords):
             if img is None or img.shape[:2] != (256, 256):
                 continue
             got += 1
-            mosaic[(y - ty0) * 256 : (y - ty0 + 1) * 256, (x - tx0) * 256 : (x - tx0 + 1) * 256] = img
+            mosaic[(y - ty0) * 256 : (y - ty0 + 1) * 256, (x - tx0) * 256 : (x - tx0 + 1) * 256] = (
+                img
+            )
     if not got:
         return None
     # Nearest-neighbour sample: both grids are Web Mercator, so the mapping is linear.
-    cols = (gx0 + (np.arange(region.width) + 0.5) * (gx1 - gx0) / region.width - tx0 * 256).astype(int)
-    rows = (gy0 + (np.arange(region.height) + 0.5) * (gy1 - gy0) / region.height - ty0 * 256).astype(int)
+    cols = (gx0 + (np.arange(region.width) + 0.5) * (gx1 - gx0) / region.width - tx0 * 256).astype(
+        int
+    )
+    rows = (
+        gy0 + (np.arange(region.height) + 0.5) * (gy1 - gy0) / region.height - ty0 * 256
+    ).astype(int)
     cols = np.clip(cols, 0, mosaic.shape[1] - 1)
     rows = np.clip(rows, 0, mosaic.shape[0] - 1)
-    return mosaic[rows][:, cols]
+    out: np.ndarray = mosaic[rows][:, cols]
+    return out
 
 
-def repaint(img: np.ndarray, fn: Callable[[int, int, int], RGB | None], min_alpha: int = 24) -> np.ndarray:
+def repaint(
+    img: np.ndarray, fn: Callable[[int, int, int], RGB | None], min_alpha: int = 24
+) -> np.ndarray:
     """Map each distinct colour through `fn`; drop faint and unmapped pixels."""
     out = np.zeros_like(img)
     solid = img[..., 3] >= min_alpha
     if not solid.any():
         return out
-    packed = (img[..., 0].astype(np.int32) << 16) | (img[..., 1].astype(np.int32) << 8) | img[..., 2]
+    packed = (
+        (img[..., 0].astype(np.int32) << 16) | (img[..., 1].astype(np.int32) << 8) | img[..., 2]
+    )
     keys, inverse = np.unique(packed[solid], return_inverse=True)
     lut = np.zeros((len(keys), 4), np.uint8)
     for i, k in enumerate(keys.tolist()):
@@ -323,22 +356,121 @@ def repaint(img: np.ndarray, fn: Callable[[int, int, int], RGB | None], min_alph
 # rainviewer.com/api/color-schemes.html: one colour per dBZ, for rain and for snow.
 
 RV_RAIN_FROM = 15
-RV_RAIN = (
-    "88ddee 6cd1eb 51c5e8 36bae5 1baee2 00a3e0 009ad5 0091ca 0088bf 007fb4 "
-    "0077aa 0070a3 00699c 006295 005b8e 005588 005180 004e78 004a70 004768 "
-    "ffee00 ffe000 ffd200 ffc500 ffb700 ffaa00 ff9f00 ff9500 ff8b00 ff8100 "
-    "ff4400 f23600 e62800 d91b00 cd0d00 c10000 a80000 8f0000 760000 5d0000 "
-    "ffaaff ff9fff ff95ff ff8bff ff81ff ff77ff ff6cff ff62ff ff58ff ff4eff"
-).split()
+RV_RAIN = [
+    "88ddee",
+    "6cd1eb",
+    "51c5e8",
+    "36bae5",
+    "1baee2",
+    "00a3e0",
+    "009ad5",
+    "0091ca",
+    "0088bf",
+    "007fb4",
+    "0077aa",
+    "0070a3",
+    "00699c",
+    "006295",
+    "005b8e",
+    "005588",
+    "005180",
+    "004e78",
+    "004a70",
+    "004768",
+    "ffee00",
+    "ffe000",
+    "ffd200",
+    "ffc500",
+    "ffb700",
+    "ffaa00",
+    "ff9f00",
+    "ff9500",
+    "ff8b00",
+    "ff8100",
+    "ff4400",
+    "f23600",
+    "e62800",
+    "d91b00",
+    "cd0d00",
+    "c10000",
+    "a80000",
+    "8f0000",
+    "760000",
+    "5d0000",
+    "ffaaff",
+    "ff9fff",
+    "ff95ff",
+    "ff8bff",
+    "ff81ff",
+    "ff77ff",
+    "ff6cff",
+    "ff62ff",
+    "ff58ff",
+    "ff4eff",
+]
 RV_SNOW_FROM = 0
-RV_SNOW = (
-    "c7ffff c6ffff c5ffff c4ffff c3ffff c3ffff c2ffff c1ffff c0ffff bfffff "
-    "bfffff b8f8ff b2f2ff abebff a5e5ff 9fdfff 98d8ff 92d2ff 8bcbff 85c5ff "
-    "7fbfff 78b8ff 72b2ff 6babff 65a5ff 5f9fff 5b9bff 5898ff 5595ff 5292ff "
-    "4f8fff 4b8bff 4888ff 4585ff 4282ff 3f7fff 3b7bff 3878ff 3575ff 3272ff "
-    "2f6fff 2b6bff 2868ff 2565ff 2262ff 1f5fff 1b5bff 1858ff 1555ff 1252ff "
-    "0f4fff 0c4bff 0948ff 0645ff 0242ff 003fff 003bff 0038ff 0035ff 0032ff"
-).split()
+RV_SNOW = [
+    "c7ffff",
+    "c6ffff",
+    "c5ffff",
+    "c4ffff",
+    "c3ffff",
+    "c3ffff",
+    "c2ffff",
+    "c1ffff",
+    "c0ffff",
+    "bfffff",
+    "bfffff",
+    "b8f8ff",
+    "b2f2ff",
+    "abebff",
+    "a5e5ff",
+    "9fdfff",
+    "98d8ff",
+    "92d2ff",
+    "8bcbff",
+    "85c5ff",
+    "7fbfff",
+    "78b8ff",
+    "72b2ff",
+    "6babff",
+    "65a5ff",
+    "5f9fff",
+    "5b9bff",
+    "5898ff",
+    "5595ff",
+    "5292ff",
+    "4f8fff",
+    "4b8bff",
+    "4888ff",
+    "4585ff",
+    "4282ff",
+    "3f7fff",
+    "3b7bff",
+    "3878ff",
+    "3575ff",
+    "3272ff",
+    "2f6fff",
+    "2b6bff",
+    "2868ff",
+    "2565ff",
+    "2262ff",
+    "1f5fff",
+    "1b5bff",
+    "1858ff",
+    "1555ff",
+    "1252ff",
+    "0f4fff",
+    "0c4bff",
+    "0948ff",
+    "0645ff",
+    "0242ff",
+    "003fff",
+    "003bff",
+    "0038ff",
+    "0035ff",
+    "0032ff",
+]
 _RV = [(hex_rgb("#" + h), False, RV_RAIN_FROM + i) for i, h in enumerate(RV_RAIN)] + [
     (hex_rgb("#" + h), True, RV_SNOW_FROM + i) for i, h in enumerate(RV_SNOW)
 ]
@@ -417,31 +549,29 @@ def radar_frames(net: Net) -> list[RadarFrame]:
     for f in (ix.get("radar") or {}).get("past") or []:
         if isinstance(f.get("time"), int) and isinstance(f.get("path"), str):
             out.append(
-                RadarFrame(f["time"], f["path"], f"{ix['host']}{f['path']}/256/{{z}}/{{x}}/{{y}}/2/1_1.png")
+                RadarFrame(
+                    f["time"], f["path"], f"{ix['host']}{f['path']}/256/{{z}}/{{x}}/{{y}}/2/1_1.png"
+                )
             )
     return sorted(out, key=lambda f: f.t)
 
 
-def hrrr_slots(net: Net) -> dict[int, int]:
-    """Valid time → IEM forecast minute. Each slot comes from the newest run reaching it
-    (hourly runs to 18 h, 6-hourly runs to 48 h), so read each slot's own valid time."""
-    out: dict[int, int] = {}
+def hrrr_slots(net: Net) -> dict[int, tuple[int, str]]:
+    """Valid time → (IEM forecast minute, model run). Each slot comes from the newest run
+    reaching it (hourly runs to 18 h, 6-hourly runs to 48 h), so read each slot's own JSON."""
+    out: dict[int, tuple[int, str]] = {}
 
-    def one(minute: int) -> tuple[int, int | None]:
+    def one(minute: int) -> tuple[int, int | None, str]:
         j = net.json(f"{IEM}/data/gis/images/4326/hrrr/refp_{minute:04d}.json")
-        valid = j.get("model_forecast_utc") if isinstance(j, dict) else None
-        return minute, iso_ts(valid) if isinstance(valid, str) else None
+        if not isinstance(j, dict) or not isinstance(j.get("model_forecast_utc"), str):
+            return minute, None, ""
+        return minute, iso_ts(j["model_forecast_utc"]), str(j.get("model_init_utc", ""))
 
     with ThreadPoolExecutor(4) as pool:
-        for minute, valid in pool.map(one, range(0, 48 * 60 + 1, 60)):
+        for minute, valid, init in pool.map(one, range(0, 48 * 60 + 1, 60)):
             if valid is not None and valid not in out:
-                out[valid] = minute
+                out[valid] = (minute, init)
     return out
-
-
-def hrrr_init(net: Net, minute: int) -> str:
-    j = net.json(f"{IEM}/data/gis/images/4326/hrrr/refp_{minute:04d}.json")
-    return str(j.get("model_init_utc", "")) if isinstance(j, dict) else ""
 
 
 @dataclass
@@ -453,8 +583,13 @@ class Wpc:
 def wpc_info(net: Net) -> Wpc | None:
     j = net.json(
         f"{WPC}/13/query",
-        {"where": "1=1", "outFields": "start_time,issue_time", "returnGeometry": "false",
-         "resultRecordCount": "1", "f": "json"},
+        {
+            "where": "1=1",
+            "outFields": "start_time,issue_time",
+            "returnGeometry": "false",
+            "resultRecordCount": "1",
+            "f": "json",
+        },
     )
     try:
         a = j["features"][0]["attributes"]
@@ -477,8 +612,15 @@ def wpc_layer(t: int, base: int) -> int | None:
 def wpc_draw(net: Net, layer: int, region: Region) -> np.ndarray | None:
     fc = net.json(
         f"{WPC}/{layer}/query",
-        {"where": "qpf>=0.1", "outFields": "qpf", "returnGeometry": "true",
-         "maxAllowableOffset": "0.02", "geometryPrecision": "3", "outSR": "4326", "f": "geojson"},
+        {
+            "where": "qpf>=0.1",
+            "outFields": "qpf",
+            "returnGeometry": "true",
+            "maxAllowableOffset": "0.02",
+            "geometryPrecision": "3",
+            "outSR": "4326",
+            "f": "geojson",
+        },
     )
     if not isinstance(fc, dict) or not isinstance(fc.get("features"), list):
         return None
@@ -596,48 +738,71 @@ class Renderer:
             painted = repaint(img, radar_recolor)
             frames.append(FrameOut(rf.t, True, self._save(painted, region, f"r{rf.t}"), key, ""))
 
+        self._write(region, now, frames)
+
         # Future: HRDPS hourly, with HRRR or WPC outside its domain.
         dims = capabilities_dims(self.net, HRDPS_LAYERS[2][0])
         times = [t for t in parse_times(dims.get("time", "")) if t > now]
         run_ref = dims.get("reference_time.default", "")
         slots = hrrr_slots(self.net) if times else {}
-        inits: dict[int, str] = {}
         wpc = wpc_info(self.net) if times else None
-        domain: np.ndarray | None = None
+        todo: list[tuple[int, str, int | None, int | None]] = []
         for t in times:
-            minute = slots.get(t)
+            minute, init = slots.get(t, (None, ""))
+            layer = wpc_layer(t, wpc.base) if wpc else None
             if minute is not None:
-                if minute not in inits:
-                    inits[minute] = hrrr_init(self.net, minute)
-                south_key = f"hrrr:{minute}:{inits[minute]}"
-            elif wpc and wpc_layer(t, wpc.base) is not None:
-                south_key = f"wpc:{wpc_layer(t, wpc.base)}:{wpc.issued}"
+                south_key = f"hrrr:{minute}:{init}"
+            elif wpc and layer is not None:
+                south_key = f"wpc:{layer}:{wpc.issued}"
             else:
                 south_key = "none"
             key = f"fc|{t}|{run_ref}|{south_key}|{region.key}"
             if key in prev and (self.dir / prev[key].file).exists():
                 frames.append(prev[key])
-                continue
-            if domain is None:
-                d = geomet_map(self.net, DOMAIN_LAYER, sld(DOMAIN_LAYER, [(-1, "#000000")]), region, None)
-                domain = (d[..., 3] > 0) if d is not None else np.zeros(blank.shape[:2], bool)
-            south = blank
-            kind = ""
-            if minute is not None:
-                tiles = stitch(self.net, f"{IEM}/cache/tile.py/1.0.0/hrrr::REFP-F{minute:04d}-0/{{z}}/{{x}}/{{y}}.png", region)
-                if tiles is not None:
-                    south, kind = repaint(tiles, hrrr_recolor), "hrrr"
-            if not kind and wpc and (layer := wpc_layer(t, wpc.base)) is not None:
-                drawn = wpc_draw(self.net, layer, region)
-                if drawn is not None:
-                    south, kind = drawn, "wpc"
-            south = south.copy()
-            south[domain] = 0
-            img = south
-            for layer_name, ramp in HRDPS_LAYERS:
-                img = over(geomet_map(self.net, layer_name, sld(layer_name, ramp), region, ts_iso(t)), img)
-            frames.append(FrameOut(t, False, self._save(img, region, f"f{t}"), key, kind))
+            else:
+                todo.append((t, key, minute, layer))
 
+        if todo:
+            d = geomet_map(
+                self.net, DOMAIN_LAYER, sld(DOMAIN_LAYER, [(-1, "#000000")]), region, None
+            )
+            domain = (d[..., 3] > 0) if d is not None else np.zeros(blank.shape[:2], bool)
+
+            def draw(job: tuple[int, str, int | None, int | None]) -> FrameOut:
+                t, key, minute, layer = job
+                south, kind = blank, ""
+                if minute is not None:
+                    tiles = stitch(
+                        self.net,
+                        f"{IEM}/cache/tile.py/1.0.0/hrrr::REFP-F{minute:04d}-0/{{z}}/{{x}}/{{y}}.png",
+                        region,
+                    )
+                    if tiles is not None:
+                        south, kind = repaint(tiles, hrrr_recolor), "hrrr"
+                if not kind and layer is not None:
+                    drawn = wpc_draw(self.net, layer, region)
+                    if drawn is not None:
+                        south, kind = drawn, "wpc"
+                img = south.copy()
+                img[domain] = 0
+                for name, ramp in HRDPS_LAYERS:
+                    img = over(geomet_map(self.net, name, sld(name, ramp), region, ts_iso(t)), img)
+                return FrameOut(t, False, self._save(img, region, f"f{t}"), key, kind)
+
+            # Two frames at a time (the sources are the slow part; more costs worker
+            # memory), soonest first, with the index rewritten as they land so a first
+            # build is usable early.
+            with ThreadPoolExecutor(2) as pool:
+                for i, frame in enumerate(pool.map(draw, todo), 1):
+                    frames.append(frame)
+                    if i % 6 == 0:
+                        self._write(region, now, frames)
+
+        index = self._write(region, now, frames)
+        self._prune({f.file for f in frames} | {f.file for f in prev.values()})
+        return index
+
+    def _write(self, region: Region, now: int, frames: list[FrameOut]) -> dict[str, Any]:
         frames.sort(key=lambda f: (f.t, not f.past))
         index = {
             "generated": ts_iso(now),
@@ -650,7 +815,6 @@ class Renderer:
         tmp = self.dir / "index.json.tmp"
         tmp.write_text(json.dumps(index))
         tmp.replace(self.dir / "index.json")
-        self._prune({f.file for f in frames} | {f.file for f in prev.values()})
         return index
 
     def _prune(self, keep: set[str]) -> None:

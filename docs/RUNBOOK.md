@@ -36,10 +36,10 @@ Tick these off once; each links to the step with the details.
 
 | Where | What |
 |---|---|
-| Docker VM (Debian 12) | `api` (web app + API, port 8090) and `worker` (forecast runs, backups) |
+| Docker VM (Debian 12) | `api` (web app + API, port 8090) and `worker` (forecast runs, backups, the map's precipitation frames every 10 min) |
 | Home Assistant VM | The Cloudflared app, which already runs the tunnel for `ha.` and `dash.` |
 | Cloudflare | DNS, the tunnel edge, the Access login |
-| `./data` on the Docker VM | The database, the raw-response cache and backups |
+| `./data` on the Docker VM | The database, the raw-response cache, backups and `precip/` (map frames, ~2 MB) |
 
 ---
 
@@ -257,6 +257,16 @@ webcams, push alerts), do this once after the timer deploys it:
 **Add a friend:** Zero Trust → Access → the `Snow Watch` app's policy (or the
 `snow-viewers` group) → add their email. They sign in with a one-time PIN sent
 to that address.
+
+**Map precipitation:** the worker redraws the frames every 10 minutes, starting
+when it starts; the first build takes about a minute and a half. If the Map says
+precipitation is unavailable, check the worker's log for `precipitation frames`, or
+build them now:
+```bash
+docker compose run --rm worker snowwatch precip
+```
+The frames cover a box around your locations, so adding a location elsewhere moves
+the box at the next pass.
 
 **Add or change locations:** open **More → Manage locations** (owner only).
 Search the catalog for a resort, or drop a trailhead and a high-point pin for a
