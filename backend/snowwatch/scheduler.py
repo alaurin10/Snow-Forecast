@@ -40,6 +40,8 @@ class Worker:
         self.settings = settings
         self.cfg = cfg
         self.lock = threading.Lock()
+        # The map's precipitation frames are separate files: they don't wait for runs.
+        self.precip_lock = threading.Lock()
         self._ping = ping
         migrate(connect(settings.database))
 
@@ -160,6 +162,24 @@ class Worker:
             log.info("pruned %d cached raw responses", removed)
             avalanche.prune(conn)
 
+    def precip(self) -> None:
+        """Redraw the map's precipitation frames that changed (new radar, new model runs)."""
+        from snowwatch.precip import Net, Renderer, region_for
+
+        if not self.precip_lock.acquire(blocking=False):
+            return
+        try:
+            conn = connect(self.settings.database)
+            points = [(b.lat, b.lon) for loc in list_locations(conn) for b in loc.bands[:1]]
+            headers = {"User-Agent": self.settings.user_agent}
+            with httpx.Client(headers=headers, follow_redirects=True) as client:
+                index = Renderer(self.settings.precip_dir, Net(client)).run(region_for(points))
+            log.info("precipitation frames: %d", len(index["frames"]))
+        except Exception:
+            log.exception("precipitation frames failed")
+        finally:
+            self.precip_lock.release()
+
     def weekly(self) -> None:
         with self.lock:
             vacuum(connect(self.settings.database))
@@ -207,6 +227,14 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             **opts,
         )
     sched.add_job(worker.process_jobs, IntervalTrigger(seconds=15), id="jobs", **opts)
+    # RainViewer adds a radar scan every 10 minutes; models update hourly or slower.
+    sched.add_job(
+        worker.precip,
+        IntervalTrigger(minutes=10),
+        id="precip",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
     h, m = _hm(cfg.backup_utc)
     sched.add_job(worker.nightly, CronTrigger(hour=h, minute=m, timezone=UTC), id="nightly", **opts)
     sched.add_job(

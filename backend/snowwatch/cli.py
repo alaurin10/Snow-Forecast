@@ -166,6 +166,15 @@ def cmd_worker(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_precip(args: argparse.Namespace, settings: Settings) -> int:
+    from snowwatch.logs import setup_logging
+    from snowwatch.scheduler import Worker
+
+    setup_logging()
+    Worker(settings, get_forecast_config()).precip()
+    return 0
+
+
 def cmd_rebuild(args: argparse.Namespace, settings: Settings) -> int:
     """Rebuild snapshots without calling any API: from the raw cache or a fixture folder."""
     from snowwatch.pipeline import latest_cached, run_location
@@ -360,6 +369,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("lookups", help="refresh the ski-area catalog, SNOTEL stations and zones")
     s.add_argument("action", choices=["refresh"])
     s.set_defaults(func=cmd_lookups)
+
+    s = sub.add_parser("precip", help="draw the map's precipitation frames now")
+    s.set_defaults(func=cmd_precip)
 
     s = sub.add_parser("avalanche", help="fetch the avalanche forecasts for every location")
     s.add_argument("action", choices=["refresh"])

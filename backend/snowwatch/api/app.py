@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,6 +85,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def me(viewer: CurrentViewer) -> dict[str, Any]:
         """Who is viewing, so the app shows owner-only controls."""
         return {"email": viewer.email, "is_owner": viewer.is_owner}
+
+    @app.get("/api/precip")
+    def precip_index() -> FileResponse:
+        """The map's precipitation timeline: frame files, times and the box they cover."""
+        path = settings.precip_dir / "index.json"
+        if not path.exists():
+            raise HTTPException(503, "precipitation frames not ready yet")
+        return FileResponse(path, media_type="application/json", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/precip/{name}")
+    def precip_frame(name: str) -> FileResponse:
+        """One frame. Names carry a hash of the pixels, so they never change."""
+        if not re.fullmatch(r"[rf]\d+-[0-9a-f]{12}\.png", name):
+            raise HTTPException(404)
+        path = settings.precip_dir / name
+        if not path.exists():
+            raise HTTPException(404)
+        return FileResponse(
+            path, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable"}
+        )
 
     app.include_router(make_router())
     app.include_router(make_admin_router())
