@@ -5,7 +5,10 @@
 // the whole timeline), and decode only the frame on screen and its neighbours. Showing a
 // frame is a single draw into one canvas, so scrubbing is instant and memory stays flat.
 import type { CanvasSource, Map as MlMap } from 'maplibre-gl';
-import { frameUrl, type Frame } from './radar';
+import { frameUrl } from './radar';
+
+/** Anything with a picture file under /api/precip/: a frame or a snow total. */
+type Pic = { file: string };
 
 /** Decoded frames kept ready: the one on screen and a couple either side. */
 const DECODED = 4;
@@ -17,12 +20,12 @@ export class FrameStore {
 	private active = 0;
 	private queue: (() => void)[] = [];
 
-	has(f: Frame) {
+	has(f: Pic) {
 		return this.blobs.has(f.file);
 	}
 
 	/** The frame's compressed picture, downloaded once (a few at a time). */
-	blob(f: Frame, urgent = false): Promise<Blob | null> {
+	blob(f: Pic, urgent = false): Promise<Blob | null> {
 		const have = this.blobs.get(f.file);
 		if (have) return Promise.resolve(have);
 		let p = this.loading.get(f.file);
@@ -45,7 +48,7 @@ export class FrameStore {
 	}
 
 	/** The frame ready to draw. Older decoded frames are freed as new ones come in. */
-	async bitmap(f: Frame): Promise<ImageBitmap | null> {
+	async bitmap(f: Pic): Promise<ImageBitmap | null> {
 		const have = this.decoded.get(f.file);
 		if (have) {
 			this.decoded.delete(f.file);
@@ -67,7 +70,7 @@ export class FrameStore {
 	}
 
 	/** Forget pictures no longer in the timeline. */
-	keepOnly(frames: Frame[]) {
+	keepOnly(frames: Pic[]) {
 		const keep = new Set(frames.map((f) => f.file));
 		for (const file of [...this.blobs.keys()]) if (!keep.has(file)) this.blobs.delete(file);
 		for (const [file, bmp] of [...this.decoded]) {

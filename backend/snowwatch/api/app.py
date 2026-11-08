@@ -21,7 +21,7 @@ from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
-from snowwatch.tiles import TileCache
+from snowwatch.tiles import TileCache, glyphs
 
 
 def _last_good_run(db: Path) -> dict[str, Any] | None:
@@ -100,7 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
         """One frame. Names carry a hash of the pixels, so they never change."""
-        if not re.fullmatch(r"[rf]\d+-[0-9a-f]{12}\.png", name):
+        if not re.fullmatch(r"[rft]\d+-[0-9a-f]{12}\.png", name):
             raise HTTPException(404)
         path = settings.precip_dir / name
         if not path.exists():
@@ -124,6 +124,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data, media_type = got
         return Response(
             data, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"}
+        )
+
+    @app.get("/api/glyphs/{stack}/{rng}.pbf")
+    def glyph(stack: str, rng: str) -> Response:
+        """Fonts for the map's labels, cached here."""
+        nonlocal tile_cache
+        tile_cache = tile_cache or TileCache(settings.tiles_dir, settings.user_agent)
+        data = glyphs(tile_cache, stack, rng)
+        if data is None:
+            raise HTTPException(404)
+        return Response(
+            data,
+            media_type="application/x-protobuf",
+            headers={"Cache-Control": "public, max-age=2592000"},
+        )
+
+    @app.get("/api/osm/ski.geojson")
+    def ski_map() -> FileResponse:
+        """Ski runs, lifts and peaks around the locations (refreshed weekly by the worker)."""
+        if not settings.osm_path.exists():
+            raise HTTPException(503, "ski map data not fetched yet")
+        return FileResponse(
+            settings.osm_path,
+            media_type="application/geo+json",
+            headers={"Cache-Control": "public, max-age=3600"},
         )
 
     app.include_router(make_router())

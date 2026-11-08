@@ -183,6 +183,19 @@ class Worker:
         finally:
             self.precip_lock.release()
 
+    def ski_map(self) -> None:
+        """Ski runs, lifts and peaks from OpenStreetMap: weekly, or when locations change."""
+        from snowwatch import osm
+
+        try:
+            conn = connect(self.settings.database)
+            points = [(b.lat, b.lon) for loc in list_locations(conn) for b in loc.bands[:1]]
+            headers = {"User-Agent": self.settings.user_agent}
+            with httpx.Client(headers=headers, follow_redirects=True) as client:
+                osm.refresh(self.settings.osm_path, points, client)
+        except Exception:
+            log.exception("ski map data failed")
+
     def weekly(self) -> None:
         with self.lock:
             vacuum(connect(self.settings.database))
@@ -230,6 +243,14 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             **opts,
         )
     sched.add_job(worker.process_jobs, IntervalTrigger(seconds=15), id="jobs", **opts)
+    # Checks hourly; only fetches when the file is a week old or the locations changed.
+    sched.add_job(
+        worker.ski_map,
+        IntervalTrigger(hours=1),
+        id="ski_map",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
     # RainViewer adds a radar scan every 10 minutes; models update hourly or slower.
     sched.add_job(
         worker.precip,

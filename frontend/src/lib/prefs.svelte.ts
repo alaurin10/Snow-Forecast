@@ -29,6 +29,9 @@ class Prefs {
 	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
 	mapPistes = $state<'on' | 'off'>(load('sw.mapPistes', ['on', 'off'] as const, 'on'));
 	mapTerrain = $state<'on' | 'off'>(load('sw.mapTerrain', ['on', 'off'] as const, 'off'));
+	mapMode = $state<'timeline' | 'totals'>(
+		load('sw.mapMode', ['timeline', 'totals'] as const, 'timeline')
+	);
 	mapBase = $state<'topo' | 'satellite'>(
 		load('sw.mapBase', ['topo', 'satellite'] as const, 'topo')
 	);
@@ -51,6 +54,11 @@ class Prefs {
 	setMapPrecip(on: boolean) {
 		this.mapPrecip = on ? 'on' : 'off';
 		save('sw.mapPrecip', this.mapPrecip);
+	}
+
+	setMapMode(mode: 'timeline' | 'totals') {
+		this.mapMode = mode;
+		save('sw.mapMode', mode);
 	}
 
 	setMapBase(base: 'topo' | 'satellite') {

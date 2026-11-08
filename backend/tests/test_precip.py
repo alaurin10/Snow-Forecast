@@ -228,6 +228,8 @@ def test_api_serves_index_and_frames(settings: Settings) -> None:
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
     r = client.get("/api/precip/f123-0123456789ab.png")
     assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
+    (d / "t24-0123456789ab.png").write_bytes(png((1, 2, 3), 2, 2))
+    assert client.get("/api/precip/t24-0123456789ab.png").status_code == 200
     assert client.get("/api/precip/index.json.tmp").status_code == 404
     assert client.get("/api/precip/..%2Fsnowwatch.db").status_code == 404
 
@@ -302,3 +304,211 @@ def test_api_serves_cached_tiles(settings: Settings, monkeypatch: Any) -> None:
     assert r.status_code == 200 and r.content == b"png"
     assert "max-age" in r.headers["cache-control"]
     assert client.get("/api/tiles/nope/5/3/4.png").status_code == 404
+
+
+# ---- Ski runs, lifts and peaks (OpenStreetMap) -------------------------------------
+
+
+OVERPASS_SAMPLE = {
+    "elements": [
+        {
+            "type": "way",
+            "id": 1,
+            "tags": {
+                "piste:type": "downhill",
+                "piste:difficulty": "advanced",
+                "name": "Upper International",
+            },
+            "geometry": [{"lat": 47.44, "lon": -121.44}, {"lat": 47.445, "lon": -121.445}],
+        },
+        {
+            "type": "way",
+            "id": 2,
+            "tags": {"piste:type": "skitour", "piste:name": "Slot Couloir"},
+            "geometry": [{"lat": 47.46, "lon": -121.41}, {"lat": 47.465, "lon": -121.415}],
+        },
+        {
+            "type": "way",
+            "id": 3,
+            "tags": {"aerialway": "chair_lift", "name": "Edelweiss"},
+            "geometry": [{"lat": 47.44, "lon": -121.44}, {"lat": 47.442, "lon": -121.441}],
+        },
+        {
+            "type": "way",
+            "id": 4,
+            "tags": {"aerialway": "station"},
+            "geometry": [{"lat": 1, "lon": 1}] * 2,
+        },
+        {
+            "type": "way",
+            "id": 5,
+            "tags": {"piste:type": "ice_skate"},
+            "geometry": [{"lat": 1, "lon": 1}] * 2,
+        },
+        {
+            "type": "node",
+            "id": 6,
+            "lat": 47.46,
+            "lon": -121.41,
+            "tags": {"natural": "peak", "name": "Snoqualmie Mountain", "ele": "2,014 m"},
+        },
+        {
+            "type": "node",
+            "id": 7,
+            "lat": 47.45,
+            "lon": -121.42,
+            "tags": {"natural": "peak", "name": "Guye Peak"},
+        },
+        {
+            "type": "way",
+            "id": 1,
+            "tags": {"piste:type": "downhill"},
+            "geometry": [{"lat": 1, "lon": 1}] * 2,
+        },
+    ]
+}
+
+
+def test_osm_to_geojson_keeps_runs_lifts_and_peaks() -> None:
+    from snowwatch.osm import to_geojson
+
+    fc = to_geojson(OVERPASS_SAMPLE["elements"])
+    props = [f["properties"] for f in fc["features"]]
+    assert [p["kind"] for p in props] == ["run", "run", "lift", "peak", "peak"]
+    assert props[0] == {
+        "kind": "run",
+        "type": "downhill",
+        "difficulty": "advanced",
+        "name": "Upper International",
+    }
+    assert props[1]["name"] == "Slot Couloir" and props[1]["type"] == "skitour"
+    assert props[3] == {"kind": "peak", "name": "Snoqualmie Mountain", "ele": 2014}
+    assert "ele" not in props[4]
+    assert fc["features"][0]["geometry"]["coordinates"][0] == [-121.44, 47.44]
+
+
+def test_osm_refresh_falls_back_and_keeps_fresh_files(tmp_path: Path) -> None:
+    import httpx
+
+    from snowwatch import osm
+
+    hits: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        hits.append(req.url.host)
+        if req.url.host == "overpass-api.de":
+            return httpx.Response(504)
+        assert b"piste" in req.content
+        return httpx.Response(200, json=OVERPASS_SAMPLE)
+
+    client = httpx.Client(transport=httpx.MockTransport(answer))
+    path = tmp_path / "osm" / "ski.geojson"
+    pts = [(47.42, -121.42)]
+    assert osm.refresh(path, pts, client, now=1000.0)
+    assert hits == ["overpass-api.de", "overpass.kumi.systems"]
+    assert len(json.loads(path.read_text())["features"]) == 5
+    # Fresh and same locations: no new request.
+    assert not osm.refresh(path, pts, client, now=1000.0 + 3600)
+    assert len(hits) == 2
+    # New locations, or a week later: fetch again.
+    assert osm.refresh(path, [*pts, (50.06, -122.95)], client, now=2000.0)
+    assert osm.refresh(path, [*pts, (50.06, -122.95)], client, now=2000.0 + 8 * 86400)
+
+    def down(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    # Overpass down: the old file stays.
+    assert not osm.refresh(path, pts, httpx.Client(transport=httpx.MockTransport(down)), force=True)
+    assert path.exists()
+
+
+def test_api_serves_ski_map_and_glyphs(settings: Settings, monkeypatch: Any) -> None:
+    from snowwatch import tiles
+
+    client = TestClient(create_app(settings))
+    assert client.get("/api/osm/ski.geojson").status_code == 503
+    settings.osm_path.parent.mkdir(parents=True)
+    settings.osm_path.write_text('{"type":"FeatureCollection","features":[]}')
+    r = client.get("/api/osm/ski.geojson")
+    assert r.status_code == 200 and r.json()["features"] == []
+
+    monkeypatch.setattr(
+        tiles, "glyphs", lambda cache, stack, rng: b"pbf" if stack == "Open Sans Semibold" else None
+    )
+    import snowwatch.api.app as app_mod
+
+    monkeypatch.setattr(app_mod, "glyphs", tiles.glyphs)
+    assert client.get("/api/glyphs/Open Sans Semibold/0-255.pbf").content == b"pbf"
+    assert client.get("/api/glyphs/Comic Sans/0-255.pbf").status_code == 404
+
+
+def test_glyph_names_are_checked(tmp_path: Path) -> None:
+    import httpx
+
+    from snowwatch.tiles import TileCache, glyphs
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"font")
+
+    cache = TileCache(tmp_path, "t", httpx.Client(transport=httpx.MockTransport(answer)))
+    assert glyphs(cache, "Open Sans Semibold", "0-255") == b"font"
+    assert (tmp_path / "glyphs" / "Open_Sans_Semibold" / "0-255.pbf").exists()
+    assert glyphs(cache, "../../etc", "0-255") is None
+    assert glyphs(cache, "Open Sans Semibold", "../x") is None
+
+
+# ---- Snowfall totals ---------------------------------------------------------------
+
+
+def float_tiff(values: np.ndarray, lon0: float, lat0: float, d: float) -> bytes:
+    from PIL import TiffImagePlugin
+
+    im = Image.fromarray(values.astype(np.float32), "F")
+    info = TiffImagePlugin.ImageFileDirectory_v2()
+    info[33922] = (0.0, 0.0, 0.0, lon0, lat0, 0.0)
+    info[33550] = (d, d, 0.0)
+    buf = io.BytesIO()
+    im.save(buf, "TIFF", tiffinfo=info)
+    return buf.getvalue()
+
+
+def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
+    from snowwatch.precip import TOTAL, wcs_grid
+
+    now = 1_800_000_000 - 1_800_000_000 % 3600
+    region = Region(
+        precip.merc_x(-125), precip.merc_y(42), precip.merc_x(-115), precip.merc_y(50), 60, 50
+    )
+
+    class TotalsNet(precip.Net):
+        def __init__(self) -> None:
+            pass
+
+        def get(self, url: str, params: dict[str, str] | None = None, tries: int = 3) -> Any:
+            if params and params.get("request") == "GetCapabilities":
+                text = (
+                    f'<Dimension name="time" default="x">{precip.ts_iso(now - 3600)}/'
+                    f"{precip.ts_iso(now + 30 * 3600)}/PT1H</Dimension>"
+                    '<Dimension name="reference_time" default="RUN7">x</Dimension>'
+                )
+                return type("R", (), {"text": text})()
+            if "GetCoverage" in url:
+                t = precip.iso_ts(url.split("TIME=")[1].replace("%3A", ":"))
+                # 1 mm water an hour since the run began, over the whole box.
+                grid = np.full((40, 60), float((t - (now - 6 * 3600)) / 3600), np.float32)
+                body = float_tiff(grid, -126.0, 51.0, 0.25)
+                return type("R", (), {"content": body, "headers": {"content-type": "image/tiff"}})()
+            return None
+
+    net = TotalsNet()
+    g = wcs_grid(net, "X", precip.ts_iso(now), region)
+    assert g is not None and g.dlon == 0.25 and g.lon0 == -126.0 and g.data.shape == (40, 60)
+
+    r = Renderer(tmp_path, net, now=lambda: now + 600)
+    totals = r._snow_totals(region, now + 600)
+    assert [t.hours for t in totals] == [12, 24, 30]  # the run ends 30 h out
+    assert all(t.start == now for t in totals)
+    img = np.asarray(Image.open(tmp_path / totals[1].file).convert("RGBA"))
+    # 24 mm of water ≈ 24 cm of snow: the 22.86 cm step.
+    step = next(c for low, c in reversed(TOTAL) if low <= 24)
+    assert tuple(img[25, 30][:3]) == hex_rgb(step)

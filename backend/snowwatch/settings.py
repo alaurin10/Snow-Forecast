@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         return self.data_dir / "backups"
 
     @property
+    def osm_path(self) -> Path:
+        """Ski runs, lifts and peaks for the map (see snowwatch/osm.py)."""
+        return self.data_dir / "osm" / "ski.geojson"
+
+    @property
     def tiles_dir(self) -> Path:
         """Cached map tiles (see snowwatch/tiles.py)."""
         return self.data_dir / "tiles"

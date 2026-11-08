@@ -90,6 +90,16 @@ export interface Frame {
 	south: '' | 'hrrr' | 'wpc';
 }
 
+/** Forecast snow over a window, from the Canadian model. */
+export interface Total {
+	/** Window length (12, 24, or up to 48 when the run ends sooner). */
+	hours: number;
+	/** Unix seconds. */
+	start: number;
+	end: number;
+	file: string;
+}
+
 export interface PrecipIndex {
 	generated: string;
 	/** [[south, west], [north, east]] the pictures cover. */
@@ -97,6 +107,7 @@ export interface PrecipIndex {
 	width: number;
 	height: number;
 	frames: Frame[];
+	totals?: Total[];
 }
 
 export interface Timeline {
@@ -107,6 +118,7 @@ export interface Timeline {
 	height: number;
 	/** Index of the latest radar frame ("now"), or -1. */
 	now: number;
+	totals: Total[];
 }
 
 /** Turn the server's list into a timeline: in time order, radar before forecast. */
@@ -116,7 +128,10 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		.sort((a, b) => a.t - b.t || Number(b.past) - Number(a.past));
 	let now = -1;
 	frames.forEach((f, i) => f.past && (now = i));
-	return { frames, bounds: ix.bounds, width: ix.width, height: ix.height, now };
+	const totals = (ix.totals ?? [])
+		.filter((t) => typeof t?.hours === 'number' && typeof t?.file === 'string')
+		.sort((a, b) => a.hours - b.hours);
+	return { frames, bounds: ix.bounds, width: ix.width, height: ix.height, now, totals };
 }
 
 /** Why the timeline isn't available, in words for the map. */
@@ -164,7 +179,7 @@ export async function loadTimeline(): Promise<Timeline> {
 	return tl;
 }
 
-export const frameUrl = (f: Frame) => `/api/precip/${f.file}`;
+export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 
 // ---- Labels ------------------------------------------------------------------
 
@@ -216,4 +231,33 @@ export function rampTop(ramp: Ramp, units: UnitSystem): string {
 export function untypedTop(units: UnitSystem): string {
 	const inches = UNTYPED[UNTYPED.length - 1].from;
 	return units === 'imperial' ? `${tidy(inches)}+ in / 6 h` : `${tidy(inches * 25.4)}+ mm / 6 h`;
+}
+
+// ---- Snowfall totals ------------------------------------------------------------------
+
+/** Lower bound in cm of snow; on whole inches (1, 3, 6, 9, 12, 18, 24, 36, 48). */
+export const TOTAL: RampStep[] = [
+	{ from: 2.54, color: '#cfe8f8' },
+	{ from: 7.62, color: '#8cc8ef' },
+	{ from: 15.24, color: '#4a98e0' },
+	{ from: 22.86, color: '#2b5cc2' },
+	{ from: 30.48, color: '#6a3fb0' },
+	{ from: 45.72, color: '#a535a3' },
+	{ from: 60.96, color: '#e0457b' },
+	{ from: 91.44, color: '#f08a24' },
+	{ from: 121.92, color: '#f4d03f' }
+];
+
+/** Legend tick for a TOTAL step: "6" (inches) or "15" (cm). */
+export function totalTick(cm: number, units: UnitSystem): string {
+	return units === 'imperial' ? String(Math.round(cm / 2.54)) : String(Math.round(cm));
+}
+
+/** "Sun 10 AM → Tue 4 AM". */
+export function totalSpan(t: Total): string {
+	const f = (s: number) =>
+		new Date(s * 1000)
+			.toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })
+			.replace(',', '');
+	return `${f(t.start)} → ${f(t.end)}`;
 }

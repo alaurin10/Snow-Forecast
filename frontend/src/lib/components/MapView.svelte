@@ -26,6 +26,9 @@
 		PrecipError,
 		RAMPS,
 		rampTop,
+		TOTAL,
+		totalSpan,
+		totalTick,
 		UNTYPED,
 		untypedTop,
 		type Frame,
@@ -62,7 +65,20 @@
 	const satellite = $derived(radar && prefs.mapBase === 'satellite');
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
-	const tooClose = $derived(zoom >= 13);
+	const totalsMode = $derived(radar && prefs.mapMode === 'totals');
+	/** Snow totals are smooth fields: they stay on further in than the hourly frames. */
+	const tooClose = $derived(zoom >= (totalsMode ? 15 : 13));
+	const TOTAL_OPACITY: ExpressionSpecification = [
+		'interpolate',
+		['linear'],
+		['zoom'],
+		10,
+		0.72,
+		13,
+		0.5,
+		15,
+		0
+	];
 	const PRECIP_OPACITY: ExpressionSpecification = [
 		'interpolate',
 		['linear'],
@@ -114,13 +130,12 @@
 					tileSize: 256,
 					maxzoom: 18
 				},
-				pistes: {
-					type: 'raster',
-					tiles: tiles('pistes'),
-					tileSize: 256,
-					minzoom: PISTE_ZOOM,
-					maxzoom: 17,
-					attribution: 'Ski runs © <a href="https://www.opensnowmap.org">OpenSnowMap</a>'
+				// Runs, lifts and peaks from OpenStreetMap, fetched weekly by the mini PC.
+				ski: {
+					type: 'geojson',
+					data: '/api/osm/ski.geojson',
+					attribution:
+						'Runs, lifts, peaks © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
 				},
 				// Elevation for 3D, straight from AWS (fast, and big enough not to proxy).
 				dem: {
@@ -181,15 +196,9 @@
 					layout: { visibility: baseVis('satellite') },
 					paint: { 'raster-fade-duration': 150 }
 				},
-				{
-					id: 'pistes',
-					type: 'raster',
-					source: 'pistes',
-					minzoom: PISTE_ZOOM,
-					layout: { visibility: radar && prefs.mapPistes === 'on' ? 'visible' : 'none' },
-					paint: { 'raster-fade-duration': 150 }
-				}
+				...skiLayers(dark)
 			],
+			glyphs: '/api/glyphs/{fontstack}/{range}.pbf',
 			sky: {
 				'sky-color': dark ? '#0d1626' : '#9cc6ec',
 				'horizon-color': dark ? '#2a3a52' : '#e4eef7',
@@ -200,6 +209,182 @@
 				'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0]
 			}
 		};
+	}
+
+	// ---- Runs, lifts and peaks (vector, so names follow the runs and stay upright) -----
+	const RUN = ['==', ['get', 'kind'], 'run'] as const;
+	const runColor: ExpressionSpecification = [
+		'match',
+		['get', 'difficulty'],
+		['novice', 'easy'],
+		'#2f9e44',
+		'intermediate',
+		'#1f6fd6',
+		['advanced'],
+		'#111111',
+		['expert', 'extreme'],
+		'#111111',
+		'freeride',
+		'#e8862a',
+		['match', ['get', 'type'], ['skitour', 'backcountry'], '#7b3fb0', '#5b6b7a']
+	];
+	const FONT = ['Open Sans Semibold'];
+	const SKI_LAYERS = ['run-casing', 'runs', 'lifts', 'run-labels', 'lift-labels'];
+
+	function peakLabel(): ExpressionSpecification {
+		const ft = units === 'imperial';
+		return [
+			'case',
+			['has', 'ele'],
+			[
+				'format',
+				['get', 'name'],
+				{},
+				'\n',
+				{},
+				[
+					'concat',
+					[
+						'number-format',
+						['round', ft ? ['*', ['get', 'ele'], 3.28084] : ['get', 'ele']],
+						{ 'max-fraction-digits': 0 }
+					],
+					ft ? ' ft' : ' m'
+				],
+				{ 'font-scale': 0.85 }
+			],
+			['get', 'name']
+		] as ExpressionSpecification;
+	}
+
+	function skiLayers(dark: boolean): StyleSpecification['layers'] {
+		const vis = radar && prefs.mapPistes === 'on' ? 'visible' : 'none';
+		const halo = dark ? 'rgba(10,15,25,0.85)' : 'rgba(255,255,255,0.9)';
+		// Zoom may only feed a top-level interpolate, so the casing gets its own stops.
+		const lineWidth = (add: number): ExpressionSpecification => [
+			'interpolate',
+			['linear'],
+			['zoom'],
+			11,
+			1 + add,
+			14,
+			2.2 + add,
+			17,
+			4 + add
+		];
+		const width = lineWidth(0);
+		return [
+			{
+				id: 'run-casing',
+				type: 'line',
+				source: 'ski',
+				minzoom: PISTE_ZOOM,
+				filter: RUN as unknown as ExpressionSpecification,
+				layout: { visibility: vis, 'line-cap': 'round', 'line-join': 'round' },
+				paint: { 'line-color': halo, 'line-width': lineWidth(2) }
+			},
+			{
+				id: 'runs',
+				type: 'line',
+				source: 'ski',
+				minzoom: PISTE_ZOOM,
+				filter: RUN as unknown as ExpressionSpecification,
+				layout: { visibility: vis, 'line-cap': 'round', 'line-join': 'round' },
+				paint: {
+					'line-color': runColor,
+					'line-width': width,
+					// Touring and backcountry routes dashed, like on paper maps.
+					'line-dasharray': [
+						'match',
+						['get', 'type'],
+						['skitour', 'backcountry', 'nordic', 'hike'],
+						['literal', [2, 1.5]],
+						['literal', [1, 0]]
+					] as unknown as number[]
+				}
+			},
+			{
+				id: 'lifts',
+				type: 'line',
+				source: 'ski',
+				minzoom: PISTE_ZOOM,
+				filter: ['==', ['get', 'kind'], 'lift'],
+				layout: { visibility: vis },
+				paint: {
+					'line-color': '#d6303a',
+					'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 16, 2.5]
+				}
+			},
+			{
+				id: 'run-labels',
+				type: 'symbol',
+				source: 'ski',
+				minzoom: 13,
+				filter: ['all', RUN as unknown as ExpressionSpecification, ['!=', ['get', 'name'], '']],
+				layout: {
+					visibility: vis,
+					'symbol-placement': 'line',
+					'text-field': ['get', 'name'],
+					'text-font': FONT,
+					'text-size': ['interpolate', ['linear'], ['zoom'], 13, 11.5, 17, 15],
+					// Face the viewer when tilted, so names on steep runs stay readable.
+					'text-pitch-alignment': 'viewport',
+					'text-letter-spacing': 0.02,
+					'symbol-spacing': 280,
+					'text-max-angle': 35
+				},
+				paint: { 'text-color': runColor, 'text-halo-color': halo, 'text-halo-width': 1.6 }
+			},
+			{
+				id: 'lift-labels',
+				type: 'symbol',
+				source: 'ski',
+				minzoom: 14,
+				filter: ['all', ['==', ['get', 'kind'], 'lift'], ['!=', ['get', 'name'], '']],
+				layout: {
+					visibility: vis,
+					'symbol-placement': 'line',
+					'text-field': ['get', 'name'],
+					'text-font': FONT,
+					'text-size': 12,
+					'text-pitch-alignment': 'viewport'
+				},
+				paint: { 'text-color': '#b0202a', 'text-halo-color': halo, 'text-halo-width': 1.6 }
+			},
+			{
+				id: 'peaks',
+				type: 'circle',
+				source: 'ski',
+				minzoom: 10,
+				filter: ['==', ['get', 'kind'], 'peak'],
+				paint: {
+					'circle-radius': 3,
+					'circle-color': dark ? '#e8edf5' : '#3a3346',
+					'circle-stroke-width': 1.2,
+					'circle-stroke-color': halo
+				}
+			},
+			{
+				id: 'peak-labels',
+				type: 'symbol',
+				source: 'ski',
+				minzoom: 10,
+				filter: ['==', ['get', 'kind'], 'peak'],
+				layout: {
+					'text-field': peakLabel(),
+					'text-font': FONT,
+					'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10.5, 15, 13],
+					'text-anchor': 'top',
+					'text-offset': [0, 0.5],
+					'text-max-width': 8
+				},
+				paint: {
+					'text-color': dark ? '#eef2f8' : '#2a2433',
+					'text-halo-color': halo,
+					'text-halo-width': 1.6
+				}
+			}
+		];
 	}
 
 	function baseVis(base: 'topo' | 'satellite'): 'visible' | 'none' {
@@ -250,7 +435,22 @@
 
 	$effect(() => {
 		const want = pistesOn;
-		if (ready && map) map.setLayoutProperty('pistes', 'visibility', want ? 'visible' : 'none');
+		if (!ready || !map) return;
+		for (const id of SKI_LAYERS) map.setLayoutProperty(id, 'visibility', want ? 'visible' : 'none');
+	});
+
+	// Peak heights in the viewer's units; label colours with the theme.
+	$effect(() => {
+		void units;
+		const d = dark;
+		if (!ready || !map) return;
+		map.setLayoutProperty('peak-labels', 'text-field', peakLabel());
+		const halo = d ? 'rgba(10,15,25,0.85)' : 'rgba(255,255,255,0.9)';
+		for (const id of ['run-labels', 'lift-labels', 'peak-labels'])
+			map.setPaintProperty(id, 'text-halo-color', halo);
+		map.setPaintProperty('run-casing', 'line-color', halo);
+		map.setPaintProperty('peak-labels', 'text-color', d ? '#eef2f8' : '#2a2433');
+		map.setPaintProperty('peaks', 'circle-color', d ? '#e8edf5' : '#3a3346');
 	});
 
 	// 3D: drape everything over the terrain and tilt the view; back to flat and north-up
@@ -333,12 +533,33 @@
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
+	/** Which snow total is shown: its window in hours. */
+	let totalHours = $state(24);
+	const totals = $derived(timeline?.totals ?? []);
+	const total = $derived(
+		totals.find((t) => t.hours === totalHours) ?? totals[Math.min(1, totals.length - 1)]
+	);
+	$effect(() => {
+		const tot = totalsMode;
+		if (ready && map?.getLayer(PrecipLayer.ID))
+			map.setPaintProperty(PrecipLayer.ID, 'raster-opacity', tot ? TOTAL_OPACITY : PRECIP_OPACITY);
+	});
 
 	/** Put the wanted frame on screen; the old one stays until the new one is decoded. */
 	let showToken = 0;
 	async function show() {
 		if (!map || !timeline) return;
-		if (!on || !current) {
+		if (on && totalsMode && total) {
+			const t = total;
+			const token = ++showToken;
+			const bmp = await store.bitmap(t);
+			if (token !== showToken || !overlay) return;
+			overlay.draw(t.file, bmp);
+			shown = t.file;
+			return;
+		}
+		if (!on || !current || totalsMode) {
+			++showToken;
 			overlay?.draw(null, null);
 			shown = null;
 			return;
@@ -382,7 +603,7 @@
 			// The pictures' box only changes when locations do.
 			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
 			timeline = tl;
-			store.keepOnly(tl.frames);
+			store.keepOnly([...tl.frames, ...tl.totals]);
 			ready_ = new Set(tl.frames.filter((f) => store.has(f)).map((f) => f.file));
 			// Keep the viewer's place if that time still exists; otherwise go to "now".
 			const same = tl.frames.findIndex((f) => f.t === before);
@@ -390,7 +611,14 @@
 			if (map && (!overlay || !sameBox)) {
 				overlay?.remove();
 				// Over the base map, under the satellite labels and the ski runs.
-				overlay = new PrecipLayer(map, tl.bounds, tl.width, tl.height, PRECIP_OPACITY, 'satlabels');
+				overlay = new PrecipLayer(
+					map,
+					tl.bounds,
+					tl.width,
+					tl.height,
+					totalsMode ? TOTAL_OPACITY : PRECIP_OPACITY,
+					'satlabels'
+				);
 			}
 			void show();
 			void fetchAll();
@@ -414,13 +642,15 @@
 		void frame;
 		void on;
 		void count;
+		void totalsMode;
+		void total;
 		if (ready) void show();
 	});
 
 	// Play: step when the next frame is on hand (or after a short wait), quicker through
 	// the radar, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || !on || count < 2) return;
+		if (!ready || !playing || !on || totalsMode || count < 2) return;
 		let hold = 0;
 		let waits = 0;
 		let loops = 0;
@@ -719,8 +949,45 @@
 		{/if}
 
 		{#if on}
-			<section class="controls glass" aria-label="Precipitation timeline">
-				{#if count && label && current}
+			<section class="controls glass" aria-label="Precipitation">
+				<div class="modes seg" role="group" aria-label="Show">
+					<button aria-pressed={!totalsMode} onclick={() => prefs.setMapMode('timeline')}
+						>Radar & forecast</button
+					>
+					<button aria-pressed={totalsMode} onclick={() => prefs.setMapMode('totals')}
+						>Snow total</button
+					>
+				</div>
+				{#if totalsMode}
+					{#if total}
+						<div class="totals">
+							<div class="seg" role="group" aria-label="Window">
+								{#each totals as t (t.hours)}
+									<button
+										aria-pressed={t.hours === total.hours}
+										onclick={() => (totalHours = t.hours)}>Next {t.hours} h</button
+									>
+								{/each}
+							</div>
+							<span class="span faint">{totalSpan(total)}</span>
+						</div>
+						<div class="key total-key" aria-label="Snow total, {unit}">
+							<span class="name">{unit}</span>
+							<span class="ticks-ramp">
+								{#each TOTAL as s (s.from)}
+									<span class="cell" style:background={s.color}>{totalTick(s.from, units)}</span>
+								{/each}
+							</span>
+						</div>
+						<p class="note small-note">
+							Canadian HRDPS model, snow at about 10:1; covers Canada and the northern US.
+						</p>
+					{:else if loadError}
+						<p class="note">{loadError}</p>
+					{:else}
+						<p class="note">Snow totals aren't drawn yet.</p>
+					{/if}
+				{:else if count && label && current}
 					<div class="player">
 						<button
 							class="play"
@@ -761,28 +1028,30 @@
 					<p class="note">Loading…</p>
 				{/if}
 				{#if tooClose}
-					<p class="note">Zoom out to see precipitation.</p>
+					<p class="note">Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.</p>
 				{/if}
-				<div class="key">
-					{#each legendRamps as r (r.kind)}
-						<span class="kind">
-							<span class="name">{r.label}</span>
-							<span class="ramp" aria-hidden="true">
-								{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
+				{#if !totalsMode}
+					<div class="key">
+						{#each legendRamps as r (r.kind)}
+							<span class="kind">
+								<span class="name">{r.label}</span>
+								<span class="ramp" aria-hidden="true">
+									{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
+								</span>
+								<span class="top">{rampTop(r, units)}</span>
 							</span>
-							<span class="top">{rampTop(r, units)}</span>
-						</span>
-					{/each}
-					{#if untypedShown}
-						<span class="kind">
-							<span class="name">No type</span>
-							<span class="ramp" aria-hidden="true">
-								{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
+						{/each}
+						{#if untypedShown}
+							<span class="kind">
+								<span class="name">No type</span>
+								<span class="ramp" aria-hidden="true">
+									{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
+								</span>
+								<span class="top">{untypedTop(units)}</span>
 							</span>
-							<span class="top">{untypedTop(units)}</span>
-						</span>
-					{/if}
-				</div>
+						{/if}
+					</div>
+				{/if}
 			</section>
 		{/if}
 	{/if}
@@ -942,6 +1211,46 @@
 		.controls {
 			bottom: calc(84px + env(safe-area-inset-bottom));
 		}
+	}
+	.modes {
+		justify-self: start;
+	}
+	.modes button {
+		font-size: 0.78rem;
+		padding: 3px 10px;
+	}
+	.totals {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+	}
+	.totals .seg button {
+		font-size: 0.78rem;
+		padding: 3px 9px;
+	}
+	.totals .span {
+		font-size: 0.75rem;
+	}
+	.total-key {
+		gap: 6px;
+	}
+	.ticks-ramp {
+		display: flex;
+		flex: 1;
+		min-width: 0;
+		border-radius: 4px;
+		overflow: hidden;
+	}
+	.ticks-ramp .cell {
+		flex: 1;
+		text-align: center;
+		font: 600 0.62rem/1.6 var(--font-num, sans-serif);
+		color: #1f1b2e;
+	}
+	.small-note {
+		font-size: 0.68rem;
+		margin: 0 4px;
 	}
 	.player {
 		display: flex;

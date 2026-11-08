@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -124,6 +125,28 @@ class TileCache:
         with self._guard:
             self._locks.pop(key, None)
         return data, up.media_type
+
+
+GLYPHS = "https://demotiles.maplibre.org/font/{stack}/{range}.pbf"
+FONTS = {"Open Sans Semibold", "Noto Sans Regular"}
+
+
+def glyphs(cache: TileCache, stack: str, rng: str) -> bytes | None:
+    """Map label fonts (MapLibre glyph ranges), cached like tiles."""
+    if stack not in FONTS or not re.fullmatch(r"\d{1,5}-\d{1,5}", rng):
+        return None
+    path = cache.root / "glyphs" / stack.replace(" ", "_") / f"{rng}.pbf"
+    if path.exists():
+        return path.read_bytes()
+    try:
+        r = cache.client.get(GLYPHS.format(stack=stack.replace(" ", "%20"), range=rng))
+    except httpx.HTTPError:
+        return None
+    if r.status_code != 200:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(r.content)
+    return r.content
 
 
 def prune(root: Path, keep_days: int = KEEP_DAYS, now: float | None = None) -> int:
