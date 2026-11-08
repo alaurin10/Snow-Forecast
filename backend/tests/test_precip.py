@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -236,3 +237,68 @@ def test_numpy_runs_on_plain_x86_64() -> None:
     fails to import there ("your machine doesn't support X86_V2"). Keep a build that doesn't."""
     simd = np.show_config(mode="dicts")["SIMD Extensions"]  # type: ignore[no-untyped-call]
     assert "X86_V2" not in simd.get("baseline", [])
+
+
+# ---- Map tile cache -------------------------------------------------------------
+
+
+def test_tile_cache_fetches_once_repairs_esri_and_prunes(tmp_path: Path) -> None:
+    import httpx
+
+    from snowwatch.tiles import TileCache, prune
+
+    calls: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if "arcgisonline" in str(req.url):
+            im = Image.new("RGB", (256, 256), (100, 100, 100))
+            for i in range(256):
+                im.putpixel((i, 255), (240, 240, 240))  # the light edge
+                im.putpixel((255, i), (240, 240, 240))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=95)
+            return httpx.Response(
+                200, content=buf.getvalue(), headers={"content-type": "image/jpeg"}
+            )
+        if "/9/0/0" in str(req.url):
+            return httpx.Response(404)
+        return httpx.Response(
+            200, content=png((1, 2, 3), 4, 4), headers={"content-type": "image/png"}
+        )
+
+    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
+    first = cache.get("otm", 5, 3, 4)
+    again = cache.get("otm", 5, 3, 4)
+    assert first is not None and again == first and len(calls) == 1
+    assert "opentopomap.org/5/3/4.png" in calls[0]
+
+    esri = cache.get("esri", 6, 10, 22)
+    assert esri is not None and esri[1] == "image/jpeg"
+    im = Image.open(io.BytesIO(esri[0])).convert("RGB")
+    assert abs(im.getpixel((10, 255))[0] - 100) < 12  # the edge now matches the tile
+    assert abs(im.getpixel((255, 10))[0] - 100) < 12
+    assert "/tile/6/22/10" in calls[-1]  # Esri wants z/y/x
+
+    assert cache.get("otm", 9, 0, 0) is None  # upstream has none
+    assert cache.get("nope", 1, 0, 0) is None
+    assert cache.get("otm", 3, 8, 0) is None  # off the world
+    assert cache.get("otm", 18, 0, 0) is None  # beyond its zoom
+
+    assert prune(tmp_path, now=time.time() + 100 * 86400) == 2
+    assert not any(p.is_file() for p in tmp_path.rglob("*"))
+
+
+def test_api_serves_cached_tiles(settings: Settings, monkeypatch: Any) -> None:
+    from snowwatch.tiles import TileCache
+
+    monkeypatch.setattr(
+        TileCache,
+        "get",
+        lambda self, layer, z, x, y: (b"png", "image/png") if layer == "otm" else None,
+    )
+    client = TestClient(create_app(settings))
+    r = client.get("/api/tiles/otm/5/3/4.png")
+    assert r.status_code == 200 and r.content == b"png"
+    assert "max-age" in r.headers["cache-control"]
+    assert client.get("/api/tiles/nope/5/3/4.png").status_code == 404

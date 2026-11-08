@@ -2,14 +2,18 @@
   Every location on a map. Each marker shows the next-5-day snow on the
   Calendar's colour ramp, with a ring in the avalanche danger colour when the
   center's rating is current. Tap a marker for the numbers and a link.
-  With `radar`, precipitation plays over the map on one timeline: the last two hours
-  of observed radar, then the next ~48 hours of forecast, with rain, mix and snow in
-  their own colours. See ../radar.ts for the sources and how they're blended.
-  On phones the map fills the screen and the controls float over it.
+  With `radar`, the map fills the window and precipitation plays over it on one
+  timeline: the last two hours of observed radar, then the next ~48 hours of forecast
+  (see ../radar.ts). It's a MapLibre map: tilt and turn it, and switch on 3D terrain.
 -->
 <script lang="ts">
-	import 'leaflet/dist/leaflet.css';
-	import type { Map as LeafletMap } from 'leaflet';
+	import 'maplibre-gl/dist/maplibre-gl.css';
+	import type {
+		ExpressionSpecification,
+		Map as MlMap,
+		Marker,
+		StyleSpecification
+	} from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -26,48 +30,150 @@
 		type Frame,
 		type Timeline
 	} from '../radar';
-	import { FrameStore, PrecipCanvas } from '../precipOverlay';
+	import { FrameStore, PrecipLayer } from '../precipOverlay';
 
 	interface Props {
 		rows: OverviewRow[];
 		units: UnitSystem;
 		href: (id: string) => string;
-		/** Show the precipitation layers and their controls, full screen on phones. */
+		/** The full map: precipitation, its controls, and the whole window. */
 		radar?: boolean;
 	}
 
 	let { rows, units, href, radar = false }: Props = $props();
 	let el = $state<HTMLDivElement>();
 	let wrap = $state<HTMLDivElement>();
-	let map: LeafletMap | null = null;
-	let L: typeof import('leaflet') | null = null;
-	let markers: import('leaflet').LayerGroup | null = null;
+	let map: MlMap | null = null;
+	let ml: typeof import('maplibre-gl') | null = null;
+	let markers: Marker[] = [];
 	let ready = $state(false);
 	let infoOpen = $state(false);
+	let zoom = $state(0);
+
+	/** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
 	const DETAIL_ZOOM = 12;
 	const PISTE_ZOOM = 11;
-	let pistes: import('leaflet').TileLayer | null = null;
-	let zoom = $state(0);
+	const EXAGGERATION = 1.3;
 	const pistesOn = $derived(radar && prefs.mapPistes === 'on');
-	// The precipitation pictures are ~1.4 km a pixel: fade them out as the map zooms
-	// past that, and hide them up close where they'd be one colour across the screen.
-	const precipFade = $derived(zoom >= 13 ? 0 : zoom >= 12 ? 0.45 : zoom >= 11 ? 0.7 : 1);
+	const terrainOn = $derived(radar && prefs.mapTerrain === 'on');
+	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
+	// that and are gone up close, where one pixel would fill the screen.
 	const tooClose = $derived(zoom >= 13);
-	$effect(() => {
-		const f = precipFade;
-		const pane = ready && map ? map.getPane('precip') : undefined;
-		if (pane) pane.style.opacity = String(f);
-	});
-	$effect(() => {
-		const want = pistesOn;
-		if (!ready || !map || !pistes) return;
-		if (want) pistes.addTo(map);
-		else pistes.remove();
-	});
+	const PRECIP_OPACITY: ExpressionSpecification = [
+		'interpolate',
+		['linear'],
+		['zoom'],
+		10,
+		0.8,
+		11,
+		0.65,
+		12,
+		0.4,
+		13,
+		0
+	];
 
-	// ---- Base map ------------------------------------------------------------
-	// Esri's World Topo: natural colours, gentle relief, clear labels. Dimmed a little
-	// in the dark theme so it doesn't glare.
+	// Base map and ski-run tiles come through the mini PC, which caches them.
+	const tiles = (layer: string) => [`/api/tiles/${layer}/{z}/{x}/{y}.png`];
+
+	function mapStyle(dark: boolean): StyleSpecification {
+		return {
+			version: 8,
+			sources: {
+				esri: {
+					type: 'raster',
+					tiles: tiles('esri'),
+					tileSize: 256,
+					maxzoom: 17,
+					attribution:
+						'Map © <a href="https://www.esri.com">Esri</a>, HERE, Garmin, USGS, NGA, EPA, USDA, NPS'
+				},
+				otm: {
+					type: 'raster',
+					tiles: tiles('otm'),
+					tileSize: 256,
+					maxzoom: 17,
+					attribution:
+						'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+				},
+				pistes: {
+					type: 'raster',
+					tiles: tiles('pistes'),
+					tileSize: 256,
+					minzoom: PISTE_ZOOM,
+					maxzoom: 17,
+					attribution: 'Ski runs © <a href="https://www.opensnowmap.org">OpenSnowMap</a>'
+				},
+				// Elevation for 3D, straight from AWS (fast, and big enough not to proxy).
+				dem: {
+					type: 'raster-dem',
+					tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+					encoding: 'terrarium',
+					tileSize: 256,
+					// ~20 m detail: plenty for slopes, and light on memory.
+					maxzoom: 13,
+					attribution:
+						'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen, AWS</a>'
+				}
+			},
+			layers: [
+				{
+					id: 'esri',
+					type: 'raster',
+					source: 'esri',
+					maxzoom: DETAIL_ZOOM + 1,
+					paint: { 'raster-fade-duration': 150, ...basePaint(dark) }
+				},
+				{
+					id: 'otm',
+					type: 'raster',
+					source: 'otm',
+					minzoom: DETAIL_ZOOM - 0.5,
+					paint: {
+						// Cross-fade from Esri over half a zoom level.
+						'raster-opacity': [
+							'interpolate',
+							['linear'],
+							['zoom'],
+							DETAIL_ZOOM - 0.5,
+							0,
+							DETAIL_ZOOM + 0.3,
+							1
+						],
+						'raster-fade-duration': 150,
+						...basePaint(dark)
+					}
+				},
+				{
+					id: 'pistes',
+					type: 'raster',
+					source: 'pistes',
+					minzoom: PISTE_ZOOM,
+					layout: { visibility: radar && prefs.mapPistes === 'on' ? 'visible' : 'none' },
+					paint: { 'raster-fade-duration': 150 }
+				}
+			],
+			sky: {
+				'sky-color': dark ? '#0d1626' : '#9cc6ec',
+				'horizon-color': dark ? '#2a3a52' : '#e4eef7',
+				'fog-color': dark ? '#1b2638' : '#dfe8f0',
+				'sky-horizon-blend': 0.6,
+				'horizon-fog-blend': 0.6,
+				'fog-ground-blend': 0.8,
+				'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0]
+			}
+		};
+	}
+
+	/** Dimmed a little in the dark theme so the map doesn't glare. */
+	function basePaint(dark: boolean) {
+		return {
+			'raster-brightness-max': dark ? 0.72 : 1,
+			'raster-saturation': dark ? -0.15 : 0
+		} as const;
+	}
+
+	// ---- Theme ----------------------------------------------------------------
 	let systemDark = $state(false);
 	const dark = $derived(prefs.theme === 'dark' || (prefs.theme === 'auto' && systemDark));
 
@@ -77,6 +183,38 @@
 		const on = (e: MediaQueryListEvent) => (systemDark = e.matches);
 		mq.addEventListener('change', on);
 		return () => mq.removeEventListener('change', on);
+	});
+
+	$effect(() => {
+		const d = dark;
+		if (!ready || !map) return;
+		for (const id of ['esri', 'otm']) {
+			const p = basePaint(d);
+			map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
+			map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
+		}
+		const sky = mapStyle(d).sky;
+		if (sky) map.setSky(sky);
+	});
+
+	$effect(() => {
+		const want = pistesOn;
+		if (ready && map) map.setLayoutProperty('pistes', 'visibility', want ? 'visible' : 'none');
+	});
+
+	// 3D: drape everything over the terrain and tilt the view; back to flat and north-up
+	// when it's switched off.
+	$effect(() => {
+		const want = terrainOn;
+		if (!ready || !map) return;
+		if (want) {
+			map.setTerrain({ source: 'dem', exaggeration: EXAGGERATION });
+			if (map.getPitch() < 20) map.easeTo({ pitch: 60, duration: 900 });
+		} else {
+			if (map.getTerrain()) map.setTerrain(null);
+			if (map.getPitch() > 0 || map.getBearing() !== 0)
+				map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
+		}
 	});
 
 	// The full map fills the window below the header (and any banner), edge to edge;
@@ -141,14 +279,13 @@
 		return `linear-gradient(90deg, ${stops.join(', ')})`;
 	});
 
-	const OPACITY = 0.8;
 	const store = new FrameStore();
-	let overlay: PrecipCanvas | null = null;
+	let overlay: PrecipLayer | null = null;
 
 	/** Put the wanted frame on screen; the old one stays until the new one is decoded. */
 	let showToken = 0;
 	async function show() {
-		if (!map || !L || !timeline) return;
+		if (!map || !timeline) return;
 		if (!on || !current) {
 			overlay?.draw(null, null);
 			shown = null;
@@ -198,9 +335,10 @@
 			// Keep the viewer's place if that time still exists; otherwise go to "now".
 			const same = tl.frames.findIndex((f) => f.t === before);
 			frame = atNow || same < 0 ? Math.max(0, tl.now) : same;
-			if (map && L && (!overlay || !sameBox)) {
+			if (map && (!overlay || !sameBox)) {
 				overlay?.remove();
-				overlay = new PrecipCanvas(L, tl.bounds, tl.width, tl.height, OPACITY).addTo(map);
+				// Under the ski runs, over the base map.
+				overlay = new PrecipLayer(map, tl.bounds, tl.width, tl.height, PRECIP_OPACITY, 'pistes');
 			}
 			void show();
 			void fetchAll();
@@ -277,53 +415,42 @@
 	$effect(() => {
 		if (!el) return;
 		let cancelled = false;
-		import('leaflet').then((mod) => {
+		import('maplibre-gl').then((mod) => {
 			if (cancelled || !el) return;
-			L = mod.default ?? mod;
-			map = L.map(el, {
-				zoomControl: true,
-				// The full map owns the page, so the wheel can zoom it.
-				scrollWheelZoom: radar,
-				maxZoom: radar ? 17 : 15,
-				attributionControl: false
-			});
-			// Credits in the top-right, one line until tapped.
-			L.control.attribution({ position: 'topright', prefix: false }).addTo(map);
-			// Zoomed out: Esri's soft topo. Zoomed in (12+): OpenTopoMap, with contours,
-			// trails, peaks and lifts, the map the Manage page uses.
-			L.tileLayer(
-				'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-				{
-					maxZoom: DETAIL_ZOOM - 1,
-					className: 'basemap',
-					attribution:
-						'Map © <a href="https://www.esri.com">Esri</a>, HERE, Garmin, USGS, NGA, EPA, USDA, NPS'
-				}
-			).addTo(map);
-			L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-				minZoom: DETAIL_ZOOM,
+			ml = (mod as unknown as { default?: typeof mod }).default ?? mod;
+			const phone = matchMedia('(max-width: 700px)').matches;
+			map = new ml.Map({
+				container: el,
+				style: mapStyle(dark),
+				center: [-120, 48],
+				zoom: 5,
 				maxZoom: 17,
-				className: 'basemap-detail',
-				attribution:
-					'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
-			}).addTo(map);
-			// Ski runs and touring routes (OpenSnowMap), above the precipitation.
-			map.createPane('pistes').style.zIndex = '360';
-			pistes = L.tileLayer('https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png', {
-				pane: 'pistes',
-				minZoom: PISTE_ZOOM,
-				maxZoom: 17,
-				attribution: 'Ski runs © <a href="https://www.opensnowmap.org">OpenSnowMap</a>'
+				maxPitch: 80,
+				// Phones draw at 2x, not 3x: less than half the pixels, and it still looks sharp.
+				pixelRatio: Math.min(devicePixelRatio, 2),
+				// Fewer tiles kept in memory on phones.
+				maxTileCacheSize: phone ? 60 : 160,
+				attributionControl: false,
+				scrollZoom: radar,
+				renderWorldCopies: false,
+				fadeDuration: 150
 			});
-			if (radar && prefs.mapPistes === 'on') pistes.addTo(map);
-			map.on('zoomend', () => (zoom = map!.getZoom()));
-			map.whenReady(() => (zoom = map!.getZoom()));
-			// Precipitation between the terrain and the markers.
-			map.createPane('precip').style.zIndex = '350';
-			markers = L.layerGroup().addTo(map);
-			if (radar) refresh();
-			ready = true;
-			draw();
+			map.addControl(new ml.NavigationControl({ visualizePitch: true }), 'top-left');
+			map.addControl(new ml.AttributionControl({ compact: true }), 'top-right');
+			map.on('zoom', () => (zoom = map!.getZoom()));
+			// Tilting by hand switches 3D on: a tilted flat map is just a stretched map.
+			map.on('pitchend', () => {
+				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
+			});
+			map.on('load', () => {
+				if (cancelled) return;
+				// Credits start folded to their (i) button, which opens them.
+				el?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+				zoom = map!.getZoom();
+				ready = true;
+				draw();
+				if (radar) refresh();
+			});
 		});
 		return () => {
 			cancelled = true;
@@ -331,21 +458,11 @@
 			fetchRun++;
 			overlay = null;
 			store.clear();
+			for (const m of markers) m.remove();
+			markers = [];
 			map?.remove();
 			map = null;
 		};
-	});
-
-	// Tap the credits to read them in full.
-	$effect(() => {
-		if (!ready || !el) return;
-		const credits = el.querySelector('.leaflet-control-attribution');
-		const toggle = (e: Event) => {
-			if ((e.target as HTMLElement).tagName === 'A') return;
-			credits?.classList.toggle('open');
-		};
-		credits?.addEventListener('click', toggle);
-		return () => credits?.removeEventListener('click', toggle);
 	});
 
 	$effect(() => {
@@ -354,32 +471,47 @@
 		draw();
 	});
 
+	let fitted = false;
 	function draw() {
-		if (!map || !L || !markers) return;
-		markers.clearLayers();
+		if (!map || !ml || !ready) return;
+		for (const m of markers) m.remove();
+		markers = [];
 		const placed = rows.filter((r) => r.lat !== null && r.lat !== undefined && r.lon != null);
 		for (const r of placed) {
 			const b = bucket(r.next5_cm);
 			const danger = r.danger?.status === 'current' && r.danger.level ? r.danger.level : 0;
 			const label = snowNum(r.next5_cm, units);
-			const icon = L.divIcon({
-				className: 'snowpin',
-				html: `<span class="dot b${b}${danger ? ` ring d${danger}` : ''}">${esc(label)}</span>`,
-				iconSize: [34, 34],
-				iconAnchor: [17, 17]
-			});
+			const pin = document.createElement('button');
+			pin.className = 'snowpin';
+			pin.title = r.name;
+			pin.setAttribute('aria-label', `${r.name}: ${label} ${units === 'imperial' ? 'in' : 'cm'}`);
+			pin.innerHTML = `<span class="dot b${b}${danger ? ` ring d${danger}` : ''}">${esc(label)}</span>`;
 			const unit = units === 'imperial' ? 'in' : 'cm';
 			const dangerLine = danger ? `<div>Avalanche ${danger} · ${dangerWord(danger)}</div>` : '';
-			L.marker([r.lat!, r.lon!], { icon, title: r.name, alt: r.name })
-				.bindPopup(
-					`<strong>${esc(r.name)}</strong><div>${esc(label)} ${unit} in the next 5 days</div>` +
-						`${dangerLine}<a href="${esc(href(r.id))}">Open forecast →</a>`
-				)
-				.addTo(markers);
+			const popup = new ml.Popup({ offset: 20, maxWidth: '240px' }).setHTML(
+				`<strong>${esc(r.name)}</strong><div>${esc(label)} ${unit} in the next 5 days</div>` +
+					`${dangerLine}<a href="${esc(href(r.id))}">Open forecast →</a>`
+			);
+			markers.push(
+				// Always fully shown: in 3D, MapLibre would dim a marker it thinks a ridge hides.
+				new ml.Marker({ element: pin, opacityWhenCovered: '1' })
+					.setLngLat([r.lon!, r.lat!])
+					.setPopup(popup)
+					.addTo(map)
+			);
 		}
-		if (placed.length) {
-			const bounds = L.latLngBounds(placed.map((r) => [r.lat!, r.lon!] as [number, number]));
-			map.fitBounds(bounds.pad(0.25), { maxZoom: 9 });
+		// Frame the locations once; after that the view is the viewer's.
+		if (placed.length && !fitted) {
+			fitted = true;
+			const lons = placed.map((r) => r.lon!);
+			const lats = placed.map((r) => r.lat!);
+			map.fitBounds(
+				[
+					[Math.min(...lons), Math.min(...lats)],
+					[Math.max(...lons), Math.max(...lats)]
+				],
+				{ padding: 70, maxZoom: 9, animate: false }
+			);
 		}
 	}
 
@@ -401,6 +533,16 @@
 
 	{#if radar}
 		<div class="tools">
+			<button
+				class="tool three"
+				class:active={terrainOn}
+				aria-pressed={terrainOn}
+				onclick={() => prefs.setMapTerrain(!terrainOn)}
+				title={terrainOn
+					? 'Back to a flat map'
+					: '3D terrain: tilt with two fingers or right-drag, turn by twisting or Ctrl-drag'}
+				aria-label="3D terrain">3D</button
+			>
 			<button
 				class="tool"
 				class:active={on}
@@ -550,7 +692,7 @@
 <style>
 	.wrap {
 		position: relative;
-		/* Keep Leaflet's layers inside, under the floating tab bar. */
+		/* Keep the map's layers inside, under the floating tab bar. */
 		isolation: isolate;
 		z-index: 0;
 		--buffered: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -574,53 +716,46 @@
 		border-radius: 0;
 		border: 0;
 	}
-	/* Esri's topo tiles have a lighter last row and column, which draw a faint grid.
-	   Stretch each tile by a pixel and clip that edge off. */
-	.map :global(.basemap img.leaflet-tile) {
-		width: 257px !important;
-		height: 257px !important;
-		clip-path: inset(0 1px 1px 0);
-	}
-	.dark .map :global(.basemap-detail) {
-		filter: brightness(0.72) saturate(0.85);
-	}
-	.dark .map :global(.basemap) {
-		filter: brightness(0.68) saturate(0.85) contrast(0.95);
-	}
-
-	/* Credits: one line, tap for all. */
-	.map :global(.leaflet-control-attribution) {
-		max-width: min(70vw, 520px);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	/* MapLibre's controls: credits as a small (i) in the top-right, and room for our
+	   buttons under the zoom and compass. */
+	.map :global(.maplibregl-ctrl-attrib) {
 		font-size: 0.65rem;
-		cursor: pointer;
-		border-bottom-left-radius: 6px;
 	}
-	.map :global(.leaflet-control-attribution.open) {
-		white-space: normal;
+	.map :global(.maplibregl-popup-content) {
+		font: inherit;
+		font-size: 0.85rem;
+		border-radius: 10px;
+		padding: 10px 14px;
+		color: #1f1b2e;
+	}
+	.map :global(.maplibregl-popup-content a) {
+		color: #4b3fb5;
+		font-weight: 600;
 	}
 
 	.tools {
 		position: absolute;
-		top: 86px;
+		top: 112px;
 		left: 10px;
 		z-index: 1000;
 		display: grid;
 		gap: 6px;
 	}
+	/* Like MapLibre's own buttons, a touch bigger for fingers. */
 	.tool {
-		width: 34px;
-		height: 34px;
+		width: 32px;
+		height: 32px;
 		display: grid;
 		place-items: center;
 		border-radius: 4px;
-		border: 2px solid rgb(0 0 0 / 0.2);
-		background-clip: padding-box;
+		border: 0;
+		box-shadow: 0 0 0 2px rgb(0 0 0 / 0.1);
 		background: #fff;
 		color: #333;
 		cursor: pointer;
+	}
+	.tool.three {
+		font: 700 0.8rem/1 var(--font-num, sans-serif);
 	}
 	.tool.active {
 		background: var(--accent);
@@ -636,7 +771,7 @@
 
 	.info {
 		position: absolute;
-		top: 86px;
+		top: 112px;
 		left: 54px;
 		right: 10px;
 		max-width: 360px;
@@ -848,6 +983,12 @@
 	.pin.ring {
 		background: var(--c0);
 		border: 3px solid var(--d3);
+	}
+	:global(.snowpin) {
+		border: 0;
+		padding: 0;
+		background: none;
+		cursor: pointer;
 	}
 	:global(.snowpin .dot) {
 		display: grid;

@@ -39,7 +39,7 @@ Tick these off once; each links to the step with the details.
 | Docker VM (Debian 12) | `api` (web app + API, port 8090) and `worker` (forecast runs, backups, the map's precipitation frames every 10 min) |
 | Home Assistant VM | The Cloudflared app, which already runs the tunnel for `ha.` and `dash.` |
 | Cloudflare | DNS, the tunnel edge, the Access login |
-| `./data` on the Docker VM | The database, the raw-response cache, backups and `precip/` (map frames, ~2 MB) |
+| `./data` on the Docker VM | The database, the raw-response cache, backups, `precip/` (map frames, ~2 MB) and `tiles/` (cached map tiles; unused ones pruned nightly) |
 
 ---
 

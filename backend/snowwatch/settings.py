@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         return self.data_dir / "backups"
 
     @property
+    def tiles_dir(self) -> Path:
+        """Cached map tiles (see snowwatch/tiles.py)."""
+        return self.data_dir / "tiles"
+
+    @property
     def precip_dir(self) -> Path:
         """Precipitation frames for the map (see snowwatch/precip.py)."""
         return self.data_dir / "precip"

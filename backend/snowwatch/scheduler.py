@@ -160,6 +160,9 @@ class Worker:
             self.ping(self.settings.healthchecks_backup_url)
             removed = prune_raw(self.settings.raw_dir)
             log.info("pruned %d cached raw responses", removed)
+            from snowwatch.tiles import prune as prune_tiles
+
+            log.info("pruned %d cached map tiles", prune_tiles(self.settings.tiles_dir))
             avalanche.prune(conn)
 
     def precip(self) -> None:

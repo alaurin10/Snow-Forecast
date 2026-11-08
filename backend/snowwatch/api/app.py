@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from snowwatch import __version__
 from snowwatch.api.admin import make_admin_router
@@ -21,6 +21,7 @@ from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
+from snowwatch.tiles import TileCache
 
 
 def _last_good_run(db: Path) -> dict[str, Any] | None:
@@ -108,6 +109,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path,
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    tile_cache: TileCache | None = None
+
+    @app.get("/api/tiles/{layer}/{z}/{x}/{y}.png")
+    def tile(layer: str, z: int, x: int, y: int) -> Response:
+        """Base map and ski-run tiles, cached here (see snowwatch/tiles.py)."""
+        nonlocal tile_cache
+        tile_cache = tile_cache or TileCache(settings.tiles_dir, settings.user_agent)
+        got = tile_cache.get(layer, z, x, y)
+        if got is None:
+            raise HTTPException(404)
+        data, media_type = got
+        return Response(
+            data, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"}
         )
 
     app.include_router(make_router())
