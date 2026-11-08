@@ -27,6 +27,7 @@ class Prefs {
 	theme = $state<Theme>(load('sw.theme', ['auto', 'light', 'dark'] as const, 'auto'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
+	mapPistes = $state<'on' | 'off'>(load('sw.mapPistes', ['on', 'off'] as const, 'on'));
 
 	setUnits(u: UnitSystem) {
 		this.units = u;
@@ -46,6 +47,11 @@ class Prefs {
 	setMapPrecip(on: boolean) {
 		this.mapPrecip = on ? 'on' : 'off';
 		save('sw.mapPrecip', this.mapPrecip);
+	}
+
+	setMapPistes(on: boolean) {
+		this.mapPistes = on ? 'on' : 'off';
+		save('sw.mapPistes', this.mapPistes);
 	}
 }
 

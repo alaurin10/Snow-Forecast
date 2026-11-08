@@ -30,22 +30,13 @@
 {/if}
 
 <style>
+	/* The map fills the window; the title is for screen readers. */
 	h1 {
-		font-family: var(--font-num);
-		font-size: 1.9rem;
-		font-weight: 600;
-		letter-spacing: -0.02em;
-		margin: 4px 0 16px;
-	}
-	/* Phones and tablets: the map fills the screen; the title is for screen readers. */
-	@media (max-width: 1099px) {
-		h1 {
-			position: absolute;
-			width: 1px;
-			height: 1px;
-			overflow: hidden;
-			clip-path: inset(50%);
-			margin: 0;
-		}
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		margin: 0;
 	}
 </style>

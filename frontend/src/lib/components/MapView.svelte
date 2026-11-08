@@ -44,6 +44,26 @@
 	let markers: import('leaflet').LayerGroup | null = null;
 	let ready = $state(false);
 	let infoOpen = $state(false);
+	const DETAIL_ZOOM = 12;
+	const PISTE_ZOOM = 11;
+	let pistes: import('leaflet').TileLayer | null = null;
+	let zoom = $state(0);
+	const pistesOn = $derived(radar && prefs.mapPistes === 'on');
+	// The precipitation pictures are ~1.4 km a pixel: fade them out as the map zooms
+	// past that, and hide them up close where they'd be one colour across the screen.
+	const precipFade = $derived(zoom >= 13 ? 0 : zoom >= 12 ? 0.45 : zoom >= 11 ? 0.7 : 1);
+	const tooClose = $derived(zoom >= 13);
+	$effect(() => {
+		const f = precipFade;
+		const pane = ready && map ? map.getPane('precip') : undefined;
+		if (pane) pane.style.opacity = String(f);
+	});
+	$effect(() => {
+		const want = pistesOn;
+		if (!ready || !map || !pistes) return;
+		if (want) pistes.addTo(map);
+		else pistes.remove();
+	});
 
 	// ---- Base map ------------------------------------------------------------
 	// Esri's World Topo: natural colours, gentle relief, clear labels. Dimmed a little
@@ -59,11 +79,16 @@
 		return () => mq.removeEventListener('change', on);
 	});
 
-	// Phones: fill the screen from the map's top down, behind the floating tab bar.
+	// The full map fills the window below the header (and any banner), edge to edge;
+	// on phones the tab bar floats over it.
 	let fillTop = $state(0);
 	$effect(() => {
 		if (!radar || !wrap) return;
-		const measure = () => (fillTop = wrap!.getBoundingClientRect().top + window.scrollY);
+		const main = wrap.closest('main');
+		// Whole pixels: a map placed at a fractional offset blends every tile edge,
+		// which draws a faint grid.
+		const measure = () =>
+			(fillTop = Math.round((main ?? wrap!).getBoundingClientRect().top + window.scrollY));
 		measure();
 		window.addEventListener('resize', measure);
 		return () => window.removeEventListener('resize', measure);
@@ -257,20 +282,42 @@
 			L = mod.default ?? mod;
 			map = L.map(el, {
 				zoomControl: true,
-				scrollWheelZoom: false,
+				// The full map owns the page, so the wheel can zoom it.
+				scrollWheelZoom: radar,
+				maxZoom: radar ? 17 : 15,
 				attributionControl: false
 			});
 			// Credits in the top-right, one line until tapped.
 			L.control.attribution({ position: 'topright', prefix: false }).addTo(map);
+			// Zoomed out: Esri's soft topo. Zoomed in (12+): OpenTopoMap, with contours,
+			// trails, peaks and lifts, the map the Manage page uses.
 			L.tileLayer(
 				'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
 				{
-					maxZoom: 15,
+					maxZoom: DETAIL_ZOOM - 1,
 					className: 'basemap',
 					attribution:
-						'Map © <a href="https://www.esri.com">Esri</a>, HERE, Garmin, USGS, NGA, EPA, USDA, NPS, © OpenStreetMap'
+						'Map © <a href="https://www.esri.com">Esri</a>, HERE, Garmin, USGS, NGA, EPA, USDA, NPS'
 				}
 			).addTo(map);
+			L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+				minZoom: DETAIL_ZOOM,
+				maxZoom: 17,
+				className: 'basemap-detail',
+				attribution:
+					'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
+			}).addTo(map);
+			// Ski runs and touring routes (OpenSnowMap), above the precipitation.
+			map.createPane('pistes').style.zIndex = '360';
+			pistes = L.tileLayer('https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png', {
+				pane: 'pistes',
+				minZoom: PISTE_ZOOM,
+				maxZoom: 17,
+				attribution: 'Ski runs © <a href="https://www.opensnowmap.org">OpenSnowMap</a>'
+			});
+			if (radar && prefs.mapPistes === 'on') pistes.addTo(map);
+			map.on('zoomend', () => (zoom = map!.getZoom()));
+			map.whenReady(() => (zoom = map!.getZoom()));
 			// Precipitation between the terrain and the markers.
 			map.createPane('precip').style.zIndex = '350';
 			markers = L.layerGroup().addTo(map);
@@ -370,6 +417,22 @@
 			</button>
 			<button
 				class="tool"
+				class:active={pistesOn}
+				aria-pressed={pistesOn}
+				onclick={() => prefs.setMapPistes(!pistesOn)}
+				title={zoom < PISTE_ZOOM
+					? 'Ski runs (zoom in to see them)'
+					: 'Show or hide ski runs and touring routes'}
+				aria-label="Ski runs"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><circle cx="15" cy="4.5" r="1.8" /><path
+						d="M3 20l18-6M7 18.7l3.5-6 4 1.5-1.5-5-3.5 1.5L8 9M14 8.7l3 2.3"
+					/></svg
+				>
+			</button>
+			<button
+				class="tool"
 				class:active={infoOpen}
 				aria-expanded={infoOpen}
 				onclick={() => (infoOpen = !infoOpen)}
@@ -446,6 +509,9 @@
 				{:else}
 					<p class="note">Loading…</p>
 				{/if}
+				{#if tooClose}
+					<p class="note">Zoom out to see precipitation.</p>
+				{/if}
 				<div class="key">
 					{#each legendRamps as r (r.kind)}
 						<span class="kind">
@@ -495,22 +561,18 @@
 		overflow: hidden;
 		border: 1px solid var(--border);
 	}
-	/* The full map: a tall card on desktop. */
-	.fill .map {
-		height: clamp(420px, calc(100dvh - 190px), 900px);
+	/* The full map: the whole window below the header, edge to edge. */
+	.wrap.fill {
+		position: fixed;
+		top: var(--fill-top);
+		left: 0;
+		right: 0;
+		bottom: 0;
 	}
-	/* Phones and tablets: edge to edge, from the header to the bottom of the screen,
-	   with the tab bar floating over it. */
-	@media (max-width: 1099px) {
-		.wrap.fill {
-			margin: -16px -16px 0;
-		}
-		.fill .map {
-			height: calc(100dvh - var(--fill-top));
-			min-height: 360px;
-			border-radius: 0;
-			border: 0;
-		}
+	.fill .map {
+		height: 100%;
+		border-radius: 0;
+		border: 0;
 	}
 	/* Esri's topo tiles have a lighter last row and column, which draw a faint grid.
 	   Stretch each tile by a pixel and clip that edge off. */
@@ -518,6 +580,9 @@
 		width: 257px !important;
 		height: 257px !important;
 		clip-path: inset(0 1px 1px 0);
+	}
+	.dark .map :global(.basemap-detail) {
+		filter: brightness(0.72) saturate(0.85);
 	}
 	.dark .map :global(.basemap) {
 		filter: brightness(0.68) saturate(0.85) contrast(0.95);
