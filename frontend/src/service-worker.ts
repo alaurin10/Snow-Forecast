@@ -3,6 +3,9 @@
 // - /api/* is network-first, falling back to the last good response (up to 2 days
 //   old) when offline. A redirect to the Access login passes straight through, so
 //   the app can show "Sign in again" instead of quietly serving old data.
+// - Map tiles, terrain, label fonts and ski runs saved for offline use (Map → offline
+//   maps; see lib/offlineMaps.ts) are answered from that cache first. Other map tiles
+//   go straight to the network: they are many and big, and the mini PC caches them.
 // - Page loads always go to the network (so Access can ask for a login) and
 //   fall back to the cached app shell only when the network is unreachable.
 /// <reference lib="webworker" />
@@ -16,8 +19,12 @@ const shellFiles = [
 	...assets.map((f) => `/${f.path}`)
 ];
 const SHELL = `shell-${hash(shellFiles.join('|'))}`;
-const API = 'api-v1';
+const API = 'api-v2'; // v1 also held map tiles; dropped on activate
 const API_MAX_AGE_MS = 2 * 24 * 3600 * 1000;
+// Keep in step with OFFLINE_CACHE in lib/offlineMaps.ts.
+const OFFLINE = 'offline-maps-v1';
+const DEM_HOST = 's3.amazonaws.com';
+const DEM_PATH = '/elevation-tiles-prod/terrarium/';
 
 function hash(s: string): string {
 	let h = 0;
@@ -39,7 +46,9 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 		caches
 			.keys()
 			.then((keys) =>
-				Promise.all(keys.filter((k) => k !== SHELL && k !== API).map((k) => caches.delete(k)))
+				Promise.all(
+					keys.filter((k) => k !== SHELL && k !== API && k !== OFFLINE).map((k) => caches.delete(k))
+				)
 			)
 			.then(() => self.clients.claim())
 	);
@@ -68,6 +77,27 @@ async function apiFirst(request: Request): Promise<Response> {
 	}
 }
 
+/** Saved map files first (they don't change), then the network. */
+async function savedFirst(request: Request): Promise<Response> {
+	const saved = await caches.match(request.url, { cacheName: OFFLINE, ignoreVary: true });
+	if (saved) return saved;
+	try {
+		return await fetch(request);
+	} catch {
+		return new Response(null, { status: 504 });
+	}
+}
+
+/** Ski runs change weekly: the network first, the saved copy when offline. */
+async function networkThenSaved(request: Request): Promise<Response> {
+	try {
+		return await fetch(request);
+	} catch {
+		const saved = await caches.match(request.url, { cacheName: OFFLINE, ignoreVary: true });
+		return saved ?? new Response(null, { status: 504 });
+	}
+}
+
 async function pageNetworkFirst(request: Request): Promise<Response> {
 	try {
 		return await fetch(request);
@@ -80,8 +110,16 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 	const { request } = event;
 	if (request.method !== 'GET') return;
 	const url = new URL(request.url);
+	if (url.host === DEM_HOST && url.pathname.startsWith(DEM_PATH)) {
+		event.respondWith(savedFirst(request));
+		return;
+	}
 	if (url.origin !== self.location.origin) return;
-	if (url.pathname.startsWith('/api/')) {
+	if (url.pathname.startsWith('/api/tiles/') || url.pathname.startsWith('/api/glyphs/')) {
+		event.respondWith(savedFirst(request));
+	} else if (url.pathname.startsWith('/api/osm/')) {
+		event.respondWith(networkThenSaved(request));
+	} else if (url.pathname.startsWith('/api/')) {
 		event.respondWith(apiFirst(request));
 	} else if (request.mode === 'navigate') {
 		event.respondWith(pageNetworkFirst(request));

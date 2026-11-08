@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
+	import { savedAreas } from '../../lib/offlineMaps';
 	import MapView from '../../lib/components/MapView.svelte';
 	import type { OverviewRow } from '../../lib/types.gen';
 
@@ -11,7 +12,23 @@
 	$effect(() => {
 		getOverview()
 			.then((r) => (rows = r))
-			.catch((e: Error) => (error = e.message));
+			.catch((e: Error) => {
+				// No connection and no recent copy: still open the map on the areas saved for
+				// offline use, with no forecast numbers.
+				const saved = Object.values(savedAreas());
+				if (saved.length) {
+					rows = saved.map(
+						(a) =>
+							({
+								id: a.id,
+								name: a.name,
+								lat: a.lat,
+								lon: a.lon,
+								next5_cm: null
+							}) as unknown as OverviewRow
+					);
+				} else error = e.message;
+			});
 	});
 
 	const href = (id: string) => resolve('/location/[id]', { id });
