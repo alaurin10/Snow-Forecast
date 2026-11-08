@@ -35,6 +35,8 @@
 		type Timeline
 	} from '../radar';
 	import { FrameStore, PrecipLayer } from '../precipOverlay';
+	import { UserLocation, type LocState } from '../userLocation';
+	import OfflineMaps from './OfflineMaps.svelte';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -53,6 +55,12 @@
 	let popups: Popup[] = [];
 	let ready = $state(false);
 	let infoOpen = $state(false);
+	let offlineOpen = $state(false);
+	let loc: UserLocation | null = null;
+	let locState = $state<LocState>('off');
+	const canLocate = UserLocation.supported();
+	/** No connection: the map shows only what's saved (OpenTopoMap at every zoom). */
+	let offline = $state(typeof navigator !== 'undefined' && navigator.onLine === false);
 	let zoom = $state(0);
 
 	/** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
@@ -91,6 +99,17 @@
 		0.4,
 		13,
 		0
+	];
+
+	/** Cross-fade from Esri over half a zoom level. */
+	const OTM_OPACITY: ExpressionSpecification = [
+		'interpolate',
+		['linear'],
+		['zoom'],
+		DETAIL_ZOOM - 0.5,
+		0,
+		DETAIL_ZOOM + 0.3,
+		1
 	];
 
 	// Base map and ski-run tiles come through the mini PC, which caches them.
@@ -166,16 +185,7 @@
 					minzoom: DETAIL_ZOOM - 0.5,
 					layout: { visibility: baseVis('topo') },
 					paint: {
-						// Cross-fade from Esri over half a zoom level.
-						'raster-opacity': [
-							'interpolate',
-							['linear'],
-							['zoom'],
-							DETAIL_ZOOM - 0.5,
-							0,
-							DETAIL_ZOOM + 0.3,
-							1
-						],
+						'raster-opacity': OTM_OPACITY,
 						'raster-fade-duration': 150,
 						...basePaint(dark)
 					}
@@ -436,12 +446,27 @@
 	});
 
 	$effect(() => {
-		const sat = satellite;
+		// Offline, only OpenTopoMap is saved (Esri's terms don't allow storing its tiles),
+		// so it shows at every zoom and satellite waits for a connection.
+		const off = offline;
+		const sat = satellite && !off;
 		if (!ready || !map) return;
-		for (const id of ['esri', 'otm'])
-			map.setLayoutProperty(id, 'visibility', sat ? 'none' : 'visible');
+		map.setLayoutProperty('esri', 'visibility', sat || off ? 'none' : 'visible');
+		map.setLayoutProperty('otm', 'visibility', sat ? 'none' : 'visible');
+		map.setLayerZoomRange('otm', off ? 0 : DETAIL_ZOOM - 0.5, 24);
+		map.setPaintProperty('otm', 'raster-opacity', off ? 1 : OTM_OPACITY);
 		for (const id of ['sat', 'satlabels'])
 			map.setLayoutProperty(id, 'visibility', sat ? 'visible' : 'none');
+	});
+
+	$effect(() => {
+		const set = () => (offline = navigator.onLine === false);
+		addEventListener('online', set);
+		addEventListener('offline', set);
+		return () => {
+			removeEventListener('online', set);
+			removeEventListener('offline', set);
+		};
 	});
 
 	$effect(() => {
@@ -744,6 +769,10 @@
 				// Credits start folded to their (i) button, which opens them.
 				el?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 				zoom = map!.getZoom();
+				if (radar && canLocate) {
+					loc = new UserLocation(map!, ml!);
+					loc.onChange = (st) => (locState = st);
+				}
 				ready = true;
 				draw();
 				if (radar) refresh();
@@ -751,6 +780,8 @@
 		});
 		return () => {
 			cancelled = true;
+			loc?.stop();
+			loc = null;
 			ready = false;
 			fetchRun++;
 			overlay = null;
@@ -870,6 +901,25 @@
 
 	{#if radar}
 		<div class="tools">
+			{#if canLocate}
+				<button
+					class="tool"
+					class:active={locState === 'following'}
+					class:shown={locState === 'shown' || locState === 'locating'}
+					aria-pressed={locState === 'following' || locState === 'shown'}
+					onclick={() => loc?.toggle()}
+					title={locState === 'following'
+						? 'Stop showing your location'
+						: locState === 'shown'
+							? 'Back to your location'
+							: 'Show your location'}
+					aria-label="Your location"
+				>
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+						><path d="M20 4L4 11l7 2 2 7 7-16z" class:fill={locState === 'following'} /></svg
+					>
+				</button>
+			{/if}
 			<button
 				class="tool three"
 				class:active={terrainOn}
@@ -924,9 +974,27 @@
 			</button>
 			<button
 				class="tool"
+				class:active={offlineOpen}
+				aria-expanded={offlineOpen}
+				onclick={() => {
+					offlineOpen = !offlineOpen;
+					infoOpen = false;
+				}}
+				title="Save maps for use with no signal"
+				aria-label="Offline maps"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" /></svg
+				>
+			</button>
+			<button
+				class="tool"
 				class:active={infoOpen}
 				aria-expanded={infoOpen}
-				onclick={() => (infoOpen = !infoOpen)}
+				onclick={() => {
+					infoOpen = !infoOpen;
+					offlineOpen = false;
+				}}
 				aria-label="About this map"
 			>
 				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
@@ -934,6 +1002,31 @@
 				>
 			</button>
 		</div>
+
+		{#if offlineOpen}
+			<OfflineMaps
+				places={rows
+					.filter((r) => r.lat != null && r.lon != null)
+					.map((r) => ({ id: r.id, name: r.name, lat: r.lat!, lon: r.lon! }))}
+				onclose={() => (offlineOpen = false)}
+			/>
+		{/if}
+
+		{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline}
+			<p class="note glass" role="status">
+				{#if offline}
+					Offline: showing saved maps.
+				{/if}
+				{#if locState === 'locating'}
+					Finding you…
+				{:else if locState === 'denied'}
+					Location is off for this site. On iPhone: Settings → Privacy & Security → Location
+					Services → Safari Websites → While Using.
+				{:else if locState === 'unavailable'}
+					No GPS fix yet. Keep the phone where it can see the sky.
+				{/if}
+			</p>
+		{/if}
 
 		{#if infoOpen}
 			<div class="info" role="dialog" aria-label="About this map">
@@ -1163,6 +1256,59 @@
 	.tool.active {
 		background: var(--accent);
 		color: #fff;
+	}
+	.tool.shown {
+		color: var(--accent);
+	}
+	.tool svg .fill {
+		fill: currentColor;
+	}
+	.note {
+		position: absolute;
+		top: 10px;
+		left: 54px;
+		right: 54px;
+		max-width: 420px;
+		margin: 0 auto;
+		z-index: 1001;
+		padding: 8px 12px;
+		border-radius: 12px;
+		font-size: 0.8rem;
+		text-align: center;
+		color: var(--text);
+	}
+	:global(.userloc) {
+		width: 22px;
+		height: 22px;
+		position: relative;
+	}
+	:global(.userloc .me) {
+		position: absolute;
+		inset: 3px;
+		border-radius: 50%;
+		background: #1a73e8;
+		border: 2.5px solid #fff;
+		box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+	}
+	/* The way you're facing: a soft wedge pointing up, turned with the marker. */
+	:global(.userloc .cone) {
+		display: none;
+		position: absolute;
+		left: -19px;
+		top: -49px;
+		width: 60px;
+		height: 60px;
+		background: conic-gradient(
+			from -30deg at 50% 100%,
+			rgb(26 115 232 / 0.45),
+			rgb(26 115 232 / 0) 60deg,
+			transparent 60deg
+		);
+		clip-path: polygon(50% 100%, 0 0, 100% 0);
+		mask: radial-gradient(circle at 50% 100%, #000 30%, transparent 100%);
+	}
+	:global(.userloc.has-heading .cone) {
+		display: block;
 	}
 	.tool svg {
 		fill: none;
