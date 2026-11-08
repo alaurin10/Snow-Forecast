@@ -229,6 +229,14 @@
 		['match', ['get', 'type'], ['skitour', 'backcountry'], '#7b3fb0', '#5b6b7a']
 	];
 	const FONT = ['Open Sans Semibold'];
+	// Run and lift names keep a white outline in both themes: the difficulty colours
+	// (black runs especially) are only readable on a light edge.
+	const LABEL_HALO = 'rgba(255,255,255,0.95)';
+	const LABEL_PAINT = {
+		'text-halo-color': LABEL_HALO,
+		'text-halo-width': 2,
+		'text-halo-blur': 0.2
+	};
 	const SKI_LAYERS = ['run-casing', 'runs', 'lifts', 'run-labels', 'lift-labels'];
 
 	function peakLabel(): ExpressionSpecification {
@@ -331,9 +339,11 @@
 					'text-pitch-alignment': 'viewport',
 					'text-letter-spacing': 0.02,
 					'symbol-spacing': 280,
-					'text-max-angle': 35
+					'text-max-angle': 35,
+					// Beside the run rather than on it, so a dark line doesn't swallow the name.
+					'text-offset': [0, -0.9]
 				},
-				paint: { 'text-color': runColor, 'text-halo-color': halo, 'text-halo-width': 1.6 }
+				paint: { 'text-color': runColor, ...LABEL_PAINT }
 			},
 			{
 				id: 'lift-labels',
@@ -347,9 +357,10 @@
 					'text-field': ['get', 'name'],
 					'text-font': FONT,
 					'text-size': 12,
-					'text-pitch-alignment': 'viewport'
+					'text-pitch-alignment': 'viewport',
+					'text-offset': [0, -0.85]
 				},
-				paint: { 'text-color': '#b0202a', 'text-halo-color': halo, 'text-halo-width': 1.6 }
+				paint: { 'text-color': '#b0202a', ...LABEL_PAINT }
 			},
 			{
 				id: 'peaks',
@@ -446,8 +457,7 @@
 		if (!ready || !map) return;
 		map.setLayoutProperty('peak-labels', 'text-field', peakLabel());
 		const halo = d ? 'rgba(10,15,25,0.85)' : 'rgba(255,255,255,0.9)';
-		for (const id of ['run-labels', 'lift-labels', 'peak-labels'])
-			map.setPaintProperty(id, 'text-halo-color', halo);
+		map.setPaintProperty('peak-labels', 'text-halo-color', halo);
 		map.setPaintProperty('run-casing', 'line-color', halo);
 		map.setPaintProperty('peak-labels', 'text-color', d ? '#eef2f8' : '#2a2433');
 		map.setPaintProperty('peaks', 'circle-color', d ? '#e8edf5' : '#3a3346');
