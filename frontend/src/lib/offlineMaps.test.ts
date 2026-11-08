@@ -42,5 +42,6 @@ describe('offline map areas', () => {
 		const u = sharedUrls('');
 		expect(u).toContain('/api/osm/ski.geojson');
 		expect(u).toContain('/api/glyphs/Open%20Sans%20Semibold/0-255.pbf');
+		expect(u).toContain('/api/glyphs/Noto%20Sans%20Regular/8192-8447.pbf');
 	});
 });

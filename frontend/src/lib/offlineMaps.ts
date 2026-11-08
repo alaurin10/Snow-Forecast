@@ -101,9 +101,11 @@ export function sharedUrls(origin: string): string[] {
 	const fonts = ['Open Sans Semibold', 'Noto Sans Regular'];
 	return [
 		`${origin}/api/osm/ski.geojson`,
-		// Latin and Latin-1 cover the names here.
+		// Latin, accented letters (French names in Canada) and punctuation (– ’ …).
 		...fonts.flatMap((f) =>
-			['0-255', '256-511'].map((r) => `${origin}/api/glyphs/${encodeURIComponent(f)}/${r}.pbf`)
+			['0-255', '256-511', '8192-8447'].map(
+				(r) => `${origin}/api/glyphs/${encodeURIComponent(f)}/${r}.pbf`
+			)
 		)
 	];
 }
