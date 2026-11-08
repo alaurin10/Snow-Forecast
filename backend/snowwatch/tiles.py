@@ -39,6 +39,23 @@ UPSTREAMS: dict[str, Upstream] = {
         "image/png",
     ),
     "pistes": Upstream(("https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png",), 18, "image/png"),
+    # Satellite imagery for the Satellite style, with place names and borders on top.
+    "sat": Upstream(
+        (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/"
+            "tile/{z}/{y}/{x}",
+        ),
+        18,
+        "image/jpeg",
+    ),
+    "satlabels": Upstream(
+        (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/"
+            "World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        ),
+        18,
+        "image/png",
+    ),
     "esri": Upstream(
         (
             "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/"

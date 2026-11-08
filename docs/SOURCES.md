@@ -85,7 +85,8 @@ A frame is only redrawn when its inputs change: a new radar scan, a new HRDPS ru
 - **The map itself:** MapLibre GL (WebGL), so it can tilt, turn and show 3D terrain.
   - Base map: Esri World Topo up to zoom 12, then a half-level cross-fade to OpenTopoMap (contours, trails, peaks, lifts), dimmed in the dark theme. Ski runs and touring routes: OpenSnowMap's `pistes` overlay from zoom 11.
   - These three come through the mini PC's tile cache, `/api/tiles/{esri,otm,pistes}/{z}/{x}/{y}.png` (`backend/snowwatch/tiles.py`, files in `data/tiles/`, unused ones pruned nightly after 45 days). OpenTopoMap takes ~0.5–1 s a tile and OpenSnowMap ~0.5 s, so a repeat view is far quicker from the cache. Esri's tiles have a lighter last row and column; the cache repairs them once, so the map has no grid.
-  - 3D terrain: AWS/Mapzen terrain tiles (`elevation-tiles-prod/terrarium`, CORS open, no key), up to zoom 13 (~20 m). Fetched straight from AWS, since they're fast and large.
+  - Satellite style: Esri World Imagery (to zoom 18) with Esri's Boundaries & Places labels on top, also through the tile cache (`sat`, `satlabels`).
+  - 3D terrain: AWS/Mapzen terrain tiles (`elevation-tiles-prod/terrarium`, CORS open, no key), up to zoom 15 (~3 m a pixel around Snoqualmie; zoom 16 doesn't exist), exaggerated ×1.15. Fetched straight from AWS, since they're fast and large.
   - Precipitation is a MapLibre canvas source over the frames' box, uploaded once per frame shown. It drapes over the terrain and fades out from zoom 11 to 13.
   - Phones draw at 2× rather than 3× and keep fewer tiles in memory. In headless Chrome on an iPhone profile, the page held ~220 MB through playback and panning in 3D.
 - **Later option:** our own HRRR from NOAA's GRIB files on AWS (rain/snow/freezing rain/sleet and rate, to 48 h) would replace the IEM/WPC part of `precip.py`.

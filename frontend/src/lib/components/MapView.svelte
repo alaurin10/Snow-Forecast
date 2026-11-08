@@ -12,6 +12,7 @@
 		ExpressionSpecification,
 		Map as MlMap,
 		Marker,
+		Popup,
 		StyleSpecification
 	} from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
@@ -46,6 +47,7 @@
 	let map: MlMap | null = null;
 	let ml: typeof import('maplibre-gl') | null = null;
 	let markers: Marker[] = [];
+	let popups: Popup[] = [];
 	let ready = $state(false);
 	let infoOpen = $state(false);
 	let zoom = $state(0);
@@ -53,9 +55,11 @@
 	/** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
 	const DETAIL_ZOOM = 12;
 	const PISTE_ZOOM = 11;
-	const EXAGGERATION = 1.3;
+	/** A little extra height reads well zoomed out without making couloirs cartoonish up close. */
+	const EXAGGERATION = 1.15;
 	const pistesOn = $derived(radar && prefs.mapPistes === 'on');
 	const terrainOn = $derived(radar && prefs.mapTerrain === 'on');
+	const satellite = $derived(radar && prefs.mapBase === 'satellite');
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
 	const tooClose = $derived(zoom >= 13);
@@ -96,6 +100,20 @@
 					attribution:
 						'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
 				},
+				sat: {
+					type: 'raster',
+					tiles: tiles('sat'),
+					tileSize: 256,
+					maxzoom: 18,
+					attribution:
+						'Imagery © <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics, USDA, USGS'
+				},
+				satlabels: {
+					type: 'raster',
+					tiles: tiles('satlabels'),
+					tileSize: 256,
+					maxzoom: 18
+				},
 				pistes: {
 					type: 'raster',
 					tiles: tiles('pistes'),
@@ -110,8 +128,9 @@
 					tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
 					encoding: 'terrarium',
 					tileSize: 256,
-					// ~20 m detail: plenty for slopes, and light on memory.
-					maxzoom: 13,
+					// Down to ~3 m a pixel (zoom 15, the finest these tiles have): enough to
+					// see couloirs. Only the tiles in view load, so memory stays bounded.
+					maxzoom: 15,
 					attribution:
 						'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen, AWS</a>'
 				}
@@ -122,6 +141,7 @@
 					type: 'raster',
 					source: 'esri',
 					maxzoom: DETAIL_ZOOM + 1,
+					layout: { visibility: baseVis('topo') },
 					paint: { 'raster-fade-duration': 150, ...basePaint(dark) }
 				},
 				{
@@ -129,6 +149,7 @@
 					type: 'raster',
 					source: 'otm',
 					minzoom: DETAIL_ZOOM - 0.5,
+					layout: { visibility: baseVis('topo') },
 					paint: {
 						// Cross-fade from Esri over half a zoom level.
 						'raster-opacity': [
@@ -143,6 +164,22 @@
 						'raster-fade-duration': 150,
 						...basePaint(dark)
 					}
+				},
+				// Satellite: imagery, then place names and borders over it (and over the
+				// precipitation, so names stay readable).
+				{
+					id: 'sat',
+					type: 'raster',
+					source: 'sat',
+					layout: { visibility: baseVis('satellite') },
+					paint: { 'raster-fade-duration': 150, ...basePaint(dark, 0.8) }
+				},
+				{
+					id: 'satlabels',
+					type: 'raster',
+					source: 'satlabels',
+					layout: { visibility: baseVis('satellite') },
+					paint: { 'raster-fade-duration': 150 }
 				},
 				{
 					id: 'pistes',
@@ -165,10 +202,15 @@
 		};
 	}
 
+	function baseVis(base: 'topo' | 'satellite'): 'visible' | 'none' {
+		const want = radar ? prefs.mapBase : 'topo';
+		return want === base ? 'visible' : 'none';
+	}
+
 	/** Dimmed a little in the dark theme so the map doesn't glare. */
-	function basePaint(dark: boolean) {
+	function basePaint(dark: boolean, darkBrightness = 0.72) {
 		return {
-			'raster-brightness-max': dark ? 0.72 : 1,
+			'raster-brightness-max': dark ? darkBrightness : 1,
 			'raster-saturation': dark ? -0.15 : 0
 		} as const;
 	}
@@ -188,13 +230,22 @@
 	$effect(() => {
 		const d = dark;
 		if (!ready || !map) return;
-		for (const id of ['esri', 'otm']) {
-			const p = basePaint(d);
+		for (const id of ['esri', 'otm', 'sat']) {
+			const p = basePaint(d, id === 'sat' ? 0.8 : 0.72);
 			map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
 			map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
 		}
 		const sky = mapStyle(d).sky;
 		if (sky) map.setSky(sky);
+	});
+
+	$effect(() => {
+		const sat = satellite;
+		if (!ready || !map) return;
+		for (const id of ['esri', 'otm'])
+			map.setLayoutProperty(id, 'visibility', sat ? 'none' : 'visible');
+		for (const id of ['sat', 'satlabels'])
+			map.setLayoutProperty(id, 'visibility', sat ? 'visible' : 'none');
 	});
 
 	$effect(() => {
@@ -209,7 +260,8 @@
 		if (!ready || !map) return;
 		if (want) {
 			map.setTerrain({ source: 'dem', exaggeration: EXAGGERATION });
-			if (map.getPitch() < 20) map.easeTo({ pitch: 60, duration: 900 });
+			// Unless a fly-to is already tilting the view.
+			if (map.getPitch() < 20 && !map.isMoving()) map.easeTo({ pitch: 60, duration: 900 });
 		} else {
 			if (map.getTerrain()) map.setTerrain(null);
 			if (map.getPitch() > 0 || map.getBearing() !== 0)
@@ -337,8 +389,8 @@
 			frame = atNow || same < 0 ? Math.max(0, tl.now) : same;
 			if (map && (!overlay || !sameBox)) {
 				overlay?.remove();
-				// Under the ski runs, over the base map.
-				overlay = new PrecipLayer(map, tl.bounds, tl.width, tl.height, PRECIP_OPACITY, 'pistes');
+				// Over the base map, under the satellite labels and the ski runs.
+				overlay = new PrecipLayer(map, tl.bounds, tl.width, tl.height, PRECIP_OPACITY, 'satlabels');
 			}
 			void show();
 			void fetchAll();
@@ -424,7 +476,7 @@
 				style: mapStyle(dark),
 				center: [-120, 48],
 				zoom: 5,
-				maxZoom: 17,
+				maxZoom: 18,
 				maxPitch: 80,
 				// Phones draw at 2x, not 3x: less than half the pixels, and it still looks sharp.
 				pixelRatio: Math.min(devicePixelRatio, 2),
@@ -438,6 +490,11 @@
 			map.addControl(new ml.NavigationControl({ visualizePitch: true }), 'top-left');
 			map.addControl(new ml.AttributionControl({ compact: true }), 'top-right');
 			map.on('zoom', () => (zoom = map!.getZoom()));
+			// The "3D view" buttons inside marker popups.
+			el.addEventListener('click', (e) => {
+				const id = (e.target as HTMLElement).closest<HTMLElement>('[data-fly]')?.dataset.fly;
+				if (id) flyTo(id);
+			});
 			// Tilting by hand switches 3D on: a tilted flat map is just a stretched map.
 			map.on('pitchend', () => {
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
@@ -471,18 +528,40 @@
 		draw();
 	});
 
+	/** Fly to a location, tilted, in 3D: the quickest way to look at its terrain. */
+	function flyTo(id: string) {
+		const r = rows.find((x) => x.id === id);
+		if (!map || !r || r.lat == null || r.lon == null) return;
+		prefs.setMapTerrain(true);
+		for (const p of popups) p.remove();
+		map.flyTo({
+			center: [r.lon, r.lat],
+			zoom: 13.5,
+			pitch: 65,
+			bearing: map.getBearing() || -20,
+			duration: 2600,
+			essential: true
+		});
+	}
+
 	let fitted = false;
 	function draw() {
 		if (!map || !ml || !ready) return;
 		for (const m of markers) m.remove();
+		for (const p of popups) p.remove();
 		markers = [];
+		popups = [];
 		const placed = rows.filter((r) => r.lat !== null && r.lat !== undefined && r.lon != null);
 		for (const r of placed) {
 			const b = bucket(r.next5_cm);
 			const danger = r.danger?.status === 'current' && r.danger.level ? r.danger.level : 0;
 			const label = snowNum(r.next5_cm, units);
-			const pin = document.createElement('button');
+			// The pin opens its own popup (click, Enter or Space): MapLibre's built-in
+			// toggle listens for map clicks, which don't arrive reliably over markers.
+			const pin = document.createElement('div');
 			pin.className = 'snowpin';
+			pin.tabIndex = 0;
+			pin.setAttribute('role', 'button');
 			pin.title = r.name;
 			pin.setAttribute('aria-label', `${r.name}: ${label} ${units === 'imperial' ? 'in' : 'cm'}`);
 			pin.innerHTML = `<span class="dot b${b}${danger ? ` ring d${danger}` : ''}">${esc(label)}</span>`;
@@ -490,13 +569,31 @@
 			const dangerLine = danger ? `<div>Avalanche ${danger} · ${dangerWord(danger)}</div>` : '';
 			const popup = new ml.Popup({ offset: 20, maxWidth: '240px' }).setHTML(
 				`<strong>${esc(r.name)}</strong><div>${esc(label)} ${unit} in the next 5 days</div>` +
-					`${dangerLine}<a href="${esc(href(r.id))}">Open forecast →</a>`
+					`${dangerLine}<div class="pop-actions"><a href="${esc(href(r.id))}">Open forecast →</a>` +
+					`<button type="button" data-fly="${esc(r.id)}">3D view</button></div>`
 			);
+			popups.push(popup);
+			const toggle = () => {
+				if (popup.isOpen()) popup.remove();
+				else {
+					for (const other of popups) other.remove();
+					popup.setLngLat([r.lon!, r.lat!]).addTo(map!);
+				}
+			};
+			pin.addEventListener('click', (e) => {
+				e.stopPropagation();
+				toggle();
+			});
+			pin.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					toggle();
+				}
+			});
 			markers.push(
 				// Always fully shown: in 3D, MapLibre would dim a marker it thinks a ridge hides.
 				new ml.Marker({ element: pin, opacityWhenCovered: '1' })
 					.setLngLat([r.lon!, r.lat!])
-					.setPopup(popup)
 					.addTo(map)
 			);
 		}
@@ -543,6 +640,18 @@
 					: '3D terrain: tilt with two fingers or right-drag, turn by twisting or Ctrl-drag'}
 				aria-label="3D terrain">3D</button
 			>
+			<button
+				class="tool"
+				class:active={satellite}
+				aria-pressed={satellite}
+				onclick={() => prefs.setMapBase(satellite ? 'topo' : 'satellite')}
+				title={satellite ? 'Back to the topo map' : 'Satellite imagery'}
+				aria-label="Satellite"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" /></svg
+				>
+			</button>
 			<button
 				class="tool"
 				class:active={on}
@@ -731,6 +840,21 @@
 	.map :global(.maplibregl-popup-content a) {
 		color: #4b3fb5;
 		font-weight: 600;
+	}
+	.map :global(.pop-actions) {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 6px;
+	}
+	.map :global(.pop-actions button) {
+		border: 0;
+		border-radius: 999px;
+		padding: 4px 10px;
+		background: #4b3fb5;
+		color: #fff;
+		font: 600 0.8rem/1.2 inherit;
+		cursor: pointer;
 	}
 
 	.tools {
