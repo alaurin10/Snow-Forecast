@@ -268,6 +268,15 @@ docker compose run --rm worker snowwatch precip
 The frames cover a box around your locations, so adding a location elsewhere moves
 the box at the next pass.
 
+**Map ski runs, lifts and peaks:** the worker fetches them from OpenStreetMap
+(Overpass) at start, then weekly, or after six hours if it got nothing. If the map
+shows no runs, check the worker's log for `overpass` or `ski map data`, or fetch
+them now; it prints how many runs, lifts and peaks it saved:
+```bash
+docker compose run --rm worker snowwatch ski-map
+```
+Reload the Map page afterwards.
+
 If the worker's log shows `NumPy was built with baseline optimizations ... X86_V2`,
 the VM's virtual CPU type hides the processor's features. The project pins NumPy
 below 2.4 so this can't happen, but setting the Docker VM's CPU type to `host` (in

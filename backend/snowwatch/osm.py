@@ -22,11 +22,16 @@ import httpx
 
 log = logging.getLogger("snowwatch.osm")
 
+# Public Overpass servers with worldwide data, tried in turn.
 OVERPASS = (
     "https://overpass-api.de/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
 MAX_AGE_S = 7 * 86400
+# A file with nothing in it is tried again sooner.
+EMPTY_MAX_AGE_S = 6 * 3600
 # Around each location: ~35 x 35 km, enough for the resort and the touring nearby.
 PAD_LAT = 0.16
 PAD_LON = 0.24
@@ -110,6 +115,31 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": feats}
 
 
+def fetch_box(client: httpx.Client, box: tuple[float, float, float, float]) -> list[Any] | None:
+    """One location's runs, lifts and peaks, from the first server that answers in full."""
+    q = query([box])
+    for url in OVERPASS:
+        try:
+            r = client.post(url, data={"data": q}, timeout=180)
+            if r.status_code != 200:
+                log.warning("overpass %s answered %s", url, r.status_code)
+                continue
+            data = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("overpass %s failed: %s", url, e)
+            continue
+        # A timeout or memory limit still answers 200, with a remark and partial data.
+        remark = str(data.get("remark", "")) if isinstance(data, dict) else ""
+        if "error" in remark.lower():
+            log.warning("overpass %s: %s", url, remark[:200])
+            continue
+        elements = data.get("elements") if isinstance(data, dict) else None
+        if isinstance(elements, list):
+            return elements
+        log.warning("overpass %s answered without elements", url)
+    return None
+
+
 def refresh(
     path: Path,
     points: Iterable[tuple[float, float]],
@@ -117,9 +147,10 @@ def refresh(
     *,
     now: float | None = None,
     force: bool = False,
+    pause: float = 1.0,
 ) -> bool:
-    """Fetch again if the file is missing, a week old, or the locations changed.
-    Returns whether it wrote a new file. Keeps the old file if Overpass fails."""
+    """Fetch again if the file is missing, a week old (six hours if empty), or the locations
+    changed. Returns whether it wrote a new file. Keeps the old file if Overpass fails."""
     bxs = boxes(points)
     key = json.dumps(bxs)
     meta = path.with_suffix(".meta.json")
@@ -127,26 +158,24 @@ def refresh(
     if not force and path.exists() and meta.exists():
         try:
             m = json.loads(meta.read_text())
-            if m.get("key") == key and now - float(m.get("at", 0)) < MAX_AGE_S:
+            max_age = MAX_AGE_S if int(m.get("features", 0)) > 0 else EMPTY_MAX_AGE_S
+            if m.get("key") == key and now - float(m.get("at", 0)) < max_age:
                 return False
         except (ValueError, TypeError):
             pass
     if not bxs:
         return False
-    q = query(bxs)
-    data = None
-    for url in OVERPASS:
-        try:
-            r = client.post(url, data={"data": q}, timeout=180)
-            if r.status_code == 200:
-                data = r.json()
-                break
-            log.warning("overpass %s answered %s", url, r.status_code)
-        except (httpx.HTTPError, ValueError) as e:
-            log.warning("overpass %s failed: %s", url, e)
-    if not isinstance(data, dict) or not isinstance(data.get("elements"), list):
-        return False
-    fc = to_geojson(data["elements"])
+    # One small query per location: quicker for the servers, and well under their limits.
+    elements: list[Any] = []
+    for i, box in enumerate(bxs):
+        if i and pause:
+            time.sleep(pause)
+        got = fetch_box(client, box)
+        if got is None:
+            log.warning("ski map data: no server answered for %s; keeping the old file", box)
+            return False
+        elements.extend(got)
+    fc = to_geojson(elements)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(fc, separators=(",", ":")))

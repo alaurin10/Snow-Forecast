@@ -175,6 +175,30 @@ def cmd_precip(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_ski_map(args: argparse.Namespace, settings: Settings) -> int:
+    """Fetch the map's ski runs, lifts and peaks from OpenStreetMap now."""
+    import httpx
+
+    from snowwatch import osm
+    from snowwatch.logs import setup_logging
+
+    setup_logging()
+    conn = connect(settings.database)
+    points = [(b.lat, b.lon) for loc in service.list_locations(conn) for b in loc.bands[:1]]
+    headers = {"User-Agent": settings.user_agent}
+    with httpx.Client(headers=headers, follow_redirects=True) as client:
+        wrote = osm.refresh(settings.osm_path, points, client, force=True)
+    if not wrote:
+        print("no new ski map data: every Overpass server failed (see the warnings above)")
+        return 1
+    kinds: dict[str, int] = {}
+    for f in json.loads(settings.osm_path.read_text())["features"]:
+        k = f["properties"]["kind"]
+        kinds[k] = kinds.get(k, 0) + 1
+    print(f"wrote {settings.osm_path}: " + ", ".join(f"{n} {k}s" for k, n in sorted(kinds.items())))
+    return 0
+
+
 def cmd_rebuild(args: argparse.Namespace, settings: Settings) -> int:
     """Rebuild snapshots without calling any API: from the raw cache or a fixture folder."""
     from snowwatch.pipeline import latest_cached, run_location
@@ -372,6 +396,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("precip", help="draw the map's precipitation frames now")
     s.set_defaults(func=cmd_precip)
+
+    s = sub.add_parser("ski-map", help="fetch the map's ski runs, lifts and peaks now")
+    s.set_defaults(func=cmd_ski_map)
 
     s = sub.add_parser("avalanche", help="fetch the avalanche forecasts for every location")
     s.add_argument("action", choices=["refresh"])

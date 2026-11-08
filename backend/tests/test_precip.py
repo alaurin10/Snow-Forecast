@@ -398,28 +398,53 @@ def test_osm_refresh_falls_back_and_keeps_fresh_files(tmp_path: Path) -> None:
         hits.append(req.url.host)
         if req.url.host == "overpass-api.de":
             return httpx.Response(504)
+        if req.url.host == "maps.mail.ru":
+            # Timed out: Overpass still answers 200, with a remark and no data.
+            return httpx.Response(
+                200, json={"elements": [], "remark": "runtime error: Query timed out"}
+            )
         assert b"piste" in req.content
         return httpx.Response(200, json=OVERPASS_SAMPLE)
 
     client = httpx.Client(transport=httpx.MockTransport(answer))
     path = tmp_path / "osm" / "ski.geojson"
     pts = [(47.42, -121.42)]
-    assert osm.refresh(path, pts, client, now=1000.0)
-    assert hits == ["overpass-api.de", "overpass.kumi.systems"]
+    assert osm.refresh(path, pts, client, now=1000.0, pause=0)
+    assert hits == ["overpass-api.de", "maps.mail.ru", "overpass.private.coffee"]
     assert len(json.loads(path.read_text())["features"]) == 5
     # Fresh and same locations: no new request.
-    assert not osm.refresh(path, pts, client, now=1000.0 + 3600)
-    assert len(hits) == 2
-    # New locations, or a week later: fetch again.
-    assert osm.refresh(path, [*pts, (50.06, -122.95)], client, now=2000.0)
-    assert osm.refresh(path, [*pts, (50.06, -122.95)], client, now=2000.0 + 8 * 86400)
+    assert not osm.refresh(path, pts, client, now=1000.0 + 3600, pause=0)
+    assert len(hits) == 3
+    # New locations (one query each), or a week later: fetch again.
+    hits.clear()
+    two = [*pts, (50.06, -122.95)]
+    assert osm.refresh(path, two, client, now=2000.0, pause=0)
+    assert len(hits) == 6
+    assert osm.refresh(path, two, client, now=2000.0 + 8 * 86400, pause=0)
 
     def down(req: httpx.Request) -> httpx.Response:
         return httpx.Response(503)
 
     # Overpass down: the old file stays.
-    assert not osm.refresh(path, pts, httpx.Client(transport=httpx.MockTransport(down)), force=True)
+    dead = httpx.Client(transport=httpx.MockTransport(down))
+    assert not osm.refresh(path, pts, dead, force=True, pause=0)
     assert path.exists()
+
+
+def test_osm_refresh_retries_an_empty_file_sooner(tmp_path: Path) -> None:
+    import httpx
+
+    from snowwatch import osm
+
+    def empty(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"elements": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(empty))
+    path = tmp_path / "ski.geojson"
+    pts = [(47.42, -121.42)]
+    assert osm.refresh(path, pts, client, now=1000.0, pause=0)
+    assert not osm.refresh(path, pts, client, now=1000.0 + 3600, pause=0)
+    assert osm.refresh(path, pts, client, now=1000.0 + 7 * 3600, pause=0)
 
 
 def test_api_serves_ski_map_and_glyphs(settings: Settings, monkeypatch: Any) -> None:
