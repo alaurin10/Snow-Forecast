@@ -4,8 +4,11 @@
 // ../radar.ts). Here we download them all once, keep them compressed (a couple of MB for
 // the whole timeline), and decode only the frame on screen and its neighbours. Showing a
 // frame is a single draw into one canvas, so scrubbing is instant and memory stays flat.
-import type * as Leaflet from 'leaflet';
-import { frameUrl, type Frame } from './radar';
+import type { CanvasSource, Map as MlMap } from 'maplibre-gl';
+import { frameUrl } from './radar';
+
+/** Anything with a picture file under /api/precip/: a frame or a snow total. */
+type Pic = { file: string };
 
 /** Decoded frames kept ready: the one on screen and a couple either side. */
 const DECODED = 4;
@@ -17,12 +20,12 @@ export class FrameStore {
 	private active = 0;
 	private queue: (() => void)[] = [];
 
-	has(f: Frame) {
+	has(f: Pic) {
 		return this.blobs.has(f.file);
 	}
 
 	/** The frame's compressed picture, downloaded once (a few at a time). */
-	blob(f: Frame, urgent = false): Promise<Blob | null> {
+	blob(f: Pic, urgent = false): Promise<Blob | null> {
 		const have = this.blobs.get(f.file);
 		if (have) return Promise.resolve(have);
 		let p = this.loading.get(f.file);
@@ -45,7 +48,7 @@ export class FrameStore {
 	}
 
 	/** The frame ready to draw. Older decoded frames are freed as new ones come in. */
-	async bitmap(f: Frame): Promise<ImageBitmap | null> {
+	async bitmap(f: Pic): Promise<ImageBitmap | null> {
 		const have = this.decoded.get(f.file);
 		if (have) {
 			this.decoded.delete(f.file);
@@ -67,7 +70,7 @@ export class FrameStore {
 	}
 
 	/** Forget pictures no longer in the timeline. */
-	keepOnly(frames: Frame[]) {
+	keepOnly(frames: Pic[]) {
 		const keep = new Set(frames.map((f) => f.file));
 		for (const file of [...this.blobs.keys()]) if (!keep.has(file)) this.blobs.delete(file);
 		for (const [file, bmp] of [...this.decoded]) {
@@ -97,39 +100,54 @@ export class FrameStore {
 	}
 }
 
-/** One canvas stretched over the pictures' bounds, in the map's precipitation pane. */
-export class PrecipCanvas {
+/**
+ * The precipitation as one canvas laid over the pictures' box, in a MapLibre canvas
+ * source. It drapes over 3D terrain like the base map. Drawing a frame uploads the
+ * canvas to the GPU once (play then pause), rather than every frame of an animation.
+ */
+export class PrecipLayer {
 	readonly canvas: HTMLCanvasElement;
 	private ctx: CanvasRenderingContext2D;
-	private layer: Leaflet.Layer;
 	private shown: string | null = null;
+	static readonly ID = 'precip';
 
 	constructor(
-		L: typeof Leaflet,
-		bounds: Leaflet.LatLngBoundsExpression,
+		private map: MlMap,
+		bounds: [[number, number], [number, number]],
 		width: number,
 		height: number,
-		opacity: number
+		opacity: unknown,
+		beforeId?: string
 	) {
 		this.canvas = document.createElement('canvas');
 		this.canvas.width = width;
 		this.canvas.height = height;
 		this.ctx = this.canvas.getContext('2d')!;
-		// SVGOverlay places any element over a box and keeps it there through pans and zooms.
-		this.layer = L.svgOverlay(this.canvas as unknown as SVGElement, bounds, {
-			pane: 'precip',
-			opacity,
-			interactive: false
+		const [[south, west], [north, east]] = bounds;
+		map.addSource(PrecipLayer.ID, {
+			type: 'canvas',
+			canvas: this.canvas,
+			animate: false,
+			coordinates: [
+				[west, north],
+				[east, north],
+				[east, south],
+				[west, south]
+			]
 		});
-	}
-
-	addTo(map: Leaflet.Map) {
-		this.layer.addTo(map);
-		return this;
-	}
-
-	remove() {
-		this.layer.remove();
+		map.addLayer(
+			{
+				id: PrecipLayer.ID,
+				type: 'raster',
+				source: PrecipLayer.ID,
+				paint: {
+					'raster-opacity': opacity as number,
+					'raster-fade-duration': 0,
+					'raster-resampling': 'linear'
+				}
+			},
+			beforeId
+		);
 	}
 
 	get showing() {
@@ -140,5 +158,14 @@ export class PrecipCanvas {
 		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 		if (bmp) this.ctx.drawImage(bmp, 0, 0, this.canvas.width, this.canvas.height);
 		this.shown = file;
+		const src = this.map.getSource(PrecipLayer.ID) as CanvasSource | undefined;
+		// play() marks it changed and asks for a repaint; pause() uploads it right away.
+		src?.play();
+		src?.pause();
+	}
+
+	remove() {
+		if (this.map.getLayer(PrecipLayer.ID)) this.map.removeLayer(PrecipLayer.ID);
+		if (this.map.getSource(PrecipLayer.ID)) this.map.removeSource(PrecipLayer.ID);
 	}
 }

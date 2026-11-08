@@ -27,6 +27,7 @@ import logging
 import math
 import re
 import time
+import urllib.parse
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -36,7 +37,7 @@ from typing import Any
 
 import httpx
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, TiffImagePlugin
 
 log = logging.getLogger("snowwatch.precip")
 
@@ -88,9 +89,25 @@ def ramp_color(ramp: list[tuple[float, str]], value: float) -> RGB | None:
     return out
 
 
+# Snowfall totals: lower bound in cm of snow (the model's water equivalent at 10:1).
+# Steps sit on whole inches (1, 3, 6, 9, 12, 18, 24, 36, 48) so both units read cleanly.
+TOTAL = [
+    (2.54, "#cfe8f8"),
+    (7.62, "#8cc8ef"),
+    (15.24, "#4a98e0"),
+    (22.86, "#2b5cc2"),
+    (30.48, "#6a3fb0"),
+    (45.72, "#a535a3"),
+    (60.96, "#e0457b"),
+    (91.44, "#f08a24"),
+    (121.92, "#f4d03f"),
+]
+TOTAL_HOURS = (12, 24, 48)
+SN_TOTAL_LAYER = "HRDPS.CONTINENTAL_SN"  # water equivalent (mm) since the run began
+
 # Every colour a frame can hold: index 0 is transparent.
 PALETTE: list[RGB] = [(0, 0, 0)] + [
-    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, UNTYPED) for _, c in ramp
+    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, UNTYPED, TOTAL) for _, c in ramp
 ]
 
 # ---- Region ------------------------------------------------------------------
@@ -648,6 +665,80 @@ def wpc_draw(net: Net, layer: int, region: Region) -> np.ndarray | None:
     return np.asarray(out)
 
 
+# ---- Snowfall totals ------------------------------------------------------------------
+
+
+@dataclass
+class Grid:
+    """Raw values on a lat/lon grid: row 0 is the north edge, column 0 the west."""
+
+    data: np.ndarray
+    lon0: float
+    lat0: float
+    dlon: float
+    dlat: float
+
+
+def wcs_grid(net: Net, layer: str, time_: str, region: Region, margin: float = 0.5) -> Grid | None:
+    """GeoMet WCS: the raw numbers (not a picture) over the region, as a float grid."""
+    (south, west), (north, east) = region.bounds
+    q = urllib.parse.urlencode(
+        [
+            ("service", "WCS"),
+            ("version", "2.0.1"),
+            ("request", "GetCoverage"),
+            ("coverageId", layer),
+            ("format", "image/tiff"),
+            ("subsettingCrs", "EPSG:4326"),
+            ("subset", f"lat({south - margin},{north + margin})"),
+            ("subset", f"long({west - margin},{east + margin})"),
+            ("TIME", time_),
+        ]
+    )
+    r = net.get(f"{GEOMET}?{q}")
+    if r is None or "tiff" not in r.headers.get("content-type", ""):
+        return None
+    try:
+        im = Image.open(io.BytesIO(r.content))
+        if not isinstance(im, TiffImagePlugin.TiffImageFile):
+            return None
+        data = np.asarray(im, dtype=np.float32)
+        tie = im.tag_v2[33922]
+        scale = im.tag_v2[33550]
+    except (OSError, KeyError, ValueError):
+        return None
+    return Grid(data, float(tie[3]), float(tie[4]), float(scale[0]), float(scale[1]))
+
+
+def on_region(grid: Grid, region: Region) -> np.ndarray:
+    """Sample a lat/lon grid onto the region's Web Mercator pixels (NaN where it has none)."""
+    xs = region.x0 + (np.arange(region.width) + 0.5) * (region.x1 - region.x0) / region.width
+    ys = region.y1 - (np.arange(region.height) + 0.5) * (region.y1 - region.y0) / region.height
+    lons = xs * 180 / WORLD
+    lats = np.degrees(2 * np.arctan(np.exp(ys * math.pi / WORLD)) - math.pi / 2)
+    ci = np.floor((lons - grid.lon0) / grid.dlon).astype(int)
+    ri = np.floor((grid.lat0 - lats) / grid.dlat).astype(int)
+    h, w = grid.data.shape
+    out = np.full((region.height, region.width), np.nan, np.float32)
+    cv = (ci >= 0) & (ci < w)
+    rv = (ri >= 0) & (ri < h)
+    sub = grid.data[np.ix_(ri[rv], ci[cv])]
+    out[np.ix_(rv, cv)] = sub
+    # Values far out of range are the model's "no data" outside its domain.
+    out[(out < 0) | (out > 5000)] = np.nan
+    return out
+
+
+def paint_total(cm: np.ndarray) -> np.ndarray:
+    """Snow totals (cm) to RGBA on the TOTAL ramp; below the first step is clear."""
+    out = np.zeros((*cm.shape, 4), np.uint8)
+    lows = np.array([low for low, _ in TOTAL])
+    idx = np.digitize(np.nan_to_num(cm, nan=-1.0), lows)  # 0 = below the first step
+    for i, (_, color) in enumerate(TOTAL, start=1):
+        out[idx == i] = (*hex_rgb(color), 255)
+    return out
+
+
 # ---- Composing and saving -------------------------------------------------------------
 
 
@@ -694,6 +785,15 @@ class FrameOut:
     south: str
 
 
+@dataclass
+class TotalOut:
+    hours: int
+    start: int
+    end: int
+    file: str
+    key: str
+
+
 class Renderer:
     """Draws frames into `out_dir` and writes `index.json` for the map."""
 
@@ -701,11 +801,14 @@ class Renderer:
         self.dir = out_dir
         self.net = net
         self.now = now
+        self.totals: list[TotalOut] = []
+        self._prev_totals: dict[str, TotalOut] = {}
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _previous(self) -> dict[str, FrameOut]:
         try:
             data = json.loads((self.dir / "index.json").read_text())
+            self._prev_totals = {t["key"]: TotalOut(**t) for t in data.get("totals", [])}
             return {f["key"]: FrameOut(**f) for f in data.get("frames", [])}
         except (OSError, ValueError, TypeError, KeyError):
             return {}
@@ -798,9 +901,54 @@ class Renderer:
                     if i % 6 == 0:
                         self._write(region, now, frames)
 
+        self.totals = self._snow_totals(region, now)
         index = self._write(region, now, frames)
-        self._prune({f.file for f in frames} | {f.file for f in prev.values()})
+        self._prune(
+            {f.file for f in frames}
+            | {f.file for f in prev.values()}
+            | {t.file for t in self.totals}
+            | {t.file for t in self._prev_totals.values()}
+        )
         return index
+
+    def _snow_totals(self, region: Region, now: int) -> list[TotalOut]:
+        """Snow over the next 12, 24 and 48 hours (or to the run's end), Canadian model."""
+        dims = capabilities_dims(self.net, SN_TOTAL_LAYER)
+        times = parse_times(dims.get("time", ""))
+        if not times:
+            return []
+        run_ref = dims.get("reference_time.default", "")
+        past = [t for t in times if t <= now]
+        t0 = past[-1] if past else times[0]
+        start: np.ndarray | None = None
+        out: list[TotalOut] = []
+        seen_ends: set[int] = set()
+        for hours in TOTAL_HOURS:
+            end = t0 + hours * HOUR
+            if end not in times:
+                end = times[-1]
+            if end <= t0 or end in seen_ends:
+                continue
+            seen_ends.add(end)
+            span = round((end - t0) / HOUR)
+            key = f"tot|{run_ref}|{t0}|{end}|{region.key}"
+            had = self._prev_totals.get(key)
+            if had and (self.dir / had.file).exists():
+                out.append(had)
+                continue
+            if start is None:
+                g0 = wcs_grid(self.net, SN_TOTAL_LAYER, ts_iso(t0), region)
+                if g0 is None:
+                    return out
+                start = on_region(g0, region)
+            g1 = wcs_grid(self.net, SN_TOTAL_LAYER, ts_iso(end), region)
+            if g1 is None:
+                continue
+            # mm of water over the window; at 10:1 that's cm of snow.
+            cm = np.clip(on_region(g1, region) - start, 0, None)
+            name = self._save(paint_total(cm), region, f"t{span}")
+            out.append(TotalOut(span, t0, end, name, key))
+        return out
 
     def _write(self, region: Region, now: int, frames: list[FrameOut]) -> dict[str, Any]:
         frames.sort(key=lambda f: (f.t, not f.past))
@@ -811,6 +959,7 @@ class Renderer:
             "height": region.height,
             "now": max((f.t for f in frames if f.past), default=None),
             "frames": [asdict(f) for f in frames],
+            "totals": [asdict(t) for t in self.totals],
         }
         tmp = self.dir / "index.json.tmp"
         tmp.write_text(json.dumps(index))
