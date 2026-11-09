@@ -5,8 +5,10 @@
 		adminLookups,
 		archiveLocation,
 		createLocation,
+		ApiError,
 		getBudget,
 		getMe,
+		logout,
 		refreshLocation,
 		refreshLookups,
 		reorderLocations,
@@ -19,6 +21,7 @@
 	import { elevation } from '../../lib/units';
 	import MapPicker, { type PinBand, type Pins } from '../../lib/manage/MapPicker.svelte';
 	import LocationForm from '../../lib/manage/LocationForm.svelte';
+	import OwnerLogin from '../../lib/manage/OwnerLogin.svelte';
 	import type {
 		BudgetOut,
 		CatalogItem,
@@ -62,6 +65,23 @@
 			me = await getMe();
 			if (!me.is_owner) return;
 			[locs, budget, lookups] = await Promise.all([adminLocations(), getBudget(), adminLookups()]);
+		} catch (e) {
+			if (!signedOut(e)) error = (e as Error).message;
+		}
+	}
+
+	/** The session ended (expired, or signed out elsewhere): show the password form again. */
+	function signedOut(e: unknown): boolean {
+		if (e instanceof ApiError && e.status === 401 && me) {
+			me = { ...me, is_owner: false };
+			return true;
+		}
+		return false;
+	}
+
+	async function signOut() {
+		try {
+			me = await logout();
 		} catch (e) {
 			error = (e as Error).message;
 		}
@@ -229,7 +249,10 @@
 <svelte:head><title>Manage locations · Snow Watch</title></svelte:head>
 
 <div class="head">
-	<h1>Manage locations</h1>
+	<div class="title">
+		<h1>Manage locations</h1>
+		{#if me?.is_owner}<button class="btn" onclick={signOut}>Sign out</button>{/if}
+	</div>
 	{#if budget}
 		<p class="muted small">
 			{budget.active} of {budget.max_locations} locations · about {Math.round(
@@ -248,9 +271,19 @@
 	</p>{/if}
 
 {#if me && !me.is_owner}
-	<p class="card">
-		Only the owner can manage locations. <a href={resolve('/')}>Back to the overview</a>
-	</p>
+	{#if me.owner_login_enabled}
+		<OwnerLogin
+			onSignedIn={(m) => {
+				me = m;
+				load();
+			}}
+		/>
+	{:else}
+		<p class="card">
+			Managing locations in the app is turned off on this server: set <code>OWNER_PASSWORD</code>
+			to turn it on. <a href={resolve('/')}>Back to the overview</a>
+		</p>
+	{/if}
 {:else if !me}
 	<p class="muted">Loading…</p>
 {:else if mode === 'review' && draft}
@@ -410,6 +443,12 @@
 	}
 	.head p {
 		margin: 0 0 12px;
+	}
+	.title {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
 	}
 	.bad {
 		border-color: var(--temp);

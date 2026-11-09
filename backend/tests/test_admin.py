@@ -1,21 +1,18 @@
-"""Owner role (Cloudflare Access tokens), lookups, auto-detect and the Manage API."""
+"""Owner sign-in, lookups, auto-detect and the Manage API."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-import time
-from typing import Any
 
 import httpx
-import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from snowwatch import jobs
 from snowwatch.api.app import create_app
-from snowwatch.api.auth import AccessVerifier
+from snowwatch.api.auth import COOKIE, logout_all
+from snowwatch.api.ratelimit import LoginThrottle
 from snowwatch.capture import load_fixture
 from snowwatch.http import Fetcher
 from snowwatch.locations import service
@@ -24,21 +21,8 @@ from snowwatch.settings import Settings
 from snowwatch.store import repo
 from tests.helpers import FIXTURES, SEED
 
-TEAM = "snowteam"
-AUD = "aud-snow"
-OWNER = "owner@example.com"
-KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
-def token(email: str, *, aud: str = AUD, key: Any = KEY, exp: float | None = None) -> str:
-    claims = {
-        "email": email,
-        "aud": [aud],
-        "iss": f"https://{TEAM}.cloudflareaccess.com",
-        "exp": int(exp if exp is not None else time.time() + 600),
-    }
-    return jwt.encode(claims, key, algorithm="RS256")
+PASSWORD = "correct horse battery"
+H = {"Origin": "http://testserver"}
 
 
 def fake_upstream(req: httpx.Request) -> httpx.Response:
@@ -70,9 +54,7 @@ def fake_upstream(req: httpx.Request) -> httpx.Response:
 def app_settings(settings: Settings) -> Settings:
     return settings.model_copy(
         update={
-            "admin_emails": OWNER,
-            "cf_access_team": TEAM,
-            "cf_access_auds": AUD,
+            "owner_password": PASSWORD,
             "static_dir": settings.data_dir / "none",
         }
     )
@@ -93,12 +75,17 @@ def client(app_settings: Settings, conn: sqlite3.Connection) -> TestClient:
     )
     save_catalog(conn, catalog_rows(CATALOG["features"]))
     app = create_app(app_settings)
-    pub = KEY.public_key()
-    app.state.access = AccessVerifier(TEAM, [AUD], key_for=lambda _t: pub)
     app.state.make_fetcher = lambda: Fetcher(
         user_agent="t", transport=httpx.MockTransport(fake_upstream), sleep=lambda s: None
     )
-    return TestClient(app)
+    c = TestClient(app)
+    assert c.post("/api/auth/login", json={"password": PASSWORD}, headers=H).status_code == 200
+    return c
+
+
+def guest(client: TestClient) -> TestClient:
+    """Another browser on the same app, not signed in."""
+    return TestClient(client.app)
 
 
 CATALOG = {
@@ -147,34 +134,68 @@ CATALOG = {
     ]
 }
 
-H = {"Cf-Access-Jwt-Assertion": token(OWNER)}
-
 
 def test_me_and_roles(client: TestClient) -> None:
-    assert client.get("/api/me", headers=H).json() == {"email": OWNER, "is_owner": True}
-    friend = {"Cf-Access-Jwt-Assertion": token("friend@example.com")}
-    assert client.get("/api/me", headers=friend).json()["is_owner"] is False
-    assert client.get("/api/admin/locations", headers=friend).status_code == 403
-    assert client.get("/api/admin/locations").status_code == 403  # LAN, no token
+    assert client.get("/api/me").json() == {"is_owner": True, "owner_login_enabled": True}
+    other = guest(client)
+    assert other.get("/api/me").json() == {"is_owner": False, "owner_login_enabled": True}
+    assert other.get("/api/admin/locations").status_code == 401
+    assert other.post("/api/admin/lookups/refresh", headers=H).status_code == 401
 
 
-@pytest.mark.parametrize(
-    "bad",
-    [
-        token(OWNER, aud="someone-else"),
-        token(OWNER, key=OTHER_KEY),
-        token(OWNER, exp=time.time() - 60),
-        "not-a-jwt",
-    ],
-)
-def test_bad_tokens_are_viewers(client: TestClient, bad: str) -> None:
-    r = client.get("/api/admin/locations", headers={"Cf-Access-Jwt-Assertion": bad})
+def test_login_sets_a_strict_http_only_cookie(client: TestClient) -> None:
+    other = guest(client)
+    r = other.post("/api/auth/login", json={"password": PASSWORD}, headers=H)
+    cookie = r.headers["set-cookie"].lower()
+    assert f"{COOKIE}=" in cookie
+    assert "httponly" in cookie and "samesite=strict" in cookie and "path=/api" in cookie
+    assert "secure" not in cookie  # ENV=dev; prod adds Secure
+
+
+def test_wrong_password_and_lockout(client: TestClient) -> None:
+    other = guest(client)
+    for _ in range(LoginThrottle.FREE_TRIES):
+        r = other.post("/api/auth/login", json={"password": "nope"}, headers=H)
+        assert r.status_code == 401
+    r = other.post("/api/auth/login", json={"password": PASSWORD}, headers=H)
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 0
+    assert other.get("/api/me").json()["is_owner"] is False
+
+
+def test_logout_ends_the_session(client: TestClient) -> None:
+    token = client.cookies.get(COOKIE)
+    assert client.post("/api/auth/logout", headers=H).json()["is_owner"] is False
+    replay = guest(client)
+    replay.cookies.set(COOKIE, token or "", path="/api")
+    assert replay.get("/api/admin/locations").status_code == 401
+
+
+def test_logout_all_and_expiry(client: TestClient, conn: sqlite3.Connection) -> None:
+    conn.execute("UPDATE owner_sessions SET expires_at = '2000-01-01T00:00:00+00:00'")
+    conn.commit()
+    assert client.get("/api/me").json()["is_owner"] is False
+    assert logout_all(conn) == 1
+
+
+def test_cross_site_requests_are_refused(client: TestClient) -> None:
+    assert client.post("/api/admin/lookups/refresh").status_code == 403  # no Origin
+    evil = {"Origin": "https://evil.example"}
+    assert client.post("/api/admin/lookups/refresh", headers=evil).status_code == 403
+    assert client.get("/api/admin/locations").status_code == 200  # reads need no Origin
+    r = guest(client).post("/api/auth/login", json={"password": PASSWORD}, headers=evil)
     assert r.status_code == 403
 
 
-def test_cookie_token_works(client: TestClient) -> None:
-    client.cookies.set("CF_Authorization", token(OWNER))
-    assert client.get("/api/me").json()["is_owner"] is True
+def test_owner_sign_in_off_without_a_long_password(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    for pw in ("", "short"):
+        s = settings.model_copy(
+            update={"owner_password": pw, "static_dir": settings.data_dir / "x"}
+        )
+        c = TestClient(create_app(s))
+        assert c.get("/api/me").json() == {"is_owner": False, "owner_login_enabled": False}
+        assert c.post("/api/auth/login", json={"password": pw or "x"}, headers=H).status_code == 404
 
 
 def test_catalog_search_and_lookup_counts(client: TestClient) -> None:
@@ -304,18 +325,6 @@ def test_location_cap(client: TestClient, app_settings: Settings, conn: sqlite3.
 def test_lookups_job_is_queued(client: TestClient, conn: sqlite3.Connection) -> None:
     j = client.post("/api/admin/lookups/refresh", headers=H).json()
     assert j["kind"] == "lookups" and jobs.pending(conn) == 1
-
-
-def test_dev_owner_without_access(settings: Settings, conn: sqlite3.Connection) -> None:
-    s = settings.model_copy(
-        update={"env": "dev", "dev_admin_email": OWNER, "static_dir": settings.data_dir / "none"}
-    )
-    c = TestClient(create_app(s))
-    assert c.get("/api/me").json() == {"email": OWNER, "is_owner": True}
-    prod = settings.model_copy(
-        update={"env": "prod", "dev_admin_email": OWNER, "static_dir": settings.data_dir / "none"}
-    )
-    assert TestClient(create_app(prod)).get("/api/me").json()["is_owner"] is False
 
 
 def test_catalog_rows_use_polygon_centroids() -> None:

@@ -33,14 +33,17 @@ class Settings(BaseSettings):
     healthchecks_run_url: str = ""
     healthchecks_backup_url: str = ""
 
-    # Owner role. ADMIN_EMAILS is comma-separated. CF_ACCESS_TEAM is the Zero Trust
-    # team name (<team>.cloudflareaccess.com); CF_ACCESS_AUDS lists the AUD tags of
-    # the Access applications in front of the site.
-    admin_emails: str = ""
-    cf_access_team: str = ""
-    cf_access_auds: str = ""
-    # Development only (ENV=dev and no CF_ACCESS_TEAM): treat every request as this owner.
-    dev_admin_email: str = ""
+    # The owner password that unlocks the Manage page (at least 12 characters).
+    # Empty = Manage is off; locations are managed with `snowwatch locations`.
+    owner_password: str = ""
+    # The site's public address, e.g. https://snow.example.com (used to check that
+    # owner requests come from the site itself when a proxy rewrites the Host header).
+    public_url: str = ""
+    # Trust CF-Connecting-IP / X-Forwarded-For for the visitor's address (rate limits).
+    # Turn on only behind Cloudflare or a reverse proxy that sets them.
+    trusted_proxy: bool = False
+    # An email for push services (the VAPID contact). Falls back to NWS_CONTACT.
+    contact_email: str = ""
     # Web Push alerts: `snowwatch push keys` prints a pair. Empty = push is off.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
@@ -83,14 +86,6 @@ class Settings(BaseSettings):
     @property
     def user_agent(self) -> str:
         return f"snowwatch/0.1 ({self.nws_contact})"
-
-    @property
-    def access_aud_list(self) -> list[str]:
-        return [a.strip() for a in self.cf_access_auds.split(",") if a.strip()]
-
-    @property
-    def admin_email_list(self) -> list[str]:
-        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
 
 
 @lru_cache

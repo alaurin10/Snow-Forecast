@@ -1,4 +1,4 @@
-"""Push alert subscriptions. Any signed-in viewer may subscribe their own device."""
+"""Push alert subscriptions. Any visitor may subscribe their own device."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Request
 
 from snowwatch import push
 from snowwatch.api.admin import RW
-from snowwatch.api.auth import CurrentViewer
 from snowwatch.push import PushOut, PushSubscription, SubscribeIn
 from snowwatch.settings import Settings
 
@@ -26,9 +25,9 @@ def make_push_router() -> APIRouter:
         return {"key": settings_of(request).vapid_public_key}
 
     @router.post("/subscribe", response_model=PushOut)
-    def subscribe(body: SubscribeIn, request: Request, conn: RW, viewer: CurrentViewer) -> PushOut:
+    def subscribe(body: SubscribeIn, request: Request, conn: RW) -> PushOut:
         settings_of(request)
-        push.subscribe(conn, body, viewer.email)
+        push.subscribe(conn, body)
         return PushOut(ok=True)
 
     @router.post("/unsubscribe", response_model=PushOut)

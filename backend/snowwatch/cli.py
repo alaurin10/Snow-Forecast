@@ -331,6 +331,17 @@ def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_owner(args: argparse.Namespace, settings: Settings) -> int:
+    """Owner sign-in: `logout-all` ends every session (do it after changing the password)."""
+    from snowwatch.api.auth import logout_all
+
+    conn = connect(settings.database)
+    migrate(conn)
+    n = logout_all(conn)
+    print(f"ended {n} owner session{'s' if n != 1 else ''}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="snowwatch", description="Snow Watch pipeline and tools")
     sub = p.add_subparsers(dest="command", required=True)
@@ -407,6 +418,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("push", help="push alerts: `push keys` prints a new VAPID key pair")
     s.add_argument("action", choices=["keys"])
     s.set_defaults(func=cmd_push)
+
+    s = sub.add_parser("owner", help="owner sign-in: `owner logout-all` ends every session")
+    s.add_argument("action", choices=["logout-all"])
+    s.set_defaults(func=cmd_owner)
 
     s = sub.add_parser("schema", help="write the API's JSON Schema (for frontend types)")
     s.add_argument("--out", help="file to write (default stdout)")
