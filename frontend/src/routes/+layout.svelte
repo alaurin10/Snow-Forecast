@@ -333,4 +333,13 @@
 			display: none;
 		}
 	}
+	/* Phones: no brand bar. Every pixel above the fold is the page's; units live under More. */
+	@media (max-width: 640px) {
+		.bar {
+			display: none;
+		}
+		main {
+			padding-top: calc(12px + env(safe-area-inset-top));
+		}
+	}
 </style>

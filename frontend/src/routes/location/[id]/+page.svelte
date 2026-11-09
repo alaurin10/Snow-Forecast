@@ -44,6 +44,9 @@
 	import ShareButton from '../../../lib/share/ShareButton.svelte';
 	import { paint, slug } from '../../../lib/share/canvas';
 	import { drawDaysCard } from '../../../lib/share/daysCard';
+	import { viewport } from '../../../lib/viewport.svelte';
+	import DayList from '../../../lib/components/DayList.svelte';
+	import DaySheet from '../../../lib/charts/DaySheet.svelte';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -55,6 +58,9 @@
 	let selected = $state<PeriodOut | null>(null);
 	let range = $state<Range>(5);
 	let tabsEl = $state<HTMLElement>();
+	const phone = $derived(viewport.phone);
+	// Phones: a day's hours open as a chart in a popup over the day list.
+	let hourlyDay = $state<{ date: string; start: string } | null>(null);
 
 	// Desktop: once the section tabs scroll away, the page's controls dock into the header.
 	$effect(() => {
@@ -168,6 +174,8 @@
 			shareDayChoices[shareDayChoices.length - 1] ??
 			5
 	);
+	// Elevation buttons on a phone: just the number, so long band names never crowd them.
+	const elevNum = (m: number) => elevation(m, units).replace(/\s*(ft|m)$/, '');
 	const place = $derived(
 		snap
 			? { name: snap.location.name, region: snap.location.region, generatedAt: snap.generated_at }
@@ -216,47 +224,94 @@
 	{/if}
 {/snippet}
 
+{#snippet shareDaysBtn()}
+	{#if place && band}
+		<ShareButton
+			label="Share day by day"
+			filename={slug(`${place.name} day by day ${shareDays} days`)}
+			render={(shape) =>
+				paint(shape, (ctx, p) =>
+					drawDaysCard(ctx, shape, { ...place, band, units, days: shareDays }, p)
+				)}
+		>
+			{#snippet options()}
+				<div class="seg" role="group" aria-label="Days to share">
+					{#each shareDayChoices as n (n)}
+						<button aria-pressed={shareDays === n} onclick={() => (shareDaysPick = n)}
+							>{n} days</button
+						>
+					{/each}
+				</div>
+			{/snippet}
+		</ShareButton>
+	{/if}
+{/snippet}
+
 {#if error}
 	<p class="card">{error} <a href={resolve('/')}>All locations</a></p>
 {:else if !snap || !band}
 	<p class="muted">Loading…</p>
 {:else}
-	<div class="loc-head">
-		<div class="title">
-			<a class="back faint" href={resolve('/')}>← All locations</a>
-			<h1>{snap.location.name}</h1>
-			<div class="muted sub">
-				{snap.location.region} ·
-				<span class="nw"
-					>{band.label}
-					{elevation(band.elev_m, units)}</span
+	{#if phone}
+		<div class="mhead">
+			<a class="mback" href={resolve('/')} aria-label="All locations">
+				<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+					><path d="M15 5l-7 7 7 7" /></svg
 				>
-				· <span class="nw">updated {updated}</span>
+			</a>
+			<h1>{snap.location.name}</h1>
+		</div>
+		<div class="mband">
+			<span class="mbname faint"><strong>{band.label}</strong> · {updated}</span>
+			<div class="seg elevs" role="group" aria-label="Elevation, {c.heightUnit}">
+				{#each snap.bands as b (b.band)}
+					<button
+						aria-pressed={band.band === b.band}
+						aria-label="{b.label}, {elevation(b.elev_m, units)}"
+						onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
+					>
+				{/each}
+				<span class="unit" aria-hidden="true">{c.heightUnit}</span>
 			</div>
 		</div>
-		<div class="seg elev" role="group" aria-label="Elevation">
-			{#each snap.bands as b (b.band)}
-				<button
-					aria-pressed={band.band === b.band}
-					onclick={() => prefs.setBand(b.band as BandName)}>{b.label}</button
-				>
-			{/each}
+	{:else}
+		<div class="loc-head">
+			<div class="title">
+				<a class="back faint" href={resolve('/')}>← All locations</a>
+				<h1>{snap.location.name}</h1>
+				<div class="muted sub">
+					{snap.location.region} ·
+					<span class="nw"
+						>{band.label}
+						{elevation(band.elev_m, units)}</span
+					>
+					· <span class="nw">updated {updated}</span>
+				</div>
+			</div>
+			<div class="seg elev" role="group" aria-label="Elevation">
+				{#each snap.bands as b (b.band)}
+					<button
+						aria-pressed={band.band === b.band}
+						onclick={() => prefs.setBand(b.band as BandName)}>{b.label}</button
+					>
+				{/each}
+			</div>
 		</div>
-	</div>
 
-	<div class="now" aria-label="Right now">
-		<span class="now-lbl">Now</span>
-		<span
-			><strong class="num">{temperature(band.hourly.temp_c[0], units)}</strong>
-			{skyWord(band.hourly.wcode[0])}</span
-		>
-		<span><span class="faint">Freezing level</span> {elevation(band.hourly.fl_m[0], units)}</span>
-		<span
-			><span class="faint">Wind</span>
-			{compass(band.hourly.wdir[0])}
-			{speed(band.hourly.wind_kmh[0], units)}, gusts {speed(band.hourly.gust_kmh[0], units)}</span
-		>
-	</div>
+		<div class="now" aria-label="Right now">
+			<span class="now-lbl">Now</span>
+			<span
+				><strong class="num">{temperature(band.hourly.temp_c[0], units)}</strong>
+				{skyWord(band.hourly.wcode[0])}</span
+			>
+			<span><span class="faint">Freezing level</span> {elevation(band.hourly.fl_m[0], units)}</span>
+			<span
+				><span class="faint">Wind</span>
+				{compass(band.hourly.wdir[0])}
+				{speed(band.hourly.wind_kmh[0], units)}, gusts {speed(band.hourly.gust_kmh[0], units)}</span
+			>
+		</div>
+	{/if}
 
 	{#each snap.alerts as a, i (i)}
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
@@ -272,95 +327,138 @@
 
 	{#if tab === 'forecast'}
 		<div class="stackcol">
-			{#if backcountry}
+			{#if backcountry && !phone}
 				<section class="card thin">
 					<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
 				</section>
 			{/if}
-			<section class="card outlook">
-				<div class="half">
-					<span class="eyebrow">Next 5 days</span>
-					<span class="big num"
-						>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
-					>
-					{#if band.windows['next5'].ens}
-						{@const e = band.windows['next5'].ens}
-						<span class="faint small"
-							>{snowNum(e.p10, units)}–{snowNum(e.p90, units)}
-							{c.snowUnit} likely{e.estimated ? ' (est.)' : ''}</span
+			{#if phone}
+				<section class="card chartcard">
+					<ForecastChart {band} bands={snap.bands} {units} bind:range place={place ?? undefined} />
+				</section>
+				{#if backcountry}
+					<section class="card thin">
+						<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
+					</section>
+				{/if}
+				<section class="card mout">
+					<div>
+						<span class="eyebrow">Next 5 days</span>
+						<span class="mnum num"
+							>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
 						>
-					{/if}
-					<span class="faint small"
-						><span class="nw">Days 6–10: {snow(band.windows['d6_10'].snow_cm, units)}</span> ·
-						<span class="nw">Last 24 h: {snow(band.stats.last24_cm, units)}</span></span
-					>
-				</div>
-				<div class="half storm">
-					<span class="eyebrow">Next storm</span>
-					{#if storm}
-						<span class="big num">{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span>
-						<span class="small">
-							<strong
-								><span class="nw">{periodName(storm.first)}</span
-								>{#if storm.periods > 1}&#32;→&#32;<span class="nw">{periodName(storm.last)}</span
-									>{/if}</strong
+						{#if band.windows['next5'].ens}
+							{@const e = band.windows['next5'].ens}
+							<span class="faint msub"
+								>{snowNum(e.p10, units)}–{snowNum(e.p90, units)} likely{e.estimated
+									? ' (est.)'
+									: ''}</span
 							>
-							· <span class="nw">{startsIn(dateOf(snap.now), storm.first)}</span>
-						</span>
-						<span class="small muted">
-							<span class="nw"
-								>Heaviest {periodName(storm.peak)}: {snow(storm.peak.snow_cm, units)}</span
-							>{#if storm.snow_level_min_m !== null}&nbsp;·&#32;<span class="nw"
-									>snow level {elevation(storm.snow_level_min_m, units)}</span
-								>{/if}
-						</span>
-					{:else}
-						<span class="big">Quiet</span>
-						<span class="small">No storm of {snow(STORM_CM, units)}+ in sight</span>
-					{/if}
-				</div>
-			</section>
-			<section class="card">
-				<ForecastChart
-					{band}
-					bands={snap.bands}
-					{units}
-					onpick={pickTime}
-					bind:range
-					place={place ?? undefined}
-				/>
-			</section>
-			<section class="card">
-				<div class="cardhead">
-					<h2>Day by day</h2>
-					{#if place}
-						<ShareButton
-							label="Share day by day"
-							filename={slug(`${place.name} day by day ${shareDays} days`)}
-							render={(shape) =>
-								paint(shape, (ctx, p) =>
-									drawDaysCard(ctx, shape, { ...place, band, units, days: shareDays }, p)
-								)}
+						{/if}
+					</div>
+					<div class="mstorm">
+						<span class="eyebrow">Next storm</span>
+						{#if storm}
+							<span class="mnum num"
+								>{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span
+							>
+							<span class="msub">{startsIn(dateOf(snap.now), storm.first)}</span>
+						{:else}
+							<span class="mnum">Quiet</span>
+							<span class="faint msub">none in sight</span>
+						{/if}
+					</div>
+					<div>
+						<span class="eyebrow">Now</span>
+						<span class="mnum num">{temperature(band.hourly.temp_c[0], units)}</span>
+						<span class="faint msub"
+							>{compass(band.hourly.wdir[0])}
+							{speed(band.hourly.wind_kmh[0], units)}</span
 						>
-							{#snippet options()}
-								<div class="seg" role="group" aria-label="Days to share">
-									{#each shareDayChoices as n (n)}
-										<button aria-pressed={shareDays === n} onclick={() => (shareDaysPick = n)}
-											>{n} days</button
-										>
-									{/each}
-								</div>
-							{/snippet}
-						</ShareButton>
-					{/if}
-				</div>
-				<PeriodGrid
-					periods={band.periods}
-					hourly={band.hourly}
-					{units}
-					onselect={(p) => (selected = p)}
-				/>
-			</section>
+					</div>
+				</section>
+				<section class="card">
+					<div class="cardhead">
+						<h2>Day by day</h2>
+						{@render shareDaysBtn()}
+					</div>
+					<DayList
+						periods={band.periods}
+						hourly={band.hourly}
+						{units}
+						onperiod={(p) => (selected = p)}
+						onhourly={(date, start) => (hourlyDay = { date, start })}
+					/>
+				</section>
+			{:else}
+				<section class="card outlook">
+					<div class="half">
+						<span class="eyebrow">Next 5 days</span>
+						<span class="big num"
+							>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
+						>
+						{#if band.windows['next5'].ens}
+							{@const e = band.windows['next5'].ens}
+							<span class="faint small"
+								>{snowNum(e.p10, units)}–{snowNum(e.p90, units)}
+								{c.snowUnit} likely{e.estimated ? ' (est.)' : ''}</span
+							>
+						{/if}
+						<span class="faint small"
+							><span class="nw">Days 6–10: {snow(band.windows['d6_10'].snow_cm, units)}</span> ·
+							<span class="nw">Last 24 h: {snow(band.stats.last24_cm, units)}</span></span
+						>
+					</div>
+					<div class="half storm">
+						<span class="eyebrow">Next storm</span>
+						{#if storm}
+							<span class="big num"
+								>{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span
+							>
+							<span class="small">
+								<strong
+									><span class="nw">{periodName(storm.first)}</span
+									>{#if storm.periods > 1}&#32;→&#32;<span class="nw">{periodName(storm.last)}</span
+										>{/if}</strong
+								>
+								· <span class="nw">{startsIn(dateOf(snap.now), storm.first)}</span>
+							</span>
+							<span class="small muted">
+								<span class="nw"
+									>Heaviest {periodName(storm.peak)}: {snow(storm.peak.snow_cm, units)}</span
+								>{#if storm.snow_level_min_m !== null}&nbsp;·&#32;<span class="nw"
+										>snow level {elevation(storm.snow_level_min_m, units)}</span
+									>{/if}
+							</span>
+						{:else}
+							<span class="big">Quiet</span>
+							<span class="small">No storm of {snow(STORM_CM, units)}+ in sight</span>
+						{/if}
+					</div>
+				</section>
+				<section class="card">
+					<ForecastChart
+						{band}
+						bands={snap.bands}
+						{units}
+						onpick={pickTime}
+						bind:range
+						place={place ?? undefined}
+					/>
+				</section>
+				<section class="card">
+					<div class="cardhead">
+						<h2>Day by day</h2>
+						{@render shareDaysBtn()}
+					</div>
+					<PeriodGrid
+						periods={band.periods}
+						hourly={band.hourly}
+						{units}
+						onselect={(p) => (selected = p)}
+					/>
+				</section>
+			{/if}
 			{#if headsUp.length}
 				<section class="card heads">
 					<h2>Heads up</h2>
@@ -458,6 +556,16 @@
 		</div>
 	{/if}
 
+	{#if hourlyDay}
+		<DaySheet
+			{band}
+			bands={snap.bands}
+			{units}
+			date={hourlyDay.date}
+			start={hourlyDay.start}
+			onclose={() => (hourlyDay = null)}
+		/>
+	{/if}
 	{#if selected}
 		<PeriodSheet
 			period={selected}
@@ -670,6 +778,136 @@
 	.stackcol {
 		display: grid;
 		gap: 12px;
+	}
+	/* --- Phones --- */
+	.mhead {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		margin: -6px 0 0 -12px;
+	}
+	.mhead h1 {
+		margin: 0;
+		min-width: 0;
+		font-size: 1.45rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mback {
+		flex: 0 0 44px;
+		height: 44px;
+		display: grid;
+		place-items: center;
+		color: var(--text-2);
+	}
+	.mback svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.mband {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin: 0 0 6px;
+	}
+	.mbname {
+		min-width: 0;
+		font-size: 0.78rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mbname strong {
+		font-weight: 600;
+		color: var(--text-2);
+	}
+	.seg.elevs {
+		flex: 0 0 auto;
+		align-items: center;
+		border-radius: 12px;
+	}
+	.seg.elevs button {
+		min-width: 50px;
+		padding: 8px 8px;
+		border-radius: 10px;
+		font-family: var(--font-num);
+		font-variant-numeric: tabular-nums;
+	}
+	.seg.elevs .unit {
+		padding: 0 8px 0 4px;
+		font-size: 0.72rem;
+		color: var(--text-3);
+	}
+	.mout {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		padding: 0;
+	}
+	.mout > div {
+		display: grid;
+		align-content: start;
+		gap: 2px;
+		padding: 10px 12px;
+		min-width: 0;
+	}
+	.mout > div + div {
+		border-left: 1px solid var(--border);
+	}
+	.mout .eyebrow {
+		font-size: 0.66rem;
+	}
+	.mstorm .eyebrow {
+		color: var(--accent);
+	}
+	.mnum {
+		font-family: var(--font-num);
+		font-size: 1.35rem;
+		font-weight: 600;
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+	}
+	.mnum small {
+		font-family: var(--font-ui);
+		font-size: 0.75rem;
+		font-weight: 400;
+		letter-spacing: 0;
+		margin-left: 3px;
+		color: var(--text-2);
+	}
+	.msub {
+		font-size: 0.72rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	@media (max-width: 640px) {
+		.chartcard {
+			padding: 12px 10px;
+		}
+		.tabs {
+			border: 0;
+			border-radius: 0;
+			background: none;
+			padding: 0;
+			margin: 0 -16px 12px;
+			width: auto;
+			max-width: none;
+			border-bottom: 1px solid var(--border);
+		}
+		.tabs button {
+			border-radius: 0;
+			padding-top: 11px;
+			padding-bottom: 11px;
+		}
+		.tabs button[aria-current='page'] {
+			background: none;
+			box-shadow: inset 0 -2px 0 var(--accent);
+		}
 	}
 	.extras {
 		display: grid;

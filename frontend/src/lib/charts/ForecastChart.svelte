@@ -20,6 +20,7 @@
 	import ShareButton from '../share/ShareButton.svelte';
 	import { paint, slug } from '../share/canvas';
 	import { drawForecastCard, METRIC_NAME } from '../share/forecastCard';
+	import { viewport } from '../viewport.svelte';
 
 	interface Props {
 		band: BandOut;
@@ -32,15 +33,50 @@
 		range?: Range;
 		/** The location, for sharing the chart as an image; no share button without it. */
 		place?: { name: string; region: string; generatedAt: string };
+		/** Where the window starts (a local ISO time); the start of the forecast if not given. */
+		start?: string;
+		/** Inside a popup: just the readout, the plot and the metric chips. */
+		embedded?: boolean;
 	}
 
-	let { band, bands, units, onpick, range = $bindable(5), place }: Props = $props();
+	let {
+		band,
+		bands,
+		units,
+		onpick,
+		range = $bindable(5),
+		place,
+		start,
+		embedded = false
+	}: Props = $props();
+	const phone = $derived(viewport.phone);
 	const c = $derived(converters(units));
 	const ranges = $derived(availableRanges(band.hourly.t.length));
 	let metric = $state<Metric>('precip');
 	let hoverT = $state<string | null>(null);
 	const R = $derived<Range>(ranges.includes(range) ? range : (ranges[ranges.length - 1] ?? 1));
-	const steps = $derived(buildSteps(band.hourly, R));
+	// Every step to the end of the data; the chart shows a window of them. On desktop the
+	// window always starts now. On phones it can be moved along the overview strip, or by
+	// swiping the chart itself in tape mode.
+	const allSteps = $derived(buildSteps(band.hourly, R, true));
+	const nWin = $derived(Math.min((R * 24) / STEP[R], allSteps.length));
+	const maxOff = $derived(Math.max(0, allSteps.length - nWin));
+	let startMs = $state<number | null>(null);
+	let tape = $state(false);
+	const off = $derived.by(() => {
+		const t = startMs ?? (start ? Date.parse(start) : null);
+		if (t === null) return 0;
+		const k = allSteps.findIndex((st) => Date.parse(st.t) >= t);
+		return k < 0 ? maxOff : Math.min(maxOff, k);
+	});
+	const steps = $derived.by(() => {
+		const win = allSteps.slice(off, off + nWin);
+		// A popup's running total starts at its own first step.
+		const base = embedded && win.length ? win[0].cum - win[0].snow : 0;
+		return base ? win.map((st) => ({ ...st, cum: st.cum - base })) : win;
+	});
+	// A window that moves keeps one scale, so bars don't change height as you pan.
+	const axSteps = $derived(phone && !embedded ? allSteps : steps);
 	const N = $derived(Math.max(1, steps.length));
 	const W = $derived(1000 / N);
 	const H = 300;
@@ -72,13 +108,13 @@
 	const snowIn = (st: Step) => c.snow(st.snow) ?? 0;
 	const rainIn = (st: Step) => c.water(st.rain * 10) ?? 0;
 	const pAx = $derived(
-		niceAxis(0, Math.max(units === 'imperial' ? 0.2 : 0.5, ...steps.map(snowIn)), 4)
+		niceAxis(0, Math.max(units === 'imperial' ? 0.2 : 0.5, ...axSteps.map(snowIn)), 4)
 	);
 	const RAIN_H = 36; // tallest rain mark, in chart units (out of 300)
 	const rainy = (st: Step) => rainIn(st) >= (units === 'imperial' ? 0.01 : 0.2);
 	// Only all-rain steps get a green mark; snow and mixed steps show just their snow.
 	const rainOnly = (st: Step) => st.kind === 'rain' && rainy(st);
-	const rainMax = $derived(Math.max(units === 'imperial' ? 0.1 : 2.5, ...steps.map(rainIn)));
+	const rainMax = $derived(Math.max(units === 'imperial' ? 0.1 : 2.5, ...axSteps.map(rainIn)));
 	const rainH = (st: Step) => Math.max(3, (rainIn(st) / rainMax) * RAIN_H);
 	const showRain = $derived(metric === 'precip' || metric === 'slr');
 	const rainBox = (_st: Step, k: number) => {
@@ -108,7 +144,7 @@
 		v < 9.5 ? 'heavy & wet' : v < 12.5 ? 'average' : v < 15.5 ? 'light' : 'dry powder';
 	const yP = (v: number) => H - (v / pAx.max) * (H - 4);
 	const cumAxis = $derived(
-		niceAxis(0, Math.max(1, c.snow(steps[steps.length - 1]?.cum ?? 0) ?? 1), 4)
+		niceAxis(0, Math.max(1, c.snow(axSteps[axSteps.length - 1]?.cum ?? 0) ?? 1), 4)
 	);
 	const yCum = (v: number) => H - (v / cumAxis.max) * (H - 4);
 
@@ -122,21 +158,21 @@
 			if (metric === 'cloud') return st.cloud;
 			return c.height(st.fl);
 		};
-		const vals = steps.map(val).filter((v): v is number => v !== null);
+		const vals = axSteps.map(val).filter((v): v is number => v !== null);
 		let axis;
 		if (metric === 'temp') {
-			const spread = steps
+			const spread = axSteps
 				.flatMap((st) => [c.temp(st.tempLo), c.temp(st.tempHi)])
 				.filter((v): v is number => v !== null);
 			const lo = Math.min(c.freezing, ...vals, ...spread);
 			const hi = Math.max(c.freezing, ...vals, ...spread);
 			axis = niceAxis(lo - 2, hi + 2, 4);
 		} else if (metric === 'wind') {
-			const g = steps.map((st) => c.speed(st.gust)).filter((v): v is number => v !== null);
+			const g = axSteps.map((st) => c.speed(st.gust)).filter((v): v is number => v !== null);
 			axis = niceAxis(0, Math.max(10, ...vals, ...g), 4);
 		} else if (metric === 'fl') {
 			const e = elevs.map((x) => c.height(x.m) ?? 0);
-			for (const st of steps)
+			for (const st of axSteps)
 				for (const v of [c.height(st.flLo), c.height(st.flHi)]) if (v !== null) e.push(v);
 			axis = niceAxis(Math.min(...vals, ...e) * 0.9, Math.max(...vals, ...e) * 1.05, 4);
 		} else if (metric === 'slr') axis = { min: 4, max: 20, ticks: [5, 8, 11, 14, 17, 20] };
@@ -545,6 +581,13 @@
 				id: 'precip' as Metric,
 				label: 'Snow and rain',
 				short: 'Snow/rain',
+				tiny: snowIn(s) > 0.04 ? (s.kind === 'mix' ? 'Mixed' : 'Snow') : rainy(s) ? 'Rain' : 'Snow',
+				chip:
+					snowIn(s) > 0.04
+						? snowIn(s).toFixed(STEP[R] <= 3 ? c.snowDigits + 1 : c.snowDigits)
+						: rainy(s)
+							? rainIn(s).toFixed(c.waterDigits)
+							: '0',
 				color: 'var(--snow)',
 				value: snowIn(s) > 0.04 ? snowTxt(s) : rainy(s) ? rainTxt(s) : `0 ${c.snowUnit}`,
 				sub: [
@@ -559,6 +602,8 @@
 				id: 'temp' as Metric,
 				label: 'Temperature',
 				short: 'Temperature',
+				tiny: 'Temp',
+				chip: t === null ? '–' : `${Math.round(t)}°`,
 				color: 'var(--temp)',
 				value: t === null ? '–' : `${Math.round(t)}${c.tempUnit}`,
 				sub:
@@ -574,6 +619,8 @@
 				id: 'wind' as Metric,
 				label: 'Wind',
 				short: 'Wind',
+				tiny: 'Wind',
+				chip: `${compass(s.dir)} ${Math.round(c.speed(s.wind) ?? 0)}`,
 				color: 'var(--wind)',
 				value: `${compass(s.dir)} ${speed(s.wind, units)}`,
 				sub: `gusts ${speed(s.gust, units)}`
@@ -582,6 +629,8 @@
 				id: 'cloud' as Metric,
 				label: 'Cloud cover',
 				short: 'Cloud cover',
+				tiny: 'Cloud',
+				chip: s.cloud === null ? '–' : `${Math.round(s.cloud)}%`,
 				color: 'rgb(var(--cloud))',
 				value: s.cloud === null ? '–' : `${Math.round(s.cloud)}%`,
 				sub: `low ${pc(s.cloudLow)} · mid ${pc(s.cloudMid)} · high ${pc(s.cloudHigh)}`
@@ -590,6 +639,8 @@
 				id: 'fl' as Metric,
 				label: 'Freezing level',
 				short: 'Freezing',
+				tiny: 'Frz lvl',
+				chip: elevation(s.fl, units).replace(/\s*(ft|m)$/, ''),
 				color: 'var(--level)',
 				value: elevation(s.fl, units),
 				sub: zone(s.fl)
@@ -598,6 +649,8 @@
 				id: 'slr' as Metric,
 				label: 'Snow ratio',
 				short: 'Snow ratio',
+				tiny: 'Ratio',
+				chip: s.kind === 'rain' || s.slr === null ? '–' : `${Math.round(s.slr)}:1`,
 				color: 'var(--snow)',
 				value: s.kind === 'rain' ? 'Rain' : s.slr === null ? 'Too warm' : `${Math.round(s.slr)}:1`,
 				sub:
@@ -625,6 +678,81 @@
 		const st = steps[k];
 		if (st && st.t !== hoverT) hoverT = st.t;
 	};
+
+	// --- Phones: move the window ---
+	/** Put absolute step `abs` under the cursor, with the window centred on it. */
+	function showStep(abs: number) {
+		const a = Math.max(0, Math.min(allSteps.length - 1, abs));
+		const o = Math.max(0, Math.min(maxOff, a - Math.floor(nWin / 2)));
+		startMs = Date.parse(allSteps[o].t);
+		hoverT = allSteps[a].t;
+	}
+	/** A new range keeps the time you were reading in the middle of the window. */
+	function pickRange(r: Range) {
+		const at = s ? Date.parse(s.t) : null;
+		range = r;
+		if (phone && at !== null) startMs = at - (r * 24 * 3600e3) / 2;
+	}
+	// Tape: swiping the chart moves time under a cursor that stays in the middle.
+	let drag: { x: number; abs: number; px: number } | null = null;
+	function tapeDown(e: PointerEvent) {
+		const el = e.currentTarget as HTMLElement;
+		drag = { x: e.clientX, abs: off + hv, px: el.getBoundingClientRect().width / N };
+		el.setPointerCapture?.(e.pointerId);
+	}
+	function tapeMove(e: PointerEvent) {
+		if (drag) showStep(drag.abs + Math.round((drag.x - e.clientX) / drag.px));
+	}
+	function toggleTape() {
+		tape = !tape;
+		if (tape) showStep(off + hv);
+	}
+	// The strip under the chart: every day of the forecast in half-day bars, with the
+	// chart's window marked. Drag along it to move the window.
+	const strip = $derived.by(() => {
+		const halves = buildSteps(band.hourly, 10, true);
+		if (!halves.length || !steps.length) return null;
+		const h0 = halves[0].i0;
+		const hours = halves.length * 12;
+		const max = Math.max(2.54, ...halves.map((x) => x.snow));
+		const pct = (i: number) => `${(Math.max(0, Math.min(1, (i - h0) / hours)) * 100).toFixed(2)}%`;
+		return {
+			h0,
+			hours,
+			bars: halves.map((x) => ({
+				key: x.t,
+				kind: x.kind,
+				night: x.night,
+				h:
+					x.kind === 'none'
+						? '0%'
+						: x.kind === 'rain'
+							? '12%'
+							: `${Math.max(12, (x.snow / max) * 100).toFixed(0)}%`
+			})),
+			days: halves
+				.filter((x) => !x.night)
+				.map((x) => ({ left: pct(x.i0 + 6), name: weekday(dateOf(x.t)).slice(0, 2) })),
+			winLeft: pct(steps[0].i0),
+			winRight: pct(steps[steps.length - 1].i0 + STEP[R]),
+			whole: maxOff === 0,
+			cursor: s ? pct(s.i0 + s.hours / 2) : '0%'
+		};
+	});
+	let stripDown = false;
+	function stripTo(e: PointerEvent) {
+		if (!strip) return;
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const hour = strip.h0 + ((e.clientX - r.left) / r.width) * strip.hours;
+		showStep(Math.floor((hour - (allSteps[0]?.i0 ?? 0)) / STEP[R]));
+	}
+	// The big reading above the plot.
+	const reading = $derived(cards.find((k) => k.id === metric));
+	const totalTxt = $derived(
+		`${(c.snow(allSteps[allSteps.length - 1]?.cum ?? 0) ?? 0).toFixed(c.snowDigits)} ${c.snowUnit}`
+	);
+	const cumTxt = $derived(s ? (c.snow(s.cum) ?? 0).toFixed(c.snowDigits) : '0');
+
 	function onkey(e: KeyboardEvent) {
 		if (e.key === 'ArrowRight') setHover(Math.min(N - 1, hv + 1));
 		else if (e.key === 'ArrowLeft') setHover(Math.max(0, hv - 1));
@@ -634,7 +762,22 @@
 	}
 </script>
 
-<div class="fc">
+<div class="fc" class:phone class:embedded>
+	{#if phone && s && reading}
+		<div class="mread">
+			<div class="mwhen">{when(s)}</div>
+			<div class="mmain">
+				<span class="mbig num">{reading.value}</span>
+				<span class="mnote">{reading.sub.split(' · ')[0]}</span>
+			</div>
+			{#if !embedded}
+				<div class="mcum">
+					<span>Snow by then</span>
+					<strong class="num">{cumTxt}<small>of {totalTxt}</small></strong>
+				</div>
+			{/if}
+		</div>
+	{/if}
 	<div class="top">
 		<div class="titlerow">
 			<h2>Forecast</h2>
@@ -651,7 +794,7 @@
 		</div>
 		<div class="seg" role="group" aria-label="Time range">
 			{#each ranges as r (r)}
-				<button aria-pressed={R === r} onclick={() => (range = r)}
+				<button aria-pressed={R === r} onclick={() => pickRange(r)}
 					>{r} {r === 1 ? 'day' : 'days'}</button
 				>
 			{/each}
@@ -675,10 +818,10 @@
 			>
 				<span class="mlabel"
 					><i style:background={k.color}></i><span class="mtxt long">{k.label}</span><span
-						class="mtxt short">{k.short}</span
+						class="mtxt short">{phone ? k.tiny : k.short}</span
 					></span
 				>
-				<span class="mval num">{k.value}</span>
+				<span class="mval num">{phone ? k.chip : k.value}</span>
 				<span class="msub">{k.sub}</span>
 			</button>
 		{/each}
@@ -705,9 +848,11 @@
 			aria-valuemax={N - 1}
 			aria-valuenow={hv}
 			aria-valuetext={s ? `${when(s)}: ${cards.find((k) => k.id === metric)?.value ?? ''}` : ''}
-			onpointermove={(e) => setHover(stepAt(e))}
-			onpointerdown={(e) => setHover(stepAt(e))}
-			onclick={() => s && onpick?.(s.t)}
+			onpointermove={(e) => (tape ? tapeMove(e) : setHover(stepAt(e)))}
+			onpointerdown={(e) => (tape ? tapeDown(e) : setHover(stepAt(e)))}
+			onpointerup={() => (drag = null)}
+			onpointercancel={() => (drag = null)}
+			onclick={() => !phone && s && onpick?.(s.t)}
 			onkeydown={onkey}
 		>
 			<svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
@@ -790,6 +935,63 @@
 			>
 		{/each}
 	</div>
+	{#if phone && !embedded && strip}
+		<div class="striprow">
+			<div
+				class="strip"
+				class:whole={strip.whole}
+				role="slider"
+				tabindex="0"
+				aria-label="Move the chart through the forecast"
+				aria-valuemin={0}
+				aria-valuemax={allSteps.length - 1}
+				aria-valuenow={off + hv}
+				aria-valuetext={s ? when(s) : ''}
+				onpointerdown={(e) => {
+					stripDown = true;
+					(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+					stripTo(e);
+				}}
+				onpointermove={(e) => stripDown && stripTo(e)}
+				onpointerup={() => (stripDown = false)}
+				onpointercancel={() => (stripDown = false)}
+				onkeydown={(e) => {
+					if (e.key === 'ArrowRight') showStep(off + hv + 1);
+					else if (e.key === 'ArrowLeft') showStep(off + hv - 1);
+					else return;
+					e.preventDefault();
+				}}
+			>
+				<div class="sbars" aria-hidden="true">
+					{#each strip.bars as b (b.key)}<i
+							class="k-{b.kind}"
+							class:night={b.night}
+							style:height={b.h}
+						></i>{/each}
+				</div>
+				<div
+					class="swin"
+					style:left={strip.winLeft}
+					style:right="calc(100% - {strip.winRight})"
+				></div>
+				<div class="scur" style:left={strip.cursor}></div>
+				{#each strip.days as d (d.left)}<span class="sday" style:left={d.left}>{d.name}</span
+					>{/each}
+			</div>
+			<button
+				class="tapebtn"
+				aria-pressed={tape}
+				disabled={strip.whole}
+				onclick={toggleTape}
+				aria-label="Swipe the chart to move through time"
+				title="Swipe the chart to move through time"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><path d="M12 4v16M7 9l-3 3 3 3M17 9l3 3-3 3" /></svg
+				>
+			</button>
+		</div>
+	{/if}
 	<div class="legend">
 		{#if showNight}<span><i class="sw night"></i>Night (shaded)</span>{/if}
 		{#if metric === 'precip'}
@@ -1342,6 +1544,229 @@
 		.legend .lower-key {
 			display: none;
 		}
+	}
+	/* --- Phones: the reading on top, the plot, then the controls under the thumb. --- */
+	.fc.phone {
+		gap: 8px;
+	}
+	.fc.phone .mread {
+		order: 1;
+	}
+	.fc.phone .axes {
+		order: 2;
+		font-size: 0.68rem;
+		font-weight: 500;
+		color: var(--text-3);
+		margin-bottom: -4px;
+	}
+	.fc.phone .plotrow {
+		order: 3;
+	}
+	.fc.phone .xaxis {
+		order: 4;
+	}
+	.fc.phone .striprow {
+		order: 5;
+	}
+	.fc.phone .cards {
+		order: 6;
+		grid-template-columns: repeat(6, minmax(0, 1fr));
+		gap: 4px;
+	}
+	.fc.phone .top {
+		order: 7;
+		flex-wrap: nowrap;
+		flex-direction: row-reverse;
+	}
+	.fc.phone .legend,
+	.fc.phone .readout,
+	.fc.phone .top h2,
+	.fc.embedded .top {
+		display: none;
+	}
+	.fc.phone .titlerow {
+		flex: 0 0 auto;
+	}
+	.fc.phone .top .seg {
+		flex: 1 1 auto;
+		display: flex;
+	}
+	.fc.phone .top .seg button {
+		flex: 1 1 0;
+		min-width: 0;
+		padding: 9px 4px;
+	}
+	.fc.phone .mcard {
+		height: 52px;
+		padding: 6px 2px;
+		align-items: center;
+		justify-content: center;
+		gap: 3px;
+	}
+	.fc.phone .mlabel {
+		gap: 4px;
+		font-size: 0.68rem;
+		font-weight: 500;
+	}
+	.fc.phone .mlabel i {
+		width: 6px;
+		height: 6px;
+	}
+	.fc.phone .mval {
+		font-size: 0.9rem;
+	}
+	.mread {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas: 'when cum' 'main cum';
+		align-items: end;
+		gap: 2px 12px;
+		min-height: 52px;
+	}
+	.mwhen {
+		grid-area: when;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--accent-ink);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mmain {
+		grid-area: main;
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+	.mbig {
+		font-size: 1.85rem;
+		font-weight: 600;
+		line-height: 1;
+		letter-spacing: -0.02em;
+	}
+	.mnote {
+		font-size: 0.78rem;
+		color: var(--text-3);
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mcum {
+		grid-area: cum;
+		display: grid;
+		justify-items: end;
+		gap: 2px;
+		font-size: 0.7rem;
+		color: var(--text-3);
+		white-space: nowrap;
+	}
+	.mcum strong {
+		font-size: 1rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.mcum small {
+		font-family: var(--font-ui);
+		font-size: 0.7rem;
+		font-weight: 400;
+		color: var(--text-3);
+		margin-left: 4px;
+	}
+	.striprow {
+		display: flex;
+		gap: 6px;
+		align-items: stretch;
+	}
+	.strip {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+		height: 46px;
+		border-radius: 12px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		overflow: hidden;
+		touch-action: pan-y;
+		cursor: ew-resize;
+	}
+	.sbars {
+		position: absolute;
+		inset: 5px 0 17px;
+		display: flex;
+		align-items: flex-end;
+	}
+	.sbars i {
+		flex: 1 1 0;
+		margin: 0 1.5px;
+		border-radius: 2px 2px 0 0;
+		background: var(--snow);
+	}
+	.sbars i.night {
+		background: var(--snow-night);
+	}
+	.sbars i.k-heavy {
+		background: var(--snow-heavy);
+	}
+	.sbars i.k-mix {
+		background: var(--mix);
+	}
+	.sbars i.k-rain {
+		background: var(--rain);
+	}
+	.swin {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		background: color-mix(in srgb, var(--accent) 18%, transparent);
+		border-left: 1.5px solid var(--accent);
+		border-right: 1.5px solid var(--accent);
+		pointer-events: none;
+	}
+	.strip.whole .swin {
+		border-color: transparent;
+		background: none;
+	}
+	.scur {
+		position: absolute;
+		top: 0;
+		bottom: 15px;
+		border-left: 1.5px solid var(--text);
+		pointer-events: none;
+	}
+	.sday {
+		position: absolute;
+		bottom: 2px;
+		transform: translateX(-50%);
+		font-size: 0.62rem;
+		color: var(--text-3);
+		pointer-events: none;
+	}
+	.tapebtn {
+		flex: 0 0 40px;
+		border-radius: 12px;
+		border: 1px solid var(--border);
+		background: var(--surface-2);
+		color: var(--text-2);
+		display: grid;
+		place-items: center;
+		cursor: pointer;
+	}
+	.tapebtn svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.tapebtn[aria-pressed='true'] {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+		color: var(--accent-ink);
+	}
+	.tapebtn:disabled {
+		opacity: 0.4;
+		cursor: default;
 	}
 	@media (max-width: 640px) {
 		.cards {

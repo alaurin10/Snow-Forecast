@@ -36,6 +36,14 @@ class Prefs {
 		load('sw.mapBase', ['topo', 'satellite'] as const, 'topo')
 	);
 
+	/** Overview order on phones: the order set on the admin page, or most snow first. */
+	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
+
+	setSort(s: 'mine' | 'snow') {
+		this.sort = s;
+		save('sw.sort', s);
+	}
+
 	setUnits(u: UnitSystem) {
 		this.units = u;
 		save('sw.units', u);

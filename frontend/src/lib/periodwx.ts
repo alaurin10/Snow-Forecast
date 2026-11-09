@@ -58,3 +58,17 @@ export function wxIcon(p: PeriodOut, wcode: number | null): WxIcon {
 	if (wcode === 2) return night ? 'partly-night' : 'partly-day';
 	return night ? 'clear-night' : 'clear-day';
 }
+
+/** What an icon shows, in words (for labels). */
+export const ICON_WORD: Record<WxIcon, string> = {
+	'clear-day': 'Clear',
+	'clear-night': 'Clear',
+	'partly-day': 'Partly cloudy',
+	'partly-night': 'Partly cloudy',
+	cloud: 'Cloudy',
+	fog: 'Fog',
+	rain: 'Rain',
+	snow: 'Snow',
+	mix: 'Rain and snow',
+	thunder: 'Thunderstorms'
+};
