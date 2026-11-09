@@ -374,3 +374,42 @@ table.data thead th {
 	background: var(--c5);
 	color: var(--c-ink-dark);
 }
+
+/* Snow-amount cells (the Calendar's ramp), for the phone day list and calendar. */
+.heat {
+	display: grid;
+	place-items: center;
+	border-radius: 8px;
+	font-family: var(--font-num);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	text-decoration: none;
+}
+.heat.b0 {
+	background: var(--c0);
+	color: var(--text-3);
+}
+.heat.b1 {
+	background: var(--c1);
+	color: var(--c-ink-light);
+}
+.heat.b2 {
+	background: var(--c2);
+	color: var(--c-ink-light);
+}
+.heat.b3 {
+	background: var(--c3);
+	color: var(--c-ink-dark);
+}
+.heat.b4 {
+	background: var(--c4);
+	color: var(--c-ink-dark);
+}
+.heat.b5 {
+	background: var(--c5);
+	color: var(--c-ink-dark);
+}
+.heat.rainy {
+	background: color-mix(in srgb, var(--rain) 22%, var(--surface));
+	color: var(--text-2);
+}

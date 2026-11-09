@@ -139,3 +139,16 @@ describe('niceAxis', () => {
 		expect(a.max).toBeGreaterThanOrEqual(37);
 	});
 });
+
+describe('buildSteps with every step', () => {
+	it('runs to the end of the data when asked for every step', () => {
+		const h = hourly();
+		// 48 hours from 1 PM: a 1-day range is 24 hourly steps, but all 48 with `all`.
+		expect(buildSteps(h, 1)).toHaveLength(24);
+		const all = buildSteps(h, 1, true);
+		expect(all).toHaveLength(48);
+		// The first day of both is the same, running total included.
+		expect(all.slice(0, 24)).toEqual(buildSteps(h, 1));
+		expect(all[47].cum).toBeCloseTo(24);
+	});
+});

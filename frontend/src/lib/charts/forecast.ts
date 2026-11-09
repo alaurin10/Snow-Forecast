@@ -70,7 +70,11 @@ function band(lo: number[], hi: number[], kind: Step['tempKind']) {
 	return { tempLo: f(lo), tempHi: f(hi) };
 }
 
-export function buildSteps(h: HourlyOut, range: Range): Step[] {
+/**
+ * Steps for a range. With `all`, the steps run to the end of the data instead of stopping
+ * at the range, so a chart can show any window of them at the range's step size.
+ */
+export function buildSteps(h: HourlyOut, range: Range, all = false): Step[] {
 	const step = STEP[range];
 	const len = h.t.length;
 	// Start on a clean boundary: any hour, every 3 or 6 h from midnight, or 6 AM / 6 PM.
@@ -80,7 +84,8 @@ export function buildSteps(h: HourlyOut, range: Range): Step[] {
 	};
 	let start = 0;
 	while (start < len && !aligned(start)) start++;
-	const n = Math.min((range * 24) / step, Math.floor((len - start) / step));
+	const fits = Math.floor((len - start) / step);
+	const n = all ? fits : Math.min((range * 24) / step, fits);
 	const steps: Step[] = [];
 	let cum = 0;
 	for (let k = 0; k < n; k++) {

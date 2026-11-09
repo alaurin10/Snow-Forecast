@@ -9,6 +9,7 @@
 	import { stormCycles } from '../../lib/stormcycles';
 	import { monthDay, weekday } from '../../lib/time';
 	import type { OverviewRow } from '../../lib/types.gen';
+	import { viewport } from '../../lib/viewport.svelte';
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
@@ -86,6 +87,76 @@
 	<p class="card">Can't load the calendar: {error}</p>
 {:else if !rows}
 	<p class="muted">Loading…</p>
+{:else if viewport.phone}
+	<!-- Phones: the storm cards scroll away with the page; only the dates stay pinned. Each
+	     location's name sits above its row, so all ten days fit with no sideways scrolling. -->
+	{#if storms.length}
+		<ul class="mstorms">
+			{#each storms as s, k (s.start + s.end)}
+				<li class:first={k === 0}>
+					<span class="ms-when"
+						>{soon(s.start)} · {dayName(s.start)}{s.end !== s.start
+							? ` – ${dayName(s.end)}`
+							: ''}</span
+					>
+					<span class="ms-top"
+						>{s.locations[0].name}
+						<strong class="num">{snow(s.locations[0].total_cm, prefs.units)}</strong></span
+					>
+					<span class="ms-more">
+						{#each s.locations.slice(1, 3) as l, i (l.id)}{i ? ' · ' : ''}{l.name}
+							{snowNum(l.total_cm, prefs.units)}{/each}{#if s.locations.length > 3}
+							· +{s.locations.length - 3} more{/if}
+					</span>
+				</li>
+			{/each}
+		</ul>
+	{:else}
+		<p class="muted mnone">
+			No storms of {snow(5, prefs.units)} or more in the next {DAYS} days.
+		</p>
+	{/if}
+	<div class="mdates" style:--n={dates.length} aria-hidden="true">
+		{#each dates as d (d)}
+			<span class:weekend={['Sat', 'Sun'].includes(weekday(d))} class:today={d === today}
+				>{weekday(d).slice(0, 2)}<small>{Number(d.slice(8))}</small></span
+			>
+		{/each}
+	</div>
+	<ul class="mrows">
+		{#each grid as g (g.r.id)}
+			<li>
+				<div class="mname">
+					<a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a>
+					<span class="num">{snow(g.total, prefs.units)}</span>
+				</div>
+				<div class="mcells" style:--n={dates.length}>
+					{#each dates as d (d)}
+						{@const day = g.days.get(d)}
+						{#if day}
+							<!-- cellHref() builds the URL with resolve() and adds ?period= -->
+							<!-- eslint-disable svelte/no-navigation-without-resolve -->
+							<a
+								class="heat b{bucket(day.cm)}"
+								class:rainy={day.rainy}
+								href={cellHref(g.r.id, day.key)}
+								aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}`}
+								>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</a
+							>
+							<!-- eslint-enable svelte/no-navigation-without-resolve -->
+						{:else}
+							<span></span>
+						{/if}
+					{/each}
+				</div>
+			</li>
+		{/each}
+	</ul>
+	<div class="legend mlegend">
+		{#each legend as l (l.b)}<span class="sw b{l.b}"></span><span>{l.text}</span>{/each}
+		<span class="faint">{c.snowUnit} per day</span>
+		<span class="sw b0 rainy"></span><span>rain</span>
+	</div>
 {:else}
 	<section class="card storms">
 		<h2>Storms ahead</h2>
@@ -333,6 +404,127 @@
 		height: 1px;
 		overflow: hidden;
 		clip: rect(0 0 0 0);
+	}
+	/* --- Phones --- */
+	.mstorms {
+		list-style: none;
+		display: flex;
+		gap: 8px;
+		margin: 0 -16px;
+		padding: 0 16px 4px;
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.mstorms li {
+		flex: 0 0 172px;
+		display: grid;
+		gap: 2px;
+		padding: 10px 12px;
+		border-radius: 14px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		min-width: 0;
+	}
+	.mstorms li.first {
+		background: var(--accent-soft);
+	}
+	.mstorms span {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.ms-when {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--accent-ink);
+	}
+	.ms-top {
+		font-size: 0.88rem;
+		font-weight: 600;
+	}
+	.ms-more {
+		font-size: 0.72rem;
+		color: var(--text-2);
+		min-height: 1em;
+	}
+	.mnone {
+		margin: 0;
+		font-size: 0.88rem;
+	}
+	.mdates,
+	.mcells {
+		display: grid;
+		grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+		gap: 3px;
+	}
+	.mdates {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		margin: 6px -16px 0;
+		padding: calc(6px + env(safe-area-inset-top)) 16px 6px;
+		background: var(--bg);
+		border-bottom: 1px solid var(--border);
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: var(--text-2);
+		text-align: center;
+	}
+	.mdates small {
+		display: block;
+		font-weight: 400;
+		color: var(--text-3);
+	}
+	.mdates .weekend {
+		color: var(--accent);
+	}
+	.mdates .today,
+	.mdates .today small {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.mrows {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+	.mrows li {
+		padding: 8px 0 6px;
+	}
+	.mname {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 10px;
+		margin-bottom: 4px;
+	}
+	.mname a {
+		min-width: 0;
+		color: var(--text);
+		font-size: 0.88rem;
+		font-weight: 600;
+		text-decoration: none;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.mname span {
+		flex: 0 0 auto;
+		font-size: 0.78rem;
+		color: var(--text-2);
+	}
+	.mcells .heat {
+		height: 30px;
+		font-size: 0.72rem;
+	}
+	.mlegend {
+		padding: 8px 0 0;
+	}
+	@media (max-width: 640px) {
+		h1 {
+			font-size: 1.6rem;
+			margin-bottom: 10px;
+		}
 	}
 	/* Wide screens: the grid fills the card and full names fit. */
 	@media (min-width: 900px) {

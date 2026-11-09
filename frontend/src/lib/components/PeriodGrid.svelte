@@ -5,7 +5,7 @@
 	import { hscroll } from '../hscroll';
 	import type { HourlyOut, PeriodOut } from '../types.gen';
 	import { HEAVY_CM, precipKind } from '../daybars';
-	import { periodWeather, wxIcon } from '../periodwx';
+	import { ICON_WORD, periodWeather, wxIcon } from '../periodwx';
 	import { compass } from '../conditions';
 	import { dateOf, monthDay, weekday } from '../time';
 	import { converters, roundTo, snowNum, type UnitSystem } from '../units';
@@ -54,18 +54,6 @@
 			: roundTo(c.height(m) ?? 0, units === 'imperial' ? 50 : 10).toLocaleString('en-US');
 	// Snow ratio zones, as on the chart: 0 heavy & wet … 3 dry powder.
 	const zoneOf = (v: number) => (v < 9.5 ? 0 : v < 12.5 ? 1 : v < 15.5 ? 2 : 3);
-	const ICON_WORD: Record<string, string> = {
-		'clear-day': 'Clear',
-		'clear-night': 'Clear',
-		'partly-day': 'Partly cloudy',
-		'partly-night': 'Partly cloudy',
-		cloud: 'Cloudy',
-		fog: 'Fog',
-		rain: 'Rain',
-		snow: 'Snow',
-		mix: 'Rain and snow',
-		thunder: 'Thunderstorms'
-	};
 </script>
 
 <div class="wrap" use:hscroll>
