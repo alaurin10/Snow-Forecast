@@ -11,7 +11,6 @@ dependencies = [
     "pillow>=13.0.0",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
-    "pyjwt[crypto]>=2.9",
     "pywebpush>=2.5.0",
     "pyyaml>=6.0",
     "tzdata>=2026.6",

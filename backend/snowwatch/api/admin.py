@@ -1,5 +1,4 @@
-"""Owner-only endpoints for the Manage page. Cloudflare Access also guards
-/admin and /api/admin at its edge (docs/RUNBOOK.md step 6); this checks again."""
+"""Owner-only endpoints for the Manage page (see api/auth.py for the owner role)."""
 
 from __future__ import annotations
 
@@ -100,8 +99,8 @@ def make_admin_router() -> APIRouter:
         )
 
     @r.post("/lookups/refresh", response_model=JobOut)
-    def refresh_lookups(v: Owner, conn: RW) -> JobOut:
-        return _job(conn, jobs.enqueue(conn, "lookups", None, v.email))
+    def refresh_lookups(_: Owner, conn: RW) -> JobOut:
+        return _job(conn, jobs.enqueue(conn, "lookups", None, "owner"))
 
     @r.get("/catalog/search", response_model=list[CatalogItem])
     def catalog_search(
@@ -120,12 +119,12 @@ def make_admin_router() -> APIRouter:
             return resolve(conn, fetcher, body)
 
     @r.post("/locations", response_model=SaveOut, status_code=201)
-    def create(loc: Location, request: Request, v: Owner, conn: RW) -> SaveOut:
+    def create(loc: Location, request: Request, _: Owner, conn: RW) -> SaveOut:
         if service.get_location(conn, loc.id) is not None:
             raise HTTPException(409, f"a location with id {loc.id!r} already exists")
         loc = loc.model_copy(update={"sort_order": _next_order(conn)})
-        _upsert(request, conn, loc, v.email)
-        job = jobs.enqueue(conn, "pull", loc.id, v.email) if loc.active else None
+        _upsert(request, conn, loc, "owner")
+        job = jobs.enqueue(conn, "pull", loc.id, "owner") if loc.active else None
         return SaveOut(location=loc, job_id=job)
 
     @r.put("/locations/order")
@@ -134,16 +133,16 @@ def make_admin_router() -> APIRouter:
         return {"ok": True}
 
     @r.put("/locations/{location_id}", response_model=SaveOut)
-    def update(location_id: str, loc: Location, request: Request, v: Owner, conn: RW) -> SaveOut:
+    def update(location_id: str, loc: Location, request: Request, _: Owner, conn: RW) -> SaveOut:
         old = service.get_location(conn, location_id)
         if old is None:
             raise HTTPException(404, f"unknown location {location_id!r}")
         if loc.id != location_id:
             raise HTTPException(400, "the id can't be changed")
         loc = loc.model_copy(update={"sort_order": old.sort_order})
-        _upsert(request, conn, loc, v.email)
+        _upsert(request, conn, loc, "owner")
         changed = (old.bands, old.country, old.active) != (loc.bands, loc.country, loc.active)
-        job = jobs.enqueue(conn, "pull", loc.id, v.email) if loc.active and changed else None
+        job = jobs.enqueue(conn, "pull", loc.id, "owner") if loc.active and changed else None
         return SaveOut(location=loc, job_id=job)
 
     @r.delete("/locations/{location_id}")
@@ -154,10 +153,10 @@ def make_admin_router() -> APIRouter:
         return {"ok": True}
 
     @r.post("/locations/{location_id}/refresh", response_model=JobOut)
-    def refresh(location_id: str, v: Owner, conn: RW) -> JobOut:
+    def refresh(location_id: str, _: Owner, conn: RW) -> JobOut:
         if service.get_location(conn, location_id) is None:
             raise HTTPException(404, f"unknown location {location_id!r}")
-        return _job(conn, jobs.enqueue(conn, "pull", location_id, v.email))
+        return _job(conn, jobs.enqueue(conn, "pull", location_id, "owner"))
 
     @r.get("/jobs/{job_id}", response_model=JobOut)
     def job(job_id: int, _: Owner, conn: RW) -> JobOut:

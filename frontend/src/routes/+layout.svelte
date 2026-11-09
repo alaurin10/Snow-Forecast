@@ -98,12 +98,7 @@
 	</div>
 </header>
 
-{#if session.signInNeeded}
-	<div class="banner warn" role="alert">
-		Your sign-in has expired.
-		<button onclick={() => location.reload()}>Sign in again</button>
-	</div>
-{:else if !session.online}
+{#if !session.online}
 	<div class="banner">Offline: showing the forecast saved on this device.</div>
 {:else if staleHours !== null}
 	<div class="banner warn">
@@ -251,14 +246,6 @@
 	.banner.warn {
 		background: var(--warn-bg);
 		border-color: var(--warn-border);
-	}
-	.banner button {
-		margin-left: 8px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		border-radius: 999px;
-		padding: 3px 10px;
-		cursor: pointer;
 	}
 	.banner a {
 		color: inherit;

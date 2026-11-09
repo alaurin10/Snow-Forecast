@@ -103,13 +103,12 @@ def powder(date: str = "2026-12-05", cm: float = 23.0) -> Flag:
 def test_only_matching_types_and_locations_one_message_each(
     on: Settings, conn: sqlite3.Connection
 ) -> None:
-    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}), None)
+    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
     push.subscribe(
         conn,
         SubscribeIn.model_validate(
             {"subscription": sub_json(2), "locations": ["rainy"], "units": "metric"}
         ),
-        None,
     )
     storm = Flag(type="storm_incoming", severity="notice", date="2026-12-04", value=40.0)
     wind = Flag(type="wind_hold", severity="notice", date="2026-12-04", value=80.0)
@@ -131,13 +130,13 @@ def test_only_matching_types_and_locations_one_message_each(
 
 
 def test_gone_subscriptions_are_removed(on: Settings, conn: sqlite3.Connection) -> None:
-    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}), None)
+    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
     push.notify(conn, on, {"crystal": ("Crystal", [powder()])}, FakeSender(410))
     assert push.subscriptions(conn) == []
 
 
 def test_repeated_failures_remove_a_subscription(on: Settings, conn: sqlite3.Connection) -> None:
-    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}), None)
+    push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
     for _ in range(push.MAX_FAILURES - 1):
         push.notify(conn, on, {"crystal": ("Crystal", [powder()])}, FakeSender(500))
     assert len(push.subscriptions(conn)) == 1
@@ -221,9 +220,9 @@ def test_real_encrypted_signed_request(receiver: str) -> None:
 
 def test_contact_prefers_an_email(on: Settings) -> None:
     assert (
-        push.contact(on.model_copy(update={"admin_emails": "me@example.com"}))
+        push.contact(on.model_copy(update={"contact_email": "me@example.com"}))
         == "mailto:me@example.com"
     )
     assert push.contact(
-        on.model_copy(update={"admin_emails": "", "nws_contact": "a b"})
+        on.model_copy(update={"contact_email": "", "nws_contact": "a b"})
     ).startswith("mailto:")

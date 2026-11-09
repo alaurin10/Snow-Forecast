@@ -2003,23 +2003,16 @@
     },
     "Me": {
       "properties": {
-        "email": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "is_owner": {
+          "type": "boolean"
+        },
+        "owner_login_enabled": {
           "type": "boolean"
         }
       },
       "required": [
-        "email",
-        "is_owner"
+        "is_owner",
+        "owner_login_enabled"
       ],
       "title": "Me",
       "type": "object"

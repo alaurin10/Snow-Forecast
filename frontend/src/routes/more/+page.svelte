@@ -7,7 +7,7 @@
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
-	let owner = $state(false);
+	let manage = $state(false);
 
 	$effect(() => {
 		getHealth()
@@ -17,7 +17,7 @@
 			.then((r) => (runs = r))
 			.catch(() => {});
 		getMe()
-			.then((m) => (owner = m.is_owner))
+			.then((m) => (manage = m.is_owner || m.owner_login_enabled))
 			.catch(() => {});
 	});
 
@@ -50,7 +50,7 @@
 
 <svelte:head><title>More · Snow Watch</title></svelte:head>
 
-{#if owner}
+{#if manage}
 	<a class="card manage" href={resolve('/admin')}>
 		<strong>Manage locations</strong>
 		<span class="muted">Add resorts and backcountry zones, reorder, pause or remove them.</span>

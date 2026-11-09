@@ -217,8 +217,8 @@ export interface LookupStatus {
  * via the `definition` "Me".
  */
 export interface Me {
-	email: string | null;
 	is_owner: boolean;
+	owner_login_enabled: boolean;
 }
 /**
  * One location on the Overview and Calendar pages (mid band).

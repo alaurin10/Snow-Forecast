@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
+from snowwatch.api.auth import Me
 from snowwatch.avalanche import AvalancheView
 from snowwatch.doc import DayOut, Flag, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
@@ -129,11 +130,6 @@ class RunOut(BaseModel):
     finished_at: str | None
     api_weight: float
     errors: list[str]
-
-
-class Me(BaseModel):
-    email: str | None
-    is_owner: bool
 
 
 class SourceRow(BaseModel):

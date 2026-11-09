@@ -17,7 +17,6 @@ import type {
 	Snapshot,
 	TrendOut
 } from './types.gen';
-import { session } from './session.svelte';
 
 export class ApiError extends Error {
 	constructor(
@@ -28,27 +27,11 @@ export class ApiError extends Error {
 	}
 }
 
-/** Cloudflare Access wants the viewer to log in again. */
-export class SignInRequired extends ApiError {
-	constructor() {
-		super(401, 'Sign in again');
-	}
-}
-
-async function request(path: string, init: RequestInit = {}): Promise<Response> {
-	// redirect: 'manual' turns an Access login redirect into an opaque response
-	// we can recognise, instead of a CORS failure that looks like being offline.
-	const r = await fetch(path, {
+function request(path: string, init: RequestInit = {}): Promise<Response> {
+	return fetch(path, {
 		...init,
-		headers: { Accept: 'application/json', ...(init.headers ?? {}) },
-		redirect: 'manual'
+		headers: { Accept: 'application/json', ...(init.headers ?? {}) }
 	});
-	const html = (r.headers.get('content-type') ?? '').includes('text/html');
-	if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400) || (r.ok && html)) {
-		session.signInNeeded = true;
-		throw new SignInRequired();
-	}
-	return r;
 }
 
 async function get<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -117,7 +100,7 @@ export const getVerification = (id: string) =>
 
 export const getStatus = () => get<StatusOut>('/api/status');
 
-// --- Owner-only (Manage page) ---
+// --- Owner sign-in and the Manage page ---
 
 const send = <T>(method: string, path: string, body?: unknown) =>
 	get<T>(path, {
@@ -127,6 +110,8 @@ const send = <T>(method: string, path: string, body?: unknown) =>
 	});
 
 export const getMe = () => get<Me>('/api/me');
+export const login = (password: string) => send<Me>('POST', '/api/auth/login', { password });
+export const logout = () => send<Me>('POST', '/api/auth/logout');
 export const adminLocations = () => get<Location[]>('/api/admin/locations');
 export const adminLookups = () => get<LookupStatus>('/api/admin/lookups');
 export const refreshLookups = () => send<JobOut>('POST', '/api/admin/lookups/refresh');

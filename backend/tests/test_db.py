@@ -28,7 +28,7 @@ EXPECTED = {
 
 def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
     conn = connect(tmp_path / "db.sqlite")
-    assert migrate(conn) == ["001_init", "002_avalanche_doc", "003_m6"]
+    assert migrate(conn) == ["001_init", "002_avalanche_doc", "003_m6", "004_owner_sessions"]
     assert table_names(conn) >= EXPECTED
     assert migrate(conn) == []
 

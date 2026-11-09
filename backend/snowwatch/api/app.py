@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import UTC, datetime
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from snowwatch import __version__
 from snowwatch.api.admin import make_admin_router
-from snowwatch.api.auth import CurrentViewer, make_verifier
+from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.public import make_router
 from snowwatch.api.push_api import make_push_router
 from snowwatch.config import load_forecast_config
@@ -22,6 +23,8 @@ from snowwatch.http import Fetcher
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
 from snowwatch.tiles import TileCache, glyphs
+
+log = logging.getLogger("snowwatch.api")
 
 
 def _last_good_run(db: Path) -> dict[str, Any] | None:
@@ -79,13 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.settings = settings
     app.state.forecast_config = load_forecast_config(settings.config_dir / "forecast.yaml")
-    app.state.access = make_verifier(settings)
     app.state.make_fetcher = lambda: Fetcher(user_agent=settings.user_agent, tries=2, timeout_s=20)
-
-    @app.get("/api/me")
-    def me(viewer: CurrentViewer) -> dict[str, Any]:
-        """Who is viewing, so the app shows owner-only controls."""
-        return {"email": viewer.email, "is_owner": viewer.is_owner}
 
     @app.get("/api/precip")
     def precip_index() -> FileResponse:
@@ -151,6 +148,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    if settings.owner_password and len(settings.owner_password) < MIN_PASSWORD:
+        log.error(
+            "OWNER_PASSWORD is shorter than %d characters; owner sign-in is off", MIN_PASSWORD
+        )
+    app.include_router(make_auth_router())
     app.include_router(make_router())
     app.include_router(make_admin_router())
     app.include_router(make_push_router())

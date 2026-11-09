@@ -1,13 +1,13 @@
-// Offline support that stays out of Cloudflare Access's way.
+// Offline support.
 // - App files (hashed JS/CSS, icons) are cached at install and served from cache.
 // - /api/* is network-first, falling back to the last good response (up to 2 days
-//   old) when offline. A redirect to the Access login passes straight through, so
-//   the app can show "Sign in again" instead of quietly serving old data.
+//   old) when offline. Owner endpoints (/api/me, /api/auth, /api/admin) are never
+//   cached: they depend on who is signed in.
 // - Map tiles, terrain, label fonts and ski runs saved for offline use (Map → offline
 //   maps; see lib/offlineMaps.ts) are answered from that cache first. Other map tiles
-//   go straight to the network: they are many and big, and the mini PC caches them.
-// - Page loads always go to the network (so Access can ask for a login) and
-//   fall back to the cached app shell only when the network is unreachable.
+//   go straight to the network: they are many and big, and the server caches them.
+// - Page loads go to the network first (so a new version shows up) and fall back to
+//   the cached app shell only when the network is unreachable.
 /// <reference lib="webworker" />
 import { self } from '$app/service-worker';
 import { assets, immutable } from '$app/manifest';
@@ -23,6 +23,7 @@ const API = 'api-v2'; // v1 also held map tiles; dropped on activate
 const API_MAX_AGE_MS = 2 * 24 * 3600 * 1000;
 // Keep in step with OFFLINE_CACHE in lib/offlineMaps.ts.
 const OFFLINE = 'offline-maps-v1';
+const PRIVATE = ['/api/me', '/api/auth/', '/api/admin/', '/api/push/'];
 const DEM_HOST = 's3.amazonaws.com';
 const DEM_PATH = '/elevation-tiles-prod/terrarium/';
 
@@ -65,7 +66,7 @@ async function apiFirst(request: Request): Promise<Response> {
 			const cache = await caches.open(API);
 			await cache.put(request, new Response(body, { status: copy.status, headers }));
 		}
-		return res; // includes Access login redirects, untouched
+		return res;
 	} catch {
 		const cached = await caches.match(request, { cacheName: API });
 		const at = Number(cached?.headers.get('x-sw-cached-at') ?? 0);
@@ -119,6 +120,8 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 		event.respondWith(savedFirst(request));
 	} else if (url.pathname.startsWith('/api/osm/')) {
 		event.respondWith(networkThenSaved(request));
+	} else if (PRIVATE.some((p) => url.pathname.startsWith(p))) {
+		return; // straight to the network, never cached
 	} else if (url.pathname.startsWith('/api/')) {
 		event.respondWith(apiFirst(request));
 	} else if (request.mode === 'navigate') {

@@ -80,7 +80,7 @@ def generate_keys() -> tuple[str, str]:
 
 def contact(settings: Settings) -> str:
     """The VAPID "sub" claim: how a push service can reach the sender (an email)."""
-    for candidate in [*settings.admin_email_list, settings.nws_contact]:
+    for candidate in [settings.contact_email, settings.nws_contact]:
         if candidate and "@" in candidate and " " not in candidate.strip():
             return f"mailto:{candidate.strip()}"
     return "mailto:snowwatch@example.com"
@@ -93,20 +93,19 @@ def enabled(settings: Settings) -> bool:
 # --- subscriptions -------------------------------------------------------------
 
 
-def subscribe(conn: sqlite3.Connection, body: SubscribeIn, email: str | None) -> None:
+def subscribe(conn: sqlite3.Connection, body: SubscribeIn) -> None:
     types = [t for t in body.types if t in ALERT_TYPES] or DEFAULT_TYPES
     with conn:
         conn.execute(
-            "INSERT INTO push_subs (endpoint, keys_json, email, units, locations_json, "
-            "types_json, created_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0) "
+            "INSERT INTO push_subs (endpoint, keys_json, units, locations_json, "
+            "types_json, created_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, 0) "
             "ON CONFLICT (endpoint) DO UPDATE SET keys_json = excluded.keys_json, "
-            "email = excluded.email, units = excluded.units, "
+            "units = excluded.units, "
             "locations_json = excluded.locations_json, types_json = excluded.types_json, "
             "fail_count = 0",
             (
                 body.subscription.endpoint,
                 body.subscription.keys.model_dump_json(),
-                email,
                 body.units,
                 json.dumps(body.locations),
                 json.dumps(types),
