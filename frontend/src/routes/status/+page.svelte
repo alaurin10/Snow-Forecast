@@ -41,15 +41,15 @@
 
 <svelte:head><title>Status · Snow Watch</title></svelte:head>
 
-<div class="head">
-	<a class="faint back" href={resolve('/settings')}>← Settings</a>
+<div class="pagehead">
+	<a class="back" href={resolve('/settings')}>← Settings</a>
 	<h1>Status</h1>
 </div>
 
 {#if error}
 	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !status}
-	<p class="muted" aria-live="polite">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else}
 	<div class="grid">
 		<section class="card">
@@ -146,13 +146,13 @@
 {/if}
 
 <style>
-	.head h1 {
-		font-size: 1.3rem;
-		margin: 2px 0 10px;
-	}
 	.back {
-		font-size: 0.8rem;
+		display: inline-block;
+		margin-bottom: 6px;
 		text-decoration: none;
+		font-size: 0.85rem;
+		font-weight: 500;
+		color: var(--text-2);
 	}
 	.grid {
 		display: grid;

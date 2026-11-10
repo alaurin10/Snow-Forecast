@@ -52,7 +52,17 @@ async function get<T>(path: string, init: RequestInit = {}): Promise<T> {
 const snapshots = new Map<string, Promise<Snapshot>>();
 
 export const getLocations = () => get<LocationSummary[]>('/api/locations');
-export const getOverview = () => get<OverviewRow[]>('/api/overview');
+// The overview feeds both the page and the desktop rail; one copy serves both for a
+// minute (a page reload or a new forecast run is the only thing that changes it).
+let overview: { at: number; p: Promise<OverviewRow[]> } | null = null;
+export function getOverview(): Promise<OverviewRow[]> {
+	if (!overview || Date.now() - overview.at > 60_000) {
+		const p = get<OverviewRow[]>('/api/overview');
+		p.catch(() => (overview = null));
+		overview = { at: Date.now(), p };
+	}
+	return overview.p;
+}
 export const getRuns = (limit = 20) => get<RunOut[]>(`/api/runs?limit=${limit}`);
 
 export interface Health {

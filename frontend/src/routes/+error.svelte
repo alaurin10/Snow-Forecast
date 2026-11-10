@@ -25,11 +25,16 @@
 <style>
 	.err {
 		max-width: 520px;
-		margin: 24px auto;
+		margin: 48px auto;
+		padding: 24px 26px;
 	}
 	h1 {
-		font-size: 1.3rem;
-		margin: 0 0 6px;
+		font-family: var(--font-num);
+		font-size: 1.9rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1.1;
+		margin: 0 0 8px;
 	}
 	.actions {
 		display: flex;

@@ -1,13 +1,16 @@
-<!-- Day by day as a period table: two rows per day (day, then night), the day named once
-     beside them. Columns: temperature and sky, 12-hour snow, snow ratio, snow level,
-     chance and amount of precipitation, wind and gust, cloud. Night rows are shaded. -->
+<!-- Day by day on wider screens: the phone's day rows with every column there is room for.
+     One row per day: the day and its rating, sky, high and low, the day and night snow as
+     cells on the snow ramp, then snow ratio, snow level, chance and amount of
+     precipitation, wind, gust and cloud, each showing the day over the night. A snow cell
+     opens that half-day's details. Pointing at a row shades that day on the chart, and the
+     row of the day under the chart's pointer lights up. -->
 <script lang="ts">
 	import { hscroll } from '../hscroll';
-	import type { HourlyOut, PeriodOut } from '../types.gen';
-	import { HEAVY_CM, precipKind } from '../daybars';
+	import type { DayOut, HourlyOut, PeriodOut } from '../types.gen';
+	import { bucket, EDGES_CM } from '../calendar';
 	import { ICON_WORD, periodWeather, wxIcon } from '../periodwx';
 	import { compass } from '../conditions';
-	import { dateOf, monthDay, weekday } from '../time';
+	import { monthDay, weekday } from '../time';
 	import { converters, roundTo, snowNum, type UnitSystem } from '../units';
 	import WxIcon from './WxIcon.svelte';
 
@@ -15,319 +18,283 @@
 		periods: PeriodOut[];
 		hourly: HourlyOut;
 		units: UnitSystem;
+		/** Ski-day ratings, by date. */
+		days?: DayOut[];
 		onselect?: (p: PeriodOut) => void;
+		/** The day to light up (the one under the chart's pointer). */
+		focusDate?: string | null;
+		/** The day under the pointer here, or null when it leaves the table. */
+		onhoverdate?: (date: string | null) => void;
 	}
 
-	let { periods, hourly, units, onselect }: Props = $props();
+	let {
+		periods,
+		hourly,
+		units,
+		days = [],
+		onselect,
+		focusDate = null,
+		onhoverdate
+	}: Props = $props();
 	const c = $derived(converters(units));
+	const WET_MM = 1;
 
+	const half = (p: PeriodOut | undefined) => {
+		if (!p) return null;
+		const cm = p.snow_cm ?? 0;
+		const rainy = cm < EDGES_CM[0] && (p.rain_mm ?? 0) >= WET_MM;
+		const shown = Number(snowNum(cm, units)) > 0;
+		return {
+			p,
+			b: shown ? bucket(cm) : 0,
+			rainy,
+			cell: shown ? snowNum(cm, units) : rainy ? 'rain' : '–',
+			wx: periodWeather(hourly, p)
+		};
+	};
 	const rows = $derived.by(() => {
-		const max = Math.max(2.54, ...periods.map((p) => p.snow_cm ?? 0));
-		return periods.map((p, i) => {
-			const first = i === 0 || periods[i - 1].date !== p.date;
-			const span = periods.filter((q) => q.date === p.date).length;
-			const wx = periodWeather(hourly, p);
-			const night = p.kind === 'night';
+		const dates = [...new Set(periods.map((p) => p.date))];
+		return dates.map((date) => {
+			const day = periods.find((p) => p.date === date && p.kind === 'day');
+			const night = periods.find((p) => p.date === date && p.kind === 'night');
+			const lead = day ?? night!;
+			const wx = periodWeather(hourly, lead);
+			const rating = days.find((d) => d.date === date)?.rating ?? '';
 			return {
-				p,
-				first,
-				span,
-				night,
-				day: p.label === 'Today' || p.label === 'Tonight' ? 'Today' : weekday(p.date),
-				date: monthDay(dateOf(p.start)),
-				temp: night ? p.tmin_c : p.tmax_c,
-				icon: wxIcon(p, wx.wcode),
-				dir: wx.wdir,
-				// Orange only when this period is itself 6+ in.
-				kind: precipKind(p.ptype, p.snow_cm ?? 0, (p.snow_cm ?? 0) >= HEAVY_CM),
-				barW: `${(((p.snow_cm ?? 0) / max) * 100).toFixed(1)}%`
+				date,
+				name: lead.label === 'Today' || lead.label === 'Tonight' ? 'Today' : weekday(date),
+				md: monthDay(date),
+				rating,
+				icon: wxIcon(lead, wx.wcode),
+				hi: day?.tmax_c ?? null,
+				lo: night?.tmin_c ?? day?.tmin_c ?? null,
+				d: half(day),
+				n: half(night)
 			};
 		});
 	});
-	const num = (v: number | null | undefined, f: (x: number) => number | null, d = 0) => {
+	const num = (v: number | null | undefined, f: (x: number) => number | null, digits = 0) => {
 		const x = v === null || v === undefined ? null : f(v);
-		return x === null ? '–' : x.toFixed(d);
+		return x === null ? '–' : x.toFixed(digits);
 	};
-	const level = (m: number | null) =>
-		m === null
+	const level = (m: number | null | undefined) =>
+		m === null || m === undefined
 			? '–'
 			: roundTo(c.height(m) ?? 0, units === 'imperial' ? 50 : 10).toLocaleString('en-US');
-	// Snow ratio zones, as on the chart: 0 heavy & wet … 3 dry powder.
-	const zoneOf = (v: number) => (v < 9.5 ? 0 : v < 12.5 ? 1 : v < 15.5 ? 2 : 3);
+	type Half = ReturnType<typeof half>;
+	const cols: { name: string; sub: string; v: (h: NonNullable<Half>) => string }[] = $derived([
+		{
+			name: 'Snow ratio',
+			sub: '',
+			v: (h) => (h.p.slr && (h.p.snow_cm ?? 0) > 0 ? `${Math.round(h.p.slr)}:1` : '–')
+		},
+		{ name: 'Snow level', sub: c.heightUnit, v: (h) => level(h.p.snow_level_min_m) },
+		{
+			name: 'Chance',
+			sub: 'precip',
+			v: (h) => (h.p.pop_max === null ? '–' : `${Math.round(h.p.pop_max)}%`)
+		},
+		{
+			name: 'Precip',
+			sub: c.waterUnit,
+			v: (h) => num(h.p.water_mm, c.water, c.waterDigits)
+		},
+		{
+			name: 'Wind',
+			sub: c.speedUnit,
+			v: (h) => `${compass(h.wx.wdir)} ${num(h.p.wind_max_kmh, c.speed)}`
+		},
+		{ name: 'Gust', sub: c.speedUnit, v: (h) => num(h.p.gust_max_kmh, c.speed) },
+		{
+			name: 'Cloud',
+			sub: 'cover',
+			v: (h) => (h.p.cloud_mean === null ? '–' : `${Math.round(h.p.cloud_mean)}%`)
+		}
+	]);
+	const RATE_CLASS: Record<string, string> = { Great: 'great', Good: 'good', Fair: 'fair' };
 </script>
 
 <div class="wrap" use:hscroll>
-	<table>
-		<thead>
-			<tr>
-				<th class="dcol"><span class="sr">Day</span></th>
-				<th class="l">Temp</th>
-				<th class="l snowh">Snow<small>{c.snowUnit}</small></th>
-				<th>Snow<small>ratio</small></th>
-				<th>Snow level<small>{c.heightUnit}</small></th>
-				<th>Precip<small>chance</small></th>
-				<th>Precip<small>{c.waterUnit}</small></th>
-				<th>Wind<small>{c.speedUnit}</small></th>
-				<th>Gust<small>{c.speedUnit}</small></th>
-				<th>Cloud<small>cover</small></th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each rows as r (r.p.key)}
-				<tr class:night={r.night} class:first={r.first}>
-					{#if r.first}
-						<th class="dcol" scope="row" rowspan={r.span}>
-							<button
-								class="daybtn"
-								onclick={() => onselect?.(r.p)}
-								aria-label="Details for {r.day} {r.date}"
-							>
-								<strong>{r.day}</strong>
-								<span>{r.date}</span>
-							</button>
-						</th>
-					{/if}
-					<td class="l">
-						<button
-							class="temp"
-							onclick={() => onselect?.(r.p)}
-							aria-label="Details for {r.p.label}"
-						>
-							<span class="num t">{num(r.temp, c.temp)}°</span>
-							<WxIcon icon={r.icon} label={`${r.night ? 'Night' : 'Day'}: ${ICON_WORD[r.icon]}`} />
-						</button>
-					</td>
-					<td class="l snow">
-						<span class="sc">
-							<span class="sbar {r.kind}" aria-hidden="true"></span>
-							<span class="num samt" class:zero={!(r.p.snow_cm ?? 0)}
-								>{snowNum(r.p.snow_cm, units)}</span
-							>
-							<span class="track" aria-hidden="true"
-								><span class="fill {r.kind}" style:width={r.barW}></span></span
-							>
-						</span>
-					</td>
-					<td class="num ratio">
-						{#if r.p.slr && (r.p.snow_cm ?? 0) > 0}
-							<span class="slr z{zoneOf(r.p.slr)}">{Math.round(r.p.slr)}:1</span>
-							<small>{(r.p.quality ?? '').toLowerCase()}</small>
-						{:else}–{/if}
-					</td>
-					<td class="num">{level(r.p.snow_level_min_m)}</td>
-					<td class="num">{r.p.pop_max === null ? '–' : `${Math.round(r.p.pop_max)}%`}</td>
-					<td class="num">{num(r.p.water_mm, c.water, c.waterDigits)}</td>
-					<td class="num">{compass(r.dir)}&thinsp;{num(r.p.wind_max_kmh, c.speed)}</td>
-					<td class="num">{num(r.p.gust_max_kmh, c.speed)}</td>
-					<td class="num">{r.p.cloud_mean === null ? '–' : `${Math.round(r.p.cloud_mean)}%`}</td>
-				</tr>
+	<div class="table" role="table" aria-label="Day by day">
+		<div class="row head" role="row">
+			<span role="columnheader">Day</span>
+			<span role="columnheader"><span class="sr-only">Sky</span></span>
+			<span role="columnheader">High / low</span>
+			<span role="columnheader" class="c">Snow, {c.snowUnit}<small>day · night</small></span>
+			{#each cols as k (k.name)}
+				<span role="columnheader" class="r">{k.name}<small>{k.sub || ' '}</small></span>
 			{/each}
-		</tbody>
-	</table>
+		</div>
+		{#each rows as r (r.date)}
+			<div
+				class="row"
+				class:on={focusDate === r.date}
+				role="row"
+				tabindex="-1"
+				onpointerenter={() => onhoverdate?.(r.date)}
+				onpointerleave={() => onhoverdate?.(null)}
+			>
+				<span role="cell" class="day">
+					<strong>{r.name}</strong>
+					<small
+						>{r.md}{#if r.rating}&ensp;<b class={RATE_CLASS[r.rating] ?? 'poor'}>{r.rating}</b
+							>{/if}</small
+					>
+				</span>
+				<span role="cell" class="sky">
+					<WxIcon icon={r.icon} label={ICON_WORD[r.icon]} />
+				</span>
+				<span role="cell" class="num temp"
+					><strong>{num(r.hi, c.temp)}°</strong> <span>/ {num(r.lo, c.temp)}°</span></span
+				>
+				<span role="cell" class="cells">
+					{#each [r.d, r.n] as h, k (k)}
+						{#if h}
+							<button
+								class="heat b{h.b}"
+								class:rainy={h.rainy}
+								class:word={h.cell === 'rain'}
+								onclick={() => onselect?.(h.p)}
+								aria-label="{r.name} {k ? 'night' : 'day'}: {h.cell === '–'
+									? 'no snow'
+									: h.cell === 'rain'
+										? 'rain'
+										: `${h.cell} ${c.snowUnit} of snow`}. Details">{h.cell}</button
+							>
+						{:else}
+							<span class="heat b0 empty" aria-hidden="true"></span>
+						{/if}
+					{/each}
+				</span>
+				{#each cols as k (k.name)}
+					<span role="cell" class="num r stack"
+						><span>{r.d ? k.v(r.d) : '–'}</span><span class="night">{r.n ? k.v(r.n) : '–'}</span
+						></span
+					>
+				{/each}
+			</div>
+		{/each}
+	</div>
 </div>
 
 <style>
 	.wrap {
 		overflow-x: auto;
 		-webkit-overflow-scrolling: touch;
-		margin: 0 -4px;
 	}
-	table {
-		width: 100%;
-		min-width: 760px;
-		border-collapse: separate;
-		border-spacing: 0;
-		font-size: 0.88rem;
-		font-variant-numeric: tabular-nums;
+	.table {
+		min-width: 860px;
+		display: grid;
 	}
-	thead th {
-		position: sticky;
-		top: 0;
-		padding: 0 10px 10px;
-		font-size: 0.72rem;
+	.row {
+		display: grid;
+		grid-template-columns: 108px 34px 86px 122px repeat(7, minmax(0, 1fr));
+		align-items: center;
+		gap: 8px;
+		padding: 7px 10px;
+		min-height: 58px;
+		border-top: 1px solid var(--grid);
+		border-radius: 14px;
+		transition: background-color var(--ease);
+	}
+	.row:not(.head):hover,
+	.row.on {
+		background: var(--hover);
+	}
+	.row.head {
+		min-height: 0;
+		padding-bottom: 8px;
+		border-top: 0;
+		align-items: end;
+		font-size: 0.76rem;
 		font-weight: 600;
-		color: var(--text-3);
-		text-align: right;
-		vertical-align: bottom;
-		line-height: 1.2;
-		border-bottom: 1px solid var(--border);
-		white-space: nowrap;
-		background: var(--surface);
-	}
-	thead th small {
-		display: block;
-		font-weight: 500;
-		color: var(--text-3);
-		opacity: 0.85;
-	}
-	th.l,
-	td.l {
-		text-align: left;
-	}
-	td {
-		padding: 9px 10px;
-		text-align: right;
-		white-space: nowrap;
-		border-bottom: 1px solid var(--grid);
 		color: var(--text-2);
 	}
-	tbody tr:hover td {
-		background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
-	}
-	tr.night td {
-		background: var(--night);
-	}
-	tr.first td,
-	tr.first th {
-		border-top: 1px solid var(--border);
-	}
-	tbody tr:first-child td,
-	tbody tr:first-child th {
-		border-top: 0;
-	}
-	/* The day column stays put while the table scrolls sideways. */
-	.dcol {
-		position: sticky;
-		left: 0;
-		z-index: 1;
-		width: 64px;
-		min-width: 64px;
-		background: var(--surface);
-		text-align: left;
-		vertical-align: middle;
-		padding: 0 6px 0 4px;
-		border-bottom: 1px solid var(--grid);
-		border-right: 1px solid var(--grid);
-	}
-	thead .dcol {
-		z-index: 2;
-		border-bottom: 1px solid var(--border);
-	}
-	.daybtn {
-		display: grid;
-		gap: 1px;
-		border: 0;
-		background: none;
-		padding: 6px 2px;
-		text-align: left;
-		cursor: pointer;
-		font-size: 0.75rem;
+	.head small {
+		display: block;
+		font-weight: 400;
 		color: var(--text-3);
 	}
-	.daybtn strong {
-		font-size: 0.95rem;
+	.c {
+		text-align: center;
+	}
+	.r {
+		text-align: right;
+	}
+	.day strong {
+		display: block;
+		font-size: 0.98rem;
 		font-weight: 600;
+	}
+	.day small {
+		font-size: 0.78rem;
+		color: var(--text-2);
+	}
+	.day b {
+		font-weight: 600;
+		color: var(--text-3);
+	}
+	.day b.great {
+		color: var(--accent);
+	}
+	.day b.good {
 		color: var(--text);
+	}
+	.day b.fair {
+		color: var(--text-2);
+	}
+	.sky {
+		display: grid;
+		place-items: center;
+		color: var(--text-2);
 	}
 	.temp {
-		display: inline-flex;
-		align-items: center;
-		gap: 10px;
+		font-size: 0.98rem;
+		white-space: nowrap;
+	}
+	.temp strong {
+		font-weight: 600;
+	}
+	.temp span {
+		color: var(--text-2);
+	}
+	.cells {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 3px;
+	}
+	.cells .heat {
+		height: 38px;
 		border: 0;
-		background: none;
-		padding: 0;
+		font-size: 0.95rem;
 		cursor: pointer;
+		transition: transform 200ms cubic-bezier(0.3, 1.6, 0.5, 1);
 	}
-	.t {
-		min-width: 2.6em;
-		font-size: 0.98rem;
+	.cells .heat:active {
+		transform: scale(0.95);
+	}
+	.cells > :first-child {
+		border-radius: 12px 4px 4px 12px;
+	}
+	.cells > :last-child {
+		border-radius: 4px 12px 12px 4px;
+	}
+	.cells .word {
+		font-family: var(--font-ui);
+		font-size: 0.8rem;
 		font-weight: 600;
-		color: var(--text);
 	}
-	td.snow {
-		min-width: 170px;
+	.cells .empty {
+		height: 38px;
 	}
-	.sc {
-		display: flex;
-		align-items: center;
-		gap: 10px;
+	.stack {
+		display: grid;
+		gap: 1px;
+		font-size: 0.9rem;
+		line-height: 1.3;
+		white-space: nowrap;
 	}
-	.sbar {
-		width: 3px;
-		height: 20px;
-		border-radius: 2px;
-		background: var(--border);
-	}
-	.samt {
-		min-width: 2.4em;
-		font-size: 0.98rem;
-		font-weight: 600;
-		color: var(--text);
-	}
-	.samt.zero {
-		color: var(--text-3);
-		font-weight: 400;
-	}
-	.track {
-		flex: 1;
-		height: 6px;
-		border-radius: 3px;
-		background: var(--surface-2);
-		overflow: hidden;
-		min-width: 60px;
-	}
-	.fill {
-		display: block;
-		height: 100%;
-		border-radius: 3px;
-	}
-	.sbar.snow,
-	.fill.snow {
-		background: var(--snow);
-	}
-	.sbar.heavy,
-	.fill.heavy {
-		background: var(--snow-heavy);
-	}
-	.sbar.mix,
-	.fill.mix {
-		background: var(--mix);
-	}
-	.sbar.rain,
-	.fill.rain {
-		background: var(--rain);
-	}
-	td.ratio {
-		line-height: 1.15;
-	}
-	td.ratio small {
-		display: block;
-		font-size: 0.66rem;
-		color: var(--text-3);
-	}
-	.slr {
-		display: inline-block;
-		padding: 1px 6px;
-		border-radius: 6px;
-		font-weight: 600;
-		color: var(--text);
-	}
-	.slr.z0 {
-		background: color-mix(in srgb, var(--mix) 22%, transparent);
-	}
-	.slr.z1 {
-		background: color-mix(in srgb, var(--snow) 16%, transparent);
-	}
-	.slr.z2 {
-		background: color-mix(in srgb, var(--snow) 30%, transparent);
-	}
-	.slr.z3 {
-		background: color-mix(in srgb, var(--snow) 48%, transparent);
-	}
-	/* Phones: a shorter snow bar lets the next column peek in, a hint to swipe. */
-	@media (max-width: 640px) {
-		td.snow {
-			min-width: 128px;
-		}
-		.track {
-			min-width: 36px;
-		}
-	}
-	.sr {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
+	.stack .night {
+		color: var(--text-2);
 	}
 </style>

@@ -101,8 +101,8 @@
 	/>
 </svelte:head>
 
-<div class="head">
-	<a class="faint back" href={resolve('/settings')}>← Settings</a>
+<div class="pagehead">
+	<a class="back" href={resolve('/settings')}>← Settings</a>
 	<h1>About Snow Watch</h1>
 </div>
 
@@ -170,13 +170,13 @@
 </div>
 
 <style>
-	.head h1 {
-		font-size: 1.3rem;
-		margin: 2px 0 10px;
-	}
 	.back {
+		display: inline-block;
+		margin-bottom: 6px;
 		text-decoration: none;
 		font-size: 0.85rem;
+		font-weight: 500;
+		color: var(--text-2);
 	}
 	.grid {
 		display: grid;

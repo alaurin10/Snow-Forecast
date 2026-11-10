@@ -286,7 +286,7 @@
 
 <svelte:head><title>Manage locations · Snow Watch</title></svelte:head>
 
-<div class="head">
+<div class="head pagehead">
 	<div class="title">
 		<h1>Manage locations</h1>
 		{#if me?.is_owner}<button class="btn" onclick={signOut}>Sign out</button>{/if}
@@ -323,7 +323,7 @@
 		</p>
 	{/if}
 {:else if !me}
-	<p class="muted">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else if mode === 'review' && draft}
 	<section class="card">
 		<h2>{draftIsNew ? 'Check the details, then add it' : `Edit ${draft.name}`}</h2>

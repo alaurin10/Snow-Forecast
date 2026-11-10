@@ -41,7 +41,7 @@ export interface Palette {
 }
 
 export const FONT_UI = "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-export const FONT_NUM = `'Space Grotesk', ${FONT_UI}`;
+export const FONT_NUM = `Manrope, ${FONT_UI}`;
 
 /** The colours of the theme the app is showing right now. */
 export function palette(): Palette {
@@ -94,8 +94,9 @@ export async function ensureFonts(): Promise<void> {
 			`400 24px Inter`,
 			`500 24px Inter`,
 			`600 24px Inter`,
-			`500 24px 'Space Grotesk'`,
-			`600 24px 'Space Grotesk'`
+			`500 24px Manrope`,
+			`600 24px Manrope`,
+			`700 24px Manrope`
 		].map((f) => document.fonts.load(f).catch(() => []))
 	);
 }
