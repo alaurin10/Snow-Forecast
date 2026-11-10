@@ -1,4 +1,4 @@
-"""Flags: short "worth a look" notes for a location (section 4.7 of the plan).
+"""Flags: short "worth a look" notes for a location (see docs/ARCHITECTURE.md).
 
 Pure: reads the finished snapshot (plus ensemble chances the builder works out),
 returns `Flag`s with metric values. The browser words them in the viewer's units.

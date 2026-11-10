@@ -160,6 +160,17 @@ class StatusOut(BaseModel):
     locations: list[LocationAge]
 
 
+class MetaOut(BaseModel):
+    """About this server: version, and numbers the app shows instead of hard-coding them."""
+
+    version: str
+    commit: str | None
+    open_meteo_daily_budget: int
+    powder_cm: float  # a powder-day alert: this much snow, night before plus the day
+    storm_cm: float  # a storm alert: this much in 48 h
+    snowfall_cm_per_mm: float  # Open-Meteo's fixed snow-to-water conversion
+
+
 class ApiTypes(BaseModel):
     """Every response shape, exported as one JSON Schema for the TypeScript types."""
 
@@ -181,3 +192,4 @@ class ApiTypes(BaseModel):
     plan: PlanOut
     verification: VerificationOut
     status: StatusOut
+    meta: MetaOut

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     # Web Push alerts: `snowwatch push keys` prints a pair. Empty = push is off.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
+    # The git commit this build came from (set by the Docker build), shown in About.
+    git_commit: str = ""
     # Most push subscriptions the server keeps (one per device).
     push_max_subscriptions: int = 500
     # Most disk the map tile cache may use; the oldest-used tiles go first.

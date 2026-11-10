@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from snowwatch.analysis.build import DailyRecord
-from snowwatch.doc import Alert, Snapshot, Snotel
+from snowwatch.doc import Snapshot, Snotel
 from snowwatch.store.db import utcnow_iso
 
 SNAPSHOTS_KEPT = 8
@@ -112,20 +112,6 @@ def save_daily(
             [
                 (location_id, run_id, issued_at, r.target_date, r.source, r.snow_cm, r.water_mm)
                 for r in records
-            ],
-        )
-
-
-def save_alerts(
-    conn: sqlite3.Connection, location_id: str, run_id: int, alerts: Iterable[Alert]
-) -> None:
-    with conn:
-        conn.executemany(
-            "INSERT INTO alerts (location_id, run_id, event, headline, severity, onset, ends, url) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (location_id, run_id, a.event, a.headline, a.severity, a.onset, a.ends, a.url)
-                for a in alerts
             ],
         )
 

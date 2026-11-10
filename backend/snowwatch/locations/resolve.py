@@ -176,8 +176,13 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
         nws_office, radar = props.get("cwa"), props.get("radarStation")
         rel = (props.get("relativeLocation") or {}).get("properties") or {}
         state = rel.get("state") if isinstance(rel.get("state"), str) else None
-    except FetchError:
-        pass
+    except FetchError as e:
+        if e.status != 404 and not (cat and cat.get("country")):
+            # 404 means "not in the US"; anything else means NWS didn't answer.
+            warnings.append(
+                "The National Weather Service didn't answer, so the country was guessed as "
+                "Canada. Check it, and the snow station and avalanche zone."
+            )
     if cat and cat.get("country") in ("US", "CA"):
         country = cat["country"]
     tz = _timezone(fetcher, mid.lat, mid.lon, warnings)

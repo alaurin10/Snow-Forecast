@@ -152,10 +152,9 @@ def fetch_bc(
         req = bc_asws.csv_request(el)
         try:
             text = fetcher.get_text(req.url, source=req.source)
-        except FetchError as e:
+            out[el] = bc_asws.parse_wide_csv(text, wanted)
+        except Exception as e:  # snow pillows are extra: never stop the run for them
             log.warning("BC snow pillows %s: %s", el, e)
-            continue
-        out[el] = bc_asws.parse_wide_csv(text, wanted)
     return out or None
 
 
@@ -188,17 +187,16 @@ def run_location(
         first = repo.record_flags(conn, loc.id, run_id, [(f.type, flag_key(f)) for f in snap.flags])
         for f in snap.flags:
             f.first_run = first.get((f.type, flag_key(f)))
-    except Exception as e:  # one location must never stop the run
+        result.doc_bytes = repo.save_snapshot(conn, loc.id, run_id, snap)
+        repo.save_daily(conn, loc.id, run_id, now.isoformat(timespec="seconds"), records)
+        if snap.snotel is not None:
+            repo.save_obs(conn, loc.id, snap.snotel)
+        if loc.tz is None:
+            service.set_tz(conn, loc.id, snap.location.tz)
+    except Exception as e:  # one location (even a database error) must never stop the run
         log.exception("location %s failed", loc.id)
         result.errors.append(f"{loc.id}: {type(e).__name__}: {e}")
         return result
-    result.doc_bytes = repo.save_snapshot(conn, loc.id, run_id, snap)
-    repo.save_daily(conn, loc.id, run_id, now.isoformat(timespec="seconds"), records)
-    repo.save_alerts(conn, loc.id, run_id, snap.alerts)
-    if snap.snotel is not None:
-        repo.save_obs(conn, loc.id, snap.snotel)
-    if loc.tz is None:
-        service.set_tz(conn, loc.id, snap.location.tz)
     result.ok = True
     result.errors = [f"{loc.id}: {w}" for w in snap.warnings]
     return result
@@ -224,38 +222,44 @@ def run_all(
     run_id = repo.start_run(conn, kind)
     weight_before = fetcher.total_weight
     results: list[LocationResult] = []
-    bc = fetch_bc(fetcher, [loc.snotel for loc in locs if bc_asws.is_bc(loc.snotel)])
-    for i, loc in enumerate(locs):
-        if i:
-            sleep(spacing_s)
-        t0 = time.monotonic()
-        res = run_location(
-            conn,
-            loc,
-            fetcher,
-            cfg,
-            run_id=run_id,
-            now=now or datetime.now(UTC),
-            ensembles=ensembles,
-            bc=bc,
-        )
-        log.info(
-            "location %s %s in %.1fs (%d KB)",
-            loc.id,
-            "ok" if res.ok else "FAILED",
-            time.monotonic() - t0,
-            res.doc_bytes // 1024,
-        )
-        results.append(res)
-    errors = [e for r in results for e in r.errors]
-    n_ok = sum(r.ok for r in results)
-    if results and n_ok == len(results):
-        status = "ok" if not errors else "partial"
-    else:
-        status = "partial" if n_ok else "failed"
-    repo.finish_run(conn, run_id, status, errors, fetcher.total_weight - weight_before)
-    repo.save_source_status(conn, fetcher.sources)
-    fetcher.sources.clear()
+    crash: list[str] = []
+    try:
+        bc = fetch_bc(fetcher, [loc.snotel for loc in locs if bc_asws.is_bc(loc.snotel)])
+        for i, loc in enumerate(locs):
+            if i:
+                sleep(spacing_s)
+            t0 = time.monotonic()
+            res = run_location(
+                conn,
+                loc,
+                fetcher,
+                cfg,
+                run_id=run_id,
+                now=now or datetime.now(UTC),
+                ensembles=ensembles,
+                bc=bc,
+            )
+            log.info(
+                "location %s %s in %.1fs (%d KB)",
+                loc.id,
+                "ok" if res.ok else "FAILED",
+                time.monotonic() - t0,
+                res.doc_bytes // 1024,
+            )
+            results.append(res)
+    except BaseException as e:  # always close the run, then let the error go on
+        crash.append(f"run stopped: {type(e).__name__}: {e}")
+        raise
+    finally:
+        errors = crash + [e for r in results for e in r.errors]
+        n_ok = sum(r.ok for r in results)
+        if not crash and n_ok == len(locs):  # includes no locations at all
+            status = "ok" if not errors else "partial"
+        else:
+            status = "partial" if n_ok else "failed"
+        repo.finish_run(conn, run_id, status, errors, fetcher.total_weight - weight_before)
+        repo.save_source_status(conn, fetcher.sources)
+        fetcher.sources.clear()
     return run_id, results
 
 

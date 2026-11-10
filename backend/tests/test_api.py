@@ -81,3 +81,21 @@ def test_production_hides_api_docs_and_sends_hsts(settings: Settings) -> None:
     assert prod.get("/api/docs").status_code == 404
     assert prod.get("/api/openapi.json").status_code == 404
     assert "max-age" in prod.get("/api/livez").headers["strict-transport-security"]
+
+
+def test_meta_reports_version_and_thresholds(settings: Settings) -> None:
+    from snowwatch import __version__
+
+    s = settings.model_copy(update={"git_commit": "abc1234"})
+    body = TestClient(create_app(s)).get("/api/meta").json()
+    assert body["version"] == __version__ and body["commit"] == "abc1234"
+    assert body["powder_cm"] == 15 and body["storm_cm"] == 30
+    assert body["open_meteo_daily_budget"] == 10_000
+
+
+def test_requests_get_an_id(settings: Settings) -> None:
+    client = TestClient(create_app(settings))
+    assert len(client.get("/api/livez").headers["x-request-id"]) == 12
+    assert (
+        client.get("/api/livez", headers={"X-Request-ID": "abc"}).headers["x-request-id"] == "abc"
+    )

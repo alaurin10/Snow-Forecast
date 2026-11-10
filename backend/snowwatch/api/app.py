@@ -7,7 +7,9 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from snowwatch import __version__
 from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
+from snowwatch.api.models import MetaOut
 from snowwatch.api.public import make_router
 from snowwatch.api.push_api import make_push_router
 from snowwatch.api.ratelimit import RateLimiter
@@ -29,6 +32,7 @@ from snowwatch.store.db import connect
 from snowwatch.tiles import TileCache, glyphs
 
 log = logging.getLogger("snowwatch.api")
+access = logging.getLogger("snowwatch.access")
 
 
 def _last_good_run(db: Path) -> dict[str, Any] | None:
@@ -113,7 +117,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def add_security_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        response = await call_next(request)
+        started = time.perf_counter()
+        request_id = request.headers.get("x-request-id", "")[:64] or secrets.token_hex(6)
+        try:
+            response = await call_next(request)
+        except Exception:
+            access.exception("%s %s failed [%s]", request.method, request.url.path, request_id)
+            raise
+        ms = (time.perf_counter() - started) * 1000
+        # Errors, writes and slow requests at INFO; the steady stream of reads at DEBUG.
+        level = (
+            logging.INFO
+            if response.status_code >= 400 or request.method != "GET" or ms > 2000
+            else logging.DEBUG
+        )
+        access.log(
+            level,
+            "%s %s %d %.0f ms [%s]",
+            request.method,
+            request.url.path,
+            response.status_code,
+            ms,
+            request_id,
+        )
+        response.headers["X-Request-ID"] = request_id
         for name, value in security_headers.items():
             response.headers.setdefault(name, value)
         return response
@@ -150,6 +177,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tries=2,
         timeout_s=20,
     )
+
+    @app.get("/api/meta", response_model=MetaOut)
+    def meta() -> MetaOut:
+        """Version and the server-side numbers the app shows (budgets, alert thresholds)."""
+        cfg = app.state.forecast_config
+        return MetaOut(
+            version=__version__,
+            commit=settings.git_commit or None,
+            open_meteo_daily_budget=settings.open_meteo_daily_budget,
+            powder_cm=cfg.flags.powder_cm,
+            storm_cm=cfg.flags.storm_cm,
+            snowfall_cm_per_mm=cfg.snowfall_cm_per_mm,
+        )
 
     @app.get("/api/precip")
     def precip_index() -> FileResponse:
@@ -250,6 +290,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return FileResponse(root / "index.html", headers=fresh)
 
     return app
+
+
+def production_app() -> FastAPI:
+    """What the server runs (`uvicorn --factory snowwatch.api.app:production_app`):
+    the app with JSON-line logging."""
+    from snowwatch.logs import setup_logging
+
+    setup_logging()
+    return create_app()
 
 
 app = create_app()

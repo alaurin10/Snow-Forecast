@@ -136,7 +136,7 @@ CREATE TABLE flag_log (
     PRIMARY KEY (location_id, type, key)
 );
 
--- Lookups for the Manage page (milestone M4).
+-- Lookups for the Manage page.
 CREATE TABLE catalog_ski_areas (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,

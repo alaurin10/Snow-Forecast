@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -9,7 +8,9 @@ import pytest
 
 from snowwatch.analysis.hourly import consensus_line, scale_to_total, shape_value
 from snowwatch.analysis.periods import build_periods
-from snowwatch.settings import REPO_ROOT
+from tests.helpers import FIXTURES
+
+FIXTURE_DIR = FIXTURES.parent
 
 H = [0, 3600, 7200, 10800]
 
@@ -49,17 +50,7 @@ def test_crystal_17_oct_regression() -> None:
 
     Scaling the same hourly blend to the period consensus must give the bars' total.
     """
-    raw = (
-        subprocess.run(
-            ["git", "show", "HEAD:docs/reference/sample/raw/crystal.json"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout
-        or (REPO_ROOT / "docs/reference/sample/raw/crystal.json").read_text()
-    )
-    doc = json.loads(raw)
+    doc = json.loads((FIXTURE_DIR / "prototype-crystal-20261017.json").read_text())
     tz = ZoneInfo("America/Los_Angeles")
     snow = {
         int(datetime.fromisoformat(h["t"]).replace(tzinfo=tz).timestamp()): h["snow"]

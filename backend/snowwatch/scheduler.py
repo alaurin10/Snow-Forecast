@@ -20,11 +20,12 @@ from snowwatch.http import Fetcher, prune_raw
 from snowwatch.locations.service import list_locations
 from snowwatch.pipeline import run_all
 from snowwatch.settings import Settings
-from snowwatch.store import repo
+from snowwatch.store import repo, retention
 from snowwatch.store.backup import backup, vacuum
 from snowwatch.store.db import connect, migrate
 
 log = logging.getLogger("snowwatch.worker")
+RUN_TIME_BUDGET_S = 45 * 60
 
 
 def http_ping(url: str) -> None:
@@ -43,7 +44,11 @@ class Worker:
         # The map's precipitation frames are separate files: they don't wait for runs.
         self.precip_lock = threading.Lock()
         self._ping = ping
-        migrate(connect(settings.database))
+        conn = connect(settings.database)
+        migrate(conn)
+        runs, jobs_failed = retention.recover_interrupted(conn)
+        if runs or jobs_failed:
+            log.warning("marked %d interrupted runs and %d jobs as failed", runs, jobs_failed)
 
     def ping(self, url: str) -> None:
         """Tell Healthchecks.io a job succeeded. Never lets a failed ping break the job."""
@@ -59,6 +64,9 @@ class Worker:
             user_agent=self.settings.user_agent,
             contact_user_agent=self.settings.contact_user_agent,
             raw_dir=self.settings.raw_dir,
+            # A full run takes ~10 minutes; past this, retries stop so an upstream
+            # outage can't hold the lock (and the queue behind it) for hours.
+            time_budget_s=RUN_TIME_BUDGET_S,
         )
 
     def full_run(self, ensembles: bool) -> None:
@@ -170,6 +178,7 @@ class Worker:
             removed = prune_tiles(self.settings.tiles_dir, max_bytes=max_bytes)
             log.info("pruned %d cached map tiles", removed)
             avalanche.prune(conn)
+            log.info("retention: %s", retention.prune(conn))
 
     def precip(self) -> None:
         """Redraw the map's precipitation frames that changed (new radar, new model runs)."""

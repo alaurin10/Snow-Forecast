@@ -7,11 +7,11 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from snowwatch.geo import bbox, centroid
-from snowwatch.http import Fetcher, FetchError
+from snowwatch.http import Fetcher
 from snowwatch.sources import avalanche_ca, avalanche_us, bc_asws, catalog, snotel
 from snowwatch.sources.base import fetch
 from snowwatch.store import repo
@@ -19,6 +19,7 @@ from snowwatch.store.db import utcnow_iso
 
 log = logging.getLogger("snowwatch.lookups")
 COUNTRIES = ("US", "CA")
+MIN_KEEP_SHARE = 0.5  # a refresh with under half the stored rows is treated as broken
 
 
 def catalog_rows(features: Iterable[Mapping[str, Any]]) -> list[tuple[Any, ...]]:
@@ -61,7 +62,21 @@ def catalog_rows(features: Iterable[Mapping[str, Any]]) -> list[tuple[Any, ...]]
     return rows
 
 
+class SuspiciousUpdateError(ValueError):
+    """An upstream answer had far fewer rows than we hold: keep the old ones."""
+
+
+def check_not_shrunk(existing: int, new: int, what: str) -> None:
+    """A valid but empty or reshaped answer must not wipe a lookup table."""
+    if new == 0 or new < existing * MIN_KEEP_SHARE:
+        raise SuspiciousUpdateError(
+            f"{what}: got {new} rows where {existing} are stored; keeping the stored ones"
+        )
+
+
 def save_catalog(conn: sqlite3.Connection, rows: list[tuple[Any, ...]]) -> int:
+    existing = conn.execute("SELECT COUNT(*) FROM catalog_ski_areas").fetchone()[0]
+    check_not_shrunk(existing, len(rows), "ski-area catalog")
     with conn:
         conn.execute("DELETE FROM catalog_ski_areas")
         conn.executemany(
@@ -119,6 +134,11 @@ def zone_rows(
 def save_zones(
     conn: sqlite3.Connection, rows: list[tuple[Any, ...]], providers: Iterable[str]
 ) -> int:
+    for prov in providers:
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM avy_zones WHERE provider = ?", (prov,)
+        ).fetchone()[0]
+        check_not_shrunk(existing, sum(1 for r in rows if r[0] == prov), f"{prov} avalanche zones")
     with conn:
         for prov in providers:
             conn.execute("DELETE FROM avy_zones WHERE provider = ?", (prov,))
@@ -131,34 +151,50 @@ def save_zones(
 
 
 def refresh(conn: sqlite3.Connection, fetcher: Fetcher) -> dict[str, int | str]:
-    """Fetch and store every lookup table. Each part fails on its own."""
+    """Fetch and store every lookup table. Each part fails on its own, and a part
+    that fails (or comes back suspiciously small) leaves its stored rows alone."""
     out: dict[str, int | str] = {}
-    try:
-        stations = fetch(fetcher, snotel.all_stations_request())
-        out["snotel_stations"] = repo.save_stations(conn, stations)
-    except FetchError as e:
-        out["snotel_stations"] = f"failed: {e}"
-    try:
-        wfs = fetch(fetcher, bc_asws.stations_request())
-        out["bc_stations"] = repo.save_station_rows(conn, bc_asws.station_rows(wfs))
-    except FetchError as e:
-        out["bc_stations"] = f"failed: {e}"
-    us = ca = None
-    try:
-        us = fetch(fetcher, avalanche_us.map_layer_request())
-    except FetchError as e:
-        out["avy_us"] = f"failed: {e}"
-    try:
-        ca = fetch(fetcher, avalanche_ca.areas_request())
-    except FetchError as e:
-        out["avy_ca"] = f"failed: {e}"
-    providers = [p for p, d in (("nac", us), ("avcan", ca)) if d is not None]
-    if providers:
-        out["avy_zones"] = save_zones(conn, zone_rows(us, ca), providers)
-    try:
-        areas = fetch(fetcher, catalog.ski_areas_request())
-        out["ski_areas"] = save_catalog(conn, catalog_rows(areas.get("features", [])))
-    except FetchError as e:
-        out["ski_areas"] = f"failed: {e}"
+
+    def step(name: str, work: Callable[[], int]) -> None:
+        try:
+            out[name] = work()
+        except Exception as e:
+            log.warning("lookup %s failed: %s", name, e)
+            out[name] = f"failed: {e}"
+
+    step(
+        "snotel_stations",
+        lambda: repo.save_stations(conn, fetch(fetcher, snotel.all_stations_request())),
+    )
+    step(
+        "bc_stations",
+        lambda: repo.save_station_rows(
+            conn, bc_asws.station_rows(fetch(fetcher, bc_asws.stations_request()))
+        ),
+    )
+    layers: dict[str, Any] = {}
+
+    def layer(provider: str, req: Any) -> int:
+        data = fetch(fetcher, req)
+        if not isinstance(data, dict):
+            raise ValueError(f"unexpected {type(data).__name__} answer")
+        layers[provider] = data
+        return len(data.get("features") or [])
+
+    step("avy_us", lambda: layer("nac", avalanche_us.map_layer_request()))
+    step("avy_ca", lambda: layer("avcan", avalanche_ca.areas_request()))
+    if layers:
+        step(
+            "avy_zones",
+            lambda: save_zones(
+                conn, zone_rows(layers.get("nac"), layers.get("avcan")), list(layers)
+            ),
+        )
+    step(
+        "ski_areas",
+        lambda: save_catalog(
+            conn, catalog_rows(fetch(fetcher, catalog.ski_areas_request()).get("features", []))
+        ),
+    )
     log.info("lookups refreshed: %s", out)
     return out

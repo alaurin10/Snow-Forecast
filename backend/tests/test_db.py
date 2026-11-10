@@ -15,8 +15,9 @@ EXPECTED = {
     "ensemble_cache",
     "forecast_daily",
     "obs_daily",
-    "obs_hourly",
-    "alerts",
+    "owner_sessions",
+    "push_subs",
+    "source_status",
     "avalanche",
     "flag_log",
     "catalog_ski_areas",
@@ -28,8 +29,15 @@ EXPECTED = {
 
 def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
     conn = connect(tmp_path / "db.sqlite")
-    assert migrate(conn) == ["001_init", "002_avalanche_doc", "003_m6", "004_owner_sessions"]
+    assert migrate(conn) == [
+        "001_init",
+        "002_avalanche_doc",
+        "003_m6",
+        "004_owner_sessions",
+        "005_cleanup",
+    ]
     assert table_names(conn) >= EXPECTED
+    assert not table_names(conn) & {"alerts", "obs_hourly"}
     assert migrate(conn) == []
 
 

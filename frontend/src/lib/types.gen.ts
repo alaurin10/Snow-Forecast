@@ -14,6 +14,7 @@ export interface ApiTypes {
 	locations: LocationSummary[];
 	lookups: LookupStatus;
 	me: Me;
+	meta: MetaOut;
 	overview: OverviewRow[];
 	plan: PlanOut;
 	resolve_in: ResolveIn;
@@ -221,6 +222,20 @@ export interface Me {
 	owner_login_enabled: boolean;
 }
 /**
+ * About this server: version, and numbers the app shows instead of hard-coding them.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MetaOut".
+ */
+export interface MetaOut {
+	commit: string | null;
+	open_meteo_daily_budget: number;
+	powder_cm: number;
+	snowfall_cm_per_mm: number;
+	storm_cm: number;
+	version: string;
+}
+/**
  * One location on the Overview and Calendar pages (mid band).
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -270,7 +285,7 @@ export interface DangerChip {
 	status: string;
 }
 /**
- * Something worth a look (section 4.7 of the plan). The browser words it in your units.
+ * Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "Flag".

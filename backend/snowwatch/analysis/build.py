@@ -419,7 +419,7 @@ def _backcountry(
     ridge_kmh: Hourly,
     ridge_dir: Hourly,
 ) -> BackcountryOut:
-    """Facts for touring (section 4.6 of the plan). No safety judgement."""
+    """Facts for touring (see docs/ARCHITECTURE.md). No safety judgement."""
     k = cfg.snowfall_cm_per_mm
     bcfg = cfg.backcountry
     top, mid = work[2], work[1]
@@ -853,12 +853,12 @@ def _daily(
     members = ens.pooled(systems)
     offset = cfg.snow_level_offset_m
 
-    # Consensus per date from the periods (day + night of that date).
-    cons_by_date: dict[str, list[tuple[float | None, float | None, float | None]]] = defaultdict(
-        list
-    )
-    for p, c, lq, (ratio, _) in zip(periods, mid.sw, mid.liq, mid.ratios, strict=True):
-        cons_by_date[p.date.isoformat()].append((c.value, lq.value, ratio))
+    # The consensus per calendar day, from its hourly series: the same midnight-to-
+    # midnight hours as the models above and the station's observations, so the
+    # scorecard compares like with like. Each hour takes its period's snow ratio.
+    ratio_at = {
+        h: ratio for p, (ratio, _) in zip(periods, mid.ratios, strict=True) for h in p.hours
+    }
 
     rows: list[DailyRow] = []
     records: list[DailyRecord] = []
@@ -895,14 +895,14 @@ def _daily(
                 ("ens_p90", day_ens.p90),
             ):
                 records.append(DailyRecord(d, name, r(None if val is None else val * k), None))
-        parts = cons_by_date.get(d)
-        if parts and all(sv is not None for sv, _, _ in parts):
-            swe = sum(sv or 0.0 for sv, _, _ in parts)
-            liq = sum(lv or 0.0 for _, lv, _ in parts)
+        cons = [mid.hourly_sw.get(h) for h in hs]
+        if hs and all(v is not None for v in cons) and all(h in ratio_at for h in hs):
+            swe = sum(v or 0.0 for v in cons)
+            liq = sum(mid.hourly_liq.get(h) or 0.0 for h in hs)
             records.append(DailyRecord(d, "cons", r(swe * k), r(swe + liq)))
             # The same snow with the temperature-based snow-to-liquid ratio, so the
             # scorecard can compare the two depth methods.
-            slr = sum(_depth(sv, rt, k) or 0.0 for sv, _, rt in parts)
+            slr = sum(_depth(mid.hourly_sw[h], ratio_at[h], k) or 0.0 for h in hs)
             records.append(DailyRecord(d, "cons_slr", r(slr), r(swe + liq)))
     return rows, records
 

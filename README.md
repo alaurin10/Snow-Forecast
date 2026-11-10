@@ -5,7 +5,7 @@ Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resort
 - [`docs/PLAN.md`](docs/PLAN.md): the build plan (design, data sources, analysis, deployment, milestones).
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): putting it on the mini PC at `snow.andrewlaurin.com` (Docker, Cloudflare Tunnel and Access, updates, backups).
 - [`docs/SOURCES.md`](docs/SOURCES.md): the latest live check of every data source.
-- [`docs/SPEC-draft.md`](docs/SPEC-draft.md) and [`docs/reference/`](docs/reference/): the original draft spec and the working prototype.
+- [`docs/SPEC-draft.md`](docs/SPEC-draft.md): the original draft spec.
 
 ## Layout
 

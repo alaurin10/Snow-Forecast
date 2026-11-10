@@ -1108,7 +1108,7 @@
       "type": "object"
     },
     "Flag": {
-      "description": "Something worth a look (section 4.7 of the plan). The browser words it in your units.",
+      "description": "Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units.",
       "properties": {
         "date": {
           "anyOf": [
@@ -2028,6 +2028,46 @@
         "owner_login_enabled"
       ],
       "title": "Me",
+      "type": "object"
+    },
+    "MetaOut": {
+      "description": "About this server: version, and numbers the app shows instead of hard-coding them.",
+      "properties": {
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_meteo_daily_budget": {
+          "type": "integer"
+        },
+        "powder_cm": {
+          "type": "number"
+        },
+        "snowfall_cm_per_mm": {
+          "type": "number"
+        },
+        "storm_cm": {
+          "type": "number"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "commit",
+        "open_meteo_daily_budget",
+        "powder_cm",
+        "storm_cm",
+        "snowfall_cm_per_mm"
+      ],
+      "title": "MetaOut",
       "type": "object"
     },
     "OverviewPeriod": {
@@ -4083,6 +4123,9 @@
     "me": {
       "$ref": "#/$defs/Me"
     },
+    "meta": {
+      "$ref": "#/$defs/MetaOut"
+    },
     "overview": {
       "items": {
         "$ref": "#/$defs/OverviewRow"
@@ -4138,7 +4181,8 @@
     "avalanche",
     "plan",
     "verification",
-    "status"
+    "status",
+    "meta"
   ],
   "title": "ApiTypes",
   "type": "object"

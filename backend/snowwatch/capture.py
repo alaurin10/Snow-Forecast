@@ -16,12 +16,11 @@ from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us, nws, snotel
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import location_requests
-from snowwatch.sources.prototype import prototype_requests
 
 
 def location_capture_requests(loc: Location, cfg: ForecastConfig, today: date) -> list[Request]:
     mid = loc.band("mid")
-    reqs = [*location_requests(loc, cfg), *prototype_requests(loc)]
+    reqs = list(location_requests(loc, cfg))
     if loc.country == "US":
         reqs += [nws.alerts_request(mid.lat, mid.lon), nws.points_request(mid.lat, mid.lon)]
     if loc.snotel:

@@ -178,7 +178,7 @@ class Snotel(BaseModel):
 
 
 class Flag(BaseModel):
-    """Something worth a look (section 4.7 of the plan). The browser words it in your units."""
+    """Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units."""
 
     type: str  # powder_day, storm_incoming, model_outlier, low_confidence, rain_on_snow, …
     severity: str  # info, notice, warning

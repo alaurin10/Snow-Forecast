@@ -212,7 +212,11 @@ class Net:
         r = self.get(url, params, tries)
         if r is None or not r.headers.get("content-type", "").startswith("image/"):
             return None
-        return np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA"))
+        try:
+            return np.asarray(Image.open(io.BytesIO(r.content)).convert("RGBA"))
+        except (OSError, ValueError, Image.DecompressionBombError) as e:
+            log.warning("unreadable image from %s: %s", url.split("?")[0], e)
+            return None
 
 
 def sld(layer: str, ramp: list[tuple[float, str]]) -> str:

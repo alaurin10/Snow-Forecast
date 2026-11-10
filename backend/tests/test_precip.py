@@ -234,7 +234,7 @@ def test_api_serves_index_and_frames(settings: Settings) -> None:
 
 
 def test_numpy_runs_on_plain_x86_64() -> None:
-    """The mini PC's Docker VM reports a basic CPU type; NumPy 2.4+ needs x86-64-v2 and
+    """Many virtual machines report a basic CPU type; NumPy 2.4+ needs x86-64-v2 and
     fails to import there ("your machine doesn't support X86_V2"). Keep a build that doesn't."""
     simd = np.show_config(mode="dicts")["SIMD Extensions"]  # type: ignore[no-untyped-call]
     assert "X86_V2" not in simd.get("baseline", [])
