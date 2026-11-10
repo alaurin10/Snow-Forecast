@@ -45,7 +45,9 @@ class Worker:
         self.precip_lock = threading.Lock()
         self._ping = ping
         conn = connect(settings.database)
-        migrate(conn)
+        applied = migrate(conn)
+        if applied:
+            log.info("applied database migrations: %s", ", ".join(applied))
         runs, jobs_failed = retention.recover_interrupted(conn)
         if runs or jobs_failed:
             log.warning("marked %d interrupted runs and %d jobs as failed", runs, jobs_failed)

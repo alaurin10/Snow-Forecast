@@ -1,91 +1,140 @@
-# Snow-Forecast
+# Snow Watch
 
-Snow Watch: a self-hosted, OpenSnow-style snow forecast dashboard for ski resorts and backcountry zones, running on a home mini PC and shared at `snow.andrewlaurin.com` through Cloudflare Tunnel and Access.
+Self-hosted snow forecasts for ski resorts and backcountry zones. Snow Watch
+compares several weather models side by side and shows a model consensus with
+honest uncertainty: what the ensembles allow, where the models disagree, what the
+snow stations measured, and the official avalanche rating.
 
-- [`docs/PLAN.md`](docs/PLAN.md): the build plan (design, data sources, analysis, deployment, milestones).
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md): putting it on the mini PC at `snow.andrewlaurin.com` (Docker, Cloudflare Tunnel and Access, updates, backups).
-- [`docs/SOURCES.md`](docs/SOURCES.md): the latest live check of every data source.
-- [`docs/SPEC-draft.md`](docs/SPEC-draft.md): the original draft spec.
+<p>
+  <img src="docs/images/overview-phone.png" alt="Overview on a phone: every location's next seven days of snow" width="260">
+  <img src="docs/images/location-phone.png" alt="A location on a phone: forecast chart and day list" width="260">
+</p>
+<img src="docs/images/location-desktop.png" alt="A location on a desktop, dark theme" width="800">
 
-## Layout
+## Features
 
-| Path | What |
-|---|---|
-| `backend/` | Python 3.12 package `snowwatch`: pipeline, analysis, SQLite store, FastAPI app, CLI |
-| `frontend/` | SvelteKit single-page app (static build served by the API) |
-| `config/forecast.yaml` | Models, ensembles, thresholds and schedule |
-| `config/seed-locations.yaml` | The six starting locations |
-| `docker/`, `docker-compose.yml`, `deploy/` | The image, the two services (api on port 8090, worker) and the auto-update timer |
+- **Forecasts at base, mid and summit**: a consensus of GFS, ECMWF, GEM and ICON,
+  plus HRRR, NBM and HRDPS for the first 48 h, updated four times a day.
+- **Uncertainty you can see**: ensemble ranges, chance-of-snow curves, model
+  agreement, outliers flagged, and how the forecast changed over the last runs.
+- **Overview, calendar and map**: where and when the snow is, storm cycles, a
+  radar and forecast precipitation map with ski runs and 3D terrain.
+- **Backcountry**: avalanche danger exactly as published (hidden once expired),
+  ridge-height wind and loading, warming, rain on snow, refreeze, daylight.
+  Snow Watch never says whether terrain is safe.
+- **Resort days**: a Powder / Great / Good / Fair / Poor rating with its reasons.
+- **Snow stations**: SNOTEL and BC snow pillows, and a scorecard of how the
+  forecast did against them.
+- **Works like an app**: installs to the home screen, works offline with the last
+  forecast and saved map areas, optional push alerts for powder days and storms.
+- **Accessible**: keyboard and screen-reader friendly, light and dark themes,
+  imperial or metric units.
+- **Simple to run**: two Docker containers and a SQLite file. No accounts, no
+  third-party login: one owner password unlocks managing locations.
+
+<img src="docs/images/calendar-desktop.png" alt="The calendar: storm cycles across every location" width="800">
+
+## Quick start (Docker)
+
+```bash
+git clone https://github.com/alaurin10/Snow-Forecast.git && cd Snow-Forecast
+```
+```bash
+cp .env.example .env && mkdir -p data
+```
+
+Set `NWS_CONTACT` and `OWNER_PASSWORD` in `.env`, then:
+
+```bash
+docker compose up -d --build
+```
+```bash
+docker compose run --rm worker snowwatch init && docker compose run --rm worker snowwatch pull
+```
+
+Open http://localhost:8090. For HTTPS, automatic updates, push alerts, backups and
+troubleshooting, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Configuration
+
+Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `OWNER_PASSWORD` | empty (Manage off) | Unlocks Manage locations; 12+ characters |
+| `NWS_CONTACT` | | Email or URL the US National Weather Service asks for |
+| `PUBLIC_URL` | | The site's HTTPS address |
+| `TRUSTED_PROXY` | `0` | `1` behind a reverse proxy or Cloudflare |
+| `MAX_LOCATIONS` | `25` | Cap on active locations (each uses ~150 Open-Meteo calls a day) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | empty (alerts off) | Push alerts: `snowwatch push keys` |
+| `CONTACT_EMAIL` | `NWS_CONTACT` | Email for push services |
+| `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
+| `TILES_MAX_MB` | `2000` | Disk cap for the map tile cache |
+| `PUSH_MAX_SUBSCRIPTIONS` | `500` | Most devices with alerts on |
+
+Forecast models, thresholds and the schedule are in
+[`config/forecast.yaml`](config/forecast.yaml); the starting locations are in
+[`config/seed-locations.yaml`](config/seed-locations.yaml).
 
 ## Development
 
-Needs [uv](https://docs.astral.sh/uv/) and Node.js. **Node 24 LTS is recommended** (it ships npm 11, which CI uses). Other versions work: Node 25 prints an engine warning for a test-only package, and on Node 22 upgrade npm first (`npm install -g npm@11`), because npm 10 has a bug that stops this install.
+Needs [uv](https://docs.astral.sh/uv/) and Node.js 24 (it ships npm 11; on Node
+22, run `npm install -g npm@11` first).
 
 ```bash
-cd backend
-uv sync
-uv run snowwatch init            # create data/snowwatch.db and seed the locations
-uv run snowwatch locations list
-uv run snowwatch budget          # estimated daily Open-Meteo usage
-uv run uvicorn snowwatch.api.app:app --reload --port 8000
+cd backend && uv sync && uv run snowwatch init && uv run snowwatch rebuild --from tests/fixtures/live-20261104
 ```
-
 ```bash
-cd frontend
-npm install
-npm run dev                      # http://localhost:5173, proxies /api to :8000
+cd backend && OWNER_PASSWORD=dev-owner-password uv run uvicorn snowwatch.api.app:app --reload --port 8000
 ```
-
-Checks (the same as CI):
-
 ```bash
-cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy snowwatch && uv run pytest
-cd frontend && npm run lint && npm run check && npm test && npm run build
+cd frontend && npm install && npm run dev
 ```
 
-Copy `.env.example` to `.env` (repo root) and set `NWS_CONTACT` to your email.
+The app is then at http://localhost:5173 (it proxies `/api` to port 8000), with
+forecasts rebuilt from saved responses, so no weather API is called. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the checks CI runs and the conventions.
 
-## See it in a browser
+## Command line
 
-Build the frontend once, then one process serves both the app and the API:
-
-```bash
-cd frontend && npm install && npm run build
-cd ../backend && uv run snowwatch init && uv run snowwatch pull
-uv run uvicorn snowwatch.api.app:app --port 8000
-```
-
-Open http://localhost:8000. For frontend work, `npm run dev` in `frontend/` (http://localhost:5173) proxies `/api` to the backend on port 8000.
-
-`node frontend/scripts/screenshots.mjs` captures every page at phone, tablet and desktop widths in light and dark, and fails if a page scrolls sideways or the API errors.
-
-After changing a response model in `backend/snowwatch/api/models.py` or `doc.py`, regenerate the frontend types (CI checks they match):
-
-```bash
-cd backend && uv run snowwatch schema --out ../frontend/src/lib/api-schema.json
-cd ../frontend && npm run types
-```
-
-## Commands
-
-Run from `backend/` with `uv run snowwatch …`:
+Run from `backend/` with `uv run snowwatch …`, or on a server with
+`docker compose run --rm worker snowwatch …`:
 
 | Command | What it does |
 |---|---|
 | `init` | Create or migrate the database and seed the locations |
 | `pull [--only ID …] [--ensembles]` | Fetch, analyse and store forecasts now |
-| `show ID [--band base\|mid\|summit]` | Print a location's latest forecast as a table (in, °F, ft) |
-| `worker [--run-now]` | The scheduler: runs at 03:30/09:30/15:30/21:30 UTC, avalanche checks, the job queue, nightly backups |
-| `rebuild [--from FOLDER]` | Rebuild snapshots with no API calls, from the raw cache or saved fixtures |
+| `show ID [--band base\|mid\|summit]` | Print a location's latest forecast as a table |
+| `worker [--run-now]` | The scheduler (what the worker container runs) |
+| `rebuild [--from FOLDER]` | Rebuild forecasts from cached or saved responses, with no API calls |
 | `backup` | Write a database backup and a `locations.yaml` copy now |
-| `locations list\|import\|export\|stations`, `budget` | Manage the list (`stations` fills in missing snow stations); estimated Open-Meteo usage |
-| `avalanche refresh` | Fetch every location's avalanche forecast now and print its status |
-| `push keys` | Print a new VAPID key pair for push alerts (see `docs/RUNBOOK.md` step 10) |
-| `lookups refresh` | Reload the ski-area catalog, SNOTEL stations and avalanche zones (for Manage) |
-| `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and rewrite the report |
+| `locations list\|import\|export\|stations`, `budget` | Manage the list from the terminal; estimated Open-Meteo use |
+| `avalanche refresh`, `lookups refresh`, `precip`, `ski-map` | Refresh one kind of data now |
+| `owner logout-all` | End every owner session (after changing the password) |
+| `push keys` | Print a new key pair for push alerts |
+| `healthcheck worker` | Exit 0 if the worker is alive (its Docker health check) |
+| `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and write a report |
 | `schema --out FILE` | Write the API's JSON Schema (source of the frontend types) |
-| `capture-fixtures` | Save today's real responses to `backend/tests/fixtures/live-YYYYMMDD/` |
+| `capture-fixtures` | Save today's real responses as test fixtures |
 
-Try it offline: `uv run snowwatch init && uv run snowwatch rebuild --from tests/fixtures/live-20261104 && uv run snowwatch show whistler`.
+## Documentation
 
-Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0), NWS, NRCS SNOTEL, the BC River Forecast Centre (Open Government Licence – British Columbia), avalanche.org and Avalanche Canada. Ski areas from [OpenSkiMap](https://openskimap.org/) (© OpenStreetMap contributors, ODbL).
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): running it, updates, backups, troubleshooting.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how it works, the analysis, the security model.
+- [docs/SOURCES.md](docs/SOURCES.md): the latest check of every data source.
+- [docs/deploy-notes-home.md](docs/deploy-notes-home.md): one real installation, as an example.
+- [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Data and licences
+
+Snow Watch's code is under the [MIT licence](LICENSE). The data it shows comes from
+Open-Meteo (CC BY 4.0), NOAA/NWS, NRCS SNOTEL, the BC River Forecast Centre (Open
+Government Licence – British Columbia), Environment and Climate Change Canada (Open
+Government Licence – Canada), Iowa State's Mesonet, RainViewer, avalanche.org,
+Avalanche Canada, OpenStreetMap contributors and OpenSkiMap (ODbL), OpenTopoMap
+(CC-BY-SA), Esri, and Mapzen terrain tiles on AWS. Each keeps its own terms; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Some, such as Open-Meteo's free
+API and the Esri and OpenTopoMap tiles, are for non-commercial use.
+
+Forecasts are estimates and can be badly wrong. Snow Watch is not a substitute
+for your local avalanche center.
