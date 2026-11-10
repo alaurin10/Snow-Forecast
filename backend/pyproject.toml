@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.10,<4",
     "fastapi>=0.115",
+    "gribberish>=1.9.0",
     "httpx>=0.27",
     "numpy>=2.0,<2.4", # 2.4+ needs an x86-64-v2 CPU; VMs often show a plainer one
     "pillow>=13.0.0",

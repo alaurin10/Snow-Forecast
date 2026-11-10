@@ -33,13 +33,13 @@
 		{
 			name: 'Environment and Climate Change Canada',
 			href: 'https://eccc-msc.github.io/open-data/',
-			what: 'HRDPS precipitation and snow totals on the map',
+			what: 'Radar, the radar nowcast, HRDPS precipitation and snow totals on the map',
 			terms: 'Open Government Licence – Canada'
 		},
 		{
 			name: 'RainViewer',
 			href: 'https://www.rainviewer.com/',
-			what: 'Recent radar on the map',
+			what: 'Backup radar on the map',
 			terms: 'Free API, with credit'
 		},
 		{

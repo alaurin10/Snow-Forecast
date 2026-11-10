@@ -392,7 +392,7 @@ New `frontend/src/lib/map/terrain/`:
 
 | # | Milestone | Contains |
 |---|---|---|
-| 1 | Foundations and wide radar | A0, A1, fixed West box |
+| 1 | Foundations and wide radar | A0, A1, fixed West box (done, see "Milestone 1 notes") |
 | 2 | Longer, better forecast | A2, A3 |
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) |
 | 4 | Sun and wind | B4, B5 |
@@ -429,6 +429,29 @@ New `frontend/src/lib/map/terrain/`:
 
 - Whoever implements: if a source behaves differently from this document, stop and record
   it rather than working around it silently.
+
+## Milestone 1 notes (done 10 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- `backend/snowwatch/maps/` with `region`, `geomet`, `palette`, `grib`, `render` and
+  `sources/{radar_eccc,rainviewer,iem,wpc}` (`iem` and `wpc` hold today's IEM HRRR tiles and
+  WPC polygons until milestone 2 removes them). `precip.py` only re-exports.
+- `index_map` returns the flat index of the nearest source cell per pixel (−1 outside the
+  grid) rather than `(rows, cols)`: `gribberish` returns values and coordinates flat. It is
+  built without SciPy: each source cell lands in the pixel under it, then gaps are filled
+  from neighbours out to about one cell's width.
+- `span_h` is 0 for radar and nowcast frames (a rate at an instant), 1 for hourly forecast frames.
+- The scheduler jobs are `radar`, `forecast_frames` and `totals_fields`; each rewrites only
+  its own part of the index under a file lock. `snowwatch map radar|forecast|totals|all`.
+- Radar typing: the type product left 26% of echo pixels untyped on 10 Nov 2026, nearly
+  all under 0.5 mm/h. So an untyped echo first takes the nearest radar type within 8 px
+  (~12 km), then the first forecast frame's type, then rain. The type picture is classified
+  by colour as planned; raw class values seen were 110/120 (snow) and 210/220 (mixed).
+- 12-minute radar frames sit on the clock (UTC minutes divisible by 12) so they keep their
+  names between runs; the newest 30 minutes are every scan.
+- The whole first-load timeline is ~3.8 MB (radar, nowcast and 44 h of forecast), above the
+  2–3 MB aim; loading beyond 48 h on demand (milestone 2) keeps it from growing.
 
 ## Files
 

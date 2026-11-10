@@ -11,8 +11,8 @@ running a public or commercial installation.
 | [Open-Meteo](https://open-meteo.com/) | Forecast models, ensembles, elevation, timezones | Data CC BY 4.0; the free API is for non-commercial use |
 | [NOAA / National Weather Service](https://www.weather.gov/) | Alerts, forecast offices; HRRR and WPC precipitation for the map | US public domain |
 | [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/) | HRRR tiles for the map | Free use with credit |
-| [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | HRDPS precipitation and snow totals for the map | Open Government Licence – Canada |
-| [RainViewer](https://www.rainviewer.com/) | Recent radar | Free API, with credit |
+| [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | Radar (North American composite, precipitation type, nowcast), HRDPS precipitation and snow totals for the map | Open Government Licence – Canada |
+| [RainViewer](https://www.rainviewer.com/) | Backup radar, when Environment Canada's is unavailable | Free API, with credit |
 | [NRCS SNOTEL](https://www.nrcs.usda.gov/wps/portal/wcc/home/) | US snow stations | US public domain |
 | [BC River Forecast Centre](https://www2.gov.bc.ca/gov/content/environment/air-land-water/water/drought-flooding-dikes-dams/river-forecast-centre) | BC snow pillows | Open Government Licence – British Columbia |
 | [avalanche.org](https://avalanche.org/) | US avalanche forecasts | Each center's terms; shown as published, with a link |
@@ -32,7 +32,7 @@ open-source packages, each under its own licence; the full lists are in
 
 | Package | Licence |
 |---|---|
-| FastAPI, Pydantic, APScheduler, PyYAML | MIT |
+| FastAPI, Pydantic, APScheduler, PyYAML, gribberish | MIT |
 | Uvicorn, httpx, NumPy | BSD-3-Clause |
 | Pillow | MIT-CMU |
 | pywebpush, py-vapid | MPL-2.0 |

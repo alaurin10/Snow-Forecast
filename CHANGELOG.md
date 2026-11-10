@@ -4,6 +4,26 @@ Notable changes to Snow Watch. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Map radar covers the whole West and has a type.** Radar now comes from
+  Environment Canada's North American composite (Canadian and US radars, 1 km),
+  split into snow, mix and rain by its precipitation-type product, and goes back
+  three hours. RainViewer is kept as the fallback.
+- The map's pictures cover a fixed western North America box (BC, Alberta, the US
+  Rockies, California), widened only if a location is outside it (`map:` in
+  `config/forecast.yaml`).
+- The worker draws the map in three jobs: radar every 6 minutes, forecast frames
+  every 30, snow totals hourly. Its memory limit is now 1.5 GB.
+
+### Added
+- A 72-minute radar nowcast between the radar and the forecast on the map's slider.
+- `snowwatch map radar|forecast|totals|all`.
+- `backend/snowwatch/maps/`, including NOAA GRIB2 reading by byte range
+  (`gribberish`), ready for the longer forecast in milestone 2 of
+  `docs/MAP-PLAN.md`.
+
 ## [1.0.0] – 2026-11-10
 
 The first release prepared as a product: no third-party login, safe to expose

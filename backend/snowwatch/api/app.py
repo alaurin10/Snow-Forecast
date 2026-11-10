@@ -204,7 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
         """One frame. Names carry a hash of the pixels, so they never change."""
-        if not re.fullmatch(r"[rft]\d+-[0-9a-f]{12}\.png", name):
+        if not re.fullmatch(r"[rnft]\d+-[0-9a-f]{12}\.png", name):
             raise HTTPException(404)
         path = settings.precip_dir / name
         if not path.exists():

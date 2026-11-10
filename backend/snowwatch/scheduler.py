@@ -41,8 +41,9 @@ class Worker:
         self.settings = settings
         self.cfg = cfg
         self.lock = threading.Lock()
-        # The map's precipitation frames are separate files: they don't wait for runs.
-        self.precip_lock = threading.Lock()
+        # The map's pictures are separate files: they don't wait for runs. Each map job
+        # skips a turn if its previous one is still going.
+        self.map_locks = {name: threading.Lock() for name in ("radar", "forecast", "totals")}
         self._ping = ping
         conn = connect(settings.database)
         applied = migrate(conn)
@@ -188,23 +189,50 @@ class Worker:
             avalanche.prune(conn)
             log.info("retention: %s", retention.prune(conn))
 
-    def precip(self) -> None:
-        """Redraw the map's precipitation frames that changed (new radar, new model runs)."""
-        from snowwatch.precip import Net, Renderer, region_for
+    def _map_job(self, name: str) -> None:
+        """Redraw one part of the map's pictures (only what changed) and update the index."""
+        from snowwatch.maps.geomet import Net
+        from snowwatch.maps.region import region_for
+        from snowwatch.maps.render import Renderer
 
-        if not self.precip_lock.acquire(blocking=False):
+        lock = self.map_locks[name]
+        if not lock.acquire(blocking=False):
             return
         try:
             conn = connect(self.settings.database)
             points = [(b.lat, b.lon) for loc in list_locations(conn) for b in loc.bands[:1]]
+            region = region_for(points, self.cfg.map.region, self.cfg.map.width)
             headers = {"User-Agent": self.settings.user_agent}
             with httpx.Client(headers=headers, follow_redirects=True) as client:
-                index = Renderer(self.settings.precip_dir, Net(client)).run(region_for(points))
-            log.info("precipitation frames: %d", len(index["frames"]))
+                r = Renderer(self.settings.precip_dir, Net(client))
+                job = {"radar": r.radar, "forecast": r.forecast, "totals": r.snow_totals}[name]
+                index = job(region)
+            kinds: dict[str, int] = {}
+            for f in index.get("frames", []):
+                kinds[f.get("kind", "")] = kinds.get(f.get("kind", ""), 0) + 1
+            log.info("map %s: %s, %d totals", name, kinds, len(index.get("totals", [])))
         except Exception:
-            log.exception("precipitation frames failed")
+            log.exception("map %s failed", name)
         finally:
-            self.precip_lock.release()
+            lock.release()
+
+    def radar(self) -> None:
+        """Radar and nowcast frames (a new scan every 6 minutes)."""
+        self._map_job("radar")
+
+    def forecast_frames(self) -> None:
+        """Hourly forecast frames (new model runs hourly or slower)."""
+        self._map_job("forecast")
+
+    def totals_fields(self) -> None:
+        """Snow totals."""
+        self._map_job("totals")
+
+    def precip(self) -> None:
+        """All of the map's pictures, one part after another (`snowwatch precip`)."""
+        self.radar()
+        self.forecast_frames()
+        self.totals_fields()
 
     def ski_map(self) -> None:
         """Ski runs, lifts and peaks from OpenStreetMap: weekly, or when locations change."""
@@ -281,14 +309,20 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         next_run_time=datetime.now(UTC),
         **opts,
     )
-    # RainViewer adds a radar scan every 10 minutes; models update hourly or slower.
-    sched.add_job(
-        worker.precip,
-        IntervalTrigger(minutes=10),
-        id="precip",
-        next_run_time=datetime.now(UTC),
-        **opts,
-    )
+    # The map's pictures: radar scans arrive every 6 minutes, model runs hourly or slower.
+    mc = worker.cfg.map
+    for job, minutes, name in (
+        (worker.radar, mc.radar_minutes, "radar"),
+        (worker.forecast_frames, mc.forecast_minutes, "forecast_frames"),
+        (worker.totals_fields, mc.totals_minutes, "totals_fields"),
+    ):
+        sched.add_job(
+            job,
+            IntervalTrigger(minutes=minutes),
+            id=name,
+            next_run_time=datetime.now(UTC),
+            **opts,
+        )
     h, m = _hm(cfg.backup_utc)
     sched.add_job(worker.nightly, CronTrigger(hour=h, minute=m, timezone=UTC), id="nightly", **opts)
     sched.add_job(

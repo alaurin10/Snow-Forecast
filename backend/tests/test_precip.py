@@ -149,6 +149,8 @@ class FakeNet(precip.Net):
 
     def get(self, url: str, params: dict[str, str] | None = None, tries: int = 3) -> Any:
         if params and params.get("request") == "GetCapabilities":
+            if "radar" in params["layer"].lower():
+                return None  # Environment Canada radar down: RainViewer stands in
             start = self.now - self.now % 3600
             text = (
                 f'<Dimension name="time" default="x">{precip.ts_iso(start)}/'
@@ -187,8 +189,11 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path) -> None:
     past = [f for f in frames if f["past"]]
     future = [f for f in frames if not f["past"]]
     assert len(past) == 3 and index["now"] == now
-    assert len(future) == 12
+    assert {f["kind"] for f in past} == {"radar"} and past[0]["src"]["north"] == "rainviewer"
+    assert len(future) == 12 and {f["kind"] for f in future} == {"forecast"}
     assert {f["south"] for f in future} >= {"hrrr", "wpc"}  # HRRR to 6 h, WPC after
+    assert {f["src"]["south"] for f in future} >= {"hrrr-iem", "wpc"}
+    assert index["version"] == 2 and "Radar: RainViewer" in index["attribution"]
     for f in frames:
         assert (out / f["file"]).exists()
     on_disk = json.loads((out / "index.json").read_text())

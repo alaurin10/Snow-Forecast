@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	frameLabel,
+	frameSource,
 	loadTimeline,
 	RAMPS,
 	rampTop,
@@ -15,28 +16,71 @@ const f = (t: number, past: boolean, south: Frame['south'] = ''): Frame => ({
 	t,
 	past,
 	file: `${past ? 'r' : 'f'}${t}-000000000000.png`,
-	south
+	south,
+	kind: past ? 'radar' : 'forecast',
+	span_h: past ? 0 : 1,
+	src: past ? { north: 'radar-eccc', south: 'radar-eccc' } : { north: 'hrdps', south: 'hrrr-iem' }
+});
+const nc = (t: number): Frame => ({
+	t,
+	past: false,
+	file: `n${t}-000000000000.png`,
+	south: '',
+	kind: 'nowcast',
+	span_h: 0,
+	src: { north: 'nowcast-eccc', south: 'nowcast-eccc' }
 });
 
 describe('toTimeline', () => {
 	const ix: PrecipIndex = {
+		version: 2,
 		generated: '2026-11-07T00:00:00Z',
 		bounds: [
-			[43, -131],
-			[55, -110]
+			[31, -134],
+			[57, -102]
 		],
-		width: 1400,
-		height: 1232,
-		frames: [f(3600, false), f(600, true), f(1200, true)]
+		width: 1700,
+		height: 1970,
+		frames: [f(3600, false), nc(1920), f(600, true), nc(2640), f(1200, true)],
+		attribution: ['Radar: Environment and Climate Change Canada (North American composite)']
 	};
-	it('puts frames in time order and marks the last radar frame as now', () => {
+	it('orders radar, then nowcast, then forecast, with "now" at the last radar frame', () => {
 		const tl = toTimeline(ix);
-		expect(tl.frames.map((x) => x.t)).toEqual([600, 1200, 3600]);
+		expect(tl.frames.map((x) => x.kind)).toEqual([
+			'radar',
+			'radar',
+			'nowcast',
+			'nowcast',
+			'forecast'
+		]);
 		expect(tl.now).toBe(1);
-		expect(tl.width).toBe(1400);
+		expect(tl.nowcastEnd).toBe(3);
+		expect(tl.width).toBe(1700);
+		expect(tl.attribution).toHaveLength(1);
 	});
 	it('has no "now" without radar', () => {
-		expect(toTimeline({ ...ix, frames: [f(3600, false)] }).now).toBe(-1);
+		const tl = toTimeline({ ...ix, frames: [f(3600, false)] });
+		expect(tl.now).toBe(-1);
+		expect(tl.nowcastEnd).toBe(-1);
+	});
+	it('reads an index written before version 2', () => {
+		const tl = toTimeline({
+			generated: '',
+			bounds: ix.bounds,
+			width: 1400,
+			height: 1200,
+			frames: [
+				{ t: 3600, past: false, file: 'f3600-000000000000.png', south: 'hrrr' },
+				{ t: 600, past: true, file: 'r600-000000000000.png', south: '' }
+			]
+		});
+		expect(tl.frames.map((x) => [x.kind, x.span_h])).toEqual([
+			['radar', 0],
+			['forecast', 1]
+		]);
+		expect(tl.frames[0].src).toEqual({});
+		expect(tl.now).toBe(0);
+		expect(tl.attribution).toEqual([]);
 	});
 });
 
@@ -47,6 +91,12 @@ describe('frameLabel', () => {
 		expect(frameLabel(f(t, true), (t + 1200) * 1000).rel).toBe('radar · 20 min ago');
 		expect(frameLabel(f(t, true), (t + 6000) * 1000).rel).toBe('radar · 1 h 40 min ago');
 	});
+	it('says how far ahead a nowcast is', () => {
+		const t = 1_800_000_000;
+		expect(frameLabel(nc(t), (t - 24 * 60) * 1000).rel).toBe('nowcast · in 24 min');
+		expect(frameLabel(nc(t), t * 1000).rel).toBe('nowcast · now');
+		expect(frameLabel(nc(t), 0).when).toMatch(/\d:\d\d [AP]M/);
+	});
 	it('names a forecast hour and how far ahead it is', () => {
 		const end = new Date(2026, 10, 7, 6).getTime() / 1000; // Sat 6 AM local
 		const lab = frameLabel(f(end, false), (end - 5 * 3600) * 1000);
@@ -55,6 +105,16 @@ describe('frameLabel', () => {
 		expect(frameLabel(f(end, false), (end - 1800) * 1000).rel).toBe('forecast · this hour');
 		const noon = new Date(2026, 10, 7, 12).getTime() / 1000;
 		expect(frameLabel(f(noon, false), 0).when).toBe('Sat 11 AM–12 PM');
+	});
+});
+
+describe('frameSource', () => {
+	it('names where each frame came from', () => {
+		expect(frameSource(f(1, true))).toMatch(/Environment Canada/);
+		expect(frameSource({ ...f(1, true), src: { north: 'rainviewer' } })).toMatch(/RainViewer/);
+		expect(frameSource(nc(1))).toMatch(/^Nowcast/);
+		expect(frameSource(f(1, false))).toMatch(/HRRR/);
+		expect(frameSource(f(1, false, 'wpc'))).toMatch(/no type/);
 	});
 });
 

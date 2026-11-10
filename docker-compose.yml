@@ -52,6 +52,7 @@ services:
       timeout: 15s
       start_period: 60s
       retries: 3
-    # Forecast runs plus the map's precipitation frames (~350 MB at peak) can overlap.
-    mem_limit: 1g
+    # Forecast runs and the map's radar, forecast and totals jobs (~350 MB at peak each)
+    # can overlap.
+    mem_limit: 1536m
     restart: unless-stopped
