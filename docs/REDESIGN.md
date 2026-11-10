@@ -158,16 +158,29 @@ Files: `routes/+page.svelte`, `routes/location/[id]/+page.svelte`, `lib/componen
   six metric chips in a 3 × 2 grid (label with colour key, value at the scrubbed step);
   range selector (1/3/5/10 days) with Share. Frost panel, 26 px radius.
 
-### 5.1 Day-scrubbing strip
+### 5.1 Day-scrubbing strip (phone and desktop)
 
-A 50 px glass well spanning the card, one column per forecast day (10), each with a small
-daily snow bar and a two-letter day label. A raised capsule marks the days the chart shows
-and slides with the spring easing. Drag it, tap a day to centre on it, or use the ‹ ›
-buttons either side (44 px targets) to move one day. Bars inside the window use the snow
-colour; outside it they are muted. For 3- and 5-day ranges the chart shows that window at
-6-hour steps; for 1 day it shows the next 24 hours, for 10 days the whole strip is
-selected. A caption under it says what it does. `role="slider"` with arrow keys. On desktop
-the same strip sits under the chart (wider columns, bar values shown).
+A glass well spanning the chart card, one column per forecast day (10), each with a small
+daily snow bar and its day label (desktop also shows the amount). A raised capsule marks
+the days the chart shows and slides with the spring easing.
+
+- **Every range scrubs except 10 days.** 1 day shows that calendar day hour by hour (any of
+  the 10 days); 3 and 5 days show that many days from the chosen start at 6-hour steps; 10
+  days selects the whole strip.
+- **Choosing a range resets the window to Today.** The user then scrubs forward. The
+  window never keeps a previous offset across range changes.
+- Move it by dragging, tapping a day (centres the window on it), or the ‹ › buttons beside
+  it (44 px targets) that step one day. `role="slider"`, arrow keys step one day.
+- Bars inside the window use the snow colour; outside they are muted. A one-line caption
+  under it says what it does.
+- **Show or hide:** a "Timeline" toggle (icon button on phone, labelled capsule on desktop)
+  next to the range control. It is shown by default; the choice is saved per device in
+  `prefs.svelte.ts` (`showTimeline`). Hiding it collapses the space.
+- The readout and "snow so far" are measured from now, so totals stay comparable as the
+  window moves. On phone, hour labels are every 6 hours in the 1-day view.
+- Data: needs the hourly series for all 10 days (already in `band.hourly`); use
+  `buildSteps(h, range, true)` and slice by calendar-day start.
+
 - **Day by day:** today's rows (day/date, icon, high/low, wind, day and night heat cells,
   chevron), inside one panel, 54 px rows. Expanding a row shows both halves' snow level,
   chance, precipitation, ratio, wind, gust and cloud.
