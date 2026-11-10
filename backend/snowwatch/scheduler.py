@@ -204,7 +204,13 @@ class Worker:
             region = region_for(points, self.cfg.map.region, self.cfg.map.width)
             headers = {"User-Agent": self.settings.user_agent}
             with httpx.Client(headers=headers, follow_redirects=True) as client:
-                r = Renderer(self.settings.precip_dir, Net(client))
+                r = Renderer(
+                    self.settings.precip_dir,
+                    Net(client),
+                    work_dir=self.settings.data_dir / "maps",
+                    nbm_cycles=tuple(self.cfg.map.nbm_cycles),
+                    slr_bands=self.cfg.slr_bands,
+                )
                 job = {"radar": r.radar, "forecast": r.forecast, "totals": r.snow_totals}[name]
                 index = job(region)
             kinds: dict[str, int] = {}
@@ -221,7 +227,7 @@ class Worker:
         self._map_job("radar")
 
     def forecast_frames(self) -> None:
-        """Hourly forecast frames (new model runs hourly or slower)."""
+        """Forecast frames to 10 days (new model runs hourly or slower)."""
         self._map_job("forecast")
 
     def totals_fields(self) -> None:

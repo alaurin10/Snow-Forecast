@@ -199,22 +199,32 @@ class Grid:
     dlat: float
 
 
-def wcs_grid(net: Net, layer: str, time_: str, region: Region, margin: float = 0.5) -> Grid | None:
-    """GeoMet WCS: the raw numbers (not a picture) over the region, as a float grid."""
+def wcs_grid(
+    net: Net,
+    layer: str,
+    time_: str,
+    region: Region,
+    margin: float = 0.5,
+    ref: str | None = None,
+) -> Grid | None:
+    """GeoMet WCS: the raw numbers (not a picture) over the region, as a float grid.
+
+    `ref` pins the model run (an ISO time); without it GeoMet answers from its newest."""
     (south, west), (north, east) = region.bounds
-    q = urllib.parse.urlencode(
-        [
-            ("service", "WCS"),
-            ("version", "2.0.1"),
-            ("request", "GetCoverage"),
-            ("coverageId", layer),
-            ("format", "image/tiff"),
-            ("subsettingCrs", "EPSG:4326"),
-            ("subset", f"lat({south - margin},{north + margin})"),
-            ("subset", f"long({west - margin},{east + margin})"),
-            ("TIME", time_),
-        ]
-    )
+    params = [
+        ("service", "WCS"),
+        ("version", "2.0.1"),
+        ("request", "GetCoverage"),
+        ("coverageId", layer),
+        ("format", "image/tiff"),
+        ("subsettingCrs", "EPSG:4326"),
+        ("subset", f"lat({south - margin},{north + margin})"),
+        ("subset", f"long({west - margin},{east + margin})"),
+        ("TIME", time_),
+    ]
+    if ref:
+        params.append(("DIM_REFERENCE_TIME", ref))
+    q = urllib.parse.urlencode(params)
     r = net.get(f"{GEOMET}?{q}")
     if r is None or "tiff" not in r.headers.get("content-type", ""):
         return None
@@ -230,8 +240,10 @@ def wcs_grid(net: Net, layer: str, time_: str, region: Region, margin: float = 0
     return Grid(data, float(tie[3]), float(tie[4]), float(scale[0]), float(scale[1]))
 
 
-def on_region(grid: Grid, region: Region) -> np.ndarray:
-    """Sample a lat/lon grid onto the region's Web Mercator pixels (NaN where it has none)."""
+def on_region(grid: Grid, region: Region, valid: tuple[float, float] = (0, 5000)) -> np.ndarray:
+    """Sample a lat/lon grid onto the region's Web Mercator pixels (NaN where it has none).
+
+    Values outside `valid` are the model's "no data" outside its domain."""
     xs = region.x0 + (np.arange(region.width) + 0.5) * (region.x1 - region.x0) / region.width
     ys = region.y1 - (np.arange(region.height) + 0.5) * (region.y1 - region.y0) / region.height
     lons = xs * 180 / WORLD
@@ -244,6 +256,5 @@ def on_region(grid: Grid, region: Region) -> np.ndarray:
     rv = (ri >= 0) & (ri < h)
     sub = grid.data[np.ix_(ri[rv], ci[cv])]
     out[np.ix_(rv, cv)] = sub
-    # Values far out of range are the model's "no data" outside its domain.
-    out[(out < 0) | (out > 5000)] = np.nan
+    out[(out < valid[0]) | (out > valid[1])] = np.nan
     return out

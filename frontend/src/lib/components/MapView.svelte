@@ -32,10 +32,11 @@
 		RAMPS,
 		rampTop,
 		TOTAL,
+		totalLabel,
+		totalName,
+		totalSources,
 		totalSpan,
 		totalTick,
-		UNTYPED,
-		untypedTop,
 		type Frame,
 		type Timeline
 	} from '../radar';
@@ -556,18 +557,23 @@
 	const current = $derived<Frame | undefined>(frames[Math.min(frame, count - 1)]);
 	const label = $derived(current ? frameLabel(current, now) : null);
 	const waiting = $derived(!!current && shown !== current.file);
-	const untypedShown = $derived(current?.south === 'wpc');
 	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
 	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
+	// Beyond two days a day is only a few frames wide, so names that would crowd the one
+	// before are left out.
 	const ticks = $derived.by(() => {
 		const out: { at: number; name: string; now?: boolean }[] = [];
 		const nowAt = timeline?.now ?? -1;
 		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
+		let prevDay = -1;
 		frames.forEach((f, i) => {
-			if (f.kind !== 'forecast' || i === 0) return;
-			const start = new Date((f.t - 3600) * 1000);
-			// Skip a day name that would crowd "Now".
-			if (start.getHours() === 0 && !(out[0]?.now && pct(i) - out[0].at < 10))
+			if (f.kind !== 'forecast') return;
+			const start = new Date((f.t - (f.span_h || 1) * 3600) * 1000);
+			const day = start.getDate();
+			const newDay = prevDay >= 0 && day !== prevDay;
+			prevDay = day;
+			const last = out[out.length - 1];
+			if (newDay && !(last && pct(i) - last.at < 9))
 				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
 		});
 		return out;
@@ -578,6 +584,13 @@
 		const to = timeline?.nowcastEnd ?? -1;
 		if (from < 0 || to <= from) return null;
 		return { left: pct(from), width: pct(to) - pct(from) };
+	});
+	// Beyond ~48 h: 3- and 6-hour averages, a coarser stretch of the slider.
+	const extendedBand = $derived.by(() => {
+		const from = timeline?.extendedFrom ?? -1;
+		if (from < 1 || count < 2) return null;
+		const left = (pct(from - 1) + pct(from)) / 2;
+		return { left, width: 100 - left };
 	});
 	// The slider track: downloaded frames shaded, like a video's buffered range.
 	const buffered = $derived.by(() => {
@@ -594,10 +607,10 @@
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
 	/** Which snow total is shown: its window in hours. */
-	let totalHours = $state(24);
+	let totalWindow = $state(24);
 	const totals = $derived(timeline?.totals ?? []);
 	const total = $derived(
-		totals.find((t) => t.hours === totalHours) ?? totals[Math.min(1, totals.length - 1)]
+		totals.find((t) => t.window === totalWindow) ?? totals[Math.min(1, totals.length - 1)]
 	);
 	$effect(() => {
 		const tot = totalsMode;
@@ -635,13 +648,21 @@
 		if (next) void store.bitmap(next);
 	}
 
-	/** Download every frame, nearest to the one on screen first. */
+	/**
+	 * Download the frames, nearest to the one on screen first. Frames beyond ~48 h wait
+	 * until the slider reaches them or the page has sat idle 5 seconds, so the first paint
+	 * stays a couple of MB.
+	 */
 	let fetchRun = 0;
+	let extendedWanted = $state(false);
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	async function fetchAll() {
 		const run = ++fetchRun;
 		if (!timeline) return;
+		const from = timeline.extendedFrom;
 		const order = frames
-			.map((f, i) => ({ f, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
+			.map((f, i) => ({ f, i, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
+			.filter((x) => extendedWanted || from < 0 || x.i < from)
 			.sort((a, b) => a.d - b.d)
 			.map((x) => x.f);
 		await Promise.all(
@@ -652,7 +673,20 @@
 				})
 			)
 		);
+		if (run === fetchRun && !extendedWanted && from >= 0) {
+			clearTimeout(idleTimer);
+			idleTimer = setTimeout(() => (extendedWanted = true), 5000);
+		}
 	}
+	// The slider entered the extended stretch: fetch it now.
+	$effect(() => {
+		const from = timeline?.extendedFrom ?? -1;
+		if (from >= 0 && frame >= from && !totalsMode) extendedWanted = true;
+	});
+	$effect(() => {
+		if (extendedWanted && ready) void fetchAll();
+	});
+	$effect(() => () => clearTimeout(idleTimer));
 
 	async function refresh() {
 		try {
@@ -1086,12 +1120,13 @@
 						Darkest shades: snow {rampTop(RAMPS.snow, units)}, rain {rampTop(RAMPS.rain, units)}.
 					</p>
 					<p class="faint">
-						Snow per hour assumes about 10 parts snow to 1 part water. Forecasts beyond a day are
-						rougher.
+						Snow per hour assumes about 10 parts snow to 1 part water. Beyond about two days the
+						frames are 3- and 6-hour averages, and forecasts get rougher the further out they go.
 					</p>
 					<p class="faint">
-						Snow total: the Canadian HRDPS model, snow at about 10:1; it covers Canada and the
-						northern US.
+						Snow total: Canadian models north of 49°N (HRDPS, then RDPS, then GDPS), with the snow
+						ratio from the forecast temperature; NOAA's National Blend of Models south of it.
+						{#if totalsMode && total}{totalSources(total)}{/if}
 					</p>
 				{/if}
 				<button class="close" onclick={() => (infoOpen = false)}>Close</button>
@@ -1114,15 +1149,15 @@
 						{#if total}
 							<div class="totals">
 								<div class="seg" role="group" aria-label="Window">
-									{#each totals as t (t.hours)}
+									{#each totals as t (t.window)}
 										<button
-											aria-pressed={t.hours === total.hours}
-											aria-label="Next {t.hours} hours"
-											onclick={() => (totalHours = t.hours)}>{t.hours} h</button
+											aria-pressed={t.window === total.window}
+											aria-label={totalName(t)}
+											onclick={() => (totalWindow = t.window)}>{totalLabel(t)}</button
 										>
 									{/each}
 								</div>
-								<span class="span faint">{totalSpan(total)}</span>
+								<span class="span faint" title={totalSources(total)}>{totalSpan(total)}</span>
 							</div>
 						{:else if loadError}
 							<p class="note">{loadError}</p>
@@ -1151,14 +1186,24 @@
 									aria-valuetext={`${label.when}, ${label.rel}`}
 									style:--buffer={buffered}
 								/>
-								{#if nowcastBand}
+								{#if nowcastBand || extendedBand}
 									<div class="bands" aria-hidden="true">
-										<span
-											class="nowband"
-											title="Nowcast"
-											style:left="{nowcastBand.left}%"
-											style:width="{nowcastBand.width}%"
-										></span>
+										{#if nowcastBand}
+											<span
+												class="nowband"
+												title="Nowcast"
+												style:left="{nowcastBand.left}%"
+												style:width="{nowcastBand.width}%"
+											></span>
+										{/if}
+										{#if extendedBand}
+											<span
+												class="extband"
+												title="3- and 6-hour averages"
+												style:left="{extendedBand.left}%"
+												style:width="{extendedBand.width}%"
+											></span>
+										{/if}
 									</div>
 								{/if}
 								<div class="ticks" aria-hidden="true">
@@ -1203,15 +1248,6 @@
 									<span class="top">{rampTop(r, units)}</span>
 								</span>
 							{/each}
-							{#if untypedShown}
-								<span class="kind">
-									<span class="name">No type</span>
-									<span class="ramp" aria-hidden="true">
-										{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
-									</span>
-									<span class="top">{untypedTop(units)}</span>
-								</span>
-							{/if}
 						</div>
 					{/if}
 				</div>
@@ -1530,13 +1566,22 @@
 		white-space: nowrap;
 		overflow: hidden;
 	}
+	/* The window picker scrolls sideways on a phone; the dates sit under it. */
 	.totals {
 		display: flex;
-		align-items: center;
-		gap: 10px;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 3px;
 	}
 	.totals .seg {
 		flex: 0 0 auto;
+		display: flex;
+		overflow-x: auto;
+		scrollbar-width: none;
+		-webkit-overflow-scrolling: touch;
+	}
+	.totals .seg::-webkit-scrollbar {
+		display: none;
 	}
 	.totals .span {
 		min-width: 0;
@@ -1552,7 +1597,9 @@
 		font-size: 0.75rem;
 	}
 	.totals .seg button {
-		min-width: 48px;
+		min-width: 44px;
+		flex: 0 0 auto;
+		white-space: nowrap;
 	}
 	.total-key {
 		gap: 6px;
@@ -1664,6 +1711,18 @@
 		height: 100%;
 		border-radius: 2px;
 		background: color-mix(in srgb, var(--accent) 60%, transparent);
+	}
+	/* The 3- and 6-hour stretch: dashed, to read as coarser. */
+	.extband {
+		position: absolute;
+		top: 0;
+		height: 100%;
+		border-radius: 2px;
+		background: repeating-linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--text-2) 55%, transparent) 0 4px,
+			transparent 4px 7px
+		);
 	}
 	.spin {
 		display: inline-block;

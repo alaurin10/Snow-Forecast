@@ -1,12 +1,13 @@
-// Precipitation for the map: one timeline from three hours ago to two days ahead, in one
+// Precipitation for the map: one timeline from three hours ago to ten days ahead, in one
 // set of colours for rain, mix/ice and snow by rate.
 //
 // The server draws every frame (backend/snowwatch/maps/) as one picture over western
 // North America, and lists them in /api/precip. The browser only downloads and swaps
 // pictures, so scrubbing is instant and a phone's memory stays low.
 // Sources: Environment Canada's North American radar composite (past 3 h, typed) and its
-// nowcast (next 72 min); Environment Canada's HRDPS (Canada and the northern US); NOAA
-// HRRR via Iowa State, or NWS 6-hour totals, for the rest of the US.
+// nowcast (next 72 min); hourly to ~48 h, Environment Canada's HRDPS (Canada and the
+// northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
+// RDPS) and 6-hourly to 10 days (Canadian GDPS), with NOAA's National Blend south of 49°N.
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -65,20 +66,6 @@ export const RAMPS: Record<PrecipKind, Ramp> = {
 	}
 };
 
-/** NWS 6-hour totals carry no type: drawn in tan. `from` is inches per 6 hours. */
-export const UNTYPED: RampStep[] = [
-	{ from: 0.1, color: '#e6d3b3' },
-	{ from: 0.25, color: '#d4b083' },
-	{ from: 0.5, color: '#b88a50' },
-	{ from: 1, color: '#8f612c' }
-];
-
-export function untypedColor(inches: number): string | null {
-	let c: string | null = null;
-	for (const s of UNTYPED) if (inches >= s.from) c = s.color;
-	return c;
-}
-
 // ---- The frame list ------------------------------------------------------------------
 
 /** Observed radar, the radar nowcast (echoes moved forward), or a model forecast. */
@@ -91,25 +78,32 @@ export interface Frame {
 	past: boolean;
 	/** Picture file under /api/precip/. */
 	file: string;
-	/** Where the US forecast outside the Canadian model came from. */
-	south: '' | 'hrrr' | 'wpc';
+	/** Where the US forecast came from: "hrrr", "nbm", or "" (none, or radar). */
+	south: string;
 	kind: FrameKind;
-	/** Hours the amount covers: 1 for hourly forecast frames, 0 for a rate at an instant. */
+	/**
+	 * Hours the amount covers: 1 for hourly forecast frames, 3 and 6 beyond two days (shown
+	 * as the average hourly rate), 0 for a rate at an instant (radar, nowcast).
+	 */
 	span_h: number;
-	/** Which source drew the north (Canada) and south (US) parts, e.g. "radar-eccc". */
+	/** Which source drew the north (Canada) and south (US) parts, e.g. "hrdps", "nbm". */
 	src: { north?: string; south?: string };
 }
 
-/** Forecast snow over a window, from the Canadian model. */
+/** Forecast snow over a window: Canada's models north of 49°N, NOAA's blend south of it. */
 export interface Total {
-	/** Window length (12, 24, or up to 48 when the run ends sooner). */
+	/** The window's actual length in hours (shorter than `window` if the models stop sooner). */
 	hours: number;
+	/** The window asked for, in hours: 12, 24, 48, 72, 120, 168 or 240. */
+	window: number;
 	/** Unix seconds. */
 	start: number;
 	end: number;
 	file: string;
-	/** The model it came from ("hrdps"). */
+	/** The models used, joined by "+" ("hrdps+rdps+gdps+nbm"). */
 	source?: string;
+	/** Each model used → when its run began (Unix seconds). */
+	runs?: Record<string, number>;
 }
 
 /** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`. */
@@ -121,7 +115,8 @@ export interface PrecipIndex {
 	width: number;
 	height: number;
 	frames: (Pick<Frame, 't' | 'past' | 'file' | 'south'> & Partial<Frame>)[];
-	totals?: Total[];
+	/** `window` arrived with the 10-day totals; older indexes have only `hours`. */
+	totals?: (Omit<Total, 'window'> & { window?: number })[];
 	/** Credit lines for the sources in use. */
 	attribution?: string[];
 }
@@ -136,6 +131,8 @@ export interface Timeline {
 	now: number;
 	/** Index of the last nowcast frame, or -1. */
 	nowcastEnd: number;
+	/** Index of the first 3- or 6-hour frame (beyond ~48 h, loaded on demand), or -1. */
+	extendedFrom: number;
 	totals: Total[];
 	attribution: string[];
 }
@@ -164,13 +161,19 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		.sort((a, b) => a.t - b.t || ORDER[a.kind] - ORDER[b.kind]);
 	let now = -1;
 	let nowcastEnd = -1;
+	let extendedFrom = -1;
 	frames.forEach((f, i) => {
 		if (f.kind === 'radar') now = i;
 		if (f.kind === 'nowcast') nowcastEnd = i;
+		if (f.kind === 'forecast' && f.span_h > 1 && extendedFrom < 0) extendedFrom = i;
 	});
-	const totals = (ix.totals ?? [])
+	const totals: Total[] = (ix.totals ?? [])
 		.filter((t) => typeof t?.hours === 'number' && typeof t?.file === 'string')
-		.sort((a, b) => a.hours - b.hours);
+		.map((t) => ({
+			...t,
+			window: typeof t.window === 'number' && t.window > 0 ? t.window : t.hours
+		}))
+		.sort((a, b) => a.window - b.window);
 	return {
 		frames,
 		bounds: ix.bounds,
@@ -178,6 +181,7 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		height: ix.height,
 		now,
 		nowcastEnd,
+		extendedFrom,
 		totals,
 		attribution: Array.isArray(ix.attribution) ? ix.attribution : []
 	};
@@ -235,9 +239,16 @@ export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 const clock = (d: Date) =>
 	d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
 
+/** "in 4 h" up to two days ahead, then "in 3 days". */
+function aheadText(hours: number): string {
+	if (hours < 48) return `in ${hours} h`;
+	return `in ${Math.round(hours / 24)} days`;
+}
+
 /**
  * "2:40 PM" and "radar · 20 min ago" for a radar frame, "3:04 PM" and "nowcast · in 24 min"
- * for a nowcast, "Sat 5–6 AM" and "forecast · in 4 h" ahead.
+ * for a nowcast, "Sat 5–6 AM" and "forecast · in 4 h" ahead, and beyond two days
+ * "Fri 4–10 AM" and "6-hour average · in 3 days".
  */
 export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: string } {
 	if (f.kind === 'nowcast') {
@@ -269,11 +280,28 @@ export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: str
 	const [bNum, bMer] = b.split(' ');
 	const range = aMer === bMer ? `${aNum}–${bNum} ${bMer}` : `${a}–${b}`;
 	const ahead = Math.round((f.t - span - now / 1000) / HOUR);
+	if (f.span_h > 1) {
+		return {
+			when: `${day} ${range}`,
+			rel: `${f.span_h}-hour average${ahead > 0 ? ` · ${aheadText(ahead)}` : ''}`
+		};
+	}
 	return {
 		when: `${day} ${range}`,
-		rel: ahead <= 0 ? 'forecast · this hour' : `forecast · in ${ahead} h`
+		rel: ahead <= 0 ? 'forecast · this hour' : `forecast · ${aheadText(ahead)}`
 	};
 }
+
+/** Model names for the sources the server lists. */
+const MODEL_NAMES: Record<string, string> = {
+	hrdps: 'Canadian HRDPS',
+	rdps: 'Canadian RDPS',
+	gdps: 'Canadian GDPS',
+	hrrr: 'NOAA HRRR',
+	nbm: "NOAA's National Blend of Models"
+};
+
+const modelName = (s: string | undefined) => (s && MODEL_NAMES[s]) || s || '';
 
 /** Where a frame came from, in a sentence for the map's info panel. */
 export function frameSource(f: Frame): string {
@@ -285,9 +313,16 @@ export function frameSource(f: Frame): string {
 	if (f.kind === 'nowcast') {
 		return 'Nowcast: the latest radar echoes moved forward by Environment Canada, without growth or decay.';
 	}
-	return f.south === 'wpc'
-		? 'Forecast: Canadian HRDPS model; rest of the US, NWS 6-hour totals (no type).'
-		: 'Forecast: Canadian HRDPS model; rest of the US, NOAA HRRR.';
+	const north = f.src.north || 'hrdps';
+	const south = f.src.south ?? f.south;
+	if (f.span_h > 1) {
+		const avg = `Forecast, ${f.span_h}-hour average`;
+		if (!south || south === north) return `${avg}: ${modelName(north)} model.`;
+		return `${avg}: ${modelName(north)} model north of 49°N; ${modelName(south)} south of it.`;
+	}
+	if (!south)
+		return `Forecast: ${modelName(north)} model (nothing for the rest of the US this hour).`;
+	return `Forecast: ${modelName(north)} model; rest of the US, ${modelName(south)}.`;
 }
 
 /** Shown with radar and nowcast frames. */
@@ -305,11 +340,6 @@ export function rampTop(ramp: Ramp, units: UnitSystem): string {
 		return units === 'imperial' ? `${tidy(mm / 2.54)}+ in/h` : `${tidy(mm)}+ cm/h`;
 	}
 	return units === 'imperial' ? `${tidy(mm / 25.4)}+ in/h` : `${tidy(mm)}+ mm/h`;
-}
-
-export function untypedTop(units: UnitSystem): string {
-	const inches = UNTYPED[UNTYPED.length - 1].from;
-	return units === 'imperial' ? `${tidy(inches)}+ in / 6 h` : `${tidy(inches * 25.4)}+ mm / 6 h`;
 }
 
 // ---- Snowfall totals ------------------------------------------------------------------
@@ -330,6 +360,39 @@ export const TOTAL: RampStep[] = [
 /** Legend tick for a TOTAL step: "6" (inches) or "15" (cm). */
 export function totalTick(cm: number, units: UnitSystem): string {
 	return units === 'imperial' ? String(Math.round(cm / 2.54)) : String(Math.round(cm));
+}
+
+/** A window's button: "12 h", "48 h", "3 days", "10 days". */
+export function totalLabel(t: Pick<Total, 'window'>): string {
+	return t.window <= 48 ? `${t.window} h` : `${Math.round(t.window / 24)} days`;
+}
+
+/** "Next 12 hours", "Next 3 days": the button's accessible name. */
+export function totalName(t: Pick<Total, 'window'>): string {
+	return t.window <= 48 ? `Next ${t.window} hours` : `Next ${Math.round(t.window / 24)} days`;
+}
+
+const runClock = (s: number) =>
+	new Date(s * 1000)
+		.toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })
+		.replace(',', '');
+
+/**
+ * The models behind a total and when each run began:
+ * "Canada: HRDPS (Tue 4 AM), RDPS (Tue 4 AM), GDPS (Mon 4 PM). US: NOAA National Blend (Tue 4 AM)."
+ */
+export function totalSources(t: Total): string {
+	const runs = t.runs ?? {};
+	const names = Object.keys(runs).length
+		? Object.keys(runs)
+		: (t.source ?? 'hrdps').split('+').filter(Boolean);
+	const at = (m: string) => (runs[m] ? ` (${runClock(runs[m])})` : '');
+	const north = names.filter((m) => m !== 'nbm');
+	const parts: string[] = [];
+	if (north.length)
+		parts.push(`Canada: ${north.map((m) => `${m.toUpperCase()}${at(m)}`).join(', ')}.`);
+	if (names.includes('nbm')) parts.push(`US: NOAA National Blend${at('nbm')}.`);
+	return parts.join(' ');
 }
 
 /** "Sun 10 AM → Tue 4 AM". */

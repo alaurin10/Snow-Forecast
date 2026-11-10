@@ -22,7 +22,6 @@ from snowwatch.precip import (
     Renderer,
     encode,
     hex_rgb,
-    hrrr_recolor,
     parse_times,
     radar_recolor,
     rain_rate,
@@ -30,8 +29,6 @@ from snowwatch.precip import (
     snap,
     snow_rate,
     stitch,
-    wpc_layer,
-    wpc_ts,
 )
 from snowwatch.settings import Settings
 
@@ -54,30 +51,10 @@ def test_radar_colours_become_ours() -> None:
     assert radar_recolor(0xC7, 0xFF, 0xFF) is None  # 0 dBZ snow: too light to show
 
 
-def test_hrrr_colour_families() -> None:
-    assert hrrr_recolor(*hex_rgb("#d6efd0")) == rain[0]
-    assert hrrr_recolor(*hex_rgb("#00441b")) == rain[2]
-    assert hrrr_recolor(*hex_rgb("#ffe81a")) == rain[3]
-    assert hrrr_recolor(*hex_rgb("#ffa000")) == rain[5]
-    assert hrrr_recolor(*hex_rgb("#81c0d5")) == snow[0]
-    assert hrrr_recolor(*hex_rgb("#003f7f")) == snow[4]
-    assert hrrr_recolor(*hex_rgb("#dedded")) == mix[0]
-    assert hrrr_recolor(*hex_rgb("#fc8767")) == mix[1]
-    assert hrrr_recolor(128, 128, 128) is None
-
-
 def test_time_dimension() -> None:
     ts = parse_times("2026-11-06T19:00:00Z/2026-11-06T22:00:00Z/PT1H")
     assert len(ts) == 4 and ts[1] - ts[0] == 3600
     assert len(parse_times("2026-11-06T19:00:00Z, junk, 2026-11-06T18:00:00Z")) == 2
-
-
-def test_wpc_blocks() -> None:
-    base = wpc_ts("2026-11-06 18:00:00")
-    assert wpc_layer(base + 3600, base) == 13
-    assert wpc_layer(base + 6 * 3600, base) == 13
-    assert wpc_layer(base + 7 * 3600, base) == 14
-    assert wpc_layer(base, base) is None
 
 
 def test_region_covers_locations_with_room() -> None:
@@ -124,27 +101,6 @@ class FakeNet(precip.Net):
         if "rainviewer" in url:
             past = [{"time": self.now - 600 * i, "path": f"/v2/radar/{i}"} for i in (2, 1, 0)]
             return {"host": "https://tiles.example", "radar": {"past": past}}
-        if "refp_" in url:
-            minute = int(url.rsplit("_", 1)[1].split(".")[0])
-            if minute > 6 * 60:
-                return None
-            init = self.now - self.now % 3600
-            valid = init + minute * 60
-            return {
-                "model_init_utc": precip.ts_iso(init),
-                "model_forecast_utc": precip.ts_iso(valid),
-            }
-        if url.endswith("/13/query"):
-            start = precip.ts_iso(self.now - self.now % 3600).replace("T", " ").rstrip("Z")
-            return {"features": [{"attributes": {"start_time": start, "issue_time": "x"}}]}
-        if "/query" in url:
-            ring = [[-125, 40], [-115, 40], [-115, 45], [-125, 45], [-125, 40]]
-            props = {"qpf": 0.3}
-            return {
-                "features": [
-                    {"properties": props, "geometry": {"type": "Polygon", "coordinates": [ring]}}
-                ]
-            }
         return None
 
     def get(self, url: str, params: dict[str, str] | None = None, tries: int = 3) -> Any:
@@ -176,9 +132,27 @@ class FakeNet(precip.Net):
         return tile
 
 
-def test_render_writes_index_and_reuses_frames(tmp_path: Path) -> None:
+def fake_hrrr(monkeypatch: Any, now: int) -> None:
+    """HRRR reaches the first 6 hours, raining everywhere; no NBM run."""
+    from snowwatch.maps.sources import hrrr, nbm
+
+    init = now - now % 3600
+    slots = {init + h * 3600: (init, h) for h in range(1, 7)}
+    monkeypatch.setattr(hrrr, "slots", lambda net, now: slots)
+
+    def draw(net: Any, run: int, f: int, region: Region, grids: Any = None) -> np.ndarray:
+        out = np.zeros((region.height, region.width, 4), np.uint8)
+        out[...] = (*rain[1], 255)
+        return out
+
+    monkeypatch.setattr(hrrr, "draw", draw)
+    monkeypatch.setattr(nbm, "latest_run", lambda net, now, cycles: None)
+
+
+def test_render_writes_index_and_reuses_frames(tmp_path: Path, monkeypatch: Any) -> None:
     now = 1_800_000_000
     net = FakeNet(now)
+    fake_hrrr(monkeypatch, now)
     region = Region(
         *[precip.merc_x(-125), precip.merc_y(42)], precip.merc_x(-115), precip.merc_y(50), 120, 100
     )
@@ -191,8 +165,8 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path) -> None:
     assert len(past) == 3 and index["now"] == now
     assert {f["kind"] for f in past} == {"radar"} and past[0]["src"]["north"] == "rainviewer"
     assert len(future) == 12 and {f["kind"] for f in future} == {"forecast"}
-    assert {f["south"] for f in future} >= {"hrrr", "wpc"}  # HRRR to 6 h, WPC after
-    assert {f["src"]["south"] for f in future} >= {"hrrr-iem", "wpc"}
+    assert {f["south"] for f in future} == {"hrrr", ""}  # HRRR to 6 h, nothing after
+    assert {f["src"]["south"] for f in future} == {"hrrr", ""}
     assert index["version"] == 2 and "Radar: RainViewer" in index["attribution"]
     for f in frames:
         assert (out / f["file"]).exists()
@@ -281,7 +255,12 @@ def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
                 )
                 return type("R", (), {"text": text})()
             if "GetCoverage" in url:
-                t = precip.iso_ts(url.split("TIME=")[1].replace("%3A", ":"))
+                import urllib.parse
+
+                q = urllib.parse.parse_qs(url.split("?", 1)[1])
+                if not q["coverageId"][0].endswith("_SN"):
+                    return None  # no temperatures: 10:1
+                t = precip.iso_ts(q["TIME"][0])
                 # 1 mm water an hour since the run began, over the whole box.
                 grid = np.full((40, 60), float((t - (now - 6 * 3600)) / 3600), np.float32)
                 body = float_tiff(grid, -126.0, 51.0, 0.25)
@@ -289,12 +268,13 @@ def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
             return None
 
     net = TotalsNet()
-    g = wcs_grid(net, "X", precip.ts_iso(now), region)
+    g = wcs_grid(net, "HRDPS.CONTINENTAL_SN", precip.ts_iso(now), region)
     assert g is not None and g.dlon == 0.25 and g.lon0 == -126.0 and g.data.shape == (40, 60)
 
     r = Renderer(tmp_path, net, now=lambda: now + 600)
     totals = r._snow_totals(region, now + 600)
     assert [t.hours for t in totals] == [12, 24, 30]  # the run ends 30 h out
+    assert [t.window for t in totals] == [12, 24, 48]
     assert all(t.start == now for t in totals)
     img = np.asarray(Image.open(tmp_path / totals[1].file).convert("RGBA"))
     # 24 mm of water ≈ 24 cm of snow: the 22.86 cm step.

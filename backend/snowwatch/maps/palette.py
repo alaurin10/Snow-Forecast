@@ -24,9 +24,6 @@ RAIN = [
     (5, "#ee8a2a"),
     (10, "#d7301f"),
 ]
-# NWS 6-hour totals carry no type; lower bound in inches per 6 hours.
-UNTYPED = [(0.1, "#e6d3b3"), (0.25, "#d4b083"), (0.5, "#b88a50"), (1, "#8f612c")]
-
 # Snowfall totals: lower bound in cm of snow (the model's water equivalent at 10:1).
 # Steps sit on whole inches (1, 3, 6, 9, 12, 18, 24, 36, 48) so both units read cleanly.
 TOTAL = [
@@ -56,13 +53,13 @@ def ramp_color(ramp: list[tuple[float, str]], value: float) -> RGB | None:
 
 # Every colour a frame can hold: index 0 is transparent.
 PALETTE: list[RGB] = [(0, 0, 0)] + [
-    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, UNTYPED, TOTAL) for _, c in ramp
+    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, TOTAL) for _, c in ramp
 ]
 
 # Precipitation type codes, as the compositing uses them.
 NONE, SNOW_T, MIX_T, RAIN_T = 0, 1, 2, 3
 
-# Palette index → type code (UNTYPED and TOTAL colours carry no type).
+# Palette index → type code (TOTAL colours carry no type).
 _KIND_OF_INDEX = np.zeros(256, np.uint8)
 _KIND_OF_INDEX[1 : 1 + len(SNOW)] = SNOW_T
 _KIND_OF_INDEX[1 + len(SNOW) : 1 + len(SNOW) + len(MIX)] = MIX_T
@@ -101,6 +98,24 @@ def repaint(
         if c:
             lut[i] = (*c, 255)
     out[solid] = lut[inverse]
+    return out
+
+
+def _paint_ramp(
+    out: np.ndarray, values: np.ndarray, where: np.ndarray, ramp: list[tuple[float, str]]
+) -> None:
+    lows = np.array([low for low, _ in ramp])
+    idx = np.digitize(np.nan_to_num(values, nan=-1.0), lows)  # 0 = below the first step
+    for i, (_, color) in enumerate(ramp, start=1):
+        out[where & (idx == i)] = (*hex_rgb(color), 255)
+
+
+def paint_typed(rate: np.ndarray, kinds: np.ndarray) -> np.ndarray:
+    """Hourly rates (mm of water an hour) and type codes to RGBA on the SNOW, MIX and RAIN
+    ramps. Below a ramp's first step, or without a type, is clear."""
+    out = np.zeros((*rate.shape, 4), np.uint8)
+    for code, ramp in ((SNOW_T, SNOW), (MIX_T, MIX), (RAIN_T, RAIN)):
+        _paint_ramp(out, rate, kinds == code, ramp)
     return out
 
 
