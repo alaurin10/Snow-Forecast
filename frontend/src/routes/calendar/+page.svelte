@@ -74,6 +74,8 @@
 		key
 			? `${resolve('/location/[id]', { id })}?period=${encodeURIComponent(key)}`
 			: resolve('/location/[id]', { id });
+	// Desktop: the cell under the pointer (its row and day light up, details below).
+	let hover = $state<{ id: string; d: string; text: string } | null>(null);
 	const legend = $derived(
 		[1, 2, 3, 4, 5].map((b) => {
 			const lo = EDGES_CM[b - 1];
@@ -86,12 +88,15 @@
 
 <svelte:head><title>Calendar · Snow Watch</title></svelte:head>
 
-<h1>Calendar</h1>
+<header class="head">
+	<h1>Calendar</h1>
+	<span class="sub glass">Every location, next {DAYS} days · snow per day</span>
+</header>
 
 {#if error}
 	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted" aria-live="polite">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else if !rows.some((r) => r.periods?.length)}
 	<p class="card muted">
 		{rows.length
@@ -201,7 +206,10 @@
 					<tr>
 						<th class="loc"><span class="sr">Location</span></th>
 						{#each dates as d (d)}
-							<th class="date" class:weekend={['Sat', 'Sun'].includes(weekday(d))}
+							<th
+								class="date"
+								class:weekend={['Sat', 'Sun'].includes(weekday(d))}
+								class:hot={hover?.d === d}
 								>{d === today ? 'Today' : weekday(d)}<small>{Number(d.slice(8))}</small></th
 							>
 						{/each}
@@ -210,7 +218,7 @@
 				</thead>
 				<tbody>
 					{#each grid as g (g.r.id)}
-						<tr>
+						<tr class:hot={hover?.id === g.r.id}>
 							<th class="loc" scope="row"
 								><a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a></th
 							>
@@ -225,6 +233,20 @@
 											class:rainy={day.rainy}
 											href={cellHref(g.r.id, day.key)}
 											aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}`}
+											onpointerenter={() =>
+												(hover = {
+													id: g.r.id,
+													d,
+													text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
+												})}
+											onpointerleave={() => (hover = null)}
+											onfocus={() =>
+												(hover = {
+													id: g.r.id,
+													d,
+													text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
+												})}
+											onblur={() => (hover = null)}
 											>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</a
 										>
 										<!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -241,24 +263,44 @@
 			{#each legend as l (l.b)}<span class="sw b{l.b}"></span><span>{l.text}</span>{/each}
 			<span class="faint">{c.snowUnit} of snow per day</span>
 			<span class="sw b0 rainy"></span><span>rain</span>
+			<span class="detail" aria-live="polite"
+				>{hover ? hover.text : 'Point at a day for details; pick it to open that forecast.'}</span
+			>
 		</div>
 	</section>
 {/if}
 
 <style>
+	.head {
+		padding: 18px 4px 14px;
+	}
 	h1 {
 		font-family: var(--font-num);
-		font-size: 1.9rem;
-		font-weight: 600;
-		letter-spacing: -0.02em;
-		margin: 4px 0 16px;
+		font-size: 2.9rem;
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		line-height: 1.05;
+		margin: 0 0 10px;
+	}
+	.sub {
+		display: inline-flex;
+		padding: 6px 14px;
+		border-radius: 999px;
+		font-size: 0.88rem;
+		font-weight: 500;
+	}
+	.loading {
+		display: inline-block;
+		padding: 8px 16px;
+		border-radius: 999px;
+		color: var(--text-2);
 	}
 	h2 {
-		font-size: 0.95rem;
-		margin: 0 0 8px;
+		font-size: 1rem;
+		margin: 0 0 6px;
 	}
 	.storms {
-		margin-bottom: 14px;
+		margin-bottom: 16px;
 	}
 	.storms ul {
 		list-style: none;
@@ -270,9 +312,9 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 2px 16px;
-		padding: 9px 0;
+		padding: 10px 0;
 		border-top: 1px solid var(--grid);
-		font-size: 0.88rem;
+		font-size: 0.92rem;
 	}
 	.storms li:first-child {
 		border-top: 0;
@@ -294,7 +336,7 @@
 		font-size: 0.88rem;
 	}
 	.gridcard {
-		padding: 12px 0 12px 12px;
+		padding: 14px 6px 12px 14px;
 	}
 	.scroller {
 		overflow-x: auto;
@@ -315,15 +357,19 @@
 		left: 0;
 		z-index: 1;
 		background: var(--surface);
+		border-radius: 10px;
 		text-align: left !important;
 		padding-right: 10px !important;
 		max-width: 170px;
+	}
+	tr.hot .loc a {
+		color: var(--accent-ink);
 	}
 	.loc a {
 		display: block;
 		color: var(--text);
 		font-weight: 600;
-		font-size: 0.88rem;
+		font-size: 0.92rem;
 		text-decoration: none;
 		white-space: nowrap;
 		overflow: hidden;
@@ -341,20 +387,38 @@
 		color: var(--text-3);
 	}
 	.date.weekend {
-		color: var(--accent);
+		color: var(--accent-ink);
+	}
+	.date.hot {
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
+		border-radius: 10px;
+		color: var(--text);
 	}
 	.tile {
 		display: grid;
 		place-items: center;
 		width: 48px;
-		height: 38px;
-		border-radius: 9px;
-		font-size: 0.85rem;
-		font-weight: 600;
+		height: 44px;
+		border-radius: 12px;
+		font-family: var(--font-num);
+		font-size: 0.95rem;
+		font-weight: 700;
 		text-decoration: none;
+		transition:
+			transform 160ms ease,
+			box-shadow 160ms ease;
+	}
+	.tile:hover,
+	.tile:focus-visible {
+		transform: scale(1.06);
+		box-shadow:
+			0 0 0 2px var(--accent),
+			0 4px 14px rgb(0 0 0 / 0.16);
 	}
 	.tile.rainy {
-		background: color-mix(in srgb, var(--rain) 22%, var(--surface));
+		background: var(--rain-cell);
+		color: var(--rain-cell-ink);
 	}
 	.b0 {
 		background: var(--c0);
@@ -370,6 +434,9 @@
 	}
 	.b3 {
 		background: var(--c3);
+		color: var(--c-ink-light);
+	}
+	:global(:root[data-mode='dark']) .b3 {
 		color: var(--c-ink-dark);
 	}
 	.b4 {
@@ -407,7 +474,12 @@
 	}
 	.sw.rainy {
 		margin-left: 10px;
-		background: color-mix(in srgb, var(--rain) 30%, var(--surface));
+		background: var(--rain-cell);
+	}
+	.detail {
+		margin-left: auto;
+		color: var(--text);
+		font-weight: 500;
 	}
 	.sr {
 		position: absolute;
@@ -421,8 +493,8 @@
 		list-style: none;
 		display: flex;
 		gap: 8px;
-		margin: 0 -16px;
-		padding: 0 16px 4px;
+		margin: -4px -16px -8px;
+		padding: 4px 16px 14px;
 		overflow-x: auto;
 		scrollbar-width: none;
 	}
@@ -430,14 +502,17 @@
 		flex: 0 0 172px;
 		display: grid;
 		gap: 2px;
-		padding: 10px 12px;
-		border-radius: 14px;
-		background: var(--surface);
-		border: 1px solid var(--border);
+		padding: 10px 14px;
+		border-radius: 20px;
+		background: var(--glass);
+		border: 1px solid var(--glass-border);
+		box-shadow: var(--glass-shadow-sm);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
 		min-width: 0;
 	}
 	.mstorms li.first {
-		background: var(--accent-soft);
+		background-image: linear-gradient(0deg, var(--accent-soft), var(--accent-soft));
 	}
 	.mstorms span {
 		white-space: nowrap;
@@ -474,7 +549,9 @@
 		z-index: 5;
 		margin: 6px -16px 0;
 		padding: calc(6px + env(safe-area-inset-top)) 16px 6px;
-		background: var(--bg);
+		background: var(--header-glass);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
 		border-bottom: 1px solid var(--border);
 		font-size: 0.7rem;
 		font-weight: 500;
@@ -487,17 +564,12 @@
 		color: var(--text-3);
 	}
 	.mdates .weekend {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.mdates .today,
 	.mdates .today small {
 		color: var(--text);
 		font-weight: 600;
-	}
-	.mrows {
-		list-style: none;
-		margin: 0;
-		padding: 0;
 	}
 	.mrows li {
 		padding: 8px 0 6px;
@@ -528,13 +600,33 @@
 		height: 30px;
 		font-size: 0.72rem;
 	}
+	.mcells .heat.rainy {
+		background: var(--rain-cell);
+		color: var(--rain-cell-ink);
+	}
 	.mlegend {
 		padding: 8px 0 0;
 	}
+	.mrows {
+		list-style: none;
+		margin: 8px 0 0;
+		padding: 2px 12px 6px;
+		border-radius: var(--radius);
+		background: var(--panel);
+		border: 1px solid var(--panel-rim);
+		box-shadow: var(--shadow);
+		backdrop-filter: var(--blur-panel);
+		-webkit-backdrop-filter: var(--blur-panel);
+	}
+	.mrows li + li {
+		border-top: 1px solid var(--grid);
+	}
 	@media (max-width: 640px) {
+		.head {
+			padding-top: 6px;
+		}
 		h1 {
-			font-size: 1.6rem;
-			margin-bottom: 10px;
+			font-size: 1.9rem;
 		}
 	}
 	/* Wide screens: the grid fills the card and full names fit. */
@@ -544,6 +636,7 @@
 		}
 		.loc {
 			max-width: 240px;
+			background: transparent;
 		}
 		.cal td:not(.tot) .tile {
 			width: 100%;

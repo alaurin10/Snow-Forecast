@@ -1,8 +1,12 @@
 <!-- One chart for every metric. Cards above it switch the metric and show each value at
      the hovered step; the range picker sets both the span and the step size. Every
      piece of text has a fixed size so sweeping across the chart never moves the layout.
-     Precipitation keeps snow (above the line, inches of snow) apart from rain (below the
-     line, inches of water) because the two kinds of inch are not comparable. -->
+     Precipitation keeps snow (inches of snow) apart from rain (inches of water) because
+     the two kinds of inch are not comparable: rain is a small green bar from the
+     baseline on its own scale, labelled with its amount, never on the snow scale.
+     Under the chart, the timeline: one column per forecast day with the chart's window
+     marked. Drag it, tap a day or step with ‹ › to read any part of the forecast; a new
+     range always starts again at today. -->
 <script lang="ts">
 	import type { BandOut } from '../types.gen';
 	import { converters, elevation, speed, type UnitSystem } from '../units';
@@ -21,6 +25,8 @@
 	import { paint, slug } from '../share/canvas';
 	import { drawForecastCard, METRIC_NAME } from '../share/forecastCard';
 	import { viewport } from '../viewport.svelte';
+	import { prefs } from '../prefs.svelte';
+	import { HEAVY_CM } from '../daybars';
 
 	interface Props {
 		band: BandOut;
@@ -37,6 +43,10 @@
 		start?: string;
 		/** Inside a popup: just the readout, the plot and the metric chips. */
 		embedded?: boolean;
+		/** A day (YYYY-MM-DD) to shade, e.g. the row the pointer is on in the day table. */
+		shadeDate?: string | null;
+		/** The day under the pointer, or null when it leaves the chart. */
+		onhoverdate?: (date: string | null) => void;
 	}
 
 	let {
@@ -47,7 +57,9 @@
 		range = $bindable(5),
 		place,
 		start,
-		embedded = false
+		embedded = false,
+		shadeDate = null,
+		onhoverdate
 	}: Props = $props();
 	const phone = $derived(viewport.phone);
 	const c = $derived(converters(units));
@@ -55,14 +67,12 @@
 	let metric = $state<Metric>('precip');
 	let hoverT = $state<string | null>(null);
 	const R = $derived<Range>(ranges.includes(range) ? range : (ranges[ranges.length - 1] ?? 1));
-	// Every step to the end of the data; the chart shows a window of them. On desktop the
-	// window always starts now. On phones it can be moved along the overview strip, or by
-	// swiping the chart itself in tape mode.
+	// Every step to the end of the data; the chart shows a window of them. It starts now
+	// and moves with the timeline under the chart.
 	const allSteps = $derived(buildSteps(band.hourly, R, true));
 	const nWin = $derived(Math.min((R * 24) / STEP[R], allSteps.length));
 	const maxOff = $derived(Math.max(0, allSteps.length - nWin));
 	let startMs = $state<number | null>(null);
-	let tape = $state(false);
 	const off = $derived.by(() => {
 		const t = startMs ?? (start ? Date.parse(start) : null);
 		if (t === null) return 0;
@@ -76,7 +86,7 @@
 		return base ? win.map((st) => ({ ...st, cum: st.cum - base })) : win;
 	});
 	// A window that moves keeps one scale, so bars don't change height as you pan.
-	const axSteps = $derived(phone && !embedded ? allSteps : steps);
+	const axSteps = $derived(embedded ? steps : allSteps);
 	const N = $derived(Math.max(1, steps.length));
 	const W = $derived(1000 / N);
 	const H = 300;
@@ -391,7 +401,7 @@
 		if (!m) return fallback;
 		m.font = '500 10px Inter, system-ui, sans-serif';
 		const a = name ? m.measureText(name).width : 0;
-		m.font = "600 10px 'Space Grotesk', Inter, system-ui, sans-serif";
+		m.font = '600 10px Manrope, Inter, system-ui, sans-serif';
 		const b = elev ? m.measureText(elev).width : 0;
 		return Math.ceil(a + b + (name && elev ? 4 : 0) + 12);
 	};
@@ -676,76 +686,138 @@
 	}
 	const setHover = (k: number) => {
 		const st = steps[k];
-		if (st && st.t !== hoverT) hoverT = st.t;
+		if (st && st.t !== hoverT) {
+			hoverT = st.t;
+			onhoverdate?.(dateOf(st.t));
+		}
 	};
 
-	// --- Phones: move the window ---
-	/** Put absolute step `abs` under the cursor, with the window centred on it. */
-	function showStep(abs: number) {
-		const a = Math.max(0, Math.min(allSteps.length - 1, abs));
-		const o = Math.max(0, Math.min(maxOff, a - Math.floor(nWin / 2)));
-		startMs = Date.parse(allSteps[o].t);
-		hoverT = allSteps[a].t;
-	}
-	/** A new range keeps the time you were reading in the middle of the window. */
+	/** A new range always starts again at today; scrub forward from there. */
 	function pickRange(r: Range) {
-		const at = s ? Date.parse(s.t) : null;
 		range = r;
-		if (phone && at !== null) startMs = at - (r * 24 * 3600e3) / 2;
+		startMs = null;
+		hoverT = null;
 	}
-	// Tape: swiping the chart moves time under a cursor that stays in the middle.
-	let drag: { x: number; abs: number; px: number } | null = null;
-	function tapeDown(e: PointerEvent) {
-		const el = e.currentTarget as HTMLElement;
-		drag = { x: e.clientX, abs: off + hv, px: el.getBoundingClientRect().width / N };
-		el.setPointerCapture?.(e.pointerId);
+
+	// --- The timeline: one column per forecast day, the chart's window marked ---
+	const days = $derived.by(() => {
+		const t = band.hourly.t;
+		const dates = [...new Set(band.periods.map((p) => p.date))].filter((d) =>
+			t.some((x) => dateOf(x) === d)
+		);
+		const max = Math.max(2.54, ...dates.map((d) => daySnow(d)));
+		return dates.map((d, k) => {
+			const snowCm = daySnow(d);
+			const rainMm = band.periods
+				.filter((p) => p.date === d)
+				.reduce((a, p) => a + (p.rain_mm ?? 0), 0);
+			const kind =
+				snowCm >= 0.25
+					? snowCm >= HEAVY_CM
+						? 'heavy'
+						: rainMm >= 1
+							? 'mix'
+							: 'snow'
+					: rainMm >= 1
+						? 'rain'
+						: 'none';
+			// Where the day's window would start: now for today, midnight after that.
+			const i = k === 0 ? 0 : t.findIndex((x) => dateOf(x) === d && hourOf(x) === 0);
+			return {
+				date: d,
+				name: k === 0 ? 'Today' : weekday(d),
+				short: k === 0 ? 'Tod' : weekday(d).slice(0, 2),
+				amount: snowCm >= 0.25 ? (c.snow(snowCm) ?? 0).toFixed(c.snowDigits) : '',
+				kind,
+				h: kind === 'none' ? 0 : kind === 'rain' ? 12 : Math.max(12, (snowCm / max) * 100),
+				startMs: k === 0 || i < 0 ? null : Date.parse(t[i])
+			};
+		});
+	});
+	function daySnow(date: string) {
+		return band.periods.filter((p) => p.date === date).reduce((a, p) => a + (p.snow_cm ?? 0), 0);
 	}
-	function tapeMove(e: PointerEvent) {
-		if (drag) showStep(drag.abs + Math.round((drag.x - e.clientX) / drag.px));
+	const dayIndex = (iso: string) => {
+		const k = days.findIndex((d) => d.date === dateOf(iso));
+		return k < 0 ? 0 : k;
+	};
+	/** A time as a position along the timeline, in days (today's column starts now). */
+	function dayPos(ms: number): number {
+		const t = band.hourly.t;
+		if (!t.length || !days.length) return 0;
+		const first = Date.parse(t[0]);
+		const firstEnd = days[1]?.startMs ?? first + 24 * 3600e3;
+		if (ms <= first) return 0;
+		if (ms < firstEnd) return (ms - first) / (firstEnd - first);
+		for (let k = 1; k < days.length; k++) {
+			const s0 = days[k].startMs ?? 0;
+			const s1 = days[k + 1]?.startMs ?? s0 + 24 * 3600e3;
+			if (ms < s1) return k + (ms - s0) / (s1 - s0);
+		}
+		return days.length;
 	}
-	function toggleTape() {
-		tape = !tape;
-		if (tape) showStep(off + hv);
-	}
-	// The strip under the chart: every day of the forecast in half-day bars, with the
-	// chart's window marked. Drag along it to move the window.
-	const strip = $derived.by(() => {
-		const halves = buildSteps(band.hourly, 10, true);
-		if (!halves.length || !steps.length) return null;
-		const h0 = halves[0].i0;
-		const hours = halves.length * 12;
-		const max = Math.max(2.54, ...halves.map((x) => x.snow));
-		const pct = (i: number) => `${(Math.max(0, Math.min(1, (i - h0) / hours)) * 100).toFixed(2)}%`;
+	const timeline = $derived.by(() => {
+		if (!steps.length || !days.length) return null;
+		const a = Date.parse(steps[0].t);
+		const last = steps[steps.length - 1];
+		const b = Date.parse(last.t) + last.hours * 3600e3;
+		const n = days.length;
+		const from = dayPos(a);
+		const to = dayPos(b);
 		return {
-			h0,
-			hours,
-			bars: halves.map((x) => ({
-				key: x.t,
-				kind: x.kind,
-				night: x.night,
-				h:
-					x.kind === 'none'
-						? '0%'
-						: x.kind === 'rain'
-							? '12%'
-							: `${Math.max(12, (x.snow / max) * 100).toFixed(0)}%`
-			})),
-			days: halves
-				.filter((x) => !x.night)
-				.map((x) => ({ left: pct(x.i0 + 6), name: weekday(dateOf(x.t)).slice(0, 2) })),
-			winLeft: pct(steps[0].i0),
-			winRight: pct(steps[steps.length - 1].i0 + STEP[R]),
+			left: `${((from / n) * 100).toFixed(2)}%`,
+			width: `${(((to - from) / n) * 100).toFixed(2)}%`,
+			startDay: dayIndex(steps[0].t),
+			endDay: dayIndex(last.t),
 			whole: maxOff === 0,
-			cursor: s ? pct(s.i0 + s.hours / 2) : '0%'
+			canPrev: off > 0,
+			canNext: off < maxOff
 		};
 	});
-	let stripDown = false;
-	function stripTo(e: PointerEvent) {
-		if (!strip) return;
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		const hour = strip.h0 + ((e.clientX - r.left) / r.width) * strip.hours;
-		showStep(Math.floor((hour - (allSteps[0]?.i0 ?? 0)) / STEP[R]));
+	const showTimeline = $derived(!embedded && prefs.showTimeline === 'on');
+	/** Show the window starting on day `k` (today = now). */
+	function showDay(k: number) {
+		const d = days[Math.max(0, Math.min(days.length - 1, k))];
+		if (!d) return;
+		startMs = d.startMs;
+		hoverT = null;
 	}
+	/** Centre the window on day `k` (a tap or drag on the timeline). */
+	function centreOn(k: number) {
+		showDay(k - Math.floor((R - 1) / 2));
+	}
+	let tlDown = false;
+	function tlAt(e: PointerEvent): number {
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		return Math.floor(((e.clientX - r.left) / r.width) * days.length);
+	}
+	function tlKey(e: KeyboardEvent) {
+		if (!timeline) return;
+		if (e.key === 'ArrowRight' && timeline.canNext) showDay(timeline.startDay + 1);
+		else if (e.key === 'ArrowLeft' && timeline.canPrev) showDay(timeline.startDay - 1);
+		else if (e.key === 'Home') showDay(0);
+		else return;
+		e.preventDefault();
+	}
+	const tlNote = $derived(
+		!timeline
+			? ''
+			: timeline.whole
+				? `Showing all ${days.length} days`
+				: R === 1
+					? 'Drag or tap a day to read it hour by hour'
+					: 'Drag the window or tap a day; ‹ › move one day'
+	);
+	// The day the table's pointer is on, shaded across the plot.
+	const shadeRect = $derived.by(() => {
+		if (!shadeDate) return null;
+		const ks = steps.map((st, k) => (dateOf(st.t) === shadeDate ? k : -1)).filter((k) => k >= 0);
+		if (!ks.length) return null;
+		return {
+			left: `${((ks[0] / N) * 100).toFixed(2)}%`,
+			width: `${(((ks[ks.length - 1] - ks[0] + 1) / N) * 100).toFixed(2)}%`
+		};
+	});
 	// The big reading above the plot.
 	const reading = $derived(cards.find((k) => k.id === metric));
 	const totalTxt = $derived(
@@ -792,12 +864,26 @@
 				/>
 			{/if}
 		</div>
-		<div class="seg" role="group" aria-label="Time range">
-			{#each ranges as r (r)}
-				<button aria-pressed={R === r} onclick={() => pickRange(r)}
-					>{r} {r === 1 ? 'day' : 'days'}</button
+		<div class="controls">
+			<div class="seg" role="group" aria-label="Time range">
+				{#each ranges as r (r)}
+					<button aria-pressed={R === r} onclick={() => pickRange(r)}
+						>{r} {r === 1 ? 'day' : 'days'}</button
+					>
+				{/each}
+			</div>
+			<button
+				class="tltoggle"
+				aria-pressed={showTimeline}
+				aria-label={showTimeline ? 'Hide the timeline' : 'Show the timeline'}
+				title={showTimeline ? 'Hide the timeline' : 'Show the timeline'}
+				onclick={() => prefs.setShowTimeline(!showTimeline)}
+			>
+				<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"
+					><path d="M3 18h18M6 18v-4M10 18V9M14 18v-6M18 18V7" /></svg
 				>
-			{/each}
+				<span>Timeline</span>
+			</button>
 		</div>
 	</div>
 	<div class="readout">
@@ -847,13 +933,17 @@
 			aria-valuemax={N - 1}
 			aria-valuenow={hv}
 			aria-valuetext={s ? `${when(s)}: ${cards.find((k) => k.id === metric)?.value ?? ''}` : ''}
-			onpointermove={(e) => (tape ? tapeMove(e) : setHover(stepAt(e)))}
-			onpointerdown={(e) => (tape ? tapeDown(e) : setHover(stepAt(e)))}
-			onpointerup={() => (drag = null)}
-			onpointercancel={() => (drag = null)}
+			onpointermove={(e) => setHover(stepAt(e))}
+			onpointerdown={(e) => setHover(stepAt(e))}
+			onpointerleave={() => onhoverdate?.(null)}
 			onclick={() => !phone && s && onpick?.(s.t)}
 			onkeydown={onkey}
 		>
+			{#if shadeRect}<div
+					class="dayshade"
+					style:left={shadeRect.left}
+					style:width={shadeRect.width}
+				></div>{/if}
 			<svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
 				<path d={shade} class="night" />
 				{#each paths.zones as z (z.cls)}<rect
@@ -934,62 +1024,63 @@
 			>
 		{/each}
 	</div>
-	{#if phone && !embedded && strip}
-		<div class="striprow">
+	{#if showTimeline && timeline}
+		<div class="tl">
+			<button
+				class="tlstep"
+				aria-label="One day earlier"
+				disabled={!timeline.canPrev}
+				onclick={() => showDay(timeline.startDay - 1)}
+			>
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+					><path d="M15 5l-7 7 7 7" /></svg
+				>
+			</button>
 			<div
-				class="strip"
-				class:whole={strip.whole}
+				class="tltrack"
+				class:whole={timeline.whole}
 				role="slider"
 				tabindex="0"
-				aria-label="Move the chart through the forecast"
+				aria-label="Days the chart shows"
 				aria-valuemin={0}
-				aria-valuemax={allSteps.length - 1}
-				aria-valuenow={off + hv}
-				aria-valuetext={s ? when(s) : ''}
+				aria-valuemax={days.length - 1}
+				aria-valuenow={timeline.startDay}
+				aria-valuetext={s
+					? `From ${days[timeline.startDay]?.name ?? ''}, ${R} ${R === 1 ? 'day' : 'days'}`
+					: ''}
 				onpointerdown={(e) => {
-					stripDown = true;
+					if (timeline.whole) return;
+					tlDown = true;
 					(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-					stripTo(e);
+					centreOn(tlAt(e));
 				}}
-				onpointermove={(e) => stripDown && stripTo(e)}
-				onpointerup={() => (stripDown = false)}
-				onpointercancel={() => (stripDown = false)}
-				onkeydown={(e) => {
-					if (e.key === 'ArrowRight') showStep(off + hv + 1);
-					else if (e.key === 'ArrowLeft') showStep(off + hv - 1);
-					else return;
-					e.preventDefault();
-				}}
+				onpointermove={(e) => tlDown && centreOn(tlAt(e))}
+				onpointerup={() => (tlDown = false)}
+				onpointercancel={() => (tlDown = false)}
+				onkeydown={tlKey}
+				style:--n={days.length}
 			>
-				<div class="sbars" aria-hidden="true">
-					{#each strip.bars as b (b.key)}<i
-							class="k-{b.kind}"
-							class:night={b.night}
-							style:height={b.h}
-						></i>{/each}
-				</div>
-				<div
-					class="swin"
-					style:left={strip.winLeft}
-					style:right="calc(100% - {strip.winRight})"
-				></div>
-				<div class="scur" style:left={strip.cursor}></div>
-				{#each strip.days as d (d.left)}<span class="sday" style:left={d.left}>{d.name}</span
-					>{/each}
+				<span class="tlwin" style:left={timeline.left} style:width={timeline.width}></span>
+				{#each days as d, k (d.date)}
+					<span class="tlday" class:in={k >= timeline.startDay && k <= timeline.endDay}>
+						{#if !phone}<b class="num">{d.amount}</b>{/if}
+						<i class="k-{d.kind}" style:height="{d.h * 0.24}px"></i>
+						<small>{phone ? d.short : d.name}</small>
+					</span>
+				{/each}
 			</div>
 			<button
-				class="tapebtn"
-				aria-pressed={tape}
-				disabled={strip.whole}
-				onclick={toggleTape}
-				aria-label="Swipe the chart to move through time"
-				title="Swipe the chart to move through time"
+				class="tlstep"
+				aria-label="One day later"
+				disabled={!timeline.canNext}
+				onclick={() => showDay(timeline.startDay + 1)}
 			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path d="M12 4v16M7 9l-3 3 3 3M17 9l3 3-3 3" /></svg
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+					><path d="M9 5l7 7-7 7" /></svg
 				>
 			</button>
 		</div>
+		<p class="tlnote">{tlNote}</p>
 	{/if}
 	<div class="legend">
 		{#if showNight}<span><i class="sw night"></i>Night (shaded)</span>{/if}
@@ -1099,14 +1190,20 @@
 		justify-content: flex-start;
 		gap: 4px;
 		padding: 10px 12px;
-		border-radius: 14px;
-		border: 1px solid var(--border);
-		background: var(--surface);
+		border-radius: 18px;
+		border: 0;
+		background: var(--surface-2);
 		cursor: pointer;
+		transition:
+			background-color var(--ease),
+			box-shadow var(--ease);
+	}
+	.mcard:hover {
+		background: color-mix(in srgb, var(--surface-2) 70%, var(--sel));
 	}
 	.mcard.on {
-		border-color: var(--accent);
-		background: var(--accent-soft);
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
 	}
 	.mlabel {
 		display: flex;
@@ -1539,7 +1636,6 @@
 		border: 1px solid var(--border);
 	}
 	@media (max-width: 899px) {
-		.lower,
 		.legend .lower-key {
 			display: none;
 		}
@@ -1561,21 +1657,71 @@
 	.fc.phone .plotrow {
 		order: 3;
 	}
-	.fc.phone .xaxis {
+	.fc.phone .lower {
 		order: 4;
 	}
-	.fc.phone .striprow {
+	.fc.phone .xaxis {
 		order: 5;
 	}
-	.fc.phone .cards {
+	.fc.phone .tl {
 		order: 6;
-		grid-template-columns: repeat(6, minmax(0, 1fr));
-		gap: 4px;
+	}
+	.fc.phone .tlnote {
+		order: 7;
+	}
+	.fc.phone .cards {
+		order: 8;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 6px;
 	}
 	.fc.phone .top {
-		order: 7;
+		order: 9;
 		flex-wrap: nowrap;
 		flex-direction: row-reverse;
+	}
+	.fc.phone .controls {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.fc.phone .tltoggle {
+		flex: 0 0 44px;
+		height: 44px;
+		padding: 0;
+		justify-content: center;
+		border-radius: 50%;
+	}
+	.fc.phone .tltoggle span {
+		display: none;
+	}
+	.fc.phone .tlstep {
+		flex-basis: 30px;
+		height: 50px;
+	}
+	.fc.phone .tltrack {
+		height: 52px;
+	}
+	.fc.phone .tlday {
+		flex-direction: column;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 3px;
+		padding-bottom: 5px;
+	}
+	.fc.phone .tlday small {
+		font-size: 0.68rem;
+	}
+	.fc.phone .yaxis.lowaxis,
+	.fc.phone .lower .yaxis {
+		display: none;
+	}
+	.fc.phone .lplot,
+	.fc.phone .yaxis.lowaxis {
+		height: 34px;
+	}
+	.fc.phone .lplot {
+		border-radius: 8px;
+		border-bottom: 0;
+		background: var(--surface-2);
 	}
 	.fc.phone .legend,
 	.fc.phone .readout,
@@ -1596,11 +1742,10 @@
 		padding: 9px 4px;
 	}
 	.fc.phone .mcard {
-		height: 52px;
-		padding: 6px 2px;
-		align-items: center;
-		justify-content: center;
-		gap: 3px;
+		height: 50px;
+		padding: 7px 10px;
+		gap: 1px;
+		border-radius: 14px;
 	}
 	.fc.phone .mlabel {
 		gap: 4px;
@@ -1672,100 +1817,160 @@
 		color: var(--text-3);
 		margin-left: 4px;
 	}
-	.striprow {
+	/* --- The timeline --- */
+	.tl {
 		display: flex;
+		align-items: center;
 		gap: 6px;
-		align-items: stretch;
 	}
-	.strip {
-		position: relative;
-		flex: 1;
-		min-width: 0;
-		height: 46px;
-		border-radius: 12px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		overflow: hidden;
-		touch-action: pan-y;
-		cursor: ew-resize;
-	}
-	.sbars {
-		position: absolute;
-		inset: 5px 0 17px;
-		display: flex;
-		align-items: flex-end;
-	}
-	.sbars i {
-		flex: 1 1 0;
-		margin: 0 1.5px;
-		border-radius: 2px 2px 0 0;
-		background: var(--snow);
-	}
-	.sbars i.night {
-		background: var(--snow-night);
-	}
-	.sbars i.k-heavy {
-		background: var(--snow-heavy);
-	}
-	.sbars i.k-mix {
-		background: var(--mix);
-	}
-	.sbars i.k-rain {
-		background: var(--rain);
-	}
-	.swin {
-		position: absolute;
-		top: 0;
-		bottom: 0;
-		background: color-mix(in srgb, var(--accent) 18%, transparent);
-		border-left: 1.5px solid var(--accent);
-		border-right: 1.5px solid var(--accent);
-		pointer-events: none;
-	}
-	.strip.whole .swin {
-		border-color: transparent;
-		background: none;
-	}
-	.scur {
-		position: absolute;
-		top: 0;
-		bottom: 15px;
-		border-left: 1.5px solid var(--text);
-		pointer-events: none;
-	}
-	.sday {
-		position: absolute;
-		bottom: 2px;
-		transform: translateX(-50%);
-		font-size: 0.62rem;
-		color: var(--text-3);
-		pointer-events: none;
-	}
-	.tapebtn {
-		flex: 0 0 40px;
-		border-radius: 12px;
-		border: 1px solid var(--border);
+	.tlstep {
+		flex: 0 0 36px;
+		height: 56px;
+		border: 0;
+		border-radius: 14px;
 		background: var(--surface-2);
 		color: var(--text-2);
 		display: grid;
 		place-items: center;
 		cursor: pointer;
+		transition:
+			background-color var(--ease),
+			transform 200ms cubic-bezier(0.3, 1.6, 0.5, 1);
 	}
-	.tapebtn svg {
+	.tlstep:active {
+		transform: scale(0.94);
+	}
+	.tlstep:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.tlstep svg,
+	.tltoggle svg {
 		fill: none;
 		stroke: currentColor;
-		stroke-width: 2;
+		stroke-width: 2.1;
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
-	.tapebtn[aria-pressed='true'] {
-		border-color: var(--accent);
-		background: var(--accent-soft);
-		color: var(--accent-ink);
+	.tltrack {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+		height: 60px;
+		border-radius: 16px;
+		background: var(--surface-2);
+		display: grid;
+		grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+		touch-action: none;
+		cursor: grab;
+		user-select: none;
 	}
-	.tapebtn:disabled {
-		opacity: 0.4;
+	.tltrack.whole {
 		cursor: default;
+	}
+	.tlwin {
+		position: absolute;
+		top: 3px;
+		bottom: 3px;
+		border-radius: 13px;
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
+		transition:
+			left var(--spring),
+			width var(--spring);
+		pointer-events: none;
+	}
+	.tlday {
+		position: relative;
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+		gap: 6px;
+		padding: 0 2px 7px;
+		min-width: 0;
+		pointer-events: none;
+	}
+	.tlday b {
+		position: absolute;
+		top: 6px;
+		left: 0;
+		right: 0;
+		text-align: center;
+		font-size: 0.74rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+	.tlday i {
+		width: 8px;
+		border-radius: 3px 3px 0 0;
+		background: var(--text-3);
+		opacity: 0.55;
+		flex-shrink: 0;
+		transition: opacity var(--ease);
+	}
+	.tlday.in i {
+		opacity: 1;
+		background: var(--snow);
+	}
+	.tlday.in i.k-heavy {
+		background: var(--snow-heavy);
+	}
+	.tlday.in i.k-mix {
+		background: var(--mix);
+	}
+	.tlday.in i.k-rain {
+		background: var(--rain);
+	}
+	.tlday small {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tlday.in small {
+		color: var(--text);
+	}
+	.tlnote {
+		margin: -8px 0 0;
+		text-align: center;
+		font-size: 0.75rem;
+		color: var(--text-3);
+	}
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.tltoggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 34px;
+		padding: 0 13px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text-2);
+		font-size: 0.86rem;
+		cursor: pointer;
+		transition:
+			background-color var(--ease),
+			box-shadow var(--ease);
+	}
+	.tltoggle[aria-pressed='true'] {
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
+		color: var(--text);
+		font-weight: 600;
+	}
+	.dayshade {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
+		pointer-events: none;
 	}
 	@media (max-width: 640px) {
 		.cards {

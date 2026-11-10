@@ -186,7 +186,7 @@
 		margin: 0;
 	}
 	.faint {
-		color: var(--text-muted, #667);
+		color: var(--text-2);
 	}
 	.head,
 	.foot {
@@ -236,7 +236,7 @@
 	.act {
 		border: 1px solid var(--accent);
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 		border-radius: 999px;
 		padding: 4px 10px;
 		font: inherit;
@@ -260,6 +260,6 @@
 		padding: 2px 4px;
 	}
 	.err {
-		color: var(--danger, #c0392b);
+		color: var(--warn-ink, var(--warn));
 	}
 </style>

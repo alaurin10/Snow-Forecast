@@ -7,7 +7,14 @@ class AppUpdate {
 		if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return () => {};
 		let timer: ReturnType<typeof setInterval> | undefined;
 		let reloading = false;
+		// On a first visit the new worker takes control without replacing anything, so
+		// only a change of controller on an already-controlled page means an update.
+		let controlled = !!navigator.serviceWorker.controller;
 		const onChange = () => {
+			if (!controlled) {
+				controlled = true;
+				return;
+			}
 			if (reloading) return;
 			reloading = true;
 			location.reload();

@@ -46,7 +46,7 @@
 {#if error}
 	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted" aria-live="polite">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else}
 	<MapView {rows} units={prefs.units} {href} radar />
 {/if}

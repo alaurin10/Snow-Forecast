@@ -41,4 +41,4 @@ open-source packages, each under its own licence; the full lists are in
 | MapLibre GL JS | BSD-3-Clause |
 | Leaflet | BSD-2-Clause |
 | d3-array, d3-scale, d3-shape, d3-time-format | ISC |
-| Inter and Space Grotesk fonts (via Fontsource) | SIL Open Font License 1.1 |
+| Inter and Manrope fonts (via Fontsource) | SIL Open Font License 1.1 |

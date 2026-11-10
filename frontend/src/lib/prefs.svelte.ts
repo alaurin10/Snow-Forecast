@@ -2,7 +2,19 @@
 // or blocked, so every access is guarded).
 import type { UnitSystem } from './units';
 
+/** Colour mode. */
 export type Theme = 'auto' | 'light' | 'dark';
+/** Theme family: Live Sky (the weather behind the page) or a still, fixed sky. */
+export type ThemeFamily = 'sky' | 'alpenglow' | 'glacier' | 'larch' | 'granite';
+export const THEME_FAMILIES: readonly ThemeFamily[] = [
+	'sky',
+	'alpenglow',
+	'glacier',
+	'larch',
+	'granite'
+] as const;
+/** Full: everything moves. Subtle: no falling snow or count-ups. Off: nothing moves. */
+export type Motion = 'full' | 'subtle' | 'off';
 export type BandName = 'base' | 'mid' | 'summit';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -25,6 +37,10 @@ function save(key: string, value: string): void {
 class Prefs {
 	units = $state<UnitSystem>(load('sw.units', ['imperial', 'metric'] as const, 'imperial'));
 	theme = $state<Theme>(load('sw.theme', ['auto', 'light', 'dark'] as const, 'auto'));
+	themeFamily = $state<ThemeFamily>(load('sw.themeFamily', THEME_FAMILIES, 'sky'));
+	motion = $state<Motion>(load('sw.motion', ['full', 'subtle', 'off'] as const, 'full'));
+	/** The day-scrubbing strip under the forecast chart. */
+	showTimeline = $state<'on' | 'off'>(load('sw.showTimeline', ['on', 'off'] as const, 'on'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
 	mapPistes = $state<'on' | 'off'>(load('sw.mapPistes', ['on', 'off'] as const, 'on'));
@@ -52,6 +68,21 @@ class Prefs {
 	setTheme(t: Theme) {
 		this.theme = t;
 		save('sw.theme', t);
+	}
+
+	setThemeFamily(f: ThemeFamily) {
+		this.themeFamily = f;
+		save('sw.themeFamily', f);
+	}
+
+	setMotion(m: Motion) {
+		this.motion = m;
+		save('sw.motion', m);
+	}
+
+	setShowTimeline(on: boolean) {
+		this.showTimeline = on ? 'on' : 'off';
+		save('sw.showTimeline', this.showTimeline);
 	}
 
 	setBand(b: BandName) {

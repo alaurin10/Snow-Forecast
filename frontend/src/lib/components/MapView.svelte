@@ -22,6 +22,7 @@
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
 	import { prefs } from '../prefs.svelte';
+	import { viewport } from '../viewport.svelte';
 	import {
 		frameLabel,
 		frameSource,
@@ -510,15 +511,24 @@
 	});
 
 	// The full map fills the window below the header (and any banner), edge to edge;
-	// on phones the tab bar floats over it.
+	// on phones and tablets the tab bar floats over it. On desktop it fills the space
+	// beside the navigation rail as a rounded panel.
 	let fillTop = $state(0);
+	let fillLeft = $state(0);
+	let fillRight = $state(0);
 	$effect(() => {
 		if (!radar || !wrap) return;
 		const main = wrap.closest('main');
 		// Whole pixels: a map placed at a fractional offset blends every tile edge,
 		// which draws a faint grid.
-		const measure = () =>
-			(fillTop = Math.round((main ?? wrap!).getBoundingClientRect().top + window.scrollY));
+		const measure = () => {
+			const box = (main ?? wrap!).getBoundingClientRect();
+			fillTop = Math.round(box.top + window.scrollY);
+			fillLeft = viewport.desktop ? Math.round(box.left) : 0;
+			fillRight = viewport.desktop
+				? Math.max(0, Math.round(document.documentElement.clientWidth - box.right))
+				: 0;
+		};
 		measure();
 		window.addEventListener('resize', measure);
 		return () => window.removeEventListener('resize', measure);
@@ -909,7 +919,16 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && infoOpen && (infoOpen = false)} />
 
-<div class="wrap" class:fill={radar} class:dark bind:this={wrap} style:--fill-top="{fillTop}px">
+<div
+	class="wrap"
+	class:fill={radar}
+	class:panel={radar && viewport.desktop}
+	class:dark
+	bind:this={wrap}
+	style:--fill-top="{fillTop}px"
+	style:--fill-left="{fillLeft}px"
+	style:--fill-right="{fillRight}px"
+>
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
 
 	{#if radar}
@@ -1224,6 +1243,17 @@
 		border-radius: 0;
 		border: 0;
 	}
+	/* Desktop: a rounded panel beside the rail. */
+	.wrap.fill.panel {
+		left: var(--fill-left);
+		right: var(--fill-right);
+		bottom: 14px;
+	}
+	.panel .map {
+		border-radius: 28px;
+		border: 1px solid var(--panel-rim);
+		box-shadow: var(--shadow);
+	}
 	/* MapLibre's controls: credits as a small (i) in the top-right, and room for our
 	   buttons under the zoom and compass. */
 	.map :global(.maplibregl-ctrl-attrib) {
@@ -1282,10 +1312,12 @@
 	}
 	.tool.active {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
+	/* The buttons stay white like MapLibre's own, so the accent is darkened to read on
+	   white in every theme. */
 	.tool.shown {
-		color: var(--accent);
+		color: color-mix(in srgb, var(--accent) 62%, #000);
 	}
 	.tool svg .fill {
 		fill: currentColor;
@@ -1375,6 +1407,16 @@
 		padding: 2px 4px;
 	}
 
+	/* A note inside the controls sits in the flow, not over the map. */
+	.controls .note {
+		position: static;
+		max-width: none;
+		margin: 0;
+		padding: 0 4px;
+		color: var(--text-2);
+		font-weight: 500;
+		cursor: default;
+	}
 	.controls {
 		position: absolute;
 		left: 10px;
@@ -1449,7 +1491,7 @@
 		border: 0;
 		border-radius: 999px;
 		background: var(--accent);
-		color: var(--surface);
+		color: var(--on-accent);
 		cursor: pointer;
 	}
 	.play svg {

@@ -1,3 +1,6 @@
+<!-- Where the snow is: every location as a row (name, a week of daily snow bars, the
+     total), with the storms ahead above. The same rows on every screen; desktops add the
+     amounts under the bars, the avalanche rating and the next-5-days range. -->
 <script lang="ts">
 	import ErrorNote from '../lib/components/ErrorNote.svelte';
 	import { friendlyError } from '../lib/errors';
@@ -6,7 +9,6 @@
 	import { prefs } from '../lib/prefs.svelte';
 	import { converters, snow, snowNum } from '../lib/units';
 	import { dangerWord } from '../lib/conditions';
-	import DailyBars from '../lib/components/DailyBars.svelte';
 	import { describeDays, dailyTotals } from '../lib/daybars';
 	import type { OverviewRow } from '../lib/types.gen';
 	import ShareButton from '../lib/share/ShareButton.svelte';
@@ -29,14 +31,8 @@
 	});
 
 	const c = $derived(converters(prefs.units));
-	// One scale for every card, so bars compare across locations.
-	const barMax = $derived(
-		Math.max(5, ...(rows ?? []).flatMap((r) => dailyTotals(r.periods ?? [], DAYS).map((d) => d.cm)))
-	);
-	// The card's total is the sum of its bars, so the two always cover the same days.
+	// The row's total is the sum of its bars, so the two always cover the same days.
 	const DAYS = 7;
-	const weekTotal = (r: OverviewRow) =>
-		dailyTotals(r.periods ?? [], DAYS).reduce((a, d) => a + d.cm, 0);
 	const href = (id: string) => resolve('/location/[id]', { id });
 	const today = new Date().toLocaleDateString('en-US', {
 		weekday: 'long',
@@ -51,9 +47,8 @@
 			.at(-1) ?? ''
 	);
 	const rated = (r: OverviewRow) => r.danger?.status === 'current' && !!r.danger.level;
+	const wide = $derived(!viewport.phone);
 
-	// --- Phones: one compact row per location ---
-	const phone = $derived(viewport.phone);
 	const list = $derived.by(() => {
 		const out = (rows ?? []).map((r) => {
 			const days = dailyTotals(r.periods ?? [], DAYS);
@@ -62,374 +57,264 @@
 		// "My order" is the order set on the Manage page, which is how the rows arrive.
 		return prefs.sort === 'snow' ? [...out].sort((a, b) => b.total - a.total) : out;
 	});
+	// One scale for every row, so bars compare across locations.
+	const barMax = $derived(Math.max(5, ...list.flatMap((x) => x.days.map((d) => d.cm))));
+	// The avalanche column only when some location has a rating to show.
+	const anyRated = $derived(list.some((x) => rated(x.r)));
 	const dayLabels = $derived(list.find((x) => x.days.length)?.days ?? []);
-	const barH = (cm: number) => (cm > 0.1 ? Math.max(3, Math.round((cm / barMax) * 34)) : 0);
-	const storm = $derived.by(() => {
-		const s = stormCycles((rows ?? []).filter((r) => r.run_id != null))[0];
-		if (!s) return null;
-		const todayDate = (rows ?? []).flatMap((r) => r.periods ?? [])[0]?.date ?? s.start;
-		const n = Math.round((Date.parse(s.start) - Date.parse(todayDate)) / 86400e3);
+	const barH = (cm: number, tall: number) =>
+		cm > 0.1 ? Math.max(3, Math.round((cm / barMax) * tall)) : 0;
+	const storms = $derived.by(() => {
+		const all = stormCycles((rows ?? []).filter((r) => r.run_id != null));
+		const todayDate = (rows ?? []).flatMap((r) => r.periods ?? [])[0]?.date ?? '';
 		const day = (d: string) => `${weekday(d)} ${monthDay(d)}`;
-		return {
-			when: s.start === s.end ? day(s.start) : `${day(s.start)} – ${day(s.end)}`,
-			soon: n <= 0 ? 'now' : n === 1 ? 'tomorrow' : `in ${n} days`,
-			top: s.locations.slice(0, 2),
-			more: Math.max(0, s.locations.length - 2)
-		};
+		return all.slice(0, 4).map((s, k) => {
+			const n = todayDate ? Math.round((Date.parse(s.start) - Date.parse(todayDate)) / 86400e3) : 0;
+			return {
+				key: s.start + s.end,
+				first: k === 0,
+				when: s.start === s.end ? day(s.start) : `${day(s.start)} – ${day(s.end)}`,
+				soon: n <= 0 ? 'Now' : n === 1 ? 'Tomorrow' : `In ${n} days`,
+				top: s.locations.slice(0, 2),
+				more: Math.max(0, s.locations.length - 2)
+			};
+		});
 	});
 </script>
 
 <svelte:head><title>Snow Watch</title></svelte:head>
 
-<div class="head">
-	<span class="faint small">{today}</span>
-	<div class="titlerow">
+<header class="head">
+	<div>
+		<span class="date">{today}</span>
 		<h1>Where the snow is</h1>
-		{#if rows?.length}
-			<ShareButton
-				label="Share the overview"
-				filename="snow-watch-overview"
-				render={(shape) =>
-					paint(shape, (ctx, p) =>
-						drawOverviewCard(
-							ctx,
-							shape,
-							{ rows: rows ?? [], units: prefs.units, days: DAYS, generatedAt: latest },
-							p
-						)
-					)}
-			/>
-		{/if}
 	</div>
-</div>
+	{#if rows?.length}
+		<ShareButton
+			label="Share the overview"
+			filename="snow-watch-overview"
+			render={(shape) =>
+				paint(shape, (ctx, p) =>
+					drawOverviewCard(
+						ctx,
+						shape,
+						{ rows: rows ?? [], units: prefs.units, days: DAYS, generatedAt: latest },
+						p
+					)
+				)}
+		/>
+	{/if}
+</header>
 
 {#if error}
 	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted" aria-live="polite">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else if !rows.length}
 	<p class="card muted">
 		No locations yet. The owner can add them under Settings → Manage locations.
 	</p>
-{:else if phone}
-	{#if storm}
-		<a class="stormbar" href={resolve('/calendar')}>
-			<span class="sb-when">Storm {storm.soon} · {storm.when}</span>
-			<span class="sb-where">
-				{#each storm.top as l, i (l.id)}{i ? ' · ' : ''}{l.name}
-					<strong class="num">{snowNum(l.total_cm, prefs.units)} {c.snowUnit}</strong
-					>{/each}{#if storm.more}<span class="faint"> · +{storm.more} more</span>{/if}
-			</span>
-		</a>
-	{/if}
-	<div class="lhead">
-		<button
-			class="sortbtn"
-			onclick={() => prefs.setSort(prefs.sort === 'mine' ? 'snow' : 'mine')}
-			aria-label="Sort: {prefs.sort === 'mine' ? 'my order' : 'most snow first'}. Tap to change."
-		>
-			<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
-				><path d="M8 5v14M8 19l-3-3M8 19l3-3M16 19V5M16 5l-3 3M16 5l3 3" /></svg
-			>
-			{prefs.sort === 'mine' ? 'My order' : 'Most snow'}
-		</button>
-		<span class="ldays" aria-hidden="true">
-			{#each dayLabels as d, i (d.date)}<span class:today={i === 0} class:weekend={d.weekend}
-					>{weekday(d.date).slice(0, 1)}</span
-				>{/each}
-		</span>
-		<span class="ltot">{DAYS} days, {c.snowUnit}</span>
-	</div>
-	<ul class="list">
-		{#each list as { r, days, total } (r.id)}
-			<li>
-				<a class="lrow" href={href(r.id)}>
-					<span class="lname">
-						<strong>{r.name}</strong>
-						{#if r.alerts?.length}
-							<small class="alert">{r.alerts[0]}</small>
-						{:else}
-							<small
-								>{r.region}{r.kind === 'backcountry' ? ' · Backcountry' : ''}{#if rated(r)}
-									· Avalanche {r.danger?.level}{/if}</small
-							>
-						{/if}
-					</span>
-					{#if r.run_id == null}
-						<small class="none">No forecast yet</small>
-					{:else}
-						<span
-							class="lbars"
-							role="img"
-							aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
-						>
-							{#each days as d (d.date)}<i class={d.kind} style:height="{barH(d.cm)}px"></i>{/each}
-						</span>
-						<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}
-							>{snowNum(total, prefs.units)}</span
-						>
-					{/if}
-				</a>
-			</li>
-		{/each}
-	</ul>
-	<div class="legend">
-		<span><i style:background="var(--snow)"></i>Snow</span>
-		<span
-			><i style:background="var(--snow-heavy)"></i>{c.snowUnit === 'in' ? '6+ in' : '15+ cm'} in a day</span
-		>
-		<span><i style:background="var(--mix)"></i>Mixed</span>
-		<span><i style:background="var(--rain)"></i>Rain</span>
-	</div>
 {:else}
-	<ul class="grid">
-		{#each rows as r (r.id)}
-			<li>
-				<a class="card loc" href={href(r.id)}>
-					<div class="top">
-						<div class="name">
+	{#if storms.length}
+		<div class="storms" aria-label="Storms ahead">
+			{#each storms as s (s.key)}
+				<a class="storm glass" class:first={s.first} href={resolve('/calendar')}>
+					<span class="eyebrow">{s.soon}</span>
+					<strong>{s.when}</strong>
+					<span class="where"
+						>{#each s.top as l, i (l.id)}{i ? ' · ' : ''}{l.name}
+							<b class="num">{snowNum(l.total_cm, prefs.units)} {c.snowUnit}</b
+							>{/each}{#if s.more}<span class="faint"> · +{s.more} more</span>{/if}</span
+					>
+				</a>
+			{/each}
+		</div>
+	{/if}
+
+	<section class="card listcard" aria-label="Locations">
+		<div class="lhead">
+			<button
+				class="sortbtn"
+				onclick={() => prefs.setSort(prefs.sort === 'mine' ? 'snow' : 'mine')}
+				aria-label="Sort: {prefs.sort === 'mine' ? 'my order' : 'most snow first'}. Change."
+			>
+				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
+					><path d="M8 5v14M8 19l-3-3M8 19l3-3M16 19V5M16 5l-3 3M16 5l3 3" /></svg
+				>
+				{prefs.sort === 'mine' ? 'My order' : 'Most snow'}
+			</button>
+			{#if wide && anyRated}<span class="lavy"></span>{/if}
+			<span class="ldays" aria-hidden="true">
+				{#each dayLabels as d, i (d.date)}<span class:today={i === 0} class:weekend={d.weekend}
+						>{wide ? d.label : weekday(d.date).slice(0, 1)}</span
+					>{/each}
+			</span>
+			<span class="ltot">{DAYS} days, {c.snowUnit}</span>
+			{#if wide}<span class="l5">Next 5 days</span>{/if}
+		</div>
+		<ul class="list">
+			{#each list as { r, days, total } (r.id)}
+				<li>
+					<a class="lrow" href={href(r.id)}>
+						<span class="lname">
 							<strong>{r.name}</strong>
-							<span class="faint small"
-								>{r.region}{r.kind === 'backcountry' ? ' · Backcountry' : ''}</span
-							>
-						</div>
-						{#if r.run_id != null}
-							<div class="total">
-								<span class="big num"
-									>{snowNum(weekTotal(r), prefs.units)}<small>{c.snowUnit}</small></span
-								>
-								<span class="faint small">next {DAYS} days</span>
-							</div>
-						{/if}
-					</div>
-					{#if r.run_id == null}
-						<span class="faint small">No forecast yet</span>
-					{:else}
-						<DailyBars
-							periods={r.periods ?? []}
-							max={barMax}
-							units={prefs.units}
-							days={DAYS}
-							label={`${r.name}: snow for the next ${DAYS} days`}
-						/>
-					{/if}
-					{#if r.alerts?.length || rated(r)}
-						<div class="notes">
-							{#if r.alerts?.length}<span class="alert"><i></i>{r.alerts[0]}</span>{/if}
-							{#if rated(r)}
-								<span class="avy"
-									><i class="d{r.danger?.level}"></i>Avalanche {r.danger?.level} ·
-									{dangerWord(r.danger?.level)}</span
+							{#if r.alerts?.length}
+								<small class="alert">{r.alerts[0]}</small>
+							{:else}
+								<small
+									>{r.region}{r.kind === 'backcountry'
+										? ' · Backcountry'
+										: ''}{#if rated(r) && !wide}
+										· Avalanche {r.danger?.level}{/if}</small
 								>
 							{/if}
-						</div>
-					{/if}
-				</a>
-			</li>
-		{/each}
-	</ul>
+						</span>
+						{#if wide && anyRated}
+							<span class="lavy">
+								{#if rated(r)}<span class="danger d{r.danger?.level}"
+										>{r.danger?.level} · {dangerWord(r.danger?.level)}</span
+									>{/if}
+							</span>
+						{/if}
+						{#if r.run_id == null}
+							<small class="none">No forecast yet</small>
+						{:else}
+							<span
+								class="lbars"
+								role="img"
+								aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
+							>
+								{#each days as d (d.date)}<span class="bar"
+										><i class={d.kind} style:height="{barH(d.cm, wide ? 40 : 34)}px"
+										></i>{#if wide}<small class="num" class:zero={d.cm < 0.1}
+												>{d.cm >= 0.1 ? snowNum(d.cm, prefs.units) : '–'}</small
+											>{/if}</span
+									>{/each}
+							</span>
+							<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}
+								>{snowNum(total, prefs.units)}</span
+							>
+							{#if wide}
+								<span class="l5 num"
+									><b>{snowNum(r.next5_cm, prefs.units)} {c.snowUnit}</b>{#if r.next5_p90_cm}<small
+											>{snowNum(r.next5_p10_cm, prefs.units)}–{snowNum(r.next5_p90_cm, prefs.units)} likely</small
+										>{/if}</span
+								>
+							{/if}
+						{/if}
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</section>
 	<div class="legend">
 		<span><i style:background="var(--snow)"></i>Snow</span>
 		<span
-			><i style:background="var(--snow-heavy)"></i>Heavy snow ({c.snowUnit === 'in'
-				? '6+ inches'
-				: '15+ cm'} in a day)</span
+			><i style:background="var(--snow-heavy)"></i>{c.snowUnit === 'in' ? '6 in' : '15 cm'} or more in
+			a day</span
 		>
 		<span><i style:background="var(--mix)"></i>Mixed</span>
 		<span><i style:background="var(--rain)"></i>Rain</span>
-		<span>Daily snow ({c.snowUnit === 'in' ? 'inches' : 'cm'})</span>
 	</div>
 {/if}
 
 <style>
 	.head {
-		display: grid;
-		gap: 2px;
-		margin: 4px 0 16px;
-	}
-	.titlerow {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: flex-end;
 		gap: 12px;
+		padding: 18px 4px 14px;
+	}
+	.date {
+		font-size: 0.86rem;
+		font-weight: 600;
 	}
 	h1 {
 		font-family: var(--font-num);
-		font-size: 1.9rem;
-		font-weight: 600;
-		letter-spacing: -0.02em;
-		margin: 0;
+		font-size: 2.9rem;
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		line-height: 1.05;
+		margin: 2px 0 0;
 	}
-	.small {
-		font-size: 0.8rem;
-	}
-	.grid {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		gap: 12px;
-		grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
-	}
-	.loc {
-		display: grid;
-		gap: 14px;
-		padding: 16px 18px;
-		color: inherit;
-		text-decoration: none;
-		height: 100%;
-		align-content: start;
-	}
-	.loc:hover {
-		border-color: var(--accent);
-	}
-	.top {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 12px;
-	}
-	.name {
-		display: grid;
-		gap: 2px;
-		min-width: 0;
-	}
-	.name strong {
-		font-size: 1.02rem;
-		font-weight: 600;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.total {
-		display: grid;
-		justify-items: end;
-		gap: 2px;
-		flex-shrink: 0;
-	}
-	.big {
-		font-size: 1.9rem;
-		font-weight: 600;
-		line-height: 1;
-		letter-spacing: -0.02em;
-	}
-	.big small {
-		font-family: var(--font-ui);
-		font-size: 0.85rem;
-		font-weight: 500;
+	.loading {
+		display: inline-block;
+		padding: 8px 16px;
+		border-radius: 999px;
 		color: var(--text-2);
-		margin-left: 3px;
-		letter-spacing: 0;
 	}
-	.notes {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px 14px;
-		font-size: 0.8rem;
-		color: var(--text-2);
-		border-top: 1px solid var(--grid);
-		padding-top: 10px;
+	.storms {
+		display: grid;
+		grid-auto-flow: column;
+		grid-auto-columns: minmax(200px, 1fr);
+		gap: 10px;
+		/* Room for the cards' shadow, which the scrolling row would otherwise clip. */
+		margin: -4px -12px 2px;
+		padding: 4px 12px 14px;
+		scroll-padding-inline: 12px;
+		overflow-x: auto;
+		scroll-snap-type: x mandatory;
+		scrollbar-width: none;
 	}
-	.notes span {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
+	.storms::-webkit-scrollbar {
+		display: none;
 	}
-	.notes i {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		flex-shrink: 0;
-	}
-	.alert {
-		color: var(--warn-ink);
-		font-weight: 600;
-	}
-	.alert i {
-		background: var(--warn);
-	}
-	.avy i {
-		border-radius: 2px;
-		outline: 1px solid var(--border);
-	}
-	.avy i.d1 {
-		background: var(--d1);
-	}
-	.avy i.d2 {
-		background: var(--d2);
-	}
-	.avy i.d3 {
-		background: var(--d3);
-	}
-	.avy i.d4 {
-		background: var(--d4);
-	}
-	.avy i.d5 {
-		background: var(--d5);
-	}
-	.legend {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px 16px;
-		margin-top: 14px;
-		font-size: 0.75rem;
-		color: var(--text-3);
-	}
-	.legend span {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-	}
-	.legend i {
-		width: 10px;
-		height: 10px;
-		border-radius: 3px;
-	}
-	/* --- Phones: rows, not cards --- */
-	.stormbar {
+	.storm {
+		scroll-snap-align: start;
+		box-shadow: var(--glass-shadow-sm);
 		display: grid;
 		gap: 2px;
-		margin: 0 0 6px;
-		padding: 10px 14px;
-		border-radius: 14px;
-		background: var(--accent-soft);
+		padding: 11px 16px;
+		border-radius: 22px;
 		color: var(--text);
 		text-decoration: none;
-		font-size: 0.85rem;
+		font-size: 0.88rem;
+		min-width: 0;
 	}
-	.sb-when {
-		font-size: 0.75rem;
-		font-weight: 600;
+	.storm.first {
+		background-image: linear-gradient(0deg, var(--accent-soft), var(--accent-soft));
+	}
+	.storm.first .eyebrow {
 		color: var(--accent-ink);
 	}
-	.sb-where {
+	.where {
+		color: var(--text-2);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.where b {
+		color: var(--text);
+		font-weight: 700;
+	}
+	.listcard {
+		padding: 4px 10px 6px;
 	}
 	.lhead,
 	.lrow {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 14px;
 	}
 	.lhead {
-		font-size: 0.7rem;
-		color: var(--text-3);
+		padding: 0 8px;
+		font-size: 0.74rem;
+		color: var(--text-2);
 	}
 	/* A quiet one-tap sort: small type, but a full-height touch target. */
 	.sortbtn {
 		flex: 1 1 auto;
 		display: flex;
 		align-items: center;
-		gap: 5px;
-		height: 40px;
+		gap: 6px;
+		height: 44px;
 		padding: 0;
 		border: 0;
 		background: none;
-		color: var(--text-2);
-		font-size: 0.78rem;
-		font-weight: 500;
+		color: var(--text);
+		font-size: 0.84rem;
+		font-weight: 600;
 		text-align: left;
 		cursor: pointer;
 	}
@@ -442,7 +327,7 @@
 	}
 	.ldays,
 	.lbars {
-		flex: 0 0 105px;
+		flex: 0 0 112px;
 		display: grid;
 		grid-template-columns: repeat(7, minmax(0, 1fr));
 	}
@@ -450,15 +335,15 @@
 		text-align: center;
 	}
 	.ldays .weekend {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.ldays .today {
 		color: var(--text);
-		font-weight: 600;
+		font-weight: 700;
 	}
 	.ltot,
 	.ltotal {
-		flex: 0 0 58px;
+		flex: 0 0 56px;
 		text-align: right;
 	}
 	.list {
@@ -470,9 +355,15 @@
 		border-top: 1px solid var(--grid);
 	}
 	.lrow {
-		min-height: 58px;
+		min-height: 64px;
+		padding: 0 8px;
+		border-radius: 16px;
 		color: inherit;
 		text-decoration: none;
+		transition: background-color var(--ease);
+	}
+	.lrow:hover {
+		background: var(--hover);
 	}
 	.lname {
 		flex: 1 1 auto;
@@ -487,49 +378,148 @@
 		text-overflow: ellipsis;
 	}
 	.lname strong {
-		font-size: 0.98rem;
+		font-size: 1rem;
 		font-weight: 600;
 	}
 	.list small {
-		font-size: 0.76rem;
-		color: var(--text-3);
+		font-size: 0.78rem;
+		color: var(--text-2);
 	}
 	.list small.alert {
-		font-weight: 500;
+		font-weight: 600;
+		color: var(--warn-ink);
 	}
 	.lbars {
-		height: 36px;
+		height: 38px;
 		align-items: end;
 		border-bottom: 1px solid var(--border);
 	}
-	.lbars i {
+	.bar {
+		display: grid;
+		align-items: end;
+		height: 100%;
+	}
+	.bar i {
 		margin: 0 2px;
-		border-radius: 2px 2px 0 0;
+		border-radius: 3px 3px 0 0;
 		background: var(--snow);
 	}
-	.lbars i.heavy {
+	.bar i.heavy {
 		background: var(--snow-heavy);
 	}
-	.lbars i.mix {
+	.bar i.mix {
 		background: var(--mix);
 	}
-	.lbars i.rain {
+	.bar i.rain {
 		background: var(--rain);
 	}
 	.ltotal {
-		font-size: 1.4rem;
+		font-size: 1.45rem;
 		font-weight: 600;
 		letter-spacing: -0.02em;
 	}
 	.ltotal.zero {
 		color: var(--text-3);
 	}
+	.none {
+		flex: 0 0 auto;
+	}
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 16px;
+		margin: 12px 8px 0;
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text);
+	}
+	.legend span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.legend i {
+		width: 10px;
+		height: 10px;
+		border-radius: 3px;
+	}
+
+	/* Tablets and desktops: wider bars with the amounts under them, the avalanche rating
+	   and the next-5-days range. */
+	@media (min-width: 641px) {
+		.lrow {
+			min-height: 76px;
+		}
+		.ldays,
+		.lbars {
+			flex: 0 0 clamp(300px, 36vw, 460px);
+			gap: 6px;
+		}
+		.lbars {
+			height: 62px;
+			border-bottom: 0;
+		}
+		.bar {
+			grid-template-rows: 1fr auto;
+			gap: 3px;
+		}
+		.bar i {
+			margin: 0 22%;
+			align-self: end;
+		}
+		.bar small {
+			text-align: center;
+			font-size: 0.78rem;
+			font-weight: 600;
+			color: var(--text);
+		}
+		.bar small.zero {
+			color: var(--text-3);
+			font-weight: 400;
+		}
+		.lavy {
+			flex: 0 0 140px;
+		}
+		.l5 {
+			flex: 0 0 120px;
+			text-align: right;
+			display: grid;
+		}
+		.l5 b {
+			font-weight: 600;
+		}
+		.l5 small {
+			font-size: 0.75rem;
+			color: var(--text-2);
+		}
+		.ltotal {
+			font-size: 1.6rem;
+		}
+	}
+	@media (max-width: 1099px) and (min-width: 641px) {
+		.lavy {
+			display: none;
+		}
+	}
+	/* Beside the rail: narrower bars, so long names have room. */
+	@media (min-width: 1100px) {
+		.ldays,
+		.lbars {
+			flex-basis: clamp(280px, calc(30vw - 40px), 440px);
+		}
+	}
 	@media (max-width: 640px) {
 		.head {
-			margin-bottom: 10px;
+			padding-top: 6px;
 		}
 		h1 {
-			font-size: 1.6rem;
+			font-size: 1.9rem;
+		}
+		.storms {
+			grid-auto-columns: 78%;
+			margin: -4px -16px 0;
+			padding: 4px 16px 14px;
+			scroll-padding-inline: 16px;
 		}
 	}
 </style>

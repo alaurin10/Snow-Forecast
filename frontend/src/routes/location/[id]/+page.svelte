@@ -1,3 +1,7 @@
+<!-- One location. Desktop: the name on the sky with the elevation control beside it, the
+     outlook card, then the section (Forecast, Models, Backcountry, Observed; the rail
+     switches them). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
+     chart first. The sky behind shows this location's weather now. -->
 <script lang="ts">
 	import { safeHref } from '../../../lib/links';
 	import { page } from '$app/state';
@@ -25,8 +29,7 @@
 	import { ENSEMBLE_NAMES } from '../../../lib/models';
 	import { dateOf, weekday } from '../../../lib/time';
 	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
-	import { availableRanges, type Range } from '../../../lib/charts/forecast';
-	import { pageBar } from '../../../lib/pagebar.svelte';
+	import type { Range } from '../../../lib/charts/forecast';
 	import PeriodGrid from '../../../lib/components/PeriodGrid.svelte';
 	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
 	import Exceedance from '../../../lib/charts/Exceedance.svelte';
@@ -40,19 +43,20 @@
 	import Webcams from '../../../lib/components/Webcams.svelte';
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
-	import { compass, skyWord } from '../../../lib/conditions';
+	import { compass, DANGER_WORDS } from '../../../lib/conditions';
 	import { nextStorm, periodName, startsIn, STORM_CM } from '../../../lib/storm';
 	import ShareButton from '../../../lib/share/ShareButton.svelte';
 	import { paint, slug } from '../../../lib/share/canvas';
 	import { drawDaysCard } from '../../../lib/share/daysCard';
 	import { viewport } from '../../../lib/viewport.svelte';
+	import { sections, SECTION_NAMES, type Section } from '../../../lib/sections.svelte';
+	import { skyState } from '../../../lib/skystate.svelte';
+	import { skyOf, hourIndex } from '../../../lib/sky';
 	import DayList from '../../../lib/components/DayList.svelte';
 	import DaySheet from '../../../lib/charts/DaySheet.svelte';
 	import ErrorNote from '../../../lib/components/ErrorNote.svelte';
 	import { friendlyError } from '../../../lib/errors';
 	import type { LoadState } from '../../../lib/load';
-
-	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
 	const id = $derived(page.params.id ?? '');
 	let snap = $state<Snapshot | null>(null);
@@ -60,31 +64,15 @@
 	let error = $state<string | null>(null);
 	let notFound = $state(false);
 	let retry = $state(0);
-	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
 	let range = $state<Range>(5);
-	let tabsEl = $state<HTMLElement>();
 	const phone = $derived(viewport.phone);
 	// Phones: a day's hours open as a chart in a popup over the day list.
 	let hourlyDay = $state<{ date: string; start: string } | null>(null);
-
-	// Desktop: once the section tabs scroll away, the page's controls dock into the header.
-	$effect(() => {
-		pageBar.snippet = dock;
-		return () => {
-			pageBar.snippet = null;
-			pageBar.show = false;
-		};
-	});
-	$effect(() => {
-		if (!tabsEl) return;
-		const io = new IntersectionObserver(
-			([e]) => (pageBar.show = !e.isIntersecting && e.boundingClientRect.top < 80),
-			{ rootMargin: '-72px 0px 0px 0px' }
-		);
-		io.observe(tabsEl);
-		return () => io.disconnect();
-	});
+	// Desktop: the day under the pointer in the table (shaded on the chart) and on the
+	// chart (lit in the table).
+	let tableDate = $state<string | null>(null);
+	let chartDate = $state<string | null>(null);
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
@@ -107,6 +95,8 @@
 		avy = null;
 		avyLoad = 'loading';
 		scoresLoad = 'loading';
+		tableDate = null;
+		chartDate = null;
 		crosshair.reset();
 		getSnapshot(current)
 			.then((s) => {
@@ -144,17 +134,23 @@
 		return () => (live = false);
 	});
 
-	const tabs = $derived<Tab[]>(
+	const tabs = $derived<Section[]>(
 		snap?.location.kind === 'backcountry'
 			? ['forecast', 'backcountry', 'models', 'observed']
 			: ['forecast', 'models', 'backcountry', 'observed']
 	);
-	const names: Record<Tab, string> = {
-		forecast: 'Forecast',
-		models: 'Models',
-		backcountry: 'Backcountry',
-		observed: 'Observed'
-	};
+	// The rail shows this location's sections; the sky shows its weather now.
+	$effect(() => {
+		sections.id = snap ? id : null;
+		sections.list = snap ? tabs : [];
+		skyState.page = snap ? skyOf(snap) : null;
+	});
+	$effect(() => () => {
+		sections.id = null;
+		sections.list = [];
+		skyState.page = null;
+	});
+	const tab = $derived(sections.tab);
 	const band = $derived(
 		snap ? (snap.bands.find((b) => b.band === prefs.band) ?? snap.bands[1]) : null
 	);
@@ -169,6 +165,9 @@
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
 	const c = $derived(converters(units));
 	const storm = $derived(band ? nextStorm(band.periods) : null);
+	// The hour holding "now", for the current conditions.
+	const nowAt = $derived(band && snap ? hourIndex(band.hourly, snap.now) : 0);
+	const sky = $derived(skyState.current);
 	// Open the period details for a time picked on the chart.
 	const pickTime = (t: string) => {
 		if (!band) return;
@@ -217,39 +216,14 @@
 				})
 			: ''
 	);
+	const avyRated = $derived(avy?.status === 'current' && !!avy.today_max);
+	const avyCenter = $derived(avy?.doc?.center ?? null);
+	const next5 = $derived(band?.windows['next5'] ?? null);
 </script>
 
 <svelte:head
 	><title>{snap ? `${snap.location.name} · Snow Watch` : 'Snow Watch'}</title></svelte:head
 >
-
-{#snippet dock()}
-	{#if snap && band}
-		<div class="dock">
-			<span class="dock-name">{snap.location.name}</span>
-			<div class="seg mini" role="group" aria-label="Elevation">
-				{#each snap.bands as b (b.band)}
-					<button
-						aria-pressed={band.band === b.band}
-						onclick={() => prefs.setBand(b.band as BandName)}>{b.label}</button
-					>
-				{/each}
-			</div>
-			<div class="seg mini" role="group" aria-label="Sections">
-				{#each tabs as t (t)}
-					<button aria-pressed={tab === t} onclick={() => (tab = t)}>{names[t]}</button>
-				{/each}
-			</div>
-			{#if tab === 'forecast'}
-				<div class="seg mini" role="group" aria-label="Time range">
-					{#each availableRanges(band.hourly.t.length) as r (r)}
-						<button aria-pressed={range === r} onclick={() => (range = r)}>{r}d</button>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	{/if}
-{/snippet}
 
 {#snippet shareDaysBtn()}
 	{#if place && band}
@@ -274,6 +248,59 @@
 	{/if}
 {/snippet}
 
+{#snippet headsUpCard()}
+	{#if snap && headsUp.length}
+		<section class="card heads">
+			<h2>Heads up</h2>
+			<ul>
+				{#each headsUp as f, i (i)}
+					<li class={f.severity}>
+						<span
+							><strong>{flagTitle(f)}</strong>{#if isNew(f, snap.run_id)}<span class="new">New</span
+								>{/if}</span
+						>
+						<span class="muted">{flagText(f, units)}</span>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet aboutCard()}
+	{#if snap && band}
+		<section class="card about">
+			<h2>About this forecast</h2>
+			<p class="muted small">
+				Snow is the median of {snap.models.length} weather models, switching to the ensemble mean
+				{#if snap.basis_switch}from {weekday(dateOf(snap.basis_switch))}{/if}
+				when fewer than three models still run. Ranges come from
+				{Object.entries(snap.ensembles)
+					.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)
+					.join(', ') || 'no ensembles'}.
+			</p>
+			{#if band.windows['next5'].snow_cm_slr !== null && band.windows['next5'].snow_cm_slr !== band.windows['next5'].snow_cm}
+				<p class="muted small">
+					With a temperature-based snow-to-liquid ratio the next 5 days would be
+					<strong>{snow(band.windows['next5'].snow_cm_slr, units)}</strong>.
+				</p>
+			{/if}
+			{#if Object.keys(snap.location.links).length}
+				<h3>Links</h3>
+				<ul class="links">
+					{#each Object.entries(snap.location.links) as [name, url] (name)}
+						<!-- External site: resolve() is only for routes in this app. -->
+						<li>
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a href={safeHref(url)} rel="noopener noreferrer" target="_blank">{name}</a>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
+{/snippet}
+
 {#if notFound}
 	<div class="card">
 		<h1 class="nf">No forecast here</h1>
@@ -288,92 +315,145 @@
 		<a href={resolve('/')}>All locations</a>
 	</ErrorNote>
 {:else if !snap || !band}
-	<p class="muted" aria-live="polite">Loading…</p>
+	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else}
 	{#if phone}
-		<div class="mhead">
-			<a class="mback" href={resolve('/')} aria-label="All locations">
-				<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+		<header class="mhead">
+			<a class="mback glass" href={resolve('/')} aria-label="All locations">
+				<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
 					><path d="M15 5l-7 7 7 7" /></svg
 				>
 			</a>
 			<h1>{snap.location.name}</h1>
-		</div>
-		<div class="mband">
-			<span class="mbname faint"><strong>{band.label}</strong> · {updated}</span>
-			<div class="seg elevs" role="group" aria-label="Elevation, {c.heightUnit}">
+		</header>
+		<div class="mrow">
+			<span class="pill glass" title="{band.label} · updated {updated}">
+				<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
+				{sky.label} · <span class="num">{temperature(band.hourly.temp_c[nowAt], units)}</span>
+			</span>
+			<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
 				{#each snap.bands as b (b.band)}
 					<button
+						class="num"
 						aria-pressed={band.band === b.band}
 						aria-label="{b.label}, {elevation(b.elev_m, units)}"
 						onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
 					>
 				{/each}
-				<span class="unit" aria-hidden="true">{c.heightUnit}</span>
 			</div>
 		</div>
 	{:else}
-		<div class="loc-head">
+		<header class="lhead">
 			<div class="title">
-				<a class="back faint" href={resolve('/')}>← All locations</a>
 				<h1>{snap.location.name}</h1>
-				<div class="muted sub">
-					{snap.location.region} ·
-					<span class="nw"
-						>{band.label}
-						{elevation(band.elev_m, units)}</span
-					>
-					· <span class="nw">updated {updated}</span>
-				</div>
+				<span class="pill glass">
+					<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
+					{snap.location.region} · {sky.label} now · updated {updated}
+				</span>
 			</div>
-			<div class="seg elev" role="group" aria-label="Elevation">
+			<div class="seg glass elev" role="group" aria-label="Elevation">
 				{#each snap.bands as b (b.band)}
 					<button
 						aria-pressed={band.band === b.band}
-						onclick={() => prefs.setBand(b.band as BandName)}>{b.label}</button
+						onclick={() => prefs.setBand(b.band as BandName)}
+						><span class="bn">{b.label}</span><span class="be num"
+							>{elevation(b.elev_m, units)}</span
+						></button
 					>
 				{/each}
 			</div>
-		</div>
+		</header>
 
-		<div class="now" aria-label="Right now">
-			<span class="now-lbl">Now</span>
-			<span
-				><strong class="num">{temperature(band.hourly.temp_c[0], units)}</strong>
-				{skyWord(band.hourly.wcode[0])}</span
-			>
-			<span><span class="faint">Freezing level</span> {elevation(band.hourly.fl_m[0], units)}</span>
-			<span
-				><span class="faint">Wind</span>
-				{compass(band.hourly.wdir[0])}
-				{speed(band.hourly.wind_kmh[0], units)}, gusts {speed(band.hourly.gust_kmh[0], units)}</span
-			>
-		</div>
+		<section class="card outlook" aria-label="Outlook">
+			<div>
+				<span class="eyebrow">Next 5 days</span>
+				<span class="big num">{snowNum(next5?.snow_cm, units)}<small>{c.snowUnit}</small></span>
+				{#if next5?.ens}
+					<span class="small muted"
+						>{snowNum(next5.ens.p10, units)}–{snowNum(next5.ens.p90, units)}
+						{c.snowUnit} likely{next5.ens.estimated ? ' (est.)' : ''}</span
+					>
+				{/if}
+				<span class="small muted"
+					><span class="nw">Days 6–10: {snow(band.windows['d6_10'].snow_cm, units)}</span> ·
+					<span class="nw">last 24 h: {snow(band.stats.last24_cm, units)}</span></span
+				>
+			</div>
+			<div class="stormcell">
+				<span class="eyebrow">Next storm</span>
+				{#if storm}
+					<span class="big num">{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span>
+					<span class="small"
+						><strong
+							><span class="nw">{periodName(storm.first)}</span
+							>{#if storm.periods > 1}&#32;→&#32;<span class="nw">{periodName(storm.last)}</span
+								>{/if}</strong
+						>
+						· <span class="nw">{startsIn(dateOf(snap.now), storm.first)}</span></span
+					>
+					<span class="small muted"
+						><span class="nw"
+							>Heaviest {periodName(storm.peak)}: {snow(storm.peak.snow_cm, units)}</span
+						>{#if storm.snow_level_min_m !== null}&nbsp;·&#32;<span class="nw"
+								>snow level {elevation(storm.snow_level_min_m, units)}</span
+							>{/if}</span
+					>
+				{:else}
+					<span class="big">Quiet</span>
+					<span class="small muted">No storm of {snow(STORM_CM, units)}+ in sight</span>
+				{/if}
+			</div>
+			<div>
+				<span class="eyebrow">Now</span>
+				<span class="big num">{temperature(band.hourly.temp_c[nowAt], units)}</span>
+				<span class="small muted"
+					>{compass(band.hourly.wdir[nowAt])}
+					{speed(band.hourly.wind_kmh[nowAt], units)}, gusts {speed(
+						band.hourly.gust_kmh[nowAt],
+						units
+					)}</span
+				>
+				<span class="small muted">Freezing level {elevation(band.hourly.fl_m[nowAt], units)}</span>
+			</div>
+			<div>
+				<span class="eyebrow">Avalanche</span>
+				{#if avyLoad === 'loading'}
+					<span class="big faint">…</span>
+				{:else if avyRated && avy?.today_max}
+					<span class="avyval"
+						><span class="danger d{avy.today_max}"
+							>{avy.today_max} · {DANGER_WORDS[avy.today_max] ?? ''}</span
+						></span
+					>
+					<span class="small muted">{avyCenter ?? 'Avalanche center'} · today’s highest</span>
+				{:else}
+					<span class="big">No rating</span>
+					<span class="small muted"
+						>{avyCenter
+							? `${avyCenter}${avy?.doc?.off_season ? ' · off season' : ''}`
+							: 'None published right now'}</span
+					>
+				{/if}
+			</div>
+		</section>
 	{/if}
 
 	{#each snap.alerts as a, i (i)}
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
 
-	<nav class="tabs" aria-label="Sections" bind:this={tabsEl}>
-		{#each tabs as t (t)}
-			<button aria-pressed={tab === t} onclick={() => (tab = t)}>{names[t]}</button>
-		{/each}
-	</nav>
+	{#if !viewport.desktop}
+		<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
+			{#each tabs as t (t)}
+				<button role="tab" aria-selected={tab === t} onclick={() => (sections.tab = t)}
+					>{SECTION_NAMES[t]}</button
+				>
+			{/each}
+		</div>
+	{/if}
 
 	{#if tab === 'forecast'}
 		<div class="stackcol">
-			{#if backcountry && !phone}
-				<section class="card thin">
-					<DangerPyramid
-						view={avy}
-						tz={snap.location.tz}
-						today={dateOf(snap.now)}
-						load={avyLoad}
-						compact
-					/>
-				</section>
-			{/if}
 			{#if phone}
 				<section class="card chartcard">
 					<ForecastChart {band} bands={snap.bands} {units} bind:range place={place ?? undefined} />
@@ -389,16 +469,15 @@
 						/>
 					</section>
 				{/if}
-				<section class="card mout">
+				<section class="card mout" aria-label="Outlook">
 					<div>
 						<span class="eyebrow">Next 5 days</span>
-						<span class="mnum num"
-							>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
+						<span class="mnum num">{snowNum(next5?.snow_cm, units)}<small>{c.snowUnit}</small></span
 						>
-						{#if band.windows['next5'].ens}
-							{@const e = band.windows['next5'].ens}
+						{#if next5?.ens}
 							<span class="faint msub"
-								>{snowNum(e.p10, units)}–{snowNum(e.p90, units)} likely{e.estimated
+								>{snowNum(next5.ens.p10, units)}–{snowNum(next5.ens.p90, units)} likely{next5.ens
+									.estimated
 									? ' (est.)'
 									: ''}</span
 							>
@@ -418,10 +497,10 @@
 					</div>
 					<div>
 						<span class="eyebrow">Now</span>
-						<span class="mnum num">{temperature(band.hourly.temp_c[0], units)}</span>
+						<span class="mnum num">{temperature(band.hourly.temp_c[nowAt], units)}</span>
 						<span class="faint msub"
-							>{compass(band.hourly.wdir[0])}
-							{speed(band.hourly.wind_kmh[0], units)}</span
+							>{compass(band.hourly.wdir[nowAt])}
+							{speed(band.hourly.wind_kmh[nowAt], units)}</span
 						>
 					</div>
 				</section>
@@ -438,53 +517,22 @@
 						onhourly={(date, start) => (hourlyDay = { date, start })}
 					/>
 				</section>
+				{@render headsUpCard()}
+				{@render aboutCard()}
+				<Webcams cams={snap.location.webcams ?? []} />
 			{:else}
-				<section class="card outlook">
-					<div class="half">
-						<span class="eyebrow">Next 5 days</span>
-						<span class="big num"
-							>{snowNum(band.windows['next5'].snow_cm, units)}<small>{c.snowUnit}</small></span
-						>
-						{#if band.windows['next5'].ens}
-							{@const e = band.windows['next5'].ens}
-							<span class="faint small"
-								>{snowNum(e.p10, units)}–{snowNum(e.p90, units)}
-								{c.snowUnit} likely{e.estimated ? ' (est.)' : ''}</span
-							>
-						{/if}
-						<span class="faint small"
-							><span class="nw">Days 6–10: {snow(band.windows['d6_10'].snow_cm, units)}</span> ·
-							<span class="nw">Last 24 h: {snow(band.stats.last24_cm, units)}</span></span
-						>
-					</div>
-					<div class="half storm">
-						<span class="eyebrow">Next storm</span>
-						{#if storm}
-							<span class="big num"
-								>{snowNum(storm.total_cm, units)}<small>{c.snowUnit}</small></span
-							>
-							<span class="small">
-								<strong
-									><span class="nw">{periodName(storm.first)}</span
-									>{#if storm.periods > 1}&#32;→&#32;<span class="nw">{periodName(storm.last)}</span
-										>{/if}</strong
-								>
-								· <span class="nw">{startsIn(dateOf(snap.now), storm.first)}</span>
-							</span>
-							<span class="small muted">
-								<span class="nw"
-									>Heaviest {periodName(storm.peak)}: {snow(storm.peak.snow_cm, units)}</span
-								>{#if storm.snow_level_min_m !== null}&nbsp;·&#32;<span class="nw"
-										>snow level {elevation(storm.snow_level_min_m, units)}</span
-									>{/if}
-							</span>
-						{:else}
-							<span class="big">Quiet</span>
-							<span class="small">No storm of {snow(STORM_CM, units)}+ in sight</span>
-						{/if}
-					</div>
-				</section>
-				<section class="card">
+				{#if backcountry}
+					<section class="card thin">
+						<DangerPyramid
+							view={avy}
+							tz={snap.location.tz}
+							today={dateOf(snap.now)}
+							load={avyLoad}
+							compact
+						/>
+					</section>
+				{/if}
+				<section class="card chartcard">
 					<ForecastChart
 						{band}
 						bands={snap.bands}
@@ -492,72 +540,37 @@
 						onpick={pickTime}
 						bind:range
 						place={place ?? undefined}
+						shadeDate={tableDate}
+						onhoverdate={(d) => (chartDate = d)}
 					/>
 				</section>
 				<section class="card">
 					<div class="cardhead">
-						<h2>Day by day</h2>
+						<div>
+							<h2>Day by day</h2>
+							<p class="faint small hint">
+								Each cell shows the day, then the night. Point at a day to find it on the chart;
+								pick a snow cell for its details.
+							</p>
+						</div>
 						{@render shareDaysBtn()}
 					</div>
 					<PeriodGrid
 						periods={band.periods}
 						hourly={band.hourly}
+						days={snap.days ?? []}
 						{units}
 						onselect={(p) => (selected = p)}
+						focusDate={chartDate}
+						onhoverdate={(d) => (tableDate = d)}
 					/>
 				</section>
-			{/if}
-			{#if headsUp.length}
-				<section class="card heads">
-					<h2>Heads up</h2>
-					<ul>
-						{#each headsUp as f, i (i)}
-							<li class={f.severity}>
-								<span
-									><strong>{flagTitle(f)}</strong>{#if isNew(f, snap.run_id)}<span class="new"
-											>New</span
-										>{/if}</span
-								>
-								<span class="muted">{flagText(f, units)}</span>
-							</li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
-			<div class="extras">
-				<section class="card">
-					<h2>About this forecast</h2>
-					<p class="muted small">
-						Snow is the median of {snap.models.length} weather models, switching to the ensemble mean
-						{#if snap.basis_switch}from {weekday(dateOf(snap.basis_switch))}{/if}
-						when fewer than three models still run. Ranges come from
-						{Object.entries(snap.ensembles)
-							.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)
-							.join(', ') || 'no ensembles'}.
-					</p>
-					{#if band.windows['next5'].snow_cm_slr !== null && band.windows['next5'].snow_cm_slr !== band.windows['next5'].snow_cm}
-						<p class="muted small">
-							With a temperature-based snow-to-liquid ratio the next 5 days would be
-							<strong>{snow(band.windows['next5'].snow_cm_slr, units)}</strong>.
-						</p>
-					{/if}
-				</section>
-				{#if Object.keys(snap.location.links).length}
-					<section class="card">
-						<h2>Links</h2>
-						<ul class="links">
-							{#each Object.entries(snap.location.links) as [name, url] (name)}
-								<!-- External site: resolve() is only for routes in this app. -->
-								<li>
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-									<a href={safeHref(url)} rel="noopener noreferrer" target="_blank">{name}</a>
-								</li>
-							{/each}
-						</ul>
-					</section>
-				{/if}
+				<div class="extras">
+					{@render headsUpCard()}
+					{@render aboutCard()}
+				</div>
 				<Webcams cams={snap.location.webcams ?? []} />
-			</div>
+			{/if}
 		</div>
 	{:else if tab === 'models'}
 		<div class="stackcol">
@@ -632,218 +645,327 @@
 		font-size: 1.2rem;
 		margin: 0 0 6px;
 	}
-	.loc-head {
+	.loading {
+		display: inline-block;
+		margin: 8px 0;
+		padding: 8px 16px;
+		border-radius: 999px;
+		color: var(--text-2);
+	}
+	h1 {
+		margin: 0;
+		font-family: var(--font-num);
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		line-height: 1.05;
+	}
+	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 14px 6px 7px;
+		border-radius: 999px;
+		font-size: 0.88rem;
+		font-weight: 500;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 100%;
+	}
+	/* A swatch of the scene's sky (the same colours as the backdrop's top). */
+	.skydot {
+		flex: 0 0 20px;
+		height: 20px;
+		border-radius: 50%;
+		background: linear-gradient(180deg, #62a8ea, #e6f1fa);
+		box-shadow: inset 0 0 0 1px var(--glass-border);
+	}
+	.skydot[data-scene='clear'] {
+		background: linear-gradient(180deg, #4f9fec, #dff0fc);
+	}
+	.skydot[data-scene='night'] {
+		background: linear-gradient(180deg, #1d2a4f, #7f88d8);
+	}
+	.skydot[data-scene='glow'] {
+		background: linear-gradient(180deg, #8aa4e6, #ffe3c4);
+	}
+	.skydot[data-scene='overcast'],
+	.skydot[data-scene='fog'] {
+		background: linear-gradient(180deg, #9fb0c4, #e6ebf1);
+	}
+	.skydot[data-scene='snow'],
+	.skydot[data-scene='heavy'],
+	.skydot[data-scene='mixed'] {
+		background: linear-gradient(180deg, #a9bcd6, #f4f7fb);
+	}
+	.skydot[data-scene='rain'] {
+		background: linear-gradient(180deg, #8fa6b8, #dbe4ea);
+	}
+
+	/* --- Desktop and tablet --- */
+	.lhead {
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-end;
-		gap: 12px;
+		gap: 12px 24px;
 		flex-wrap: wrap;
-		padding: 4px 0 14px;
+		padding: 18px 4px 14px;
+	}
+	.lhead h1 {
+		font-size: 2.9rem;
+		margin-bottom: 10px;
 	}
 	.title {
 		min-width: 0;
 	}
-	h1 {
-		margin: 4px 0 2px;
+	.seg.elev {
+		padding: 4px;
+		border-radius: 20px;
+	}
+	.seg.elev button {
+		display: grid;
+		justify-items: center;
+		gap: 0;
+		padding: 5px 16px;
+		border-radius: 16px;
+		min-width: 110px;
+	}
+	.bn {
+		font-size: 0.86rem;
+	}
+	.be {
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--text-2);
+	}
+	.outlook {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		padding: 0;
+		overflow: hidden;
+		margin-bottom: 16px;
+	}
+	.outlook > div {
+		display: grid;
+		align-content: start;
+		gap: 3px;
+		padding: 16px 20px;
+		min-width: 0;
+	}
+	.outlook > div + div {
+		border-left: 1px solid var(--grid);
+	}
+	.stormcell {
+		background: var(--accent-soft);
+	}
+	.stormcell .eyebrow {
+		color: var(--accent-ink);
+	}
+	.big {
 		font-family: var(--font-num);
-		font-size: 2rem;
+		font-size: 1.9rem;
 		font-weight: 600;
-		letter-spacing: -0.02em;
 		line-height: 1.1;
+		letter-spacing: -0.03em;
 	}
-	.back {
+	.big small,
+	.mnum small {
+		font-family: var(--font-ui);
 		font-size: 0.82rem;
-		text-decoration: none;
+		font-weight: 500;
+		letter-spacing: 0;
+		margin-left: 3px;
+		color: var(--text-2);
 	}
-	.sub {
-		font-size: 0.85rem;
+	.avyval {
+		display: flex;
+		align-items: center;
+		min-height: 2.1rem;
+	}
+	.avyval .danger {
+		font-size: 0.95rem;
+		padding: 3px 12px;
+	}
+	@media (max-width: 1099px) {
+		.outlook {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.outlook > div:nth-child(3) {
+			border-left: 0;
+		}
+		.outlook > div:nth-child(n + 3) {
+			border-top: 1px solid var(--grid);
+		}
 	}
 	.nw {
 		white-space: nowrap;
 	}
+	.small {
+		font-size: 0.85rem;
+	}
 	.alert {
 		background: var(--warn-bg);
 		border: 1px solid var(--warn-border);
-		border-radius: 14px;
-		padding: 10px 14px;
+		color: var(--warn-ink);
+		border-radius: 18px;
+		padding: 10px 16px;
 		margin: 0 0 12px;
-		font-size: 0.88rem;
+		font-size: 0.9rem;
 	}
 	.tabs {
 		display: inline-flex;
 		gap: 2px;
-		padding: 3px;
+		padding: 4px;
 		margin: 0 0 16px;
 		border-radius: 999px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
+		background: var(--glass);
+		border: 1px solid var(--glass-border);
+		box-shadow: var(--glass-shadow);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
 		max-width: 100%;
 		overflow-x: auto;
 	}
 	.tabs button {
 		border: 0;
 		background: none;
-		padding: 8px 16px;
+		padding: 8px 18px;
 		cursor: pointer;
 		color: var(--text-2);
 		border-radius: 999px;
 		white-space: nowrap;
-		font-size: 0.88rem;
-	}
-	/* Phones: the section tabs and elevation picker span the width so every option shows. */
-	@media (max-width: 640px) {
-		.tabs,
-		.seg.elev {
-			display: flex;
-			width: 100%;
-		}
-		.tabs button,
-		.seg.elev button {
-			flex: 1 1 auto;
-			min-width: 0;
-			padding-left: 8px;
-			padding-right: 8px;
-			overflow: hidden;
-			text-overflow: ellipsis;
-		}
-		.tabs button {
-			padding-top: 7px;
-			padding-bottom: 7px;
-			font-size: 0.85rem;
-		}
-		.seg.elev button {
-			padding-top: 5px;
-			padding-bottom: 5px;
-		}
-		.loc-head {
-			padding-bottom: 12px;
-		}
-	}
-	.tabs button[aria-pressed='true'] {
-		color: var(--text);
-		background: var(--surface);
-		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
-		font-weight: 600;
-	}
-	.dock {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		white-space: nowrap;
-	}
-	.dock-name {
-		font-family: var(--font-num);
-		font-weight: 600;
 		font-size: 0.9rem;
-		padding: 0 6px 0 8px;
-		max-width: 180px;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		transition:
+			background-color var(--ease),
+			box-shadow var(--ease);
 	}
-	.seg.mini {
-		background: transparent;
-		border-color: var(--border);
-	}
-	.seg.mini button {
-		padding: 4px 9px;
-		font-size: 0.78rem;
-	}
-	@media (max-width: 1279px) {
-		.dock-name {
-			display: none;
-		}
-	}
-	.now {
-		display: flex;
-		gap: 8px 18px;
-		align-items: center;
-		flex-wrap: nowrap;
-		overflow-x: auto;
-		white-space: nowrap;
-		margin: -4px 0 14px;
-		padding: 8px 14px;
-		border-radius: 999px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		font-size: 0.85rem;
-		scrollbar-width: none;
-	}
-	/* Phones: let the "Now" items wrap rather than hide off the right edge. */
-	@media (max-width: 640px) {
-		.now {
-			flex-wrap: wrap;
-			gap: 4px 14px;
-			border-radius: 14px;
-			padding: 8px 12px;
-		}
-	}
-	.now strong {
-		font-size: 1rem;
+	.tabs button[aria-selected='true'] {
+		color: var(--text);
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
 		font-weight: 600;
-	}
-	.now-lbl {
-		font-size: 0.7rem;
-		font-weight: 600;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--accent);
-	}
-	.outlook {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		padding: 0;
-		overflow: hidden;
-	}
-	.half {
-		display: grid;
-		align-content: start;
-		gap: 4px;
-		padding: 14px 16px;
-		min-width: 0;
-	}
-	.half.storm {
-		background: var(--accent-soft);
-	}
-	.eyebrow {
-		font-size: 0.7rem;
-		font-weight: 600;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--text-3);
-	}
-	.storm .eyebrow {
-		color: var(--accent);
-	}
-	.big {
-		font-family: var(--font-num);
-		font-size: 1.9rem;
-		font-weight: 600;
-		line-height: 1.05;
-		letter-spacing: -0.02em;
-	}
-	.big small {
-		font-family: var(--font-ui);
-		font-size: 0.8rem;
-		font-weight: 500;
-		letter-spacing: 0;
-		margin-left: 3px;
-		color: var(--text-2);
 	}
 	.stackcol {
 		display: grid;
-		gap: 12px;
+		gap: 16px;
 	}
+	.chartcard {
+		padding: 18px 20px 16px;
+	}
+	.cardhead {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+	.cardhead h2 {
+		margin: 0;
+	}
+	.hint {
+		margin: 2px 0 0;
+	}
+	.extras {
+		display: grid;
+		gap: 16px;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+		align-items: start;
+	}
+	.two {
+		display: grid;
+		gap: 16px;
+	}
+	@media (min-width: 768px) {
+		.two {
+			grid-template-columns: 1fr 1fr;
+		}
+	}
+	.heads h2 {
+		margin: 0 0 8px;
+	}
+	.heads ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: grid;
+		gap: 10px;
+		font-size: 0.9rem;
+	}
+	.heads li {
+		display: grid;
+		gap: 1px;
+		padding-left: 18px;
+		position: relative;
+	}
+	.heads li::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 7px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--text-3);
+	}
+	.heads li.notice::before {
+		background: var(--snow);
+	}
+	.heads li.warning::before {
+		background: var(--warn);
+	}
+	.heads .new {
+		margin-left: 6px;
+		font-size: 0.66rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--accent-ink);
+	}
+	.about h3 {
+		margin: 14px 0 6px;
+		font-size: 0.88rem;
+	}
+	.links {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		font-size: 0.86rem;
+	}
+	.links a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 32px;
+		padding: 0 12px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text);
+		text-decoration: none;
+	}
+	.links a:hover {
+		text-decoration: underline;
+	}
+	.thin {
+		padding-top: 8px;
+		padding-bottom: 8px;
+	}
+	.section {
+		font-size: 1rem;
+		margin: 4px 4px -6px;
+	}
+
 	/* --- Phones --- */
 	.mhead {
 		display: flex;
 		align-items: center;
-		gap: 2px;
-		margin: -6px 0 0 -12px;
+		gap: 10px;
+		margin: 0 0 10px;
 	}
 	.mhead h1 {
-		margin: 0;
 		min-width: 0;
-		font-size: 1.45rem;
+		font-size: 1.6rem;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -851,9 +973,10 @@
 	.mback {
 		flex: 0 0 44px;
 		height: 44px;
+		border-radius: 50%;
 		display: grid;
 		place-items: center;
-		color: var(--text-2);
+		color: var(--text);
 	}
 	.mback svg {
 		fill: none;
@@ -862,40 +985,51 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
-	.mband {
+	.mrow {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 10px;
+		gap: 8px;
 		margin: 0 0 6px;
 	}
-	.mbname {
+	.mrow .pill {
+		flex: 0 1 auto;
 		min-width: 0;
-		font-size: 0.78rem;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.mbname strong {
-		font-weight: 600;
-		color: var(--text-2);
+		padding: 5px 11px 5px 5px;
+		font-size: 0.8rem;
 	}
 	.seg.elevs {
 		flex: 0 0 auto;
-		align-items: center;
-		border-radius: 12px;
+		padding: 4px;
 	}
 	.seg.elevs button {
-		min-width: 50px;
-		padding: 8px 8px;
-		border-radius: 10px;
-		font-family: var(--font-num);
-		font-variant-numeric: tabular-nums;
+		min-width: 52px;
+		padding: 8px 6px;
+		font-size: 0.86rem;
 	}
-	.seg.elevs .unit {
-		padding: 0 8px 0 4px;
-		font-size: 0.72rem;
-		color: var(--text-3);
+	.tabs.under {
+		display: flex;
+		width: auto;
+		margin: 0 -16px 12px;
+		padding: 0 6px;
+		border: 0;
+		border-bottom: 1px solid var(--grid);
+		border-radius: 0;
+		background: none;
+		box-shadow: none;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+	.tabs.under button {
+		flex: 1 1 auto;
+		min-width: 0;
+		border-radius: 0;
+		padding: 12px 6px;
+		font-size: 0.88rem;
+	}
+	.tabs.under button[aria-selected='true'] {
+		background: none;
+		box-shadow: inset 0 -2px 0 var(--accent);
 	}
 	.mout {
 		display: grid;
@@ -906,35 +1040,27 @@
 		display: grid;
 		align-content: start;
 		gap: 2px;
-		padding: 10px 12px;
+		padding: 11px 12px;
 		min-width: 0;
 	}
 	.mout > div + div {
-		border-left: 1px solid var(--border);
+		border-left: 1px solid var(--grid);
 	}
 	.mout .eyebrow {
 		font-size: 0.66rem;
 	}
 	.mstorm .eyebrow {
-		color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.mnum {
 		font-family: var(--font-num);
 		font-size: 1.35rem;
 		font-weight: 600;
-		line-height: 1.1;
+		line-height: 1.15;
 		letter-spacing: -0.02em;
 	}
-	.mnum small {
-		font-family: var(--font-ui);
-		font-size: 0.75rem;
-		font-weight: 400;
-		letter-spacing: 0;
-		margin-left: 3px;
-		color: var(--text-2);
-	}
 	.msub {
-		font-size: 0.72rem;
+		font-size: 0.74rem;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -943,99 +1069,8 @@
 		.chartcard {
 			padding: 12px 10px;
 		}
-		.tabs {
-			border: 0;
-			border-radius: 0;
-			background: none;
-			padding: 0;
-			margin: 0 -16px 12px;
-			width: auto;
-			max-width: none;
-			border-bottom: 1px solid var(--border);
+		.stackcol {
+			gap: 12px;
 		}
-		.tabs button {
-			border-radius: 0;
-			padding-top: 11px;
-			padding-bottom: 11px;
-		}
-		.tabs button[aria-pressed='true'] {
-			background: none;
-			box-shadow: inset 0 -2px 0 var(--accent);
-		}
-	}
-	.extras {
-		display: grid;
-		gap: 12px;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-		align-items: start;
-	}
-	.two {
-		display: grid;
-		gap: 12px;
-	}
-	@media (min-width: 768px) {
-		.two {
-			grid-template-columns: 1fr 1fr;
-		}
-	}
-	.small {
-		font-size: 0.85rem;
-	}
-	.cardhead {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 10px;
-		margin-bottom: 10px;
-	}
-	.cardhead h2 {
-		margin: 0;
-	}
-	.heads h2 {
-		margin: 0 0 4px;
-		font-size: 0.95rem;
-	}
-	.heads ul {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-		display: grid;
-		gap: 6px;
-		font-size: 0.88rem;
-	}
-	.heads li {
-		display: grid;
-		gap: 1px;
-		padding-left: 10px;
-		border-left: 3px solid var(--border);
-	}
-	.heads li.notice {
-		border-left-color: var(--snow);
-	}
-	.heads li.warning {
-		border-left-color: var(--warn);
-	}
-	.heads .new {
-		margin-left: 6px;
-		font-size: 0.65rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		color: var(--accent);
-	}
-	.thin {
-		padding-top: 8px;
-		padding-bottom: 8px;
-	}
-	.section {
-		font-size: 0.95rem;
-		margin: 4px 0 -4px;
-	}
-	.links {
-		margin: 0;
-		padding-left: 18px;
-		font-size: 0.88rem;
-	}
-	.links a {
-		color: var(--text);
 	}
 </style>
