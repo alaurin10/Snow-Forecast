@@ -1,8 +1,9 @@
 # Snow Watch: one image for both services (api and worker).
-# Built on the mini PC by `docker compose up -d --build`; CI only checks that it builds.
+# Built on the server by `docker compose up -d --build`; CI only checks that it builds.
+# Base images are pinned by digest (Dependabot proposes updates).
 
 # 1. Frontend: a static build of the SvelteKit app.
-FROM node:24-alpine AS frontend
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -10,7 +11,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 2. Runtime: Python 3.12 with the backend, the config and the built frontend.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -31,11 +32,14 @@ RUN uv sync --frozen --no-dev
 COPY config /app/config
 COPY --from=frontend /src/frontend/build /app/static
 
-# Runs as uid 1000, the usual first user on the Docker VM, so ./data stays yours.
+# Runs as uid 1000, the usual first user on a Linux host, so ./data stays yours.
 RUN useradd --create-home --uid 1000 snow && mkdir -p /data && chown snow /data
 USER snow
 
-ENV PATH=/app/backend/.venv/bin:$PATH \
+# The commit this image was built from, shown on the About page.
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=$GIT_COMMIT \
+    PATH=/app/backend/.venv/bin:$PATH \
     DATA_DIR=/data \
     STATIC_DIR=/app/static \
     CONFIG_DIR=/app/config

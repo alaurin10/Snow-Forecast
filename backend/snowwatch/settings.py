@@ -77,6 +77,11 @@ class Settings(BaseSettings):
         return self.data_dir / "backups"
 
     @property
+    def heartbeat_path(self) -> Path:
+        """Touched by the worker every 30 s; its health check reads the age."""
+        return self.data_dir / "worker.heartbeat"
+
+    @property
     def osm_path(self) -> Path:
         """Ski runs, lifts and peaks for the map (see snowwatch/osm.py)."""
         return self.data_dir / "osm" / "ski.geojson"

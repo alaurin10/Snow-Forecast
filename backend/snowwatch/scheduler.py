@@ -50,6 +50,12 @@ class Worker:
         if runs or jobs_failed:
             log.warning("marked %d interrupted runs and %d jobs as failed", runs, jobs_failed)
 
+    def heartbeat(self) -> None:
+        """Show the scheduler is alive (separate from the run lock, so a long run counts)."""
+        path = self.settings.heartbeat_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
     def ping(self, url: str) -> None:
         """Tell Healthchecks.io a job succeeded. Never lets a failed ping break the job."""
         if not url:
@@ -258,6 +264,13 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             **opts,
         )
     sched.add_job(worker.process_jobs, IntervalTrigger(seconds=15), id="jobs", **opts)
+    sched.add_job(
+        worker.heartbeat,
+        IntervalTrigger(seconds=30),
+        id="heartbeat",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
     # Checks hourly; only fetches when the file is a week old or the locations changed.
     sched.add_job(
         worker.ski_map,

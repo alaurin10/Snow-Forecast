@@ -88,3 +88,19 @@ def test_no_ping_without_url(env: Settings) -> None:
     cli.main(["init"])
     w.nightly()
     assert pings == []
+
+
+def test_worker_healthcheck(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    import time
+
+    from snowwatch import cli
+
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    assert cli.main(["healthcheck", "worker"]) == 1  # no heartbeat yet
+    settings.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.heartbeat_path.touch()
+    assert cli.main(["healthcheck", "worker"]) == 0
+    old = time.time() - 600
+    os.utime(settings.heartbeat_path, (old, old))
+    assert cli.main(["healthcheck", "worker"]) == 1

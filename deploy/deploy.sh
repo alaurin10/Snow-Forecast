@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Poll-and-deploy for Snow Watch, run every 5 minutes by snowwatch-deploy.timer
-# on the Docker VM (same pattern as Home-Hub's apps/dashboard/scripts/deploy.sh).
+# on the server (see docs/DEPLOYMENT.md, "Automatic updates").
 #
 # Fetches main, fast-forwards, and rebuilds only when app files changed.
 # Outbound only: no webhook, no open port. A failed build leaves the running
@@ -29,6 +29,6 @@ fi
 
 echo "$(date -u +%FT%TZ) deploying $local_sha -> $remote_sha"
 git merge --ff-only --quiet "origin/$BRANCH"
-docker compose up -d --build
+GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 docker image prune -f >/dev/null
 echo "$(date -u +%FT%TZ) deployed $remote_sha"
