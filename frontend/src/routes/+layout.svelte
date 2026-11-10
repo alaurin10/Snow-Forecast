@@ -250,13 +250,16 @@
 			{@render children()}
 		</main>
 
-		<footer>
-			<span class="glass"
-				>Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS, NRCS
-				SNOTEL and <a href={resolve('/about')}>others</a>. Model snowfall is derived, not measured;
-				never a substitute for your avalanche center.</span
-			>
-		</footer>
+		<!-- The map credits its sources in its own (i) corner. -->
+		{#if page.route.id !== '/map'}
+			<footer>
+				<span class="glass"
+					>Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS,
+					NRCS SNOTEL and <a href={resolve('/about')}>others</a>. Model snowfall is derived, not
+					measured; never a substitute for your avalanche center.</span
+				>
+			</footer>
+		{/if}
 	</div>
 </div>
 

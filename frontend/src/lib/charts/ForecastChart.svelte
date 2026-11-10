@@ -762,8 +762,10 @@
 		const last = steps[steps.length - 1];
 		const b = Date.parse(last.t) + last.hours * 3600e3;
 		const n = days.length;
-		const from = dayPos(a);
-		const to = dayPos(b);
+		// Steps of 6 or 12 h start on the next clean boundary, a little after now, and the
+		// data can end mid-step: at either end the window still meets the edge.
+		const from = off === 0 ? 0 : dayPos(a);
+		const to = off >= maxOff ? n : dayPos(b);
 		return {
 			left: `${((from / n) * 100).toFixed(2)}%`,
 			width: `${(((to - from) / n) * 100).toFixed(2)}%`,

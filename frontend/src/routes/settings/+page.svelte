@@ -148,8 +148,8 @@
 			</div>
 		</div>
 		<div class="row">
-			<span>Day timeline under the chart</span>
-			<div class="seg" role="group" aria-label="Day timeline under the chart">
+			<span>Timeline</span>
+			<div class="seg" role="group" aria-label="Timeline under the forecast chart">
 				<button
 					aria-pressed={prefs.showTimeline === 'on'}
 					onclick={() => prefs.setShowTimeline(true)}>Show</button
@@ -160,6 +160,10 @@
 				>
 			</div>
 		</div>
+		<p class="faint small hint">
+			The strip of days under the forecast chart. Drag it or tap a day to move the chart through the
+			forecast. The chart’s bar-chart button shows or hides it too.
+		</p>
 		<h3>Put it on your home screen</h3>
 		<p class="muted small">
 			<strong>iPhone:</strong> open this site in Safari, tap Share, then “Add to Home Screen”.<br />

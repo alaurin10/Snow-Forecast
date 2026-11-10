@@ -571,20 +571,22 @@
 		color: var(--text);
 		font-weight: 600;
 	}
+	/* Compact rows, so more locations fit on one screen. */
 	.mrows li {
-		padding: 8px 0 6px;
+		padding: 4px 0 5px;
 	}
 	.mname {
 		display: flex;
 		justify-content: space-between;
 		align-items: baseline;
 		gap: 10px;
-		margin-bottom: 4px;
+		margin-bottom: 2px;
+		line-height: 1.2;
 	}
 	.mname a {
 		min-width: 0;
 		color: var(--text);
-		font-size: 0.88rem;
+		font-size: 0.82rem;
 		font-weight: 600;
 		text-decoration: none;
 		white-space: nowrap;
@@ -593,12 +595,13 @@
 	}
 	.mname span {
 		flex: 0 0 auto;
-		font-size: 0.78rem;
+		font-size: 0.74rem;
 		color: var(--text-2);
 	}
 	.mcells .heat {
-		height: 30px;
-		font-size: 0.72rem;
+		height: 24px;
+		border-radius: 8px;
+		font-size: 0.7rem;
 	}
 	.mcells .heat.rainy {
 		background: var(--rain-cell);
