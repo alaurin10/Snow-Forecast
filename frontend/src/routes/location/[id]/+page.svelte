@@ -336,6 +336,9 @@
 			</a>
 			<h1>{snap.location.name}</h1>
 		</header>
+		<p class="elevname" aria-hidden="true">
+			{band.label} <span class="faint">· {c.heightUnit}</span>
+		</p>
 		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
 		<div class="mrow" class:stuck>
 			<span class="pill glass" title="{band.label} · updated {updated}">
@@ -345,11 +348,10 @@
 			<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
 				{#each snap.bands as b (b.band)}
 					<button
+						class="num"
 						aria-pressed={band.band === b.band}
 						aria-label="{b.label}, {elevation(b.elev_m, units)}"
-						onclick={() => prefs.setBand(b.band as BandName)}
-						><span class="bn">{b.label}</span><span class="be num">{elevNum(b.elev_m)}</span
-						></button
+						onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
 					>
 				{/each}
 			</div>
@@ -973,7 +975,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		margin: 0 0 10px;
+		margin: 0 0 4px;
 	}
 	.mhead h1 {
 		min-width: 0;
@@ -1049,27 +1051,20 @@
 		padding: 3px;
 	}
 	.seg.elevs button {
-		display: grid;
-		justify-items: center;
-		min-width: 0;
-		width: 64px;
-		padding: 4px 4px 5px;
-		line-height: 1.15;
+		min-width: 52px;
+		padding: 8px 6px;
+		font-size: 0.86rem;
 	}
-	.seg.elevs .bn {
-		max-width: 100%;
-		font-size: 0.62rem;
-		font-weight: 500;
+	/* The chosen elevation's name, above the selector (it scrolls away; the selector stays). */
+	.elevname {
+		margin: 0 6px 2px;
+		text-align: right;
+		font-size: 0.74rem;
+		font-weight: 600;
 		color: var(--text-2);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-	}
-	.seg.elevs button[aria-pressed='true'] .bn {
-		color: var(--text);
-	}
-	.seg.elevs .be {
-		font-size: 0.86rem;
 	}
 	.tabs.under {
 		display: flex;
