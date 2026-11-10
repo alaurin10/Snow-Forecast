@@ -10,6 +10,7 @@
 	import { resolve } from '$app/paths';
 	import { prefs } from '../lib/prefs.svelte';
 	import { session } from '../lib/session.svelte';
+	import { appUpdate } from '../lib/update.svelte';
 	import { pageBar } from '../lib/pagebar.svelte';
 	import { getHealth, type Health } from '../lib/api';
 	import type { LayoutProps } from './$types';
@@ -22,6 +23,8 @@
 		if (prefs.theme === 'auto') delete root.dataset.theme;
 		else root.dataset.theme = prefs.theme;
 	});
+
+	$effect(() => appUpdate.watch());
 
 	$effect(() => {
 		const on = () => (session.online = true);
@@ -98,7 +101,12 @@
 	</div>
 </header>
 
-{#if !session.online}
+{#if appUpdate.waiting}
+	<div class="banner" role="status">
+		A new version of Snow Watch is ready.
+		<button class="btn small" onclick={() => appUpdate.apply()}>Reload</button>
+	</div>
+{:else if !session.online}
 	<div class="banner">Offline: showing the forecast saved on this device.</div>
 {:else if staleHours !== null}
 	<div class="banner warn">
@@ -113,8 +121,9 @@
 </main>
 
 <footer class="faint">
-	Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS, NRCS SNOTEL.
-	Model snowfall is derived, not measured.
+	Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS, NRCS SNOTEL
+	and <a href={resolve('/about')}>others</a>. Model snowfall is derived, not measured; never a
+	substitute for your avalanche center.
 </footer>
 
 <nav class="tabbar glass" aria-label="Main">

@@ -102,10 +102,11 @@
 				{#each loc.bands as b, i (b.band)}
 					<tr>
 						<td>{b.band}</td>
-						<td><input bind:value={b.label} /></td>
+						<td><input bind:value={b.label} aria-label={`${b.band} label`} /></td>
 						<td
 							><input
 								type="number"
+								aria-label={`${b.band} elevation (${imperial ? 'ft' : 'm'})`}
 								value={toShown(b.elev_m)}
 								onchange={(e) => setElev(i, e.currentTarget.value)}
 							/></td
@@ -114,6 +115,7 @@
 							><input
 								type="number"
 								step="any"
+								aria-label={`${b.band} latitude`}
 								value={b.lat}
 								onchange={(e) => setNum(i, 'lat', e.currentTarget.value)}
 							/></td
@@ -122,6 +124,7 @@
 							><input
 								type="number"
 								step="any"
+								aria-label={`${b.band} longitude`}
 								value={b.lon}
 								onchange={(e) => setNum(i, 'lon', e.currentTarget.value)}
 							/></td

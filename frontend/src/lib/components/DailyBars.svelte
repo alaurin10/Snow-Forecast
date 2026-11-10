@@ -2,8 +2,8 @@
      precipitation type. Kept simple so a row reads at a glance. -->
 <script lang="ts">
 	import type { OverviewPeriod } from '../types.gen';
-	import { dailyTotals } from '../daybars';
-	import { snowNum, type UnitSystem } from '../units';
+	import { dailyTotals, describeDays } from '../daybars';
+	import { snow, snowNum, type UnitSystem } from '../units';
 
 	interface Props {
 		periods: OverviewPeriod[];
@@ -23,7 +23,12 @@
 	const shown = (cm: number) => Number(snowNum(cm, units)) > 0;
 </script>
 
-<div class="week" role="img" aria-label={label} style:--n={n}>
+<div
+	class="week"
+	role="img"
+	aria-label={`${label}: ${describeDays(days, (cm) => snow(cm, units))}`}
+	style:--n={n}
+>
 	{#each days as d (d.date)}
 		<div class="day">
 			<span class="amt num" class:dim={!shown(d.cm)}

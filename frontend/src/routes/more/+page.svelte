@@ -119,6 +119,7 @@
 			</p>
 		{/if}
 		<a class="btn" href={resolve('/status')}>Sources, runs and data age →</a>
+		<a class="btn" href={resolve('/about')}>About, data sources and privacy →</a>
 	</section>
 </div>
 

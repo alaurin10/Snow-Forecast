@@ -35,11 +35,14 @@ function hash(s: string): string {
 
 self.addEventListener('install', (event: ExtendableEvent) => {
 	event.waitUntil(
-		caches
-			.open(SHELL)
-			.then((c) => c.addAll(shellFiles))
-			.then(() => self.skipWaiting())
+		// A new version waits until the page says to take over (its "Reload" button), so
+		// nobody's open page swaps code underneath them.
+		caches.open(SHELL).then((c) => c.addAll(shellFiles))
 	);
+});
+
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+	if ((event.data as { type?: string } | null)?.type === 'skip-waiting') void self.skipWaiting();
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {

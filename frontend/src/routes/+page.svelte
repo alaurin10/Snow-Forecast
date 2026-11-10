@@ -4,10 +4,10 @@
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../lib/api';
 	import { prefs } from '../lib/prefs.svelte';
-	import { converters, snowNum } from '../lib/units';
+	import { converters, snow, snowNum } from '../lib/units';
 	import { dangerWord } from '../lib/conditions';
 	import DailyBars from '../lib/components/DailyBars.svelte';
-	import { dailyTotals } from '../lib/daybars';
+	import { describeDays, dailyTotals } from '../lib/daybars';
 	import type { OverviewRow } from '../lib/types.gen';
 	import ShareButton from '../lib/share/ShareButton.svelte';
 	import { paint } from '../lib/share/canvas';
@@ -156,7 +156,11 @@
 					{#if r.run_id == null}
 						<small class="none">No forecast yet</small>
 					{:else}
-						<span class="lbars" role="img" aria-label={`${r.name}: snow for the next ${DAYS} days`}>
+						<span
+							class="lbars"
+							role="img"
+							aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
+						>
 							{#each days as d (d.date)}<i class={d.kind} style:height="{barH(d.cm)}px"></i>{/each}
 						</span>
 						<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}

@@ -357,9 +357,7 @@
 
 	<nav class="tabs" aria-label="Sections" bind:this={tabsEl}>
 		{#each tabs as t (t)}
-			<button aria-current={tab === t ? 'page' : undefined} onclick={() => (tab = t)}
-				>{names[t]}</button
-			>
+			<button aria-pressed={tab === t} onclick={() => (tab = t)}>{names[t]}</button>
 		{/each}
 	</nav>
 
@@ -721,7 +719,7 @@
 			padding-bottom: 12px;
 		}
 	}
-	.tabs button[aria-current='page'] {
+	.tabs button[aria-pressed='true'] {
 		color: var(--text);
 		background: var(--surface);
 		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
@@ -960,7 +958,7 @@
 			padding-top: 11px;
 			padding-bottom: 11px;
 		}
-		.tabs button[aria-current='page'] {
+		.tabs button[aria-pressed='true'] {
 			background: none;
 			box-shadow: inset 0 -2px 0 var(--accent);
 		}

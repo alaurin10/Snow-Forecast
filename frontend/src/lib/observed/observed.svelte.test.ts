@@ -79,14 +79,14 @@ describe('scorecard', () => {
 		expect(getByText(/fills in after about a week/)).toBeTruthy();
 	});
 
-	it('shows sources and the raw vs snow-ratio verdict', () => {
+	it('shows sources and which depth method is closer', () => {
 		const { container, getByText } = render(Scorecard, {
 			data: scores(true),
 			units: 'imperial',
 			width: 380
 		});
-		expect(getByText('Consensus (snow-ratio depth)')).toBeTruthy();
-		expect(container.textContent).toMatch(/snow-ratio depth is closer/);
+		expect(getByText('Consensus (temperature-based depth)')).toBeTruthy();
+		expect(container.textContent).toMatch(/temperature-based depth is closer/);
 		expectMarksInside(container);
 	});
 });

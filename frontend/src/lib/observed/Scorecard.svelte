@@ -28,8 +28,8 @@
 	const bigDay = $derived(units === 'imperial' ? '3 in' : '8 cm');
 
 	const NAMES: Record<string, string> = {
-		cons: 'Consensus (model depth)',
-		cons_slr: 'Consensus (snow-ratio depth)',
+		cons: 'Consensus (model snowfall)',
+		cons_slr: 'Consensus (temperature-based depth)',
 		ens_p50: 'Ensemble median'
 	};
 	const name = (s: string) => NAMES[s] ?? MODEL_NAMES[s] ?? s;
@@ -44,7 +44,9 @@
 		const slr = data?.rows.find((r) => r.source === 'cons_slr');
 		if (!raw || !slr || raw.mae_cm === null || slr.mae_cm === null) return null;
 		if (Math.abs(raw.mae_cm - slr.mae_cm) < 0.5) return 'about the same';
-		return slr.mae_cm < raw.mae_cm ? 'snow-ratio depth is closer' : 'model depth is closer';
+		return slr.mae_cm < raw.mae_cm
+			? 'temperature-based depth is closer'
+			: 'model snowfall is closer';
 	});
 
 	// Chart: observed vs consensus forecast per day, one scale.
@@ -94,7 +96,7 @@
 					data.band_elev_m,
 					units
 				)}){/if}.
-			{#if better}<strong>Raw vs snow-ratio: {better}.</strong>{/if}
+			{#if better}<strong>Model snowfall vs temperature-based depth: {better}.</strong>{/if}
 		</p>
 		<p class="faint small key">
 			{c.snowUnit} per day. Bias: forecast minus observed. Error: the average miss. Big days ({bigDay}

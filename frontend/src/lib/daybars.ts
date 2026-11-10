@@ -107,3 +107,18 @@ export function dailyTotals(periods: OverviewPeriod[], days = 5): DayTotal[] {
 	}
 	return out;
 }
+
+const KIND_WORDS: Record<PrecipKind, string> = {
+	snow: '',
+	heavy: ' (heavy)',
+	mix: ' (mixed with rain)',
+	rain: ' (mostly rain)',
+	none: ''
+};
+
+/** The bars in words, for screen readers: "Today 2 in, Thu none, Fri 5 in (mostly rain)". */
+export function describeDays(days: DayTotal[], fmt: (cm: number) => string): string {
+	return days
+		.map((d) => `${d.label} ${d.cm >= 0.1 ? fmt(d.cm) + KIND_WORDS[d.kind] : 'none'}`)
+		.join(', ');
+}

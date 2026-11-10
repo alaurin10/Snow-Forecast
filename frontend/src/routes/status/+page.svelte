@@ -32,7 +32,7 @@
 		'bc-asws': 'BC snow pillows',
 		'avalanche-us': 'avalanche.org',
 		'avalanche-ca': 'Avalanche Canada',
-		catalog: 'Ski-area catalog'
+		catalog: 'Ski-area list (OpenSkiMap)'
 	};
 	// A source is "late" when its last success is older than a day.
 	const late = (iso: string | null) => !iso || Date.now() - Date.parse(iso) > 26 * 3600 * 1000;

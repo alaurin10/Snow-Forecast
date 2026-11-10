@@ -112,7 +112,7 @@
 		1
 	];
 
-	// Base map and ski-run tiles come through the mini PC, which caches them.
+	// Base map and ski-run tiles come through the server, which caches them.
 	const tiles = (layer: string) => [`/api/tiles/${layer}/{z}/{x}/{y}.png`];
 
 	function mapStyle(dark: boolean): StyleSpecification {
@@ -147,9 +147,10 @@
 					type: 'raster',
 					tiles: tiles('satlabels'),
 					tileSize: 256,
-					maxzoom: 18
+					maxzoom: 18,
+					attribution: 'Labels © <a href="https://www.esri.com">Esri</a>'
 				},
-				// Runs, lifts and peaks from OpenStreetMap, fetched weekly by the mini PC.
+				// Runs, lifts and peaks from OpenStreetMap, fetched weekly by the server.
 				ski: {
 					type: 'geojson',
 					data: '/api/osm/ski.geojson',
@@ -520,13 +521,16 @@
 	});
 
 	// ---- Precipitation timeline ------------------------------------------------
-	// The mini PC draws every frame; here we download them all once and swap them.
+	// The server draws every frame; here we download them all once and swap them.
 	const on = $derived(radar && prefs.mapPrecip === 'on');
 	let timeline = $state<Timeline | null>(null);
 	/** Why precipitation isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
 	let frame = $state(0);
-	let playing = $state(true);
+	// Radar loops play by themselves, unless the device asks for less motion.
+	let playing = $state(
+		typeof matchMedia === 'undefined' || !matchMedia('(prefers-reduced-motion: reduce)').matches
+	);
 	let now = $state(Date.now());
 	/** The frame on screen (file name), which lags `frame` for the moment it takes to decode. */
 	let shown = $state<string | null>(null);
@@ -810,8 +814,8 @@
 			zoom: 13.5,
 			pitch: 65,
 			bearing: map.getBearing() || -20,
-			duration: 2600,
-			essential: true
+			duration: 2600
+			// Not "essential": MapLibre then jumps instead when the device asks for less motion.
 		});
 	}
 
@@ -895,6 +899,8 @@
 					: 'Forecast: Canadian HRDPS model; rest of the US, NOAA HRRR.'
 	);
 </script>
+
+<svelte:window onkeydown={(e) => e.key === 'Escape' && infoOpen && (infoOpen = false)} />
 
 <div class="wrap" class:fill={radar} class:dark bind:this={wrap} style:--fill-top="{fillTop}px">
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
@@ -991,6 +997,7 @@
 				class="tool"
 				class:active={infoOpen}
 				aria-expanded={infoOpen}
+				aria-controls="map-info"
 				onclick={() => {
 					infoOpen = !infoOpen;
 					offlineOpen = false;
@@ -1029,7 +1036,7 @@
 		{/if}
 
 		{#if infoOpen}
-			<div class="info" role="dialog" aria-label="About this map">
+			<div class="info" role="dialog" aria-label="About this map" id="map-info">
 				<p class="item">
 					<span class="pin" aria-hidden="true">1.2</span> Next 5 days of snow ({unit}). Tap one for
 					details.
@@ -1498,6 +1505,11 @@
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.spin {
+			animation-duration: 3s;
 		}
 	}
 	.note {

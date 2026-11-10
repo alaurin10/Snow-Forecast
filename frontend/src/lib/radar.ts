@@ -1,7 +1,7 @@
 // Precipitation for the map: one timeline from two hours ago to two days ahead, in one
 // set of colours for rain, mix/ice and snow by rate.
 //
-// The mini PC draws every frame (backend/snowwatch/precip.py) as one picture over the
+// The server draws every frame (backend/snowwatch/precip.py) as one picture over the
 // region around the locations, and lists them in /api/precip. The browser only
 // downloads and swaps pictures, so scrubbing is instant and a phone's memory stays low.
 // Sources: RainViewer radar (past); Environment Canada's HRDPS (Canada and the northern

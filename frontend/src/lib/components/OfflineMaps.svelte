@@ -97,6 +97,8 @@
 	);
 </script>
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
+
 <div class="offline" role="dialog" aria-label="Offline maps">
 	<div class="head">
 		<strong>Offline maps</strong>

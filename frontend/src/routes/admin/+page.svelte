@@ -344,6 +344,7 @@
 		<input
 			class="search"
 			type="search"
+			aria-label="Search ski areas"
 			placeholder="Search ski areas, e.g. Stevens Pass"
 			value={query}
 			oninput={(e) => onSearch(e.currentTarget.value)}

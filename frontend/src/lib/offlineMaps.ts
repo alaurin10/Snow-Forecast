@@ -3,7 +3,7 @@
 // from this cache first (see service-worker.ts).
 //
 // Only sources whose terms allow it are saved: OpenTopoMap (CC-BY-SA, asked not to be
-// hammered, so it's capped at zoom 15 and fetched a few at a time through the mini PC's
+// hammered, so it's capped at zoom 15 and fetched a few at a time through the server's
 // cache) and the AWS terrain tiles. Esri's topo and satellite tiles may not be stored
 // for offline use outside Esri's own apps, so offline the map uses OpenTopoMap at every
 // zoom and satellite isn't available.

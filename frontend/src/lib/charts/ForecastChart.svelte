@@ -807,13 +807,12 @@
 		{#if s}<strong>{when(s)}</strong>{/if}
 	</div>
 
-	<div class="cards" role="tablist" aria-label="Chart metric">
+	<div class="cards" role="group" aria-label="Chart metric">
 		{#each cards as k (k.id)}
 			<button
-				role="tab"
 				class="mcard"
 				class:on={metric === k.id}
-				aria-selected={metric === k.id}
+				aria-pressed={metric === k.id}
 				onclick={() => (metric = k.id)}
 			>
 				<span class="mlabel"
