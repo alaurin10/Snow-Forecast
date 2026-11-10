@@ -10,6 +10,8 @@ The first release prepared as a product: no third-party login, safe to expose
 publicly, and documented for anyone who wants to run it.
 
 ### Changed
+- The **More** tab is now **Settings** (with a gear icon); old `/more` links
+  redirect there.
 - **Owner password instead of Cloudflare Access.** Forecasts are public and
   read-only; `OWNER_PASSWORD` unlocks Manage locations. `ADMIN_EMAILS`,
   `CF_ACCESS_TEAM`, `CF_ACCESS_AUDS` and `DEV_ADMIN_EMAIL` are gone. Upgrading
@@ -22,6 +24,8 @@ publicly, and documented for anyone who wants to run it.
   models").
 
 ### Added
+- A Version card in Settings: the app's version, the server's version and
+  build, and a "Reload to update" button when the two differ.
 - About page: data sources and licences, a forecast and avalanche disclaimer, a
   privacy note and the version. A friendly not-found page.
 - "A new version is ready — Reload" instead of silent updates.

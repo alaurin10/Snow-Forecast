@@ -108,7 +108,9 @@
 {:else if !rows}
 	<p class="muted" aria-live="polite">Loading…</p>
 {:else if !rows.length}
-	<p class="card muted">No locations yet. The owner can add them under More → Manage locations.</p>
+	<p class="card muted">
+		No locations yet. The owner can add them under Settings → Manage locations.
+	</p>
 {:else if phone}
 	{#if storm}
 		<a class="stormbar" href={resolve('/calendar')}>

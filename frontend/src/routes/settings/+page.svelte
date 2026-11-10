@@ -6,10 +6,12 @@
 	import { prefs, type BandName, type Theme } from '../../lib/prefs.svelte';
 	import type { MetaOut, RunOut } from '../../lib/types.gen';
 	import AlertsSettings from '../../lib/components/AlertsSettings.svelte';
+	import { APP_VERSION, outOfDate, shortCommit } from '../../lib/version';
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
 	let meta = $state<MetaOut | null>(null);
+	let metaFailed = $state(false);
 	let manage = $state(false);
 	let statusError = $state<string | null>(null);
 
@@ -22,7 +24,7 @@
 			.catch(() => {}); // the usage figure is optional
 		getMeta()
 			.then((m) => (meta = m))
-			.catch(() => {}); // only the budget and version
+			.catch(() => (metaFailed = true));
 		getMe()
 			.then((m) => (manage = m.is_owner || m.owner_login_enabled))
 			.catch(() => {}); // no Manage link when the server can't say
@@ -47,7 +49,9 @@
 	];
 </script>
 
-<svelte:head><title>More · Snow Watch</title></svelte:head>
+<svelte:head><title>Settings · Snow Watch</title></svelte:head>
+
+<h1 class="title">Settings</h1>
 
 {#if manage}
 	<a class="card manage" href={resolve('/admin')}>
@@ -58,7 +62,7 @@
 
 <div class="grid">
 	<section class="card">
-		<h2>Settings</h2>
+		<h2>Display</h2>
 		<div class="row">
 			<span>Units</span>
 			<div class="seg" role="group" aria-label="Units">
@@ -119,14 +123,68 @@
 			</p>
 		{/if}
 		<a class="btn" href={resolve('/status')}>Sources, runs and data age →</a>
+	</section>
+
+	<section class="card version" aria-labelledby="version-title">
+		<h2 id="version-title">Version</h2>
+		<p class="big">Snow Watch <span class="num">{APP_VERSION}</span></p>
+		<dl class="small">
+			<dt>This app</dt>
+			<dd class="num">{APP_VERSION}</dd>
+			<dt>Server</dt>
+			<dd class="num">
+				{#if meta}
+					{meta.version}{#if shortCommit(meta.commit)}
+						<span class="faint">· build {shortCommit(meta.commit)}</span>{/if}
+				{:else if metaFailed}
+					<span class="faint">unavailable</span>
+				{:else}
+					<span class="faint">checking…</span>
+				{/if}
+			</dd>
+		</dl>
+		{#if meta && outOfDate(meta.version)}
+			<p class="small update" role="status">
+				The server has version {meta.version}.
+				<button class="btn small" onclick={() => location.reload()}>Reload to update</button>
+			</p>
+		{/if}
 		<a class="btn" href={resolve('/about')}>About, data sources and privacy →</a>
 	</section>
 </div>
 
 <style>
+	.title {
+		font-size: 1.3rem;
+		margin: 2px 0 10px;
+	}
 	.grid {
 		display: grid;
 		gap: 12px;
+	}
+	.version .big {
+		font-family: var(--font-num);
+		font-size: 1.15rem;
+		font-weight: 600;
+		margin: 0 0 6px;
+	}
+	.version dl {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 2px 12px;
+		margin: 0 0 10px;
+	}
+	.version dt {
+		color: var(--text-2);
+	}
+	.version dd {
+		margin: 0;
+	}
+	.update {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 	@media (min-width: 900px) {
 		.grid {

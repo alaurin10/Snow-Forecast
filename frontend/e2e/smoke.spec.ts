@@ -4,7 +4,7 @@ const PAGES = [
 	'/',
 	'/calendar',
 	'/map',
-	'/more',
+	'/settings',
 	'/about',
 	'/status',
 	'/admin',
@@ -81,4 +81,18 @@ test('responses carry the security headers', async ({ request }) => {
 	expect(h['x-content-type-options']).toBe('nosniff');
 	const admin = await request.post('/api/admin/lookups/refresh');
 	expect(admin.status()).toBe(401);
+});
+
+test('Settings shows the version, and the old More link lands there', async ({ page }) => {
+	await page.goto('/more');
+	await expect(page).toHaveURL(/\/settings$/);
+	await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+	const card = page.getByRole('region', { name: 'Version' });
+	await expect(card).toContainText(/Snow Watch \d+\.\d+\.\d+/);
+	await expect(card).toContainText(/Server\s*\d+\.\d+\.\d+/);
+	await expect(card).not.toContainText('Reload to update'); // app and server match
+	await expect(page.getByRole('link', { name: 'Settings' }).first()).toHaveAttribute(
+		'aria-current',
+		'page'
+	);
 });

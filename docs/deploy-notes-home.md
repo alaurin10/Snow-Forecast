@@ -64,7 +64,7 @@ Once, after the timer deploys 1.0:
    ```bash
    docker compose up -d
    ```
-2. Open the site, go to More → Manage locations and sign in with the password.
+2. Open the site, go to Settings → Manage locations and sign in with the password.
 3. In Cloudflare Zero Trust → Access → Applications, delete the two Snow Watch
    applications (the whole site, and the `admin` / `api/admin` paths). Until you
    do, Access still asks visitors to log in.

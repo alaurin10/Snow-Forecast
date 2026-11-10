@@ -42,7 +42,7 @@
 <svelte:head><title>Status · Snow Watch</title></svelte:head>
 
 <div class="head">
-	<a class="faint back" href={resolve('/more')}>← More</a>
+	<a class="faint back" href={resolve('/settings')}>← Settings</a>
 	<h1>Status</h1>
 </div>
 

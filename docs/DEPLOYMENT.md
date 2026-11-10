@@ -82,7 +82,7 @@ docker compose run --rm worker snowwatch push keys
 
 Paste the two printed lines into `.env` and run `docker compose up -d`. Never
 change the keys afterwards: that silently cuts off every subscribed device.
-Then, on each device: More → Alerts → Turn on alerts. On iPhone and iPad (iOS 16.4
+Then, on each device: Settings → Alerts → Turn on alerts. On iPhone and iPad (iOS 16.4
 or newer), add the site to the Home Screen first and open it from there.
 
 **Monitoring:**
@@ -112,7 +112,7 @@ Keep that checkout free of local edits (it only fast-forwards). Watch it with
 
 ## Everyday tasks
 
-**Manage locations:** More → Manage locations, then sign in with the owner
+**Manage locations:** Settings → Manage locations, then sign in with the owner
 password. Search the ski-area list for a resort, or drop a trailhead and a high
 point on the map for a tour; the app fills in elevations, timezone, snow station
 and avalanche zone for you to check. The first forecast appears a minute or two

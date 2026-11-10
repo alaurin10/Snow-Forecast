@@ -102,7 +102,7 @@
 </svelte:head>
 
 <div class="head">
-	<a class="faint back" href={resolve('/more')}>← More</a>
+	<a class="faint back" href={resolve('/settings')}>← Settings</a>
 	<h1>About Snow Watch</h1>
 </div>
 

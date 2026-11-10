@@ -73,7 +73,7 @@ def make_push_router() -> APIRouter:
             {
                 "title": "Snow Watch alerts are on",
                 "body": "You'll hear about powder days and storms here.",
-                "url": "/more",
+                "url": "/settings",
                 "tag": "test",
             },
             sender,

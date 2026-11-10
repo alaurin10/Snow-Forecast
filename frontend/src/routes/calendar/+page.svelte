@@ -96,7 +96,7 @@
 	<p class="card muted">
 		{rows.length
 			? 'No forecasts yet: the first run hasn’t finished.'
-			: 'No locations yet. The owner can add them under More → Manage locations.'}
+			: 'No locations yet. The owner can add them under Settings → Manage locations.'}
 	</p>
 {:else if viewport.phone}
 	<!-- Phones: the storm cards scroll away with the page; only the dates stay pinned. Each
