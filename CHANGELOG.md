@@ -37,6 +37,10 @@ publicly, and documented for anyone who wants to run it.
 - MIT licence, security policy, contributing guide, deployment and architecture
   docs.
 
+### Security
+- MapLibre GL JS upgraded from 5.x to 6.17 for a critical sanitizer-bypass XSS
+  advisory (GHSA-jrc7-96c5-q579).
+
 ### Fixed
 - Push subscriptions could point anywhere, making the server send requests to
   any address; only browser push services are accepted now.

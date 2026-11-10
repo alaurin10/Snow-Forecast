@@ -263,7 +263,10 @@ def receiver() -> Iterator[str]:
 def test_real_encrypted_signed_request(receiver: str) -> None:
     info = {"endpoint": receiver, "keys": browser_keys()}
     status = push.webpush_sender(
-        info, json.dumps({"title": "hi"}), PRIVATE, {"sub": "mailto:owner@example.com"}
+        info,
+        json.dumps({"title": "plaintext-marker-7f3a9c"}),
+        PRIVATE,
+        {"sub": "mailto:owner@example.com"},
     )
     assert status == 201
     (req,) = _Receiver.seen
@@ -274,7 +277,9 @@ def test_real_encrypted_signed_request(receiver: str) -> None:
         and f"k={PUBLIC}" in headers["authorization"]
     )
     assert int(headers["ttl"]) > 0
-    assert b"hi" not in req["body"]  # encrypted
+    assert (
+        b"plaintext-marker-7f3a9c" not in req["body"]
+    )  # encrypted; long, so random bytes never match
 
 
 def test_contact_prefers_an_email(on: Settings) -> None:

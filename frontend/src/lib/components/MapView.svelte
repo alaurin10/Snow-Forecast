@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
 	import 'maplibre-gl/dist/maplibre-gl.css';
+	import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 	import type {
 		ExpressionSpecification,
 		Map as MlMap,
@@ -739,6 +740,9 @@
 		import('maplibre-gl').then((mod) => {
 			if (cancelled || !el) return;
 			ml = (mod as unknown as { default?: typeof mod }).default ?? mod;
+			// MapLibre 6 looks for its worker next to its own file, which bundling moves;
+			// point it at the copy Vite ships.
+			ml.setWorkerUrl(maplibreWorker);
 			const phone = matchMedia('(max-width: 700px)').matches;
 			map = new ml.Map({
 				container: el,
