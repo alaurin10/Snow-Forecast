@@ -326,6 +326,7 @@
         "center_id": {
           "anyOf": [
             {
+              "maxLength": 40,
               "type": "string"
             },
             {
@@ -344,6 +345,7 @@
         "zone_id": {
           "anyOf": [
             {
+              "maxLength": 40,
               "type": "string"
             },
             {
@@ -412,6 +414,7 @@
           "type": "number"
         },
         "label": {
+          "maxLength": 40,
           "minLength": 1,
           "type": "string"
         },
@@ -1639,6 +1642,7 @@
         "catalog_ref": {
           "anyOf": [
             {
+              "maxLength": 100,
               "type": "string"
             },
             {
@@ -1670,15 +1674,22 @@
             "type": "string"
           },
           "default": {},
+          "maxProperties": 12,
+          "propertyNames": {
+            "maxLength": 60,
+            "minLength": 1
+          },
           "type": "object"
         },
         "name": {
+          "maxLength": 80,
           "minLength": 1,
           "type": "string"
         },
         "nws_office": {
           "anyOf": [
             {
+              "pattern": "^[A-Z]{3,4}$",
               "type": "string"
             },
             {
@@ -1690,6 +1701,7 @@
         "radar_station": {
           "anyOf": [
             {
+              "pattern": "^[A-Z0-9]{3,5}$",
               "type": "string"
             },
             {
@@ -1700,6 +1712,7 @@
         },
         "region": {
           "default": "",
+          "maxLength": 80,
           "type": "string"
         },
         "snotel": {
@@ -3919,7 +3932,6 @@
         "image_url": {
           "anyOf": [
             {
-              "pattern": "^https?://",
               "type": "string"
             },
             {
@@ -3934,7 +3946,6 @@
           "type": "string"
         },
         "url": {
-          "pattern": "^https?://",
           "type": "string"
         }
       },

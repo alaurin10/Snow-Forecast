@@ -4,16 +4,29 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 RATE_LIMIT_WAIT_S = 65.0  # Open-Meteo's per-minute window, plus a margin
+CONTACT_HOSTS = ("api.weather.gov",)  # NWS asks callers to identify themselves
+
+
+def _wants_contact(url: str) -> bool:
+    return urlsplit(url).hostname in CONTACT_HOSTS
+
+
+def strip_queries(text: str) -> str:
+    """Drop the query strings from any URLs in an error message (they can be long, and
+    the message is shown publicly)."""
+    return re.sub(r"(https?://[^\s?)]+)\?[^\s)]*", r"\1", text)
 
 
 class FetchError(RuntimeError):
@@ -60,7 +73,10 @@ class Fetcher:
         tries: int = 6,
         timeout_s: float = 40.0,
         on_call: Callable[[CallRecord], None] | None = None,
+        contact_user_agent: str | None = None,
     ) -> None:
+        # Hosts that ask for contact details get them; every other host gets `user_agent`.
+        self._contact_headers = {"User-Agent": contact_user_agent} if contact_user_agent else {}
         self._client = httpx.Client(
             headers={
                 "User-Agent": user_agent,
@@ -125,7 +141,8 @@ class Fetcher:
         started = time.monotonic()
         for i in range(self.tries):
             try:
-                resp = self._client.get(url, params=params)
+                headers = self._contact_headers if _wants_contact(url) else None
+                resp = self._client.get(url, params=params, headers=headers)
             except httpx.TransportError as e:
                 last = f"{type(e).__name__}: {e}"
                 self._sleep(2 + 3 * i)
@@ -160,6 +177,7 @@ class Fetcher:
         st.last_ok_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     def _fail(self, source: str, message: str) -> FetchError:
+        message = strip_queries(message)  # shown on the public Status page
         st = self._stat(source)
         st.errors += 1
         st.last_error = message[:300]

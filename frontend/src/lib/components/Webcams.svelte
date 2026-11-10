@@ -1,5 +1,6 @@
 <!-- Webcams the owner added on the Manage page: a still image when there is one, always a link. -->
 <script lang="ts">
+	import { safeHref, safeImage } from '../links';
 	import type { Webcam } from '../types.gen';
 
 	interface Props {
@@ -17,10 +18,10 @@
 			{#each cams as cam, i (i)}
 				<!-- External sites: resolve() is only for routes in this app. -->
 				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-				<a class="cam" href={cam.url} target="_blank" rel="noopener">
-					{#if cam.image_url && !broken[i]}
+				<a class="cam" href={safeHref(cam.url)} target="_blank" rel="noopener noreferrer">
+					{#if safeImage(cam.image_url) && !broken[i]}
 						<img
-							src={cam.image_url}
+							src={safeImage(cam.image_url)}
 							alt={`${cam.name} webcam`}
 							loading="lazy"
 							referrerpolicy="no-referrer"

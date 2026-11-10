@@ -5,9 +5,12 @@ tile comes back at once, and the long Cache-Control lets the browser (and Cloudf
 keep it too. Esri's topo tiles have a lighter last row and column that would draw a
 faint grid on the map; they're repaired once, as they enter the cache.
 
-Tiles live under data/tiles/<layer>/<z>/<x>/<y>, and the nightly job drops ones
-nobody has asked for in a while. Elevation tiles for 3D go straight from the browser
-to AWS (fast, and large), so they aren't proxied.
+Tiles live under data/tiles/<layer>/<z>/<x>/<y>. The cache has a size cap
+(TILES_MAX_MB): once full it still serves tiles but stops storing new ones, and the
+nightly job drops tiles nobody has asked for in a while, then the least recently
+used ones until it is back under the cap. At most a few upstream fetches run at
+once. Elevation tiles for 3D go straight from the browser to AWS (fast, and
+large), so they aren't proxied.
 """
 
 from __future__ import annotations
@@ -69,6 +72,8 @@ UPSTREAMS: dict[str, Upstream] = {
 }
 
 KEEP_DAYS = 45
+MAX_TILE_BYTES = 2_000_000  # a real 256 px tile is well under this
+UPSTREAM_AT_ONCE = 6
 
 
 def repair_edges(data: bytes) -> bytes:
@@ -82,14 +87,66 @@ def repair_edges(data: bytes) -> bytes:
     return out.getvalue()
 
 
+def _write_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+
+
+def cache_bytes(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file()) if root.exists() else 0
+
+
 class TileCache:
-    def __init__(self, root: Path, user_agent: str, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        user_agent: str,
+        client: httpx.Client | None = None,
+        *,
+        max_bytes: int | None = None,
+    ) -> None:
         self.root = root
+        self.max_bytes = max_bytes
         self.client = client or httpx.Client(
             headers={"User-Agent": user_agent}, timeout=15, follow_redirects=True
         )
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
+        self._upstream = threading.BoundedSemaphore(UPSTREAM_AT_ONCE)
+        self._size: int | None = None  # bytes on disk, counted on the first miss
+
+    def _path(self, layer: str, z: int, x: int, y: int) -> Path | None:
+        up = UPSTREAMS.get(layer)
+        if up is None or not (0 <= z <= up.max_zoom) or not (0 <= x < 2**z and 0 <= y < 2**z):
+            return None
+        return self.root / layer / str(z) / str(x) / str(y)
+
+    def cached(self, layer: str, z: int, x: int, y: int) -> bool:
+        path = self._path(layer, z, x, y)
+        return path is not None and path.exists()
+
+    def _store(self, path: Path, data: bytes) -> None:
+        """Keep a fetched file unless the cache is full (the nightly prune makes room)."""
+        with self._guard:
+            if self._size is None:
+                self._size = cache_bytes(self.root)
+            if self.max_bytes is not None and self._size + len(data) > self.max_bytes:
+                return
+            self._size += len(data)
+        _write_atomic(path, data)
+
+    def fetch(self, url: str) -> bytes | None:
+        """One upstream file, or None. Limits how many run at once and how big they get."""
+        with self._upstream:
+            try:
+                r = self.client.get(url)
+            except httpx.HTTPError:
+                return None
+        if r.status_code != 200 or len(r.content) > MAX_TILE_BYTES:
+            return None
+        return r.content
 
     def _lock(self, key: str) -> threading.Lock:
         with self._guard:
@@ -97,10 +154,10 @@ class TileCache:
 
     def get(self, layer: str, z: int, x: int, y: int) -> tuple[bytes, str] | None:
         """The tile's bytes and media type, from the cache or upstream. None if it has none."""
-        up = UPSTREAMS.get(layer)
-        if up is None or not (0 <= z <= up.max_zoom) or not (0 <= x < 2**z and 0 <= y < 2**z):
+        path = self._path(layer, z, x, y)
+        if path is None:
             return None
-        path = self.root / layer / str(z) / str(x) / str(y)
+        up = UPSTREAMS[layer]
         key = f"{layer}/{z}/{x}/{y}"
         # One upstream fetch per tile even when several requests arrive together.
         with self._lock(key):
@@ -108,20 +165,22 @@ class TileCache:
                 os.utime(path)  # remember it was used, for pruning
                 return path.read_bytes(), up.media_type
             url = up.urls[(x + y) % len(up.urls)].format(z=z, x=x, y=y)
-            try:
-                r = self.client.get(url)
-            except httpx.HTTPError:
-                return None
-            if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
+            with self._upstream:
+                try:
+                    r = self.client.get(url)
+                except httpx.HTTPError:
+                    return None
+            if (
+                r.status_code != 200
+                or not r.headers.get("content-type", "").startswith("image/")
+                or len(r.content) > MAX_TILE_BYTES
+            ):
                 return None
             data = r.content
             if up.fix_edges:
                 with contextlib.suppress(OSError):  # keep the tile as it came
                     data = repair_edges(data)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(data)
-            tmp.replace(path)
+            self._store(path, data)
         with self._guard:
             self._locks.pop(key, None)
         return data, up.media_type
@@ -138,25 +197,44 @@ def glyphs(cache: TileCache, stack: str, rng: str) -> bytes | None:
     path = cache.root / "glyphs" / stack.replace(" ", "_") / f"{rng}.pbf"
     if path.exists():
         return path.read_bytes()
-    try:
-        r = cache.client.get(GLYPHS.format(stack=stack.replace(" ", "%20"), range=rng))
-    except httpx.HTTPError:
+    data = cache.fetch(GLYPHS.format(stack=stack.replace(" ", "%20"), range=rng))
+    if data is None:
         return None
-    if r.status_code != 200:
-        return None
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(r.content)
-    return r.content
+    cache._store(path, data)
+    return data
 
 
-def prune(root: Path, keep_days: int = KEEP_DAYS, now: float | None = None) -> int:
-    """Remove tiles not asked for in `keep_days`. Returns how many went."""
-    cutoff = (now or time.time()) - keep_days * 86400
-    removed = 0
+def prune(
+    root: Path,
+    keep_days: int = KEEP_DAYS,
+    now: float | None = None,
+    max_bytes: int | None = None,
+) -> int:
+    """Remove tiles not asked for in `keep_days`, then the least recently used ones until
+    the cache is under 90% of `max_bytes`. Returns how many went."""
     if not root.exists():
         return 0
+    cutoff = (now or time.time()) - keep_days * 86400
+    removed = 0
+    kept: list[tuple[float, int, Path]] = []
     for p in root.rglob("*"):
-        if p.is_file() and p.stat().st_mtime < cutoff:
+        if not p.is_file():
+            continue
+        st = p.stat()
+        if st.st_mtime < cutoff or p.name.endswith(".tmp"):
             p.unlink(missing_ok=True)
             removed += 1
+        else:
+            kept.append((st.st_mtime, st.st_size, p))
+    if max_bytes is not None:
+        total = sum(size for _, size, _ in kept)
+        for _, size, p in sorted(kept, key=lambda k: k[0]):
+            if total <= max_bytes * 0.9:
+                break
+            p.unlink(missing_ok=True)
+            total -= size
+            removed += 1
+    for d in sorted((d for d in root.rglob("*") if d.is_dir()), reverse=True):
+        with contextlib.suppress(OSError):
+            d.rmdir()  # only empty ones go
     return removed

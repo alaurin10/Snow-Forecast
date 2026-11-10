@@ -50,3 +50,34 @@ def test_spa_fallback_and_static_files(settings: Settings, tmp_path: Path) -> No
     assert client.get("/assets/app.js").text == "js"
     assert client.get("/api/nope").status_code == 404
     assert client.get("/../secret").text == "<html>app</html>"
+
+
+def test_security_headers_and_inline_script_hash(settings: Settings, tmp_path: Path) -> None:
+    import base64
+    import hashlib
+
+    static = tmp_path / "static"
+    (static / "_app" / "immutable").mkdir(parents=True)
+    boot = "start({ base: '' });"
+    (static / "index.html").write_text(f"<html><script>{boot}</script><script src=x.js></script>")
+    (static / "_app" / "immutable" / "a1.js").write_text("js")
+    client = TestClient(create_app(settings.model_copy(update={"static_dir": static})))
+    r = client.get("/")
+    csp = r.headers["content-security-policy"]
+    digest = base64.b64encode(hashlib.sha256(boot.encode()).digest()).decode()
+    assert f"'sha256-{digest}'" in csp and "'unsafe-inline'" not in csp.split("style-src")[0]
+    assert "frame-ancestors 'none'" in csp
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["cache-control"] == "no-cache"
+    assert "strict-transport-security" not in r.headers  # dev
+    assert "immutable" in client.get("/_app/immutable/a1.js").headers["cache-control"]
+    assert client.get("/api/livez").headers["x-frame-options"] == "DENY"
+
+
+def test_production_hides_api_docs_and_sends_hsts(settings: Settings) -> None:
+    dev = TestClient(create_app(settings))
+    assert dev.get("/api/docs").status_code == 200
+    prod = TestClient(create_app(settings.model_copy(update={"env": "prod"})))
+    assert prod.get("/api/docs").status_code == 404
+    assert prod.get("/api/openapi.json").status_code == 404
+    assert "max-age" in prod.get("/api/livez").headers["strict-transport-security"]

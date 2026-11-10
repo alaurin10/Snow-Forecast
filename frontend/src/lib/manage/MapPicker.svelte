@@ -32,7 +32,8 @@
 			if (cancelled || !el) return;
 			L = mod.default ?? mod;
 			map = L.map(el, { zoomControl: true }).setView(center, 9);
-			L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+			// Through the server's tile cache, like the main map: no third-party requests.
+			L.tileLayer('/api/tiles/otm/{z}/{x}/{y}.png', {
 				maxZoom: 17,
 				attribution:
 					'Map © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | Style © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'

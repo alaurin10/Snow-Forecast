@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import re
 import sqlite3
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from snowwatch import __version__
@@ -18,6 +21,7 @@ from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.public import make_router
 from snowwatch.api.push_api import make_push_router
+from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
 from snowwatch.settings import Settings, get_settings
@@ -46,15 +50,73 @@ def _last_good_run(db: Path) -> dict[str, Any] | None:
     return out
 
 
+def inline_script_hashes(index: Path) -> list[str]:
+    """CSP hashes of the inline scripts in the built index.html (SvelteKit's start-up code)."""
+    if not index.exists():
+        return []
+    html = index.read_text(encoding="utf-8")
+    scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, flags=re.S)
+    return [
+        "'sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + "'"
+        for s in scripts
+        if s.strip()
+    ]
+
+
+def content_security_policy(script_hashes: list[str]) -> str:
+    """What the page may load. Third parties: AWS terrain tiles for the 3D map (fetched),
+    and any https image (webcam stills come from each resort's own server)."""
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self' " + " ".join(script_hashes),
+            "worker-src 'self' blob:",
+            "child-src 'self' blob:",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            "connect-src 'self' https://s3.amazonaws.com",
+            "manifest-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    prod = settings.env == "prod"
     app = FastAPI(
         title="Snow Watch",
         version=__version__,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        # The interactive API docs are for development; the public site doesn't need them.
+        docs_url=None if prod else "/api/docs",
+        openapi_url=None if prod else "/api/openapi.json",
         redoc_url=None,
     )
+    static = settings.static_root
+    csp = content_security_policy(inline_script_hashes(static / "index.html") if static else [])
+    security_headers = {
+        "Content-Security-Policy": csp,
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "geolocation=(self), camera=(), microphone=(), payment=(), usb=()",
+        "Cross-Origin-Opener-Policy": "same-origin",
+    }
+    if prod:
+        security_headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    @app.middleware("http")
+    async def add_security_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        for name, value in security_headers.items():
+            response.headers.setdefault(name, value)
+        return response
 
     @app.get("/api/livez")
     def livez() -> dict[str, bool]:
@@ -82,7 +144,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.settings = settings
     app.state.forecast_config = load_forecast_config(settings.config_dir / "forecast.yaml")
-    app.state.make_fetcher = lambda: Fetcher(user_agent=settings.user_agent, tries=2, timeout_s=20)
+    app.state.make_fetcher = lambda: Fetcher(
+        user_agent=settings.user_agent,
+        contact_user_agent=settings.contact_user_agent,
+        tries=2,
+        timeout_s=20,
+    )
 
     @app.get("/api/precip")
     def precip_index() -> FileResponse:
@@ -109,13 +176,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     tile_cache: TileCache | None = None
+    # Tiles already cached are free; each visitor may cause a burst of 300 upstream
+    # fetches (a few map screens), then 10 a second.
+    tile_misses = RateLimiter(rate=10, burst=300)
+
+    def tiles() -> TileCache:
+        nonlocal tile_cache
+        tile_cache = tile_cache or TileCache(
+            settings.tiles_dir, settings.user_agent, max_bytes=settings.tiles_max_mb * 1_000_000
+        )
+        return tile_cache
 
     @app.get("/api/tiles/{layer}/{z}/{x}/{y}.png")
-    def tile(layer: str, z: int, x: int, y: int) -> Response:
+    def tile(layer: str, z: int, x: int, y: int, request: Request) -> Response:
         """Base map and ski-run tiles, cached here (see snowwatch/tiles.py)."""
-        nonlocal tile_cache
-        tile_cache = tile_cache or TileCache(settings.tiles_dir, settings.user_agent)
-        got = tile_cache.get(layer, z, x, y)
+        cache = tiles()
+        if not cache.cached(layer, z, x, y):
+            tile_misses.check(request)
+        got = cache.get(layer, z, x, y)
         if got is None:
             raise HTTPException(404)
         data, media_type = got
@@ -126,9 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/glyphs/{stack}/{rng}.pbf")
     def glyph(stack: str, rng: str) -> Response:
         """Fonts for the map's labels, cached here."""
-        nonlocal tile_cache
-        tile_cache = tile_cache or TileCache(settings.tiles_dir, settings.user_agent)
-        data = glyphs(tile_cache, stack, rng)
+        data = glyphs(tiles(), stack, rng)
         if data is None:
             raise HTTPException(404)
         return Response(
@@ -157,9 +233,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(make_admin_router())
     app.include_router(make_push_router())
 
-    static = settings.static_root
     if static is not None and (static / "index.html").exists():
         root = static.resolve()
+        fresh = {"Cache-Control": "no-cache"}  # always check for a new version
+        forever = {"Cache-Control": "public, max-age=31536000, immutable"}
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
@@ -167,8 +244,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=404)
             target = (root / path).resolve()
             if path and target.is_file() and target.is_relative_to(root):
-                return FileResponse(target)
-            return FileResponse(root / "index.html")
+                # File names under _app/immutable carry a content hash.
+                headers = forever if path.startswith("_app/immutable/") else fresh
+                return FileResponse(target, headers=headers)
+            return FileResponse(root / "index.html", headers=fresh)
 
     return app
 

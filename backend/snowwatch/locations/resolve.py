@@ -22,6 +22,7 @@ from snowwatch.models import AvyRef, Band, BandName
 from snowwatch.sources import nws
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import FORECAST_URL, SOURCE, elevation_request
+from snowwatch.urls import is_http_url
 
 SNOTEL_RADIUS_KM = 25.0
 CANADA_RADIUS_KM = 40.0  # BC snow pillows are sparser than SNOTEL
@@ -229,7 +230,7 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
     else:
         links["Mountain forecast (ECCC)"] = "https://weather.gc.ca/mountain_forecast/"
         links["Avalanche Canada"] = "https://avalanche.ca/map"
-    if cat and cat.get("website"):
+    if cat and is_http_url(cat.get("website")):
         links["Resort website"] = cat["website"]
 
     return ResolveOut(

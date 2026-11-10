@@ -55,7 +55,11 @@ class Worker:
             log.warning("healthcheck ping failed: %s", e)
 
     def _fetcher(self) -> Fetcher:
-        return Fetcher(user_agent=self.settings.user_agent, raw_dir=self.settings.raw_dir)
+        return Fetcher(
+            user_agent=self.settings.user_agent,
+            contact_user_agent=self.settings.contact_user_agent,
+            raw_dir=self.settings.raw_dir,
+        )
 
     def full_run(self, ensembles: bool) -> None:
         with self.lock, self._fetcher() as fetcher:
@@ -162,7 +166,9 @@ class Worker:
             log.info("pruned %d cached raw responses", removed)
             from snowwatch.tiles import prune as prune_tiles
 
-            log.info("pruned %d cached map tiles", prune_tiles(self.settings.tiles_dir))
+            max_bytes = self.settings.tiles_max_mb * 1_000_000
+            removed = prune_tiles(self.settings.tiles_dir, max_bytes=max_bytes)
+            log.info("pruned %d cached map tiles", removed)
             avalanche.prune(conn)
 
     def precip(self) -> None:

@@ -5,6 +5,7 @@
   as current; the API applies the expiry against the clock.
 -->
 <script lang="ts">
+	import { safeHref } from '../links';
 	import type { AvalancheView } from '../types.gen';
 	import { dangerWord } from '../conditions';
 	import { weekday } from '../time';
@@ -67,7 +68,9 @@
 		{/if}
 		{#if doc?.link}
 			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a href={doc.link} target="_blank" rel="noopener">{center ?? 'Forecast'} ↗</a>
+			<a href={safeHref(doc.link)} target="_blank" rel="noopener noreferrer"
+				>{center ?? 'Forecast'} ↗</a
+			>
 		{/if}
 	</div>
 {:else}
@@ -143,10 +146,14 @@
 
 		{#if doc?.link}
 			<!-- External site: resolve() is only for routes in this app. -->
-			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a class="btn primary full" href={doc.link} target="_blank" rel="noopener"
-				>Full forecast at {center} ↗</a
+			<!-- eslint-disable svelte/no-navigation-without-resolve -->
+			<a
+				class="btn primary full"
+				href={safeHref(doc.link)}
+				target="_blank"
+				rel="noopener noreferrer">Full forecast at {center} ↗</a
 			>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		{/if}
 	</div>
 {/if}

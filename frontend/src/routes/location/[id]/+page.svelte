@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { safeHref } from '../../../lib/links';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError, getAvalanche, getSnapshot, getTrend, getVerification } from '../../../lib/api';
@@ -500,8 +501,10 @@
 						<ul class="links">
 							{#each Object.entries(snap.location.links) as [name, url] (name)}
 								<!-- External site: resolve() is only for routes in this app. -->
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-								<li><a href={url} rel="noopener" target="_blank">{name}</a></li>
+								<li>
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a href={safeHref(url)} rel="noopener noreferrer" target="_blank">{name}</a>
+								</li>
 							{/each}
 						</ul>
 					</section>

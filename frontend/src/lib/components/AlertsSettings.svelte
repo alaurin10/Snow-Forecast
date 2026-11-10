@@ -11,6 +11,7 @@
 		currentSubscription,
 		pushSupport,
 		saveChoices,
+		savedChoices,
 		sendTest,
 		serverKey,
 		turnOff,
@@ -45,7 +46,14 @@
 			.catch(() => {});
 		if (support === 'ok') {
 			currentSubscription()
-				.then((s) => (on = s !== null))
+				.then(async (s) => {
+					on = s !== null;
+					const saved = on ? await savedChoices() : null;
+					if (saved) {
+						picked = saved.locations;
+						types = saved.types;
+					}
+				})
 				.catch(() => {});
 		}
 	});
@@ -60,7 +68,7 @@
 			message = res.ok ? done : (res.detail ?? 'That didn’t work.');
 			return res.ok;
 		} catch (e) {
-			message = `This device couldn't sign up with its push service (${(e as Error).message}). Try again, or check the RUNBOOK troubleshooting table.`;
+			message = `This device couldn't sign up with its push service (${(e as Error).message}). Try again in a moment.`;
 			return false;
 		} finally {
 			busy = false;

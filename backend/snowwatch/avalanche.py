@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from snowwatch.geo import contains
 from snowwatch.http import Fetcher, FetchError
@@ -28,6 +28,7 @@ from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us
 from snowwatch.sources.base import fetch
 from snowwatch.store.db import utcnow_iso
+from snowwatch.urls import clean_url
 
 log = logging.getLogger("snowwatch.avalanche")
 
@@ -65,6 +66,11 @@ class AvalancheDoc(BaseModel):
     problems: list[AvyProblem] = []
     summary: str | None = None  # the center's bottom line, as published (tags removed)
     off_season: bool = False
+
+    @field_validator("link")
+    @classmethod
+    def _safe_link(cls, v: str | None) -> str | None:
+        return clean_url(v)
 
 
 class AvalancheView(BaseModel):

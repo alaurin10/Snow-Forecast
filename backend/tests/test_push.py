@@ -40,7 +40,7 @@ def browser_keys() -> dict[str, str]:
 
 
 def sub_json(n: int = 1) -> dict[str, Any]:
-    return {"endpoint": f"https://push.example.com/send/{n}", "keys": browser_keys()}
+    return {"endpoint": f"https://fcm.googleapis.com/fcm/send/{n}", "keys": browser_keys()}
 
 
 @pytest.fixture
@@ -90,10 +90,69 @@ def test_subscribe_test_and_unsubscribe(on: Settings, conn: sqlite3.Connection) 
     assert client.post("/api/push/test", json=sub).status_code == 404
 
 
-def test_rejects_non_https_endpoints(on: Settings, conn: sqlite3.Connection) -> None:
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://fcm.googleapis.com/fcm/send/1",  # not https
+        "https://evil.example/x",  # not a push service
+        "https://fcm.googleapis.com.evil.example/x",
+        "https://fcm.googleapis.com:8443/x",  # odd port
+        "https://user@fcm.googleapis.com/x",
+        "https://169.254.169.254/latest/meta-data",
+    ],
+)
+def test_rejects_endpoints_that_are_not_push_services(on: Settings, endpoint: str) -> None:
     client = TestClient(create_app(on))
-    bad = {"endpoint": "http://evil.example/x", "keys": browser_keys()}
+    bad = {"endpoint": endpoint, "keys": browser_keys()}
     assert client.post("/api/push/subscribe", json={"subscription": bad}).status_code == 422
+
+
+def test_known_push_services_are_accepted() -> None:
+    for url in (
+        "https://fcm.googleapis.com/fcm/send/abc",
+        "https://updates.push.services.mozilla.com/wpush/v2/abc",
+        "https://web.push.apple.com/abc",
+        "https://api.push.apple.com/abc",
+        "https://wns2-by3p.notify.windows.com/w/?token=abc",
+    ):
+        assert push.is_push_service(url), url
+
+
+def test_saved_choices_come_back(on: Settings, conn: sqlite3.Connection) -> None:
+    client = TestClient(create_app(on))
+    sub = sub_json()
+    choices = {"locations": ["rainy"], "types": ["wind_hold"], "units": "metric"}
+    client.post("/api/push/subscribe", json={"subscription": sub, **choices})
+    assert client.post("/api/push/prefs", json={"endpoint": sub["endpoint"]}).json() == choices
+    missing = {"endpoint": "https://fcm.googleapis.com/fcm/send/none"}
+    assert client.post("/api/push/prefs", json=missing).status_code == 404
+
+
+def test_subscription_cap(on: Settings, conn: sqlite3.Connection) -> None:
+    client = TestClient(create_app(on.model_copy(update={"push_max_subscriptions": 2})))
+    codes = [
+        client.post("/api/push/subscribe", json={"subscription": sub_json(n)}).status_code
+        for n in (1, 2, 3)
+    ]
+    assert codes == [200, 200, 503]
+    # An existing device can still update its choices.
+    r = client.post("/api/push/subscribe", json={"subscription": sub_json(1), "units": "metric"})
+    assert r.status_code == 200
+
+
+def test_subscribe_is_rate_limited(on: Settings, conn: sqlite3.Connection) -> None:
+    client = TestClient(create_app(on))
+    codes = {
+        client.post("/api/push/subscribe", json={"subscription": sub_json(1)}).status_code
+        for _ in range(12)
+    }
+    assert codes == {200, 429}
+
+
+def test_long_lists_are_refused(on: Settings, conn: sqlite3.Connection) -> None:
+    client = TestClient(create_app(on))
+    body = {"subscription": sub_json(1), "locations": [f"l{i}" for i in range(101)]}
+    assert client.post("/api/push/subscribe", json=body).status_code == 422
 
 
 def powder(date: str = "2026-12-05", cm: float = 23.0) -> Flag:
@@ -121,12 +180,12 @@ def test_only_matching_types_and_locations_one_message_each(
     )
     assert sent == 3
     by = {(e, m["url"]): m for e, m in fake.sent}
-    crystal = by[("https://push.example.com/send/1", "/location/crystal")]
+    crystal = by[("https://fcm.googleapis.com/fcm/send/1", "/location/crystal")]
     # wind_hold isn't in the default types; both others are in one notification.
     assert crystal["title"] == "Crystal: Powder day Sat, 9 in; storm from Fri: 16 in in 48 h"
-    rainy_metric = by[("https://push.example.com/send/2", "/location/rainy")]
+    rainy_metric = by[("https://fcm.googleapis.com/fcm/send/2", "/location/rainy")]
     assert rainy_metric["title"] == "Rainy: Storm from Fri: 40 cm in 48 h"
-    assert ("https://push.example.com/send/2", "/location/crystal") not in by
+    assert ("https://fcm.googleapis.com/fcm/send/2", "/location/crystal") not in by
 
 
 def test_gone_subscriptions_are_removed(on: Settings, conn: sqlite3.Connection) -> None:

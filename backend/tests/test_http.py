@@ -96,3 +96,34 @@ def test_raw_cache_written_and_pruned(tmp_path: Path) -> None:
     os.utime(files[0], (old, old))
     assert prune_raw(tmp_path, max_age_h=24) == 1
     assert not list(tmp_path.rglob("*.json.gz"))
+
+
+def test_only_nws_gets_the_contact_details() -> None:
+    import httpx
+
+    from snowwatch.http import Fetcher
+
+    seen: dict[str, str] = {}
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        seen[req.url.host] = req.headers["user-agent"]
+        return httpx.Response(200, json={})
+
+    with Fetcher(
+        user_agent="snowwatch/1",
+        contact_user_agent="snowwatch/1 (me@example.com)",
+        transport=httpx.MockTransport(answer),
+    ) as f:
+        f.get_json("https://api.weather.gov/points/1,2", source="nws")
+        f.get_json("https://api.open-meteo.com/v1/forecast", source="om")
+    assert seen == {
+        "api.weather.gov": "snowwatch/1 (me@example.com)",
+        "api.open-meteo.com": "snowwatch/1",
+    }
+
+
+def test_public_errors_lose_their_query_strings() -> None:
+    from snowwatch.http import strip_queries
+
+    msg = "HTTP 400 bad (https://api.example.com/v1/x?lat=1&key=secret)"
+    assert strip_queries(msg) == "HTTP 400 bad (https://api.example.com/v1/x)"

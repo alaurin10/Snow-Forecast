@@ -60,3 +60,54 @@ def test_coordinates_are_range_checked() -> None:
     bands[0]["lat"] = 95
     with pytest.raises(ValidationError):
         make_location(bands=bands)
+
+
+def test_links_must_be_http() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from tests.conftest import make_location
+
+    assert make_location(links={"Site": "https://example.com"}).links
+    for bad in ("javascript:alert(1)", "data:text/html,x", "ftp://x", "https://", " https://a.b"):
+        with pytest.raises(ValidationError):
+            make_location(links={"Site": bad})
+        with pytest.raises(ValidationError):
+            make_location(webcams=[{"name": "Cam", "url": bad}])
+    with pytest.raises(ValidationError):
+        make_location(name="x" * 81)
+
+
+def test_upstream_links_are_dropped_not_shown() -> None:
+    from snowwatch.avalanche import AvalancheDoc
+
+    doc = AvalancheDoc(
+        provider="nac",
+        center=None,
+        center_id=None,
+        zone=None,
+        link="javascript:alert(1)",
+        issued_at=None,
+        expires_at=None,
+    )
+    assert doc.link is None
+
+
+def test_old_stored_rows_with_bad_links_still_load(conn: object) -> None:
+    import sqlite3
+
+    from snowwatch.locations import service
+    from tests.conftest import make_location
+
+    assert isinstance(conn, sqlite3.Connection)
+    service.upsert_location(conn, make_location(), max_locations=25)
+    with conn:
+        conn.execute(
+            "UPDATE locations SET links_json = ?, webcams_json = ?",
+            (
+                '{"Bad": "javascript:alert(1)", "Good": "https://ok.example"}',
+                '[{"name": "x", "url": "javascript:1"}]',
+            ),
+        )
+    (loc,) = service.list_locations(conn)
+    assert loc.links == {"Good": "https://ok.example"} and loc.webcams == []

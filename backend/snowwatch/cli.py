@@ -22,7 +22,11 @@ FIXTURES_DIR = REPO_ROOT / "backend" / "tests" / "fixtures"
 
 
 def _fetcher(settings: Settings, *, cache: bool = False) -> Fetcher:
-    return Fetcher(user_agent=settings.user_agent, raw_dir=settings.raw_dir if cache else None)
+    return Fetcher(
+        user_agent=settings.user_agent,
+        contact_user_agent=settings.contact_user_agent,
+        raw_dir=settings.raw_dir if cache else None,
+    )
 
 
 def cmd_init(args: argparse.Namespace, settings: Settings) -> int:
