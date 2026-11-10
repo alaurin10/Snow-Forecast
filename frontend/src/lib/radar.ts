@@ -1,11 +1,12 @@
-// Precipitation for the map: one timeline from two hours ago to two days ahead, in one
+// Precipitation for the map: one timeline from three hours ago to two days ahead, in one
 // set of colours for rain, mix/ice and snow by rate.
 //
-// The server draws every frame (backend/snowwatch/precip.py) as one picture over the
-// region around the locations, and lists them in /api/precip. The browser only
-// downloads and swaps pictures, so scrubbing is instant and a phone's memory stays low.
-// Sources: RainViewer radar (past); Environment Canada's HRDPS (Canada and the northern
-// US); NOAA HRRR via Iowa State, or NWS 6-hour totals, for the rest of the US.
+// The server draws every frame (backend/snowwatch/maps/) as one picture over western
+// North America, and lists them in /api/precip. The browser only downloads and swaps
+// pictures, so scrubbing is instant and a phone's memory stays low.
+// Sources: Environment Canada's North American radar composite (past 3 h, typed) and its
+// nowcast (next 72 min); Environment Canada's HRDPS (Canada and the northern US); NOAA
+// HRRR via Iowa State, or NWS 6-hour totals, for the rest of the US.
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -80,14 +81,23 @@ export function untypedColor(inches: number): string | null {
 
 // ---- The frame list ------------------------------------------------------------------
 
+/** Observed radar, the radar nowcast (echoes moved forward), or a model forecast. */
+export type FrameKind = 'radar' | 'nowcast' | 'forecast';
+
 export interface Frame {
-	/** Unix seconds: a radar scan's time, or the end of a forecast hour. */
+	/** Unix seconds: a radar scan's time, a nowcast's time, or the end of a forecast span. */
 	t: number;
+	/** True for observed radar. */
 	past: boolean;
 	/** Picture file under /api/precip/. */
 	file: string;
 	/** Where the US forecast outside the Canadian model came from. */
 	south: '' | 'hrrr' | 'wpc';
+	kind: FrameKind;
+	/** Hours the amount covers: 1 for hourly forecast frames, 0 for a rate at an instant. */
+	span_h: number;
+	/** Which source drew the north (Canada) and south (US) parts, e.g. "radar-eccc". */
+	src: { north?: string; south?: string };
 }
 
 /** Forecast snow over a window, from the Canadian model. */
@@ -98,16 +108,22 @@ export interface Total {
 	start: number;
 	end: number;
 	file: string;
+	/** The model it came from ("hrdps"). */
+	source?: string;
 }
 
+/** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`. */
 export interface PrecipIndex {
+	version?: number;
 	generated: string;
 	/** [[south, west], [north, east]] the pictures cover. */
 	bounds: [[number, number], [number, number]];
 	width: number;
 	height: number;
-	frames: Frame[];
+	frames: (Pick<Frame, 't' | 'past' | 'file' | 'south'> & Partial<Frame>)[];
 	totals?: Total[];
+	/** Credit lines for the sources in use. */
+	attribution?: string[];
 }
 
 export interface Timeline {
@@ -118,20 +134,53 @@ export interface Timeline {
 	height: number;
 	/** Index of the latest radar frame ("now"), or -1. */
 	now: number;
+	/** Index of the last nowcast frame, or -1. */
+	nowcastEnd: number;
 	totals: Total[];
+	attribution: string[];
 }
 
-/** Turn the server's list into a timeline: in time order, radar before forecast. */
+const ORDER: Record<FrameKind, number> = { radar: 0, nowcast: 1, forecast: 2 };
+
+/** Turn the server's list into a timeline: in time order, radar, then nowcast, then forecast. */
 export function toTimeline(ix: PrecipIndex): Timeline {
-	const frames = [...(ix.frames ?? [])]
+	const frames: Frame[] = [...(ix.frames ?? [])]
 		.filter((f) => typeof f?.t === 'number' && typeof f?.file === 'string')
-		.sort((a, b) => a.t - b.t || Number(b.past) - Number(a.past));
+		.map((f) => {
+			const kind: FrameKind =
+				f.kind === 'radar' || f.kind === 'nowcast' || f.kind === 'forecast'
+					? f.kind
+					: f.past
+						? 'radar'
+						: 'forecast';
+			return {
+				...f,
+				kind,
+				past: kind === 'radar',
+				span_h: typeof f.span_h === 'number' ? f.span_h : kind === 'forecast' ? 1 : 0,
+				src: f.src ?? {}
+			};
+		})
+		.sort((a, b) => a.t - b.t || ORDER[a.kind] - ORDER[b.kind]);
 	let now = -1;
-	frames.forEach((f, i) => f.past && (now = i));
+	let nowcastEnd = -1;
+	frames.forEach((f, i) => {
+		if (f.kind === 'radar') now = i;
+		if (f.kind === 'nowcast') nowcastEnd = i;
+	});
 	const totals = (ix.totals ?? [])
 		.filter((t) => typeof t?.hours === 'number' && typeof t?.file === 'string')
 		.sort((a, b) => a.hours - b.hours);
-	return { frames, bounds: ix.bounds, width: ix.width, height: ix.height, now, totals };
+	return {
+		frames,
+		bounds: ix.bounds,
+		width: ix.width,
+		height: ix.height,
+		now,
+		nowcastEnd,
+		totals,
+		attribution: Array.isArray(ix.attribution) ? ix.attribution : []
+	};
 }
 
 /** Why the timeline isn't available, in words for the map. */
@@ -186,9 +235,20 @@ export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 const clock = (d: Date) =>
 	d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
 
-/** "Sat 2:40 PM" and "20 min ago" for a radar frame; "Sat 5–6 AM" and "in 4 h" ahead. */
+/**
+ * "2:40 PM" and "radar · 20 min ago" for a radar frame, "3:04 PM" and "nowcast · in 24 min"
+ * for a nowcast, "Sat 5–6 AM" and "forecast · in 4 h" ahead.
+ */
 export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: string } {
-	if (f.past) {
+	if (f.kind === 'nowcast') {
+		const when = new Date(f.t * 1000).toLocaleTimeString('en-US', {
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+		const ahead = Math.round((f.t - now / 1000) / 60);
+		return { when, rel: ahead <= 0 ? 'nowcast · now' : `nowcast · in ${ahead} min` };
+	}
+	if (f.kind === 'radar') {
 		const d = new Date(f.t * 1000);
 		const when = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 		const ago = Math.round((now / 1000 - f.t) / 60);
@@ -198,7 +258,8 @@ export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: str
 		const m = ago % 60;
 		return { when, rel: `radar · ${h} h${m ? ` ${m} min` : ''} ago` };
 	}
-	const start = new Date((f.t - HOUR) * 1000);
+	const span = (f.span_h || 1) * HOUR;
+	const start = new Date((f.t - span) * 1000);
 	const end = new Date(f.t * 1000);
 	const day = start.toLocaleDateString('en-US', { weekday: 'short' });
 	const a = clock(start);
@@ -206,13 +267,31 @@ export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: str
 	// "5–6 AM" when both ends share AM/PM, else "11 AM–12 PM".
 	const [aNum, aMer] = a.split(' ');
 	const [bNum, bMer] = b.split(' ');
-	const span = aMer === bMer ? `${aNum}–${bNum} ${bMer}` : `${a}–${b}`;
-	const ahead = Math.round((f.t - HOUR - now / 1000) / HOUR);
+	const range = aMer === bMer ? `${aNum}–${bNum} ${bMer}` : `${a}–${b}`;
+	const ahead = Math.round((f.t - span - now / 1000) / HOUR);
 	return {
-		when: `${day} ${span}`,
+		when: `${day} ${range}`,
 		rel: ahead <= 0 ? 'forecast · this hour' : `forecast · in ${ahead} h`
 	};
 }
+
+/** Where a frame came from, in a sentence for the map's info panel. */
+export function frameSource(f: Frame): string {
+	if (f.kind === 'radar') {
+		return f.src.north === 'rainviewer'
+			? 'Observed by radar (RainViewer).'
+			: "Observed by radar: Environment Canada's North American composite, which includes the US radars.";
+	}
+	if (f.kind === 'nowcast') {
+		return 'Nowcast: the latest radar echoes moved forward by Environment Canada, without growth or decay.';
+	}
+	return f.south === 'wpc'
+		? 'Forecast: Canadian HRDPS model; rest of the US, NWS 6-hour totals (no type).'
+		: 'Forecast: Canadian HRDPS model; rest of the US, NOAA HRRR.';
+}
+
+/** Shown with radar and nowcast frames. */
+export const RADAR_GAPS = "Radar can't see into many mountain valleys.";
 
 // ---- Legend ------------------------------------------------------------------
 

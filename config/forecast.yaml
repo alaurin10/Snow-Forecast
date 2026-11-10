@@ -77,3 +77,13 @@ backcountry:
   refreeze_clear_frac: 0.5
   rose_min_snow_cm: 2        # less new snow than this: "little new snow to move"
   rose_min_wind_kmh: 15
+
+# The Map page's radar and forecast pictures (see docs/MAP-PLAN.md).
+map:
+  # The box they cover: [south, west, north, east] in degrees, western North America.
+  # Widened only to take in a location outside it.
+  region: [31, -134, 57, -102]
+  width: 1700            # pixels; about 1.5 km a pixel over this box
+  radar_minutes: 6       # radar and nowcast (a new scan every 6 minutes)
+  forecast_minutes: 30   # hourly forecast frames
+  totals_minutes: 60     # snow totals

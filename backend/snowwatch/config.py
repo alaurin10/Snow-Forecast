@@ -46,6 +46,27 @@ class Schedule(BaseModel):
     vacuum_weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "sun"
 
 
+class MapConfig(BaseModel):
+    """The Map page's weather pictures (see docs/MAP-PLAN.md)."""
+
+    # The box they cover: south, west, north, east in degrees. Widened only to take in
+    # a location outside it.
+    region: tuple[float, float, float, float] = (31.0, -134.0, 57.0, -102.0)
+    # Picture width in pixels (1700 over the default box is about 1.5 km a pixel).
+    width: int = Field(1700, ge=200, le=4000)
+    radar_minutes: int = Field(6, ge=1)
+    forecast_minutes: int = Field(30, ge=5)
+    totals_minutes: int = Field(60, ge=10)
+
+    @field_validator("region")
+    @classmethod
+    def _box(cls, v: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+        south, west, north, east = v
+        if not (-85 <= south < north <= 85 and -180 <= west < east <= 180):
+            raise ValueError("map.region is [south, west, north, east] in degrees")
+        return v
+
+
 class ForecastConfig(BaseModel):
     models: ModelSets
     ensembles: list[str]
@@ -67,6 +88,7 @@ class ForecastConfig(BaseModel):
     skiday: SkiDayConfig = SkiDayConfig()
     backcountry: BackcountryConfig = BackcountryConfig()
     flags: FlagConfig = FlagConfig()
+    map: MapConfig = MapConfig()
     # Verification: the snow-to-water ratio for the observed-SWE depth estimate.
     verify_swe_ratio: float = 10
 

@@ -3,7 +3,8 @@
   Calendar's colour ramp, with a ring in the avalanche danger colour when the
   center's rating is current. Tap a marker for the numbers and a link.
   With `radar`, the map fills the window and precipitation plays over it on one
-  timeline: the last two hours of observed radar, then the next ~48 hours of forecast
+  timeline: the last three hours of observed radar, a 72-minute radar nowcast, then the
+  next ~48 hours of forecast
   (see ../radar.ts). It's a MapLibre map: tilt and turn it, and switch on 3D terrain.
 -->
 <script lang="ts">
@@ -23,8 +24,10 @@
 	import { prefs } from '../prefs.svelte';
 	import {
 		frameLabel,
+		frameSource,
 		loadTimeline,
 		PrecipError,
+		RADAR_GAPS,
 		RAMPS,
 		rampTop,
 		TOTAL,
@@ -551,13 +554,20 @@
 		const nowAt = timeline?.now ?? -1;
 		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
 		frames.forEach((f, i) => {
-			if (f.past || i === 0) return;
+			if (f.kind !== 'forecast' || i === 0) return;
 			const start = new Date((f.t - 3600) * 1000);
 			// Skip a day name that would crowd "Now".
 			if (start.getHours() === 0 && !(out[0]?.now && pct(i) - out[0].at < 10))
 				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
 		});
 		return out;
+	});
+	// The nowcast's stretch of the slider, between the radar and the forecast.
+	const nowcastBand = $derived.by(() => {
+		const from = timeline?.now ?? -1;
+		const to = timeline?.nowcastEnd ?? -1;
+		if (from < 0 || to <= from) return null;
+		return { left: pct(from), width: pct(to) - pct(from) };
 	});
 	// The slider track: downloaded frames shaded, like a video's buffered range.
 	const buffered = $derived.by(() => {
@@ -696,8 +706,8 @@
 		let loops = 0;
 		let id: ReturnType<typeof setTimeout>;
 		const tick = () => {
-			const past = frames[frame]?.past;
-			id = setTimeout(tick, past ? 300 : 450);
+			const radarish = frames[frame]?.kind !== 'forecast';
+			id = setTimeout(tick, radarish ? 300 : 450);
 			if (hold > 0) return void hold--;
 			const next = (frame + 1) % count;
 			if ((waiting || !store.has(frames[next])) && waits++ < 10) return;
@@ -893,15 +903,8 @@
 
 	const unit = $derived(units === 'imperial' ? 'in' : 'cm');
 	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
-	const source = $derived(
-		!current
-			? ''
-			: current.past
-				? 'Observed by radar (RainViewer).'
-				: untypedShown
-					? 'Forecast: Canadian HRDPS model; rest of the US, NWS 6-hour totals (no type).'
-					: 'Forecast: Canadian HRDPS model; rest of the US, NOAA HRRR.'
-	);
+	const source = $derived(current ? frameSource(current) : '');
+	const radarShown = $derived(!!current && current.kind !== 'forecast');
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && infoOpen && (infoOpen = false)} />
@@ -1049,7 +1052,7 @@
 					<span class="pin ring" aria-hidden="true"></span> Ring: avalanche danger, when rated.
 				</p>
 				{#if on}
-					<p>{source}</p>
+					<p>{radarShown ? `${source} ${RADAR_GAPS}` : source}</p>
 					<p>
 						Darkest shades: snow {rampTop(RAMPS.snow, units)}, rain {rampTop(RAMPS.rain, units)}.
 					</p>
@@ -1123,6 +1126,16 @@
 								aria-valuetext={`${label.when}, ${label.rel}`}
 								style:--buffer={buffered}
 							/>
+							{#if nowcastBand}
+								<div class="bands" aria-hidden="true">
+									<span
+										class="nowband"
+										title="Nowcast"
+										style:left="{nowcastBand.left}%"
+										style:width="{nowcastBand.width}%"
+									></span>
+								</div>
+							{/if}
 							<div class="ticks" aria-hidden="true">
 								{#each ticks as d (d.at)}
 									<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
@@ -1131,7 +1144,7 @@
 						</div>
 						<div class="time" aria-live="off">
 							<strong class="num">{label.when}</strong>
-							<span class:fc={!current.past}
+							<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
 								>{label.rel}{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}</span
 							>
 						</div>
@@ -1163,6 +1176,9 @@
 								</span>
 								<span class="top">{untypedTop(units)}</span>
 							</span>
+						{/if}
+						{#if radarShown}
+							<span class="gaps">{RADAR_GAPS}</span>
 						{/if}
 					</div>
 				{/if}
@@ -1494,6 +1510,29 @@
 	}
 	.time span.fc {
 		color: var(--accent-ink);
+	}
+	.gaps {
+		flex-basis: 100%;
+		font-size: 0.68rem;
+	}
+	.time span.nc {
+		color: var(--text);
+	}
+	/* The nowcast's stretch: a thin bar just above the slider, inset like the ticks. */
+	.bands {
+		position: absolute;
+		top: -3px;
+		left: 8px;
+		right: 8px;
+		height: 3px;
+		pointer-events: none;
+	}
+	.nowband {
+		position: absolute;
+		top: 0;
+		height: 100%;
+		border-radius: 2px;
+		background: color-mix(in srgb, var(--accent) 60%, transparent);
 	}
 	.spin {
 		display: inline-block;
