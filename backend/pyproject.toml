@@ -1,6 +1,6 @@
 [project]
 name = "snowwatch"
-version = "0.1.0"
+version = "1.0.0"
 description = "Snow Watch: self-hosted snow forecast pipeline and API"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,6 +24,7 @@ snowwatch = "snowwatch.cli:main"
 dev = [
     "mypy>=1.11",
     "pytest>=8.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.6",
     "types-pyyaml>=6.0",
 ]
@@ -55,3 +56,12 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["snowwatch"]
+branch = false
+
+[tool.coverage.report]
+fail_under = 88
+skip_covered = true
+show_missing = true

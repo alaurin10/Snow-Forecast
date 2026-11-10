@@ -1,5 +1,6 @@
 <!-- Review and edit a location before saving (new from auto-detect, or existing). -->
 <script lang="ts">
+	import { safeHref, safeImage } from '../links';
 	import { hscroll } from '../hscroll';
 	import type { Location, SnotelCandidate } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
@@ -37,9 +38,10 @@
 	const elevs = $derived(loc.bands.map((b) => b.elev_m));
 	const rising = $derived(elevs[0] < elevs[1] && elevs[1] < elevs[2]);
 	const idOk = $derived(/^[a-z0-9][a-z0-9-]{1,39}$/.test(loc.id));
-	const urlOk = (u: string | null | undefined) => !u || /^https?:\/\/\S+$/.test(u);
+	const urlOk = (u: string | null | undefined) => !u || !!safeHref(u);
+	const imageOk = (u: string | null | undefined) => !u || !!safeImage(u);
 	const camsOk = $derived(
-		(loc.webcams ?? []).every((w) => w.name.trim() && urlOk(w.url) && w.url && urlOk(w.image_url))
+		(loc.webcams ?? []).every((w) => w.name.trim() && urlOk(w.url) && w.url && imageOk(w.image_url))
 	);
 	const canSave = $derived(rising && idOk && camsOk && loc.name.trim().length > 0 && !saving);
 	function addCam() {
@@ -100,10 +102,11 @@
 				{#each loc.bands as b, i (b.band)}
 					<tr>
 						<td>{b.band}</td>
-						<td><input bind:value={b.label} /></td>
+						<td><input bind:value={b.label} aria-label={`${b.band} label`} /></td>
 						<td
 							><input
 								type="number"
+								aria-label={`${b.band} elevation (${imperial ? 'ft' : 'm'})`}
 								value={toShown(b.elev_m)}
 								onchange={(e) => setElev(i, e.currentTarget.value)}
 							/></td
@@ -112,6 +115,7 @@
 							><input
 								type="number"
 								step="any"
+								aria-label={`${b.band} latitude`}
 								value={b.lat}
 								onchange={(e) => setNum(i, 'lat', e.currentTarget.value)}
 							/></td
@@ -120,6 +124,7 @@
 							><input
 								type="number"
 								step="any"
+								aria-label={`${b.band} longitude`}
 								value={b.lon}
 								onchange={(e) => setNum(i, 'lon', e.currentTarget.value)}
 							/></td
@@ -215,7 +220,9 @@
 			>
 		</div>
 	{/each}
-	{#if !camsOk}<p class="bad">Each webcam needs a name and links starting with https://</p>{/if}
+	{#if !camsOk}<p class="bad">
+			Each webcam needs a name and a link; image links must start with https://
+		</p>{/if}
 	<button type="button" class="btn small addcam" onclick={addCam}>+ Add a webcam</button>
 
 	<div class="actions">

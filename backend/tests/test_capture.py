@@ -26,7 +26,7 @@ def test_capture_writes_expected_tree(tmp_path: Path, cfg: ForecastConfig) -> No
         locs, fetcher, tmp_path, cfg, spacing_s=0, today=date(2026, 11, 4), log=lambda m: None
     )
     names = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.json.gz")}
-    for n in ("blend", "multi", "upper", "ens_gem_global", "proto_det", "proto_ens_ecmwf_ifs025"):
+    for n in ("blend", "multi", "upper", "ens_gem_global"):
         assert f"crystal/{n}.json.gz" in names and f"whistler/{n}.json.gz" in names
     assert "crystal/nws_alerts.json.gz" in names and "crystal/snotel_daily.json.gz" in names
     assert "whistler/nws_alerts.json.gz" not in names

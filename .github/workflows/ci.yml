@@ -1,7 +1,7 @@
 name: CI
 
-# Tests only. Nothing is built or deployed here: the mini PC builds and
-# deploys itself (docs/PLAN.md section 6).
+# Checks only. Nothing is deployed from here: each server builds its own image
+# (see docs/DEPLOYMENT.md). Actions are pinned to commits; Dependabot keeps them fresh.
 on:
   pull_request:
   push:
@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -17,15 +21,15 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: "3.12"
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy snowwatch
-      - run: uv run pytest
+      - run: uv run pytest --cov
       - name: API schema is up to date
         run: |
           uv run snowwatch schema --out ../frontend/src/lib/api-schema.json
@@ -37,8 +41,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Node 24 ships npm 11; npm 10 has a peer-dependency bug with this tree.
           node-version: "24"
@@ -54,23 +58,76 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  docker:
-    # Proves the image builds and starts. Nothing is pushed anywhere: the
-    # mini PC builds its own image.
+  e2e:
+    # The built app in a real browser against the API, with forecasts rebuilt from
+    # the saved fixtures (no network calls to weather services).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f docker/Dockerfile -t snowwatch:ci .
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --frozen
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm run e2e
+        working-directory: frontend
+
+  audit:
+    # Known vulnerabilities in dependencies. Reported, not blocking: a new advisory
+    # shouldn't turn every open PR red; Dependabot opens the fix.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Python dependencies
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/req.txt
+          uvx pip-audit -r /tmp/req.txt
+      - name: npm dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev
+
+  docker:
+    # Proves the image builds and starts. Nothing is pushed anywhere.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: docker build -f docker/Dockerfile --build-arg GIT_COMMIT=${{ github.sha }} -t snowwatch:ci .
       - name: Smoke test
         run: |
           docker run --rm snowwatch:ci snowwatch --help
           mkdir -p /tmp/sw-data && chmod 777 /tmp/sw-data
-          docker run -d --name sw -p 8000:8000 -v /tmp/sw-data:/data snowwatch:ci
+          docker run -d --name sw -p 8000:8000 -v /tmp/sw-data:/data \
+            -e OWNER_PASSWORD=ci-owner-password-123 snowwatch:ci
           for i in $(seq 1 30); do curl -sf localhost:8000/api/livez && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health)" = 503
           curl -sf localhost:8000/ | grep -q '<html'
           curl -sf localhost:8000/calendar | grep -q '<html'
+          curl -sfI localhost:8000/ | grep -qi 'content-security-policy'
           docker run --rm -v /tmp/sw-data:/data snowwatch:ci snowwatch init
           curl -sf localhost:8000/api/locations | grep -q crystal
+          curl -sf localhost:8000/api/meta | grep -q '"commit":"${{ github.sha }}"'
           curl -sf localhost:8000/manifest.webmanifest | grep -q 'Snow Watch'
+          # Owner sign-in round trip (Origin as a browser sends it).
+          curl -sf -c /tmp/jar -H 'Origin: http://localhost:8000' -H 'Content-Type: application/json' \
+            -d '{"password":"ci-owner-password-123"}' localhost:8000/api/auth/login | grep -q '"is_owner":true'
+          curl -sf -b /tmp/jar localhost:8000/api/admin/locations | grep -q crystal
           docker logs sw

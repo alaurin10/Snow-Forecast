@@ -229,6 +229,38 @@ def test_refresh_stores_and_keeps_old_rows_on_failure(seeded: sqlite3.Connection
     assert avalanche.latest(seeded)["crystal"].center_id == "CAIC"
 
 
+def test_a_failed_product_keeps_the_stored_full_forecast(seeded: sqlite3.Connection) -> None:
+    locs = service.list_locations(seeded)
+    with Fetcher(user_agent="t", transport=transport(), tries=1) as f:
+        avalanche.refresh(seeded, f, locs)
+    full = avalanche.latest(seeded)["crystal"]
+    real = transport()
+
+    def no_products(req: httpx.Request) -> httpx.Response:
+        if "/product?" in str(req.url):
+            return httpx.Response(500)
+        return real.handle_request(req)
+
+    with Fetcher(user_agent="t", transport=httpx.MockTransport(no_products), tries=1) as f:
+        res = avalanche.refresh(seeded, f, locs)
+    assert res.errors
+    assert avalanche.latest(seeded)["crystal"] == full  # not replaced by the thin map layer
+
+
+def test_one_broken_product_does_not_stop_the_rest(seeded: sqlite3.Connection) -> None:
+    locs = service.list_locations(seeded)
+    real = transport()
+
+    def broken_ca(req: httpx.Request) -> httpx.Response:
+        if str(req.url).endswith("/products"):
+            return httpx.Response(200, json=[{"area": {"id": "x"}, "report": "not a dict"}])
+        return real.handle_request(req)
+
+    with Fetcher(user_agent="t", transport=httpx.MockTransport(broken_ca), tries=1) as f:
+        res = avalanche.refresh(seeded, f, locs)
+    assert res.saved >= 3  # the US zones still saved
+
+
 def test_prune_keeps_recent(seeded: sqlite3.Connection) -> None:
     doc = parse_ca(ca_product("abc"))
     avalanche.save(seeded, "whistler", doc)

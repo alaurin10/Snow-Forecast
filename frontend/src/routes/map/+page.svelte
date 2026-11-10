@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ErrorNote from '../../lib/components/ErrorNote.svelte';
+	import { friendlyError } from '../../lib/errors';
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
@@ -8,8 +10,11 @@
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
+	let retry = $state(0);
 
 	$effect(() => {
+		void retry; // the Try again button runs this again
+		error = null;
 		getOverview()
 			.then((r) => (rows = r))
 			.catch((e: Error) => {
@@ -27,7 +32,7 @@
 								next5_cm: null
 							}) as unknown as OverviewRow
 					);
-				} else error = e.message;
+				} else error = friendlyError(e);
 			});
 	});
 
@@ -39,9 +44,9 @@
 <h1>Map</h1>
 
 {#if error}
-	<p class="card">Can't load the map: {error}</p>
+	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted">Loading…</p>
+	<p class="muted" aria-live="polite">Loading…</p>
 {:else}
 	<MapView {rows} units={prefs.units} {href} radar />
 {/if}

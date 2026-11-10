@@ -1,4 +1,4 @@
-"""Day and night periods (ported from `period_key`/`period_label` in docs/reference/pull.py).
+"""Day and night periods.
 
 Day is 06–18 and night 18–06 local time, and a night belongs to the evening's
 date. Hours are grouped by their local wall-clock hour, so a night that spans

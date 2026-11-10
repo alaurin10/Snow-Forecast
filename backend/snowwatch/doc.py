@@ -7,9 +7,10 @@ columnar (one list per field) to keep the gzipped document small.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from snowwatch.models import Webcam
+from snowwatch.urls import clean_links
 
 DOC_VERSION = 3
 
@@ -177,7 +178,7 @@ class Snotel(BaseModel):
 
 
 class Flag(BaseModel):
-    """Something worth a look (section 4.7 of the plan). The browser words it in your units."""
+    """Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units."""
 
     type: str  # powder_day, storm_incoming, model_outlier, low_confidence, rain_on_snow, …
     severity: str  # info, notice, warning
@@ -289,6 +290,11 @@ class LocationMeta(BaseModel):
     lon: float
     links: dict[str, str]
     webcams: list[Webcam] = []
+
+    @field_validator("links")
+    @classmethod
+    def _safe_links(cls, v: dict[str, str]) -> dict[str, str]:
+        return clean_links(v)
 
 
 class Snapshot(BaseModel):

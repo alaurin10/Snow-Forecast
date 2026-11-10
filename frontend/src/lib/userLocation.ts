@@ -182,8 +182,7 @@ export class UserLocation {
 			this.map.flyTo({
 				center: centre,
 				zoom: Math.max(this.map.getZoom(), FOLLOW_ZOOM),
-				duration: 1800,
-				essential: true
+				duration: 1800
 			});
 		} else if (!this.map.isMoving()) {
 			this.map.easeTo({ center: centre, duration: 600 });

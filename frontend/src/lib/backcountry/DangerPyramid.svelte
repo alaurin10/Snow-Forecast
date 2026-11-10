@@ -5,9 +5,11 @@
   as current; the API applies the expiry against the clock.
 -->
 <script lang="ts">
+	import { safeHref } from '../links';
 	import type { AvalancheView } from '../types.gen';
 	import { dangerWord } from '../conditions';
 	import { weekday } from '../time';
+	import type { LoadState } from '../load';
 
 	interface Props {
 		view: AvalancheView | null;
@@ -17,9 +19,12 @@
 		today: string;
 		/** One line for the top of the Forecast tab instead of the full card. */
 		compact?: boolean;
+		/** Whether `view` has arrived: a request still in flight, or one that failed, must
+		 * never read as "no zone" on a safety panel. */
+		load?: LoadState;
 	}
 
-	let { view, tz, today, compact = false }: Props = $props();
+	let { view, tz, today, compact = false, load = 'ready' }: Props = $props();
 
 	const doc = $derived(view?.doc ?? null);
 	const status = $derived(view?.status ?? 'none');
@@ -50,7 +55,11 @@
 {#if compact}
 	<div class="strip" aria-label="Avalanche danger">
 		<span class="lead">Avalanche</span>
-		{#if status === 'current' && todayDay}
+		{#if load === 'loading'}
+			<span class="faint">Loading…</span>
+		{:else if load === 'error'}
+			<span class="danger d0">Couldn’t load</span>
+		{:else if status === 'current' && todayDay}
 			<span class="faint">{dayName(todayDay.date)}</span>
 			{#each TIERS as t (t.key)}
 				{@const lvl = todayDay[t.key]}
@@ -67,7 +76,9 @@
 		{/if}
 		{#if doc?.link}
 			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a href={doc.link} target="_blank" rel="noopener">{center ?? 'Forecast'} ↗</a>
+			<a href={safeHref(doc.link)} target="_blank" rel="noopener noreferrer"
+				>{center ?? 'Forecast'} ↗</a
+			>
 		{/if}
 	</div>
 {:else}
@@ -137,16 +148,27 @@
 					: ''}. Conditions can still be dangerous wherever there is enough snow to slide.
 			</p>
 			{#if doc.summary}<blockquote class="summary">{doc.summary}</blockquote>{/if}
+		{:else if load === 'loading'}
+			<p class="muted small" aria-live="polite">Loading the avalanche forecast…</p>
+		{:else if load === 'error'}
+			<p class="muted small" role="alert">
+				Couldn’t load the avalanche forecast. Check the avalanche center directly, or try again in a
+				moment.
+			</p>
 		{:else}
 			<p class="muted small">No avalanche forecast zone is set for this location.</p>
 		{/if}
 
 		{#if doc?.link}
 			<!-- External site: resolve() is only for routes in this app. -->
-			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a class="btn primary full" href={doc.link} target="_blank" rel="noopener"
-				>Full forecast at {center} ↗</a
+			<!-- eslint-disable svelte/no-navigation-without-resolve -->
+			<a
+				class="btn primary full"
+				href={safeHref(doc.link)}
+				target="_blank"
+				rel="noopener noreferrer">Full forecast at {center} ↗</a
 			>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		{/if}
 	</div>
 {/if}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dailyTotals, dayPairs, precipKind } from './daybars';
+import { dailyTotals, dayPairs, describeDays, precipKind } from './daybars';
 import type { OverviewPeriod } from './types.gen';
 
 const p = (date: string, kind: string, snow_cm: number, ptype = 'snow'): OverviewPeriod => ({
@@ -80,5 +80,19 @@ describe('dailyTotals', () => {
 		const total = days.reduce((a, d) => a + d.cm, 0);
 		expect(total).toBe(ps.slice(0, 10).reduce((a, x) => a + (x.snow_cm ?? 0), 0));
 		expect(days[0].cm).toBe(3);
+	});
+});
+
+describe('describeDays', () => {
+	it('puts the bars into words', () => {
+		const text = describeDays(
+			[
+				{ date: '2026-11-09', label: 'Today', weekend: false, cm: 5.08, kind: 'snow' },
+				{ date: '2026-11-10', label: 'Tue', weekend: false, cm: 0, kind: 'none' },
+				{ date: '2026-11-11', label: 'Wed', weekend: false, cm: 2.54, kind: 'rain' }
+			],
+			(cm) => `${(cm / 2.54).toFixed(0)} in`
+		);
+		expect(text).toBe('Today 2 in, Tue none, Wed 1 in (mostly rain)');
 	});
 });

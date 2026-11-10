@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { ago, instant } from '../../lib/time';
+	import ErrorNote from '../../lib/components/ErrorNote.svelte';
+	import { friendlyError } from '../../lib/errors';
 	import { hscroll } from '../../lib/hscroll';
 	import { resolve } from '$app/paths';
 	import { getStatus } from '../../lib/api';
@@ -6,27 +9,22 @@
 
 	let status = $state<StatusOut | null>(null);
 	let error = $state<string | null>(null);
+	let retry = $state(0);
+	const KINDS: Record<string, string> = {
+		full: 'Scheduled',
+		job: 'Refresh',
+		rebuild: 'Rebuild',
+		manual: 'Manual'
+	};
 
 	$effect(() => {
+		void retry; // the Try again button runs this again
+		error = null;
 		getStatus()
 			.then((s) => (status = s))
-			.catch((e: Error) => (error = e.message));
+			.catch((e: Error) => (error = friendlyError(e)));
 	});
 
-	const ago = (iso: string | null | undefined): string => {
-		if (!iso) return 'never';
-		const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
-		if (m < 60) return `${Math.max(0, m)} min ago`;
-		const h = Math.round(m / 60);
-		return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
-	};
-	const when = (iso: string) =>
-		new Date(iso).toLocaleString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			hour: 'numeric',
-			minute: '2-digit'
-		});
 	const NAMES: Record<string, string> = {
 		'open-meteo': 'Open-Meteo (weather models)',
 		nws: 'National Weather Service',
@@ -34,7 +32,7 @@
 		'bc-asws': 'BC snow pillows',
 		'avalanche-us': 'avalanche.org',
 		'avalanche-ca': 'Avalanche Canada',
-		catalog: 'Ski-area catalog'
+		catalog: 'Ski-area list (OpenSkiMap)'
 	};
 	// A source is "late" when its last success is older than a day.
 	const late = (iso: string | null) => !iso || Date.now() - Date.parse(iso) > 26 * 3600 * 1000;
@@ -44,14 +42,14 @@
 <svelte:head><title>Status · Snow Watch</title></svelte:head>
 
 <div class="head">
-	<a class="faint back" href={resolve('/more')}>← More</a>
+	<a class="faint back" href={resolve('/settings')}>← Settings</a>
 	<h1>Status</h1>
 </div>
 
 {#if error}
-	<p class="card">Can't load the status: {error}</p>
+	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !status}
-	<p class="muted">Loading…</p>
+	<p class="muted" aria-live="polite">Loading…</p>
 {:else}
 	<div class="grid">
 		<section class="card">
@@ -76,7 +74,11 @@
 						<tbody>
 							{#each status.sources as s (s.source)}
 								<tr class:bad={late(s.last_ok_at)}>
-									<th scope="row">{NAMES[s.source] ?? s.source}</th>
+									<th scope="row"
+										>{NAMES[s.source] ?? s.source}{#if late(s.last_ok_at)}<span class="sr-only">
+												(no success for a day)</span
+											>{/if}</th
+									>
 									<td>{ago(s.last_ok_at)}</td>
 									<td class="num"
 										>{s.calls_today}{s.errors_today ? ` (${s.errors_today} failed)` : ''}</td
@@ -109,6 +111,8 @@
 								<td class="age">{l.station ? ago(l.station_obs_time) : '–'}</td>
 								<td class="num">{l.flags}</td>
 							</tr>
+						{:else}
+							<tr><td colspan="4" class="muted">No locations yet.</td></tr>
 						{/each}
 					</tbody>
 				</table>
@@ -125,12 +129,14 @@
 					<tbody>
 						{#each status.runs as r (r.id)}
 							<tr class:bad={r.status === 'failed'}>
-								<td>{when(r.started_at)}</td>
-								<td>{r.kind}</td>
+								<td>{instant(r.started_at)}</td>
+								<td>{KINDS[r.kind] ?? r.kind}</td>
 								<td>{r.status}</td>
 								<td title={r.errors.join('\n')}>{r.errors.length}</td>
 								<td class="num">{Math.round(r.api_weight)}</td>
 							</tr>
+						{:else}
+							<tr><td colspan="5" class="muted">No runs yet.</td></tr>
 						{/each}
 					</tbody>
 				</table>

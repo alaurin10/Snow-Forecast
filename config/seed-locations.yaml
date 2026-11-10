@@ -1,6 +1,5 @@
-# The six prototype locations (docs/reference/pull.py LOCATIONS), used to seed
-# a new database with `snowwatch init`. After that the list lives in the
-# database and is managed in the app (milestone M4) or with
+# Six starting locations, used to seed a new database with `snowwatch init`. After that the list lives in the
+# database and is managed in the app (Manage locations) or with
 # `snowwatch locations import|export`.
 #
 # NWS office/radar come from api.weather.gov/points; avalanche zones from a

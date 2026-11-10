@@ -48,10 +48,6 @@ def hourly_slr(temp_c: float | None, bands: Sequence[SlrBand]) -> float | None:
     return ratio_for(temp_c, bands)[0]
 
 
-def raw_depth_cm(swe_mm: float, cm_per_mm: float = 0.7) -> float:
-    return swe_mm * cm_per_mm
-
-
 def slr_depth_cm(swe_mm: float, ratio: float) -> float:
     return swe_mm * ratio / 10
 

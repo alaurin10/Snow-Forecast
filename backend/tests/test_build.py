@@ -133,3 +133,23 @@ def test_flags_are_in_the_snapshot() -> None:
     for loc_id in LOCS:
         flags = fixture_snapshot(loc_id).flags
         assert [order[f.severity] for f in flags] == sorted(order[f.severity] for f in flags)
+
+
+def test_consensus_records_cover_calendar_days() -> None:
+    """The scorecard compares calendar days, so the consensus record for a date is
+    the hourly consensus from local midnight to midnight, like the models' records."""
+    from collections import defaultdict
+    from datetime import datetime
+
+    loc = seed()["crystal"]
+    snap, records = build_snapshot(loc, fixture_inputs("crystal"), config(), captured_at())
+    mid = snap.bands[1].hourly
+    by_day: dict[str, float] = defaultdict(float)
+    for t, swe in zip(mid.t, mid.swe_mm, strict=True):
+        by_day[datetime.fromisoformat(t).date().isoformat()] += swe or 0.0
+    cons = {r.target_date: r for r in records if r.source == "cons"}
+    full_days = sorted(cons)[1:4]  # skip today, which starts part-way through
+    assert full_days
+    k = config().snowfall_cm_per_mm
+    for d in full_days:
+        assert cons[d].snow_cm == pytest.approx(by_day[d] * k, abs=0.15)

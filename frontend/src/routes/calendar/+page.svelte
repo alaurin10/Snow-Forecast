@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ErrorNote from '../../lib/components/ErrorNote.svelte';
+	import { friendlyError } from '../../lib/errors';
 	import { hscroll } from '../../lib/hscroll';
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../../lib/api';
@@ -13,15 +15,18 @@
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
+	let retry = $state(0);
 
 	$effect(() => {
+		void retry; // the Try again button runs this again
+		error = null;
 		getOverview()
 			.then((r) => (rows = r))
-			.catch((e: Error) => (error = e.message));
+			.catch((e: Error) => (error = friendlyError(e)));
 	});
 
 	const c = $derived(converters(prefs.units));
-	// In the order set on the admin page.
+	// In the order set on the Manage page.
 	const shown = $derived((rows ?? []).filter((r) => r.run_id != null));
 	const DAYS = 10;
 	// A day counts as rainy with at least 1 mm (0.04 in) of rain and almost no snow.
@@ -84,9 +89,15 @@
 <h1>Calendar</h1>
 
 {#if error}
-	<p class="card">Can't load the calendar: {error}</p>
+	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted">Loading…</p>
+	<p class="muted" aria-live="polite">Loading…</p>
+{:else if !rows.some((r) => r.periods?.length)}
+	<p class="card muted">
+		{rows.length
+			? 'No forecasts yet: the first run hasn’t finished.'
+			: 'No locations yet. The owner can add them under Settings → Manage locations.'}
+	</p>
 {:else if viewport.phone}
 	<!-- Phones: the storm cards scroll away with the page; only the dates stay pinned. Each
 	     location's name sits above its row, so all ten days fit with no sideways scrolling. -->

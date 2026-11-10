@@ -1,6 +1,6 @@
 <!--
   How well the next-day forecast matched the snow station, per source. Bias is
-  forecast minus observed (positive = too much snow forecast). "3 in days" counts
+  forecast minus observed (positive = too much snow forecast). "Big days" counts
   days with at least 3 in (7.6 cm) observed or forecast.
 -->
 <script lang="ts">
@@ -10,6 +10,7 @@
 	import { MODEL_NAMES } from '../models';
 	import { converters, elevation, type UnitSystem } from '../units';
 	import { monthDay } from '../time';
+	import type { LoadState } from '../load';
 	import Frame from '../charts/Frame.svelte';
 	import { maxOf, roundedTopBar } from '../charts/geom';
 
@@ -17,15 +18,18 @@
 		data: VerificationOut | null;
 		units: UnitSystem;
 		width?: number;
+		load?: LoadState;
 	}
 
-	let { data, units, width: fixedWidth }: Props = $props();
+	let { data, units, width: fixedWidth, load = 'ready' }: Props = $props();
 	let measured = $state(0);
 	const c = $derived(converters(units));
+	// The server's threshold for a big day is 7.62 cm (3 in).
+	const bigDay = $derived(units === 'imperial' ? '3 in' : '8 cm');
 
 	const NAMES: Record<string, string> = {
-		cons: 'Consensus (model depth)',
-		cons_slr: 'Consensus (snow-ratio depth)',
+		cons: 'Consensus (model snowfall)',
+		cons_slr: 'Consensus (temperature-based depth)',
 		ens_p50: 'Ensemble median'
 	};
 	const name = (s: string) => NAMES[s] ?? MODEL_NAMES[s] ?? s;
@@ -40,7 +44,9 @@
 		const slr = data?.rows.find((r) => r.source === 'cons_slr');
 		if (!raw || !slr || raw.mae_cm === null || slr.mae_cm === null) return null;
 		if (Math.abs(raw.mae_cm - slr.mae_cm) < 0.5) return 'about the same';
-		return slr.mae_cm < raw.mae_cm ? 'snow-ratio depth is closer' : 'model depth is closer';
+		return slr.mae_cm < raw.mae_cm
+			? 'temperature-based depth is closer'
+			: 'model snowfall is closer';
 	});
 
 	// Chart: observed vs consensus forecast per day, one scale.
@@ -69,7 +75,11 @@
 
 <section class="card">
 	<h2>Forecast scorecard</h2>
-	{#if !data || !data.station}
+	{#if load === 'loading'}
+		<p class="muted small" aria-live="polite">Loading the scorecard…</p>
+	{:else if load === 'error'}
+		<p class="muted small" role="alert">Couldn’t load the scorecard. Try again in a moment.</p>
+	{:else if !data || !data.station}
 		<p class="muted small">The scorecard needs a snow station for this location.</p>
 	{:else if !data.ready}
 		<p class="muted small">
@@ -86,11 +96,11 @@
 					data.band_elev_m,
 					units
 				)}){/if}.
-			{#if better}<strong>Raw vs snow-ratio: {better}.</strong>{/if}
+			{#if better}<strong>Model snowfall vs temperature-based depth: {better}.</strong>{/if}
 		</p>
 		<p class="faint small key">
-			{c.snowUnit} per day. Bias: forecast minus observed. Error: the average miss. Big days (3 in or
-			more): caught / missed / false alarms.
+			{c.snowUnit} per day. Bias: forecast minus observed. Error: the average miss. Big days ({bigDay}
+			or more): caught / missed / false alarms.
 		</p>
 		<div class="table-wrap" use:hscroll>
 			<table class="data">
@@ -99,7 +109,7 @@
 						<th>Source</th>
 						<th title="Average forecast minus observed">Bias</th>
 						<th title="Average size of the miss">Error</th>
-						<th title="Days of 3 in or more: caught / missed / false alarms">Big days</th>
+						<th title={`Days of ${bigDay} or more: caught / missed / false alarms`}>Big days</th>
 						<th title="Days compared">n</th>
 					</tr>
 				</thead>

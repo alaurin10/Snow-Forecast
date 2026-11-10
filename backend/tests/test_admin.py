@@ -256,6 +256,24 @@ def test_resolve_canada(client: TestClient) -> None:
     assert r["avy"]["provider"] == "avcan"
 
 
+def test_resolve_warns_when_nws_is_down(client: TestClient) -> None:
+    def nws_down(req: httpx.Request) -> httpx.Response:
+        if "api.weather.gov" in str(req.url):
+            return httpx.Response(503)
+        return fake_upstream(req)
+
+    client.app.state.make_fetcher = lambda: Fetcher(  # type: ignore[attr-defined]
+        user_agent="t", transport=httpx.MockTransport(nws_down), sleep=lambda s: None, tries=1
+    )
+    body = {
+        "kind": "resort",
+        "name": "South Hill",
+        "pins": [{"band": "mid", "lat": 46.85, "lon": -121.4, "elev_m": 1800}],
+    }
+    r = client.post("/api/admin/locations/resolve", json=body, headers=H).json()
+    assert any("National Weather Service" in w for w in r["warnings"])
+
+
 def test_create_update_archive_and_jobs(client: TestClient, conn: sqlite3.Connection) -> None:
     body = {
         "kind": "resort",
@@ -400,3 +418,27 @@ def test_webcams_round_trip(client: TestClient, conn: sqlite3.Connection) -> Non
     assert "image_url: https://example.com/c.jpg" in service.export_yaml(conn)
     loc["webcams"] = [{"name": "Bad", "url": "javascript:alert(1)"}]
     assert client.put(f"/api/admin/locations/{loc['id']}", json=loc, headers=H).status_code == 422
+
+
+def test_a_tiny_catalog_answer_never_wipes_the_stored_one(conn: sqlite3.Connection) -> None:
+    from snowwatch.lookups import SuspiciousUpdateError
+
+    save_catalog(conn, catalog_rows(CATALOG["features"]))
+    with pytest.raises(SuspiciousUpdateError):
+        save_catalog(conn, [])
+    assert conn.execute("SELECT COUNT(*) FROM catalog_ski_areas").fetchone()[0] > 0
+
+
+def test_lookup_refresh_parts_fail_on_their_own(conn: sqlite3.Connection) -> None:
+    from snowwatch.lookups import refresh
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        if "avalanche.org" in str(req.url):
+            return httpx.Response(200, json=["not", "a", "layer"])  # reshaped
+        return httpx.Response(503)
+
+    f = Fetcher(
+        user_agent="t", transport=httpx.MockTransport(answer), sleep=lambda s: None, tries=1
+    )
+    out = refresh(conn, f)
+    assert all(str(v).startswith("failed") for v in out.values()), out

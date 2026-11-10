@@ -3,21 +3,38 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from snowwatch.models import AvyRef, Band, Location, Webcam
 from snowwatch.store.db import utcnow_iso
+from snowwatch.urls import clean_links
+
+log = logging.getLogger("snowwatch.locations")
 
 
 class LocationLimitError(ValueError):
     """Adding or activating this location would exceed MAX_LOCATIONS."""
 
 
+def _webcams(raw: str | None) -> list[Webcam]:
+    out = []
+    for w in json.loads(raw or "[]"):
+        try:
+            out.append(Webcam.model_validate(w))
+        except ValidationError:
+            log.warning("dropped an invalid stored webcam: %r", w)
+    return out
+
+
 def _from_row(row: sqlite3.Row) -> Location:
+    """A stored location. Links and webcams that fail today's checks are dropped, so an
+    old row can't break the list or put an unsafe link on the page."""
     return Location(
         id=row["id"],
         name=row["name"],
@@ -30,8 +47,8 @@ def _from_row(row: sqlite3.Row) -> Location:
         nws_office=row["nws_office"],
         radar_station=row["radar_station"],
         avy=AvyRef.model_validate_json(row["avy_json"]) if row["avy_json"] else None,
-        links=json.loads(row["links_json"]),
-        webcams=[Webcam.model_validate(w) for w in json.loads(row["webcams_json"] or "[]")],
+        links=dict(list(clean_links(json.loads(row["links_json"])).items())[:12]),
+        webcams=_webcams(row["webcams_json"])[:12],
         catalog_ref=row["catalog_ref"],
         active=bool(row["active"]),
         sort_order=row["sort_order"],
@@ -50,7 +67,13 @@ def list_locations(
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY sort_order, name"
-    return [_from_row(r) for r in conn.execute(sql)]
+    out = []
+    for r in conn.execute(sql):
+        try:
+            out.append(_from_row(r))
+        except ValidationError as e:
+            log.error("skipped stored location %r: %s", r["id"], e)
+    return out
 
 
 def get_location(conn: sqlite3.Connection, location_id: str) -> Location | None:

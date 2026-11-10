@@ -16,7 +16,7 @@ describe('offline map areas', () => {
 		expect(r.y1 - r.y0 + 1).toBeLessThanOrEqual(22);
 	});
 
-	it('asks for the topo map to zoom 15 and terrain through the mini PC and AWS', () => {
+	it('asks for the topo map to zoom 15 and terrain through the server and AWS', () => {
 		const { topo, dem } = areaUrls(47.445, -121.427, 'https://snow.example');
 		expect(topo.every((u) => u.startsWith('https://snow.example/api/tiles/otm/'))).toBe(true);
 		expect(topo.some((u) => u.includes('/otm/15/'))).toBe(true);

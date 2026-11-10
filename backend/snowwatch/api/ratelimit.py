@@ -22,6 +22,13 @@ from fastapi import HTTPException, Request
 from snowwatch.settings import Settings
 
 Clock = Callable[[], float]
+
+
+def now() -> float:
+    """The limiter's clock (tests replace it)."""
+    return time.monotonic()
+
+
 MAX_KEYS = 10_000  # forget the oldest clients beyond this, so memory stays bounded
 
 
@@ -38,10 +45,10 @@ def client_key(request: Request) -> str:
 
 
 class RateLimiter:
-    def __init__(self, rate: float, burst: float, clock: Clock = time.monotonic) -> None:
+    def __init__(self, rate: float, burst: float, clock: Clock | None = None) -> None:
         self.rate = rate
         self.burst = burst
-        self.clock = clock
+        self.clock = clock or (lambda: now())
         self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = threading.Lock()
 
@@ -78,11 +85,11 @@ class LoginThrottle:
 
     def __init__(
         self,
-        clock: Clock = time.monotonic,
+        clock: Clock | None = None,
         global_max: int = 100,
         global_window_s: float = 900.0,
     ) -> None:
-        self.clock = clock
+        self.clock = clock or (lambda: now())
         self.global_max = global_max
         self.global_window_s = global_window_s
         self._fails: dict[str, tuple[int, float]] = {}  # key -> (failures, locked until)

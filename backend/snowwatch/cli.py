@@ -22,7 +22,11 @@ FIXTURES_DIR = REPO_ROOT / "backend" / "tests" / "fixtures"
 
 
 def _fetcher(settings: Settings, *, cache: bool = False) -> Fetcher:
-    return Fetcher(user_agent=settings.user_agent, raw_dir=settings.raw_dir if cache else None)
+    return Fetcher(
+        user_agent=settings.user_agent,
+        contact_user_agent=settings.contact_user_agent,
+        raw_dir=settings.raw_dir if cache else None,
+    )
 
 
 def cmd_init(args: argparse.Namespace, settings: Settings) -> int:
@@ -155,10 +159,8 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_worker(args: argparse.Namespace, settings: Settings) -> int:
-    from snowwatch.logs import setup_logging
     from snowwatch.scheduler import Worker, build_scheduler
 
-    setup_logging()
     worker = Worker(settings, get_forecast_config())
     if args.run_now:
         worker.full_run(ensembles=True)
@@ -167,10 +169,8 @@ def cmd_worker(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_precip(args: argparse.Namespace, settings: Settings) -> int:
-    from snowwatch.logs import setup_logging
     from snowwatch.scheduler import Worker
 
-    setup_logging()
     Worker(settings, get_forecast_config()).precip()
     return 0
 
@@ -180,9 +180,7 @@ def cmd_ski_map(args: argparse.Namespace, settings: Settings) -> int:
     import httpx
 
     from snowwatch import osm
-    from snowwatch.logs import setup_logging
 
-    setup_logging()
     conn = connect(settings.database)
     points = [(b.lat, b.lon) for loc in service.list_locations(conn) for b in loc.bands[:1]]
     headers = {"User-Agent": settings.user_agent}
@@ -331,6 +329,18 @@ def cmd_schema(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_healthcheck(args: argparse.Namespace, settings: Settings) -> int:
+    """Exit 0 if the worker's scheduler touched its heartbeat in the last 3 minutes."""
+    import time
+
+    path = settings.heartbeat_path
+    age = time.time() - path.stat().st_mtime if path.exists() else None
+    if age is None or age > 180:
+        print(f"worker heartbeat {'missing' if age is None else f'{age:.0f} s old'}")
+        return 1
+    return 0
+
+
 def cmd_owner(args: argparse.Namespace, settings: Settings) -> int:
     """Owner sign-in: `logout-all` ends every session (do it after changing the password)."""
     from snowwatch.api.auth import logout_all
@@ -419,6 +429,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=["keys"])
     s.set_defaults(func=cmd_push)
 
+    s = sub.add_parser("healthcheck", help="exit 0 if the worker is alive (Docker health check)")
+    s.add_argument("what", choices=["worker"])
+    s.set_defaults(func=cmd_healthcheck)
+
     s = sub.add_parser("owner", help="owner sign-in: `owner logout-all` ends every session")
     s.add_argument("action", choices=["logout-all"])
     s.set_defaults(func=cmd_owner)
@@ -431,7 +445,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from snowwatch.logs import setup_logging
+
     args = build_parser().parse_args(argv)
+    # The worker's logs go to `docker compose logs` as JSON lines; commands typed in a
+    # terminal get plain lines.
+    setup_logging(json_lines=args.command == "worker")
     if args.command == "locations" and args.action == "import" and not args.path:
         print("locations import needs a YAML path", file=sys.stderr)
         return 2

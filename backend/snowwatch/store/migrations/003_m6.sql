@@ -1,4 +1,4 @@
--- Milestone M6: webcams per location, per-source status, and Web Push subscriptions.
+-- Webcams per location, per-source status, and Web Push subscriptions.
 
 ALTER TABLE locations ADD COLUMN webcams_json TEXT NOT NULL DEFAULT '[]';
 

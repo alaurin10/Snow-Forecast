@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from snowwatch import __version__
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -47,6 +49,12 @@ class Settings(BaseSettings):
     # Web Push alerts: `snowwatch push keys` prints a pair. Empty = push is off.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
+    # The git commit this build came from (set by the Docker build), shown in About.
+    git_commit: str = ""
+    # Most push subscriptions the server keeps (one per device).
+    push_max_subscriptions: int = 500
+    # Most disk the map tile cache may use; the oldest-used tiles go first.
+    tiles_max_mb: int = 2000
 
     @property
     def static_root(self) -> Path | None:
@@ -69,6 +77,11 @@ class Settings(BaseSettings):
         return self.data_dir / "backups"
 
     @property
+    def heartbeat_path(self) -> Path:
+        """Touched by the worker every 30 s; its health check reads the age."""
+        return self.data_dir / "worker.heartbeat"
+
+    @property
     def osm_path(self) -> Path:
         """Ski runs, lifts and peaks for the map (see snowwatch/osm.py)."""
         return self.data_dir / "osm" / "ski.geojson"
@@ -85,7 +98,13 @@ class Settings(BaseSettings):
 
     @property
     def user_agent(self) -> str:
-        return f"snowwatch/0.1 ({self.nws_contact})"
+        """Sent to every upstream service. No personal details."""
+        return f"snowwatch/{__version__} (self-hosted snow forecast)"
+
+    @property
+    def contact_user_agent(self) -> str:
+        """Sent only to the National Weather Service, which asks for contact details."""
+        return f"snowwatch/{__version__} ({self.nws_contact})"
 
 
 @lru_cache

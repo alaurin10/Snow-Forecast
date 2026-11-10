@@ -22,6 +22,7 @@ from snowwatch.models import AvyRef, Band, BandName
 from snowwatch.sources import nws
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import FORECAST_URL, SOURCE, elevation_request
+from snowwatch.urls import is_http_url
 
 SNOTEL_RADIUS_KM = 25.0
 CANADA_RADIUS_KM = 40.0  # BC snow pillows are sparser than SNOTEL
@@ -175,8 +176,13 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
         nws_office, radar = props.get("cwa"), props.get("radarStation")
         rel = (props.get("relativeLocation") or {}).get("properties") or {}
         state = rel.get("state") if isinstance(rel.get("state"), str) else None
-    except FetchError:
-        pass
+    except FetchError as e:
+        if e.status != 404 and not (cat and cat.get("country")):
+            # 404 means "not in the US"; anything else means NWS didn't answer.
+            warnings.append(
+                "The National Weather Service didn't answer, so the country was guessed as "
+                "Canada. Check it, and the snow station and avalanche zone."
+            )
     if cat and cat.get("country") in ("US", "CA"):
         country = cat["country"]
     tz = _timezone(fetcher, mid.lat, mid.lon, warnings)
@@ -229,7 +235,7 @@ def resolve(conn: sqlite3.Connection, fetcher: Fetcher, req: ResolveIn) -> Resol
     else:
         links["Mountain forecast (ECCC)"] = "https://weather.gc.ca/mountain_forecast/"
         links["Avalanche Canada"] = "https://avalanche.ca/map"
-    if cat and cat.get("website"):
+    if cat and is_http_url(cat.get("website")):
         links["Resort website"] = cat["website"]
 
     return ResolveOut(

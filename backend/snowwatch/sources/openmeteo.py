@@ -14,7 +14,6 @@ from snowwatch.sources.base import Request
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
-GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 SOURCE = "open-meteo"
 
 BLEND_HOURLY = [

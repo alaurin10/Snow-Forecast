@@ -1,27 +1,40 @@
-# Snow Watch on the mini PC's Docker VM. See docs/RUNBOOK.md.
-#   docker compose up -d --build
+# Snow Watch: the api (web app and API) and the worker (forecast runs, backups).
+# See docs/DEPLOYMENT.md.
+#   GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 #   docker compose run --rm worker snowwatch init     # first time only
 name: snowwatch
 
+x-hardening: &hardening
+  read_only: true # the app only writes to ./data (and /tmp)
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
 services:
   api:
+    <<: *hardening
     build:
       context: .
       dockerfile: docker/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
     image: snowwatch:local
     env_file:
       - path: .env
         required: false
     environment:
-      ENV: prod # never the dev owner shortcut, whatever .env says
+      ENV: prod # production cookies, headers and no API docs, whatever .env says
     volumes:
       - ./data:/data
     ports:
-      - "8090:8000" # the Cloudflare tunnel points at http://<docker-vm-ip>:8090
+      - "8090:8000" # point your reverse proxy or tunnel at http://<host>:8090
     mem_limit: 384m
     restart: unless-stopped
 
   worker:
+    <<: *hardening
     # Same image, built once by the api service.
     image: snowwatch:local
     pull_policy: never
@@ -34,7 +47,11 @@ services:
     volumes:
       - ./data:/data
     healthcheck:
-      disable: true # the image's check is for the api's HTTP port
+      test: ["CMD", "snowwatch", "healthcheck", "worker"]
+      interval: 60s
+      timeout: 15s
+      start_period: 60s
+      retries: 3
     # Forecast runs plus the map's precipitation frames (~350 MB at peak) can overlap.
     mem_limit: 1g
     restart: unless-stopped

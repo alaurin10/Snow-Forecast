@@ -1,11 +1,13 @@
 <script lang="ts">
+	import ErrorNote from '../lib/components/ErrorNote.svelte';
+	import { friendlyError } from '../lib/errors';
 	import { resolve } from '$app/paths';
 	import { getOverview } from '../lib/api';
 	import { prefs } from '../lib/prefs.svelte';
-	import { converters, snowNum } from '../lib/units';
+	import { converters, snow, snowNum } from '../lib/units';
 	import { dangerWord } from '../lib/conditions';
 	import DailyBars from '../lib/components/DailyBars.svelte';
-	import { dailyTotals } from '../lib/daybars';
+	import { describeDays, dailyTotals } from '../lib/daybars';
 	import type { OverviewRow } from '../lib/types.gen';
 	import ShareButton from '../lib/share/ShareButton.svelte';
 	import { paint } from '../lib/share/canvas';
@@ -16,11 +18,14 @@
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
+	let retry = $state(0);
 
 	$effect(() => {
+		void retry; // the Try again button runs this again
+		error = null;
 		getOverview()
 			.then((r) => (rows = r))
-			.catch((e: Error) => (error = e.message));
+			.catch((e: Error) => (error = friendlyError(e)));
 	});
 
 	const c = $derived(converters(prefs.units));
@@ -54,7 +59,7 @@
 			const days = dailyTotals(r.periods ?? [], DAYS);
 			return { r, days, total: days.reduce((a, d) => a + d.cm, 0) };
 		});
-		// "My order" is the order set on the admin page, which is how the rows arrive.
+		// "My order" is the order set on the Manage page, which is how the rows arrive.
 		return prefs.sort === 'snow' ? [...out].sort((a, b) => b.total - a.total) : out;
 	});
 	const dayLabels = $derived(list.find((x) => x.days.length)?.days ?? []);
@@ -99,11 +104,13 @@
 </div>
 
 {#if error}
-	<p class="card">Can't load the overview: {error}</p>
+	<ErrorNote message={error} onretry={() => retry++} />
 {:else if !rows}
-	<p class="muted">Loading…</p>
+	<p class="muted" aria-live="polite">Loading…</p>
 {:else if !rows.length}
-	<p class="card muted">No locations yet. Add some on the admin page.</p>
+	<p class="card muted">
+		No locations yet. The owner can add them under Settings → Manage locations.
+	</p>
 {:else if phone}
 	{#if storm}
 		<a class="stormbar" href={resolve('/calendar')}>
@@ -151,7 +158,11 @@
 					{#if r.run_id == null}
 						<small class="none">No forecast yet</small>
 					{:else}
-						<span class="lbars" role="img" aria-label={`${r.name}: snow for the next ${DAYS} days`}>
+						<span
+							class="lbars"
+							role="img"
+							aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
+						>
 							{#each days as d (d.date)}<i class={d.kind} style:height="{barH(d.cm)}px"></i>{/each}
 						</span>
 						<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}

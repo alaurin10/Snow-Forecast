@@ -1,6 +1,6 @@
 // The precipitation pictures on the map.
 //
-// The mini PC draws each frame as one picture over the locations' region (see
+// The server draws each frame as one picture over the locations' region (see
 // ../radar.ts). Here we download them all once, keep them compressed (a couple of MB for
 // the whole timeline), and decode only the frame on screen and its neighbours. Showing a
 // frame is a single draw into one canvas, so scrubbing is instant and memory stays flat.

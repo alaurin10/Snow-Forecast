@@ -19,9 +19,10 @@ import sqlite3
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from snowwatch.doc import Flag, Snapshot
 from snowwatch.settings import Settings
@@ -33,24 +34,77 @@ ALERT_TYPES = ("powder_day", "storm_incoming", "wind_hold", "avalanche_danger")
 DEFAULT_TYPES = ["powder_day", "storm_incoming"]
 MAX_FAILURES = 5
 
+# The browsers' own push services. The server POSTs to a subscription's endpoint,
+# so only these hosts are accepted: anything else would let a visitor make the
+# server send requests wherever they like.
+PUSH_HOSTS = frozenset(
+    {
+        "fcm.googleapis.com",  # Chrome, Edge, Android
+        "android.googleapis.com",
+        "updates.push.services.mozilla.com",  # Firefox
+        "web.push.apple.com",  # Safari, iOS
+    }
+)
+PUSH_HOST_SUFFIXES = (".push.apple.com", ".notify.windows.com", ".push.services.mozilla.com")
+
+
+def is_push_service(endpoint: str) -> bool:
+    try:
+        u = urlsplit(endpoint)
+        port = u.port
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    return (
+        u.scheme == "https"
+        and port is None
+        and not u.username
+        and (host in PUSH_HOSTS or host.endswith(PUSH_HOST_SUFFIXES))
+    )
+
 
 class SubscriptionKeys(BaseModel):
-    p256dh: str
-    auth: str
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=100)
 
 
 class PushSubscription(BaseModel):
     """What `PushManager.subscribe()` returns (its toJSON())."""
 
-    endpoint: str = Field(pattern=r"^https://")
+    endpoint: str = Field(max_length=1000)
     keys: SubscriptionKeys
 
+    @field_validator("endpoint")
+    @classmethod
+    def _push_service(cls, v: str) -> str:
+        if not is_push_service(v):
+            raise ValueError("not a browser push service address")
+        return v
 
-class SubscribeIn(BaseModel):
+
+class Endpoint(BaseModel):
+    """Identifies a subscription without its keys (unsubscribe, test, prefs)."""
+
+    endpoint: str = Field(max_length=1000)
+
+
+Units = Literal["imperial", "metric"]
+
+
+class AlertPrefs(BaseModel):
+    locations: list[Annotated[str, Field(max_length=40)]] = Field(default=[], max_length=100)
+    types: list[Annotated[str, Field(max_length=40)]] = Field(
+        default=DEFAULT_TYPES, max_length=len(ALERT_TYPES)
+    )
+    units: Units = "imperial"
+
+
+class SubscribeIn(AlertPrefs):
     subscription: PushSubscription
-    locations: list[str] = []  # empty = every location
-    types: list[str] = DEFAULT_TYPES
-    units: str = Field(default="imperial", pattern=r"^(imperial|metric)$")
+
+
+class SubscriptionLimitError(Exception):
+    """The server already holds as many subscriptions as it allows."""
 
 
 class PushOut(BaseModel):
@@ -93,9 +147,16 @@ def enabled(settings: Settings) -> bool:
 # --- subscriptions -------------------------------------------------------------
 
 
-def subscribe(conn: sqlite3.Connection, body: SubscribeIn) -> None:
+def subscribe(conn: sqlite3.Connection, body: SubscribeIn, *, max_subs: int = 500) -> None:
     types = [t for t in body.types if t in ALERT_TYPES] or DEFAULT_TYPES
     with conn:
+        known = conn.execute(
+            "SELECT 1 FROM push_subs WHERE endpoint = ?", (body.subscription.endpoint,)
+        ).fetchone()
+        if not known:
+            count = conn.execute("SELECT COUNT(*) FROM push_subs").fetchone()[0]
+            if count >= max_subs:
+                raise SubscriptionLimitError
         conn.execute(
             "INSERT INTO push_subs (endpoint, keys_json, units, locations_json, "
             "types_json, created_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, 0) "
@@ -112,6 +173,20 @@ def subscribe(conn: sqlite3.Connection, body: SubscribeIn) -> None:
                 utcnow_iso(),
             ),
         )
+
+
+def prefs(conn: sqlite3.Connection, endpoint: str) -> AlertPrefs | None:
+    """What a subscription asked for, so the Alerts card can show it."""
+    row = conn.execute(
+        "SELECT units, locations_json, types_json FROM push_subs WHERE endpoint = ?", (endpoint,)
+    ).fetchone()
+    if row is None:
+        return None
+    return AlertPrefs(
+        locations=json.loads(row["locations_json"]),
+        types=json.loads(row["types_json"]),
+        units=row["units"],
+    )
 
 
 def unsubscribe(conn: sqlite3.Connection, endpoint: str) -> bool:

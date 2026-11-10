@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { safeHref } from '../../../lib/links';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError, getAvalanche, getSnapshot, getTrend, getVerification } from '../../../lib/api';
@@ -47,6 +48,9 @@
 	import { viewport } from '../../../lib/viewport.svelte';
 	import DayList from '../../../lib/components/DayList.svelte';
 	import DaySheet from '../../../lib/charts/DaySheet.svelte';
+	import ErrorNote from '../../../lib/components/ErrorNote.svelte';
+	import { friendlyError } from '../../../lib/errors';
+	import type { LoadState } from '../../../lib/load';
 
 	type Tab = 'forecast' | 'models' | 'backcountry' | 'observed';
 
@@ -54,6 +58,8 @@
 	let snap = $state<Snapshot | null>(null);
 	let trend = $state<TrendOut | null>(null);
 	let error = $state<string | null>(null);
+	let notFound = $state(false);
+	let retry = $state(0);
 	let tab = $state<Tab>('forecast');
 	let selected = $state<PeriodOut | null>(null);
 	let range = $state<Range>(5);
@@ -82,13 +88,29 @@
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
+	let avyLoad = $state<LoadState>('loading');
+	let scoresLoad = $state<LoadState>('loading');
+
 	$effect(() => {
 		const current = id;
+		void retry; // the Retry button runs this again
+		// Answers for a location we've already left must not land on this one.
+		let live = true;
 		snap = null;
 		error = null;
+		notFound = false;
+		trend = null;
+		selected = null;
+		hourlyDay = null;
+		shareDaysPick = null;
+		scores = null;
+		avy = null;
+		avyLoad = 'loading';
+		scoresLoad = 'loading';
 		crosshair.reset();
 		getSnapshot(current)
 			.then((s) => {
+				if (!live) return;
 				snap = s;
 				// Deep link from the Calendar: open that period's details.
 				const key = page.url.searchParams.get('period');
@@ -97,24 +119,29 @@
 					selected = b.periods.find((x) => x.key === key) ?? null;
 				}
 			})
-			.catch(
-				(e: Error) =>
-					(error =
-						e instanceof ApiError && e.status === 404
-							? 'No forecast yet for this location.'
-							: e.message)
-			);
+			.catch((e: Error) => {
+				if (!live) return;
+				notFound = e instanceof ApiError && e.status === 404;
+				error = notFound ? null : friendlyError(e);
+			});
 		getTrend(current)
-			.then((t) => (trend = t))
-			.catch(() => (trend = null));
-		scores = null;
+			.then((t) => live && (trend = t))
+			.catch(() => live && (trend = null));
 		getVerification(current)
-			.then((v) => (scores = v))
-			.catch(() => (scores = null));
-		avy = null;
+			.then((v) => {
+				if (!live) return;
+				scores = v;
+				scoresLoad = 'ready';
+			})
+			.catch(() => live && (scoresLoad = 'error'));
 		getAvalanche()
-			.then((all) => (avy = all[current] ?? null))
-			.catch(() => (avy = null));
+			.then((all) => {
+				if (!live) return;
+				avy = all[current] ?? null;
+				avyLoad = 'ready';
+			})
+			.catch(() => live && (avyLoad = 'error'));
+		return () => (live = false);
 	});
 
 	const tabs = $derived<Tab[]>(
@@ -247,10 +274,21 @@
 	{/if}
 {/snippet}
 
-{#if error}
-	<p class="card">{error} <a href={resolve('/')}>All locations</a></p>
+{#if notFound}
+	<div class="card">
+		<h1 class="nf">No forecast here</h1>
+		<p class="muted">
+			This location doesn’t exist, or its first forecast hasn’t finished yet (that takes a few
+			minutes after it’s added).
+		</p>
+		<a class="btn" href={resolve('/')}>All locations</a>
+	</div>
+{:else if error}
+	<ErrorNote message={error} onretry={() => retry++}>
+		<a href={resolve('/')}>All locations</a>
+	</ErrorNote>
 {:else if !snap || !band}
-	<p class="muted">Loading…</p>
+	<p class="muted" aria-live="polite">Loading…</p>
 {:else}
 	{#if phone}
 		<div class="mhead">
@@ -319,9 +357,7 @@
 
 	<nav class="tabs" aria-label="Sections" bind:this={tabsEl}>
 		{#each tabs as t (t)}
-			<button aria-current={tab === t ? 'page' : undefined} onclick={() => (tab = t)}
-				>{names[t]}</button
-			>
+			<button aria-pressed={tab === t} onclick={() => (tab = t)}>{names[t]}</button>
 		{/each}
 	</nav>
 
@@ -329,7 +365,13 @@
 		<div class="stackcol">
 			{#if backcountry && !phone}
 				<section class="card thin">
-					<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
+					<DangerPyramid
+						view={avy}
+						tz={snap.location.tz}
+						today={dateOf(snap.now)}
+						load={avyLoad}
+						compact
+					/>
 				</section>
 			{/if}
 			{#if phone}
@@ -338,7 +380,13 @@
 				</section>
 				{#if backcountry}
 					<section class="card thin">
-						<DangerPyramid view={avy} tz={snap.location.tz} today={dateOf(snap.now)} compact />
+						<DangerPyramid
+							view={avy}
+							tz={snap.location.tz}
+							today={dateOf(snap.now)}
+							load={avyLoad}
+							compact
+						/>
 					</section>
 				{/if}
 				<section class="card mout">
@@ -500,8 +548,10 @@
 						<ul class="links">
 							{#each Object.entries(snap.location.links) as [name, url] (name)}
 								<!-- External site: resolve() is only for routes in this app. -->
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-								<li><a href={url} rel="noopener" target="_blank">{name}</a></li>
+								<li>
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a href={safeHref(url)} rel="noopener noreferrer" target="_blank">{name}</a>
+								</li>
 							{/each}
 						</ul>
 					</section>
@@ -543,7 +593,7 @@
 			</section>
 		</div>
 	{:else if tab === 'backcountry'}
-		<BackcountryTab {snap} {avy} {units} />
+		<BackcountryTab {snap} {avy} {units} {avyLoad} />
 	{:else}
 		<div class="stackcol">
 			<StationPanel
@@ -552,7 +602,7 @@
 				bandElev={snap.bands[1].elev_m}
 				{units}
 			/>
-			<Scorecard data={scores} {units} />
+			<Scorecard data={scores} {units} load={scoresLoad} />
 		</div>
 	{/if}
 
@@ -578,6 +628,10 @@
 {/if}
 
 <style>
+	.nf {
+		font-size: 1.2rem;
+		margin: 0 0 6px;
+	}
 	.loc-head {
 		display: flex;
 		justify-content: space-between;
@@ -665,7 +719,7 @@
 			padding-bottom: 12px;
 		}
 	}
-	.tabs button[aria-current='page'] {
+	.tabs button[aria-pressed='true'] {
 		color: var(--text);
 		background: var(--surface);
 		box-shadow: 0 2px 8px rgb(31 27 46 / 0.08);
@@ -904,7 +958,7 @@
 			padding-top: 11px;
 			padding-bottom: 11px;
 		}
-		.tabs button[aria-current='page'] {
+		.tabs button[aria-pressed='true'] {
 			background: none;
 			box-shadow: inset 0 -2px 0 var(--accent);
 		}

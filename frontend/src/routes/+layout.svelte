@@ -10,6 +10,7 @@
 	import { resolve } from '$app/paths';
 	import { prefs } from '../lib/prefs.svelte';
 	import { session } from '../lib/session.svelte';
+	import { appUpdate } from '../lib/update.svelte';
 	import { pageBar } from '../lib/pagebar.svelte';
 	import { getHealth, type Health } from '../lib/api';
 	import type { LayoutProps } from './$types';
@@ -22,6 +23,8 @@
 		if (prefs.theme === 'auto') delete root.dataset.theme;
 		else root.dataset.theme = prefs.theme;
 	});
+
+	$effect(() => appUpdate.watch());
 
 	$effect(() => {
 		const on = () => (session.online = true);
@@ -46,7 +49,12 @@
 		{ href: '/', label: 'Overview', icon: 'M4 6h16M4 12h16M4 18h10' },
 		{ href: '/map', label: 'Map', icon: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14' },
 		{ href: '/calendar', label: 'Calendar', icon: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4' },
-		{ href: '/more', label: 'More', icon: 'M5 12h.01M12 12h.01M19 12h.01' }
+		{
+			href: '/settings',
+			label: 'Settings',
+			// A gear (Feather icons, MIT).
+			icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'
+		}
 	] as const;
 	const active = (href: string) =>
 		href === '/' ? path === '/' || path.startsWith('/location') : path.startsWith(href);
@@ -98,11 +106,16 @@
 	</div>
 </header>
 
-{#if !session.online}
+{#if appUpdate.waiting}
+	<div class="banner" role="status">
+		A new version of Snow Watch is ready.
+		<button class="btn small" onclick={() => appUpdate.apply()}>Reload</button>
+	</div>
+{:else if !session.online}
 	<div class="banner">Offline: showing the forecast saved on this device.</div>
 {:else if staleHours !== null}
 	<div class="banner warn">
-		The forecast hasn't updated for {staleHours} hours. <a href={resolve('/more')}>Status</a>
+		The forecast hasn't updated for {staleHours} hours. <a href={resolve('/status')}>Status</a>
 	</div>
 {:else if health?.status === 'no_data'}
 	<div class="banner">No forecast yet: the first run hasn't finished.</div>
@@ -113,8 +126,9 @@
 </main>
 
 <footer class="faint">
-	Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS, NRCS SNOTEL.
-	Model snowfall is derived, not measured.
+	Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0), NWS, NRCS SNOTEL
+	and <a href={resolve('/about')}>others</a>. Model snowfall is derived, not measured; never a
+	substitute for your avalanche center.
 </footer>
 
 <nav class="tabbar glass" aria-label="Main">
@@ -320,7 +334,7 @@
 			display: none;
 		}
 	}
-	/* Phones: no brand bar. Every pixel above the fold is the page's; units live under More. */
+	/* Phones: no brand bar. Every pixel above the fold is the page's; units live under Settings. */
 	@media (max-width: 640px) {
 		.bar {
 			display: none;

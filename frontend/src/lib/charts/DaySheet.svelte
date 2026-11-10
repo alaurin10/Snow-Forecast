@@ -1,6 +1,7 @@
 <!-- One day, hour by hour, in a popup over the day list: the forecast chart at its hourly
      step with its metric chips, so the list stays where you left it underneath. -->
 <script lang="ts">
+	import { modal } from '../modal';
 	import type { BandOut } from '../types.gen';
 	import type { UnitSystem } from '../units';
 	import { monthDay, weekday } from '../time';
@@ -17,25 +18,26 @@
 	}
 
 	let { band, bands, units, date, start, onclose }: Props = $props();
-	let closeBtn = $state<HTMLButtonElement>();
-	$effect(() => closeBtn?.focus());
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
-
-<div class="scrim" role="presentation" onclick={onclose}></div>
-<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="day-title" tabindex="-1">
-	<header>
-		<div>
-			<h3 id="day-title">{weekday(date)} {monthDay(date)}, hour by hour</h3>
-			<div class="faint">{band.label}</div>
-		</div>
-		<button bind:this={closeBtn} class="close" onclick={onclose} aria-label="Close">✕</button>
-	</header>
-	<ForecastChart {band} {bands} {units} range={1} {start} embedded />
+<div class="modal" use:modal={{ onclose }}>
+	<div class="scrim" role="presentation" onclick={onclose}></div>
+	<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="day-title" tabindex="-1">
+		<header>
+			<div>
+				<h3 id="day-title">{weekday(date)} {monthDay(date)}, hour by hour</h3>
+				<div class="faint">{band.label}</div>
+			</div>
+			<button class="close" onclick={onclose} aria-label="Close">✕</button>
+		</header>
+		<ForecastChart {band} {bands} {units} range={1} {start} embedded />
+	</div>
 </div>
 
 <style>
+	.modal {
+		display: contents;
+	}
 	.scrim {
 		position: fixed;
 		inset: 0;

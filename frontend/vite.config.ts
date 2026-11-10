@@ -1,8 +1,13 @@
 import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { readFileSync } from 'node:fs';
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 export default defineConfig({
+	// The version shown in Settings; the server reports its own, so a stale app can say so.
+	define: { __APP_VERSION__: JSON.stringify(version) },
 	plugins: [
 		sveltekit({
 			compilerOptions: {

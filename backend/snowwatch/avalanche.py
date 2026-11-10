@@ -18,9 +18,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from snowwatch.geo import contains
 from snowwatch.http import Fetcher, FetchError
@@ -28,6 +28,7 @@ from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us
 from snowwatch.sources.base import fetch
 from snowwatch.store.db import utcnow_iso
+from snowwatch.urls import clean_url
 
 log = logging.getLogger("snowwatch.avalanche")
 
@@ -65,6 +66,11 @@ class AvalancheDoc(BaseModel):
     problems: list[AvyProblem] = []
     summary: str | None = None  # the center's bottom line, as published (tags removed)
     off_season: bool = False
+
+    @field_validator("link")
+    @classmethod
+    def _safe_link(cls, v: str | None) -> str | None:
+        return clean_url(v)
 
 
 class AvalancheView(BaseModel):
@@ -233,7 +239,7 @@ def parse_ca(product: Mapping[str, Any]) -> AvalancheDoc:
         when = _utc((d.get("date") or {}).get("value"))
         if not when:
             continue
-        tz = ZoneInfo(report.get("timezone") or "America/Vancouver")
+        tz = safe_zone(report.get("timezone"), "America/Vancouver")
         ratings = d.get("ratings") or {}
 
         def lvl(key: str, ratings: Mapping[str, Any] = ratings) -> int | None:
@@ -331,48 +337,75 @@ def refresh(
     """
     out = RefreshResult()
     locs = [loc for loc in locations if loc.active and loc.avy is not None]
-    us = [loc for loc in locs if loc.avy and loc.avy.provider == "nac" and loc.avy.zone_id]
+    us = [
+        loc
+        for loc in locs
+        if loc.avy and loc.avy.provider == "nac" and loc.avy.center_id and loc.avy.zone_id
+    ]
     ca = [loc for loc in locs if loc.avy and loc.avy.provider == "avcan"]
     layer: dict[str, Any] = {}
     if us:
         try:
             data = fetch(fetcher, avalanche_us.map_layer_request())
             layer = {str(f.get("id")): f for f in data.get("features") or []}
-        except FetchError as e:
+        except Exception as e:  # a missing or reshaped layer: products still work
             out.errors.append(f"avalanche.org map layer: {e}")
     products: dict[tuple[str, str], Any] = {}
     for loc in us:
-        assert loc.avy is not None and loc.avy.center_id and loc.avy.zone_id
-        key = (loc.avy.center_id, loc.avy.zone_id)
+        center, zone = loc.avy.center_id or "", loc.avy.zone_id or ""  # type: ignore[union-attr]
+        key = (center, zone)
         if key not in products:
             try:
                 products[key] = fetch(fetcher, avalanche_us.product_request(*key))
             except FetchError as e:
-                out.errors.append(f"avalanche.org {key[0]} {key[1]}: {e}")
+                out.errors.append(f"avalanche.org {center} {zone}: {e}")
                 products[key] = None
-        if products[key] is None and key[1] not in layer:
+        # Without the product, the map layer alone is a thin forecast: use it only
+        # when nothing is stored yet, so a failed fetch keeps the full one.
+        if products[key] is None and (zone not in layer or has_forecast(conn, loc.id)):
             continue
-        doc = parse_us(products[key], layer.get(key[1]), key[1], ZoneInfo(loc.tz or "UTC"))
-        save(conn, loc.id, doc)
-        out.saved += 1
+        try:
+            doc = parse_us(products[key], layer.get(zone), zone, safe_zone(loc.tz))
+            save(conn, loc.id, doc)
+            out.saved += 1
+        except Exception as e:  # one odd product must not stop the others
+            log.exception("avalanche forecast for %s failed", loc.id)
+            out.errors.append(f"avalanche.org {center} {zone}: {type(e).__name__}: {e}")
     if ca:
         try:
             areas = fetch(fetcher, avalanche_ca.areas_request())
             prods = fetch(fetcher, avalanche_ca.products_request())
-        except FetchError as e:
+            by_area = {str((p.get("area") or {}).get("id")): p for p in prods or []}
+        except Exception as e:
             out.errors.append(f"Avalanche Canada: {e}")
         else:
-            by_area = {str((p.get("area") or {}).get("id")): p for p in prods or []}
             for loc in ca:
-                mid = loc.band("mid")
-                area = find_ca_area(areas, mid.lat, mid.lon)
-                if area is None or area not in by_area:
-                    continue
-                save(conn, loc.id, parse_ca(by_area[area]))
-                out.saved += 1
+                try:
+                    mid = loc.band("mid")
+                    area = find_ca_area(areas, mid.lat, mid.lon)
+                    if area is None or area not in by_area:
+                        continue
+                    save(conn, loc.id, parse_ca(by_area[area]))
+                    out.saved += 1
+                except Exception as e:
+                    log.exception("avalanche forecast for %s failed", loc.id)
+                    out.errors.append(f"Avalanche Canada {loc.id}: {type(e).__name__}: {e}")
     for err in out.errors:
         log.warning(err)
     return out
+
+
+def safe_zone(name: str | None, default: str = "UTC") -> ZoneInfo:
+    """A timezone from upstream data or settings; an unknown name falls back."""
+    try:
+        return ZoneInfo(name or default)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo(default)
+
+
+def has_forecast(conn: sqlite3.Connection, location_id: str) -> bool:
+    row = conn.execute("SELECT 1 FROM avalanche WHERE location_id = ? LIMIT 1", (location_id,))
+    return row.fetchone() is not None
 
 
 def save(conn: sqlite3.Connection, location_id: str, doc: AvalancheDoc) -> None:

@@ -3,6 +3,7 @@
      image is made before the Share tap because iOS only opens the share sheet straight
      from a tap. A bottom sheet on phones, a centred dialog on wider screens. -->
 <script lang="ts">
+	import { modal } from '../modal';
 	import type { Snippet } from 'svelte';
 	import { ensureFonts, toBlob, type Shape } from './canvas';
 
@@ -116,62 +117,62 @@
 			note = `Couldn't copy: ${e instanceof Error ? e.message : e}`;
 		}
 	}
-
-	let closeBtn = $state<HTMLButtonElement>();
-	$effect(() => closeBtn?.focus());
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
+<div class="modal" use:modal={{ onclose }}>
+	<div class="scrim" role="presentation" onclick={onclose}></div>
+	<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="share-title" tabindex="-1">
+		<header>
+			<h3 id="share-title">{title}</h3>
+			<button class="close" onclick={onclose} aria-label="Close">✕</button>
+		</header>
 
-<div class="scrim" role="presentation" onclick={onclose}></div>
-<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="share-title" tabindex="-1">
-	<header>
-		<h3 id="share-title">{title}</h3>
-		<button bind:this={closeBtn} class="close" onclick={onclose} aria-label="Close">✕</button>
-	</header>
-
-	<div class="controls">
-		<div class="seg" role="group" aria-label="Image shape">
-			<button aria-pressed={shape === 'portrait'} onclick={() => setShape('portrait')}
-				>Portrait 3:4</button
-			>
-			<button aria-pressed={shape === 'landscape'} onclick={() => setShape('landscape')}
-				>Landscape 4:3</button
-			>
-		</div>
-		{#if options}{@render options()}{/if}
-	</div>
-
-	<div class="preview" class:landscape={shape === 'landscape'}>
-		{#if error}
-			<p class="muted">Couldn't make the image: {error}</p>
-		{:else if url}
-			<img src={url} alt="What will be shared" />
-		{:else}
-			<p class="muted">Making the image…</p>
-		{/if}
-	</div>
-
-	<div class="actions">
-		{#if canShareFiles}
-			<button class="btn primary big" onclick={share} disabled={!file}>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path d="M12 3v12M7 8l5-5 5 5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg
+		<div class="controls">
+			<div class="seg" role="group" aria-label="Image shape">
+				<button aria-pressed={shape === 'portrait'} onclick={() => setShape('portrait')}
+					>Portrait 3:4</button
 				>
-				Share
-			</button>
-		{/if}
-		<button class="btn big" class:primary={!canShareFiles} onclick={save} disabled={!file}
-			>Save image</button
-		>
-		{#if canCopy}
-			<button class="btn big" onclick={copy} disabled={!file}>Copy</button>
-		{/if}
+				<button aria-pressed={shape === 'landscape'} onclick={() => setShape('landscape')}
+					>Landscape 4:3</button
+				>
+			</div>
+			{#if options}{@render options()}{/if}
+		</div>
+
+		<div class="preview" class:landscape={shape === 'landscape'}>
+			{#if error}
+				<p class="muted">Couldn't make the image: {error}</p>
+			{:else if url}
+				<img src={url} alt="What will be shared" />
+			{:else}
+				<p class="muted">Making the image…</p>
+			{/if}
+		</div>
+
+		<div class="actions">
+			{#if canShareFiles}
+				<button class="btn primary big" onclick={share} disabled={!file}>
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+						><path d="M12 3v12M7 8l5-5 5 5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg
+					>
+					Share
+				</button>
+			{/if}
+			<button class="btn big" class:primary={!canShareFiles} onclick={save} disabled={!file}
+				>Save image</button
+			>
+			{#if canCopy}
+				<button class="btn big" onclick={copy} disabled={!file}>Copy</button>
+			{/if}
+		</div>
+		{#if note}<p class="note muted" role="status">{note}</p>{/if}
 	</div>
-	{#if note}<p class="note muted" role="status">{note}</p>{/if}
 </div>
 
 <style>
+	.modal {
+		display: contents;
+	}
 	.scrim {
 		position: fixed;
 		inset: 0;

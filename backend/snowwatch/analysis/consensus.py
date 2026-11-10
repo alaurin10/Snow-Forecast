@@ -1,4 +1,4 @@
-"""Period consensus (ported from the consensus block of `build()` in docs/reference/pull.py).
+"""Period consensus.
 
 While at least `min_models` deterministic models cover a period, the consensus
 is their median; in the first periods the short-range models and the

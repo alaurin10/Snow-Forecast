@@ -7,6 +7,7 @@ import type {
 	LocationSummary,
 	LookupStatus,
 	Me,
+	MetaOut,
 	OverviewRow,
 	StatusOut,
 	VerificationOut,
@@ -100,6 +101,16 @@ export const getVerification = (id: string) =>
 
 export const getStatus = () => get<StatusOut>('/api/status');
 
+// Version and server numbers; they don't change while the page is open.
+let meta: Promise<MetaOut> | null = null;
+export function getMeta(): Promise<MetaOut> {
+	if (!meta) {
+		meta = get<MetaOut>('/api/meta');
+		meta.catch(() => (meta = null));
+	}
+	return meta;
+}
+
 // --- Owner sign-in and the Manage page ---
 
 const send = <T>(method: string, path: string, body?: unknown) =>
@@ -131,13 +142,21 @@ export const refreshLocation = (id: string) =>
 export const getJob = (id: number) => get<JobOut>(`/api/admin/jobs/${id}`);
 export const getBudget = () => get<BudgetOut>('/api/admin/budget');
 
-/** Poll a job until it's done or failed (or ~3 minutes pass). */
-export async function waitForJob(id: number, onUpdate?: (j: JobOut) => void): Promise<JobOut> {
+/** Poll a job until it's done or failed, ~3 minutes pass, or `signal` aborts (the page
+ * was left). Returns the job as last seen, which may still be queued or running. */
+export async function waitForJob(
+	id: number,
+	onUpdate?: (j: JobOut) => void,
+	signal?: AbortSignal
+): Promise<JobOut> {
+	let j = await getJob(id);
 	for (let i = 0; i < 90; i++) {
-		const j = await getJob(id);
+		if (signal?.aborted) break;
 		onUpdate?.(j);
 		if (j.status === 'done' || j.status === 'failed') return j;
 		await new Promise((r) => setTimeout(r, 2000));
+		if (signal?.aborted) break;
+		j = await getJob(id);
 	}
-	return getJob(id);
+	return j;
 }

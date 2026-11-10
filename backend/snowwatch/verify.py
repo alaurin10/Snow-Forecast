@@ -25,6 +25,7 @@ from snowwatch.models import Location
 BIG_DAY_CM = 7.62  # 3 in
 MIN_DAYS = 7
 PAIR_DAYS = 30
+SCORE_DAYS = 365  # the scorecard covers the last year
 
 
 class VerificationRow(BaseModel):
@@ -85,8 +86,9 @@ def _forecasts(conn: sqlite3.Connection, loc_id: str, tz: ZoneInfo) -> dict[str,
     """{date: {source: snow_cm}} from the last run issued before that date began."""
     rows = conn.execute(
         "SELECT run_id, issued_at, target_date, source, snow_cm FROM forecast_daily "
-        "WHERE location_id = ? AND snow_cm IS NOT NULL",
-        (loc_id,),
+        "WHERE location_id = ? AND snow_cm IS NOT NULL AND target_date >= ? "
+        "AND target_date <= date(issued_at, '+2 days')",
+        (loc_id, (date.today() - timedelta(days=SCORE_DAYS)).isoformat()),
     ).fetchall()
     best: dict[str, int] = {}
     for r in rows:
