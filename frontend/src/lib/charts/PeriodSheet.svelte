@@ -1,5 +1,6 @@
 <!-- The details of one period: a bottom sheet on phones, a side panel on desktop. -->
 <script lang="ts">
+	import { getMeta } from '../api';
 	import type { DayOut, PeriodOut } from '../types.gen';
 	import { elevation, snow, speed, temperature, water, type UnitSystem } from '../units';
 	import { MODEL_NAMES } from '../models';
@@ -16,6 +17,13 @@
 	}
 
 	let { period: p, bandLabel, units, day = null, onclose }: Props = $props();
+	// cm of snow per mm of water, from the server (0.7 cm/mm is 7:1).
+	let ratio = $state(7);
+	$effect(() => {
+		getMeta()
+			.then((m) => (ratio = Math.round(m.snowfall_cm_per_mm * 10)))
+			.catch(() => {}); // keep the usual 7:1
+	});
 
 	const basis = $derived(
 		p.basis === 'ensemble'
@@ -84,7 +92,9 @@
 			{/if}
 		</tbody>
 	</table>
-	<p class="faint note">Model snowfall uses a fixed 7:1 snow-to-water ratio.</p>
+	<p class="faint note">
+		Model snowfall uses a fixed {ratio}:1 snow-to-water ratio; colder, drier snow piles up deeper.
+	</p>
 </div>
 
 <style>

@@ -39,8 +39,6 @@ export function converters(units: UnitSystem) {
 	};
 }
 
-export type Converters = ReturnType<typeof converters>;
-
 export function snow(cm: number | null | undefined, units: UnitSystem): string {
 	if (cm === null || cm === undefined) return '–';
 	return units === 'imperial' ? `${cmToIn(cm).toFixed(1)} in` : `${cm.toFixed(0)} cm`;

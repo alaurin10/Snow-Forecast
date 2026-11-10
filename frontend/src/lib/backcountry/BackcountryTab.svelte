@@ -4,6 +4,7 @@
   published and linked.
 -->
 <script lang="ts">
+	import type { LoadState } from '../load';
 	import { hscroll } from '../hscroll';
 	import type { AvalancheView, Snapshot } from '../types.gen';
 	import { compass } from '../conditions';
@@ -15,10 +16,11 @@
 	interface Props {
 		snap: Snapshot;
 		avy: AvalancheView | null;
+		avyLoad?: LoadState;
 		units: UnitSystem;
 	}
 
-	let { snap, avy, units }: Props = $props();
+	let { snap, avy, units, avyLoad = 'ready' }: Props = $props();
 
 	const today = $derived(dateOf(snap.now));
 	const bc = $derived(snap.backcountry ?? null);
@@ -56,7 +58,7 @@
 
 <div class="bc">
 	<section class="card wide">
-		<DangerPyramid view={avy} tz={snap.location.tz} {today} />
+		<DangerPyramid view={avy} tz={snap.location.tz} {today} load={avyLoad} />
 	</section>
 
 	<section class="card">

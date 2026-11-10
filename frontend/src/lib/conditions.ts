@@ -14,24 +14,6 @@ export const DANGER_WORDS: Record<number, string> = {
 export const dangerWord = (level: number | null | undefined): string =>
 	level ? (DANGER_WORDS[level] ?? '–') : 'No rating';
 
-/** What a danger chip says when there is no rating to show. */
-export function dangerStatusText(status: string): string {
-	switch (status) {
-		case 'expired':
-			return 'Expired';
-		case 'no_rating':
-			return 'No rating';
-		case 'not_issued':
-			return 'Not issued';
-		case 'none':
-			return 'No zone';
-		default:
-			return '–';
-	}
-}
-
-export const RATINGS = ['Poor', 'Fair', 'Good', 'Great', 'Powder'] as const;
-
 /** One reason for a ski-day rating, in the viewer's units. */
 export function reasonText(r: Reason, units: UnitSystem): string {
 	const v = r.value ?? null;

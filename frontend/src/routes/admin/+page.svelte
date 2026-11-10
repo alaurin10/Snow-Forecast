@@ -18,6 +18,7 @@
 		waitForJob
 	} from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
+	import { friendlyError } from '../../lib/errors';
 	import { elevation } from '../../lib/units';
 	import MapPicker, { type PinBand, type Pins } from '../../lib/manage/MapPicker.svelte';
 	import LocationForm from '../../lib/manage/LocationForm.svelte';
@@ -53,6 +54,7 @@
 	let query = $state('');
 	let results = $state<CatalogItem[]>([]);
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	let searchSeq = 0;
 
 	// Add a backcountry zone
 	let zoneName = $state('');
@@ -66,7 +68,7 @@
 			if (!me.is_owner) return;
 			[locs, budget, lookups] = await Promise.all([adminLocations(), getBudget(), adminLookups()]);
 		} catch (e) {
-			if (!signedOut(e)) error = (e as Error).message;
+			if (!signedOut(e)) error = friendlyError(e);
 		}
 	}
 
@@ -79,17 +81,27 @@
 		return false;
 	}
 
-	async function signOut() {
-		try {
+	const signOut = () =>
+		act(async () => {
 			me = await logout();
-		} catch (e) {
-			error = (e as Error).message;
-		}
-	}
+		});
 
+	// Job polling stops when the page is left.
+	const leaving = new AbortController();
 	$effect(() => {
 		load();
+		return () => leaving.abort();
 	});
+
+	/** Run an owner action; any failure becomes the page's error message. */
+	async function act(work: () => Promise<void>) {
+		error = null;
+		try {
+			await work();
+		} catch (e) {
+			if (!signedOut(e)) error = friendlyError(e);
+		}
+	}
 
 	function onSearch(q: string) {
 		query = q;
@@ -99,10 +111,12 @@
 			return;
 		}
 		searchTimer = setTimeout(async () => {
+			const asked = ++searchSeq;
 			try {
-				results = await searchCatalog(q);
+				const found = await searchCatalog(q);
+				if (asked === searchSeq) results = found; // ignore answers that arrive late
 			} catch (e) {
-				error = (e as Error).message;
+				if (asked === searchSeq && !signedOut(e)) error = friendlyError(e);
 			}
 		}, 250);
 	}
@@ -134,7 +148,7 @@
 			draftIsNew = true;
 			mode = 'review';
 		} catch (e) {
-			error = (e as Error).message;
+			if (!signedOut(e)) error = friendlyError(e);
 		} finally {
 			busy = false;
 		}
@@ -163,16 +177,26 @@
 
 	async function follow(jobId: number | null | undefined, name: string, id: string) {
 		if (!jobId) return;
-		message = `Getting the forecast for ${name}… (about 2 minutes)`;
-		const job = await waitForJob(jobId, (j) => {
-			if (j.status === 'running') message = `Fetching and analysing ${name}…`;
-		});
-		message =
-			job.status === 'done'
-				? `${name} is ready.`
-				: `The forecast for ${name} failed: ${job.error ?? 'unknown error'}. It will retry at the next scheduled run.`;
-		lastReady = job.status === 'done' ? id : null;
-		await load();
+		message = `Getting the forecast for ${name}… (this usually takes a minute or two)`;
+		try {
+			const job = await waitForJob(
+				jobId,
+				(j) => {
+					if (j.status === 'running') message = `Fetching and analysing ${name}…`;
+				},
+				leaving.signal
+			);
+			if (leaving.signal.aborted) return;
+			if (job.status === 'done') message = `${name} is ready.`;
+			else if (job.status === 'failed')
+				message = `The forecast for ${name} failed: ${job.error ?? 'unknown error'}. It will retry at the next scheduled run.`;
+			else
+				message = `${name} is still being fetched. It will appear on the overview when it’s ready.`;
+			lastReady = job.status === 'done' ? id : null;
+			await load();
+		} catch (e) {
+			if (!leaving.signal.aborted && !signedOut(e)) message = null;
+		}
 	}
 	let lastReady = $state<string | null>(null);
 
@@ -189,39 +213,46 @@
 			query = '';
 			results = [];
 			await load();
-			follow(res.job_id, loc.name, loc.id);
+			void follow(res.job_id, loc.name, loc.id);
 		} catch (e) {
-			error = (e as Error).message;
+			if (!signedOut(e)) error = friendlyError(e);
 		} finally {
 			saving = false;
 		}
 	}
 
-	async function move(i: number, d: -1 | 1) {
-		const ids = locs.map((l) => l.id);
-		const j = i + d;
-		if (j < 0 || j >= ids.length) return;
-		[ids[i], ids[j]] = [ids[j], ids[i]];
-		await reorderLocations(ids);
-		await load();
-	}
+	const move = (i: number, d: -1 | 1) =>
+		act(async () => {
+			const ids = locs.map((l) => l.id);
+			const j = i + d;
+			if (j < 0 || j >= ids.length) return;
+			[ids[i], ids[j]] = [ids[j], ids[i]];
+			await reorderLocations(ids);
+			await load();
+		});
 
-	async function toggle(loc: Location) {
-		const res = await updateLocation({ ...$state.snapshot(loc), active: !loc.active } as Location);
-		await load();
-		follow(res.job_id, loc.name, loc.id);
-	}
+	const toggle = (loc: Location) =>
+		act(async () => {
+			const res = await updateLocation({
+				...$state.snapshot(loc),
+				active: !loc.active
+			} as Location);
+			await load();
+			void follow(res.job_id, loc.name, loc.id);
+		});
 
-	async function refreshNow(loc: Location) {
-		const job = await refreshLocation(loc.id);
-		follow(job.id, loc.name, loc.id);
-	}
+	const refreshNow = (loc: Location) =>
+		act(async () => {
+			const job = await refreshLocation(loc.id);
+			void follow(job.id, loc.name, loc.id);
+		});
 
-	async function archive(loc: Location) {
-		if (!confirm(`Remove ${loc.name}? Its history is kept and it can be added again.`)) return;
-		await archiveLocation(loc.id);
-		await load();
-	}
+	const archive = (loc: Location) =>
+		act(async () => {
+			if (!confirm(`Remove ${loc.name}? Its history is kept and it can be added again.`)) return;
+			await archiveLocation(loc.id);
+			await load();
+		});
 
 	function edit(loc: Location) {
 		draft = $state.snapshot(loc) as Location;
@@ -230,13 +261,20 @@
 		mode = 'review';
 	}
 
-	async function loadLookups() {
-		const job = await refreshLookups();
-		message = 'Loading the ski-area catalog, SNOTEL stations and avalanche zones…';
-		const done = await waitForJob(job.id);
-		message = done.status === 'done' ? 'Lookups loaded.' : `Lookups failed: ${done.error}`;
-		await load();
-	}
+	const loadLookups = () =>
+		act(async () => {
+			const job = await refreshLookups();
+			message = 'Loading the ski-area catalog, snow stations and avalanche zones…';
+			const done = await waitForJob(job.id, undefined, leaving.signal);
+			if (leaving.signal.aborted) return;
+			message =
+				done.status === 'done'
+					? 'Lookups loaded.'
+					: done.status === 'failed'
+						? `Lookups failed: ${done.error}`
+						: 'Still loading the lookups; check back in a few minutes.';
+			await load();
+		});
 
 	const lookupsMissing = $derived(
 		lookups !== null &&

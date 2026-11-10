@@ -32,6 +32,25 @@ export function dayHour(iso: string): string {
 	return `${weekday(dateOf(iso))} ${hourLabel(iso)}`;
 }
 
-/** Minutes between two ISO instants. */
-export const minutesBetween = (a: string, b: string): number =>
-	(Date.parse(b) - Date.parse(a)) / 60000;
+/** "5 min ago", "3 h ago", "2 days ago" for an instant (never "in the future"). */
+export function ago(iso: string | null | undefined, now: number = Date.now()): string {
+	if (!iso) return 'never';
+	const m = Math.max(0, Math.round((now - Date.parse(iso)) / 60000));
+	if (m < 60) return `${m} min ago`;
+	const h = Math.round(m / 60);
+	return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+}
+
+/** "Nov 4, 2:00 PM PST" for an instant, in `tz` (the location's) or the browser's zone.
+ * The zone is named, so times from different places never look alike. */
+export function instant(iso: string | null | undefined, tz?: string): string {
+	if (!iso) return '–';
+	return new Date(iso).toLocaleString('en-US', {
+		timeZone: tz,
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit',
+		timeZoneName: 'short'
+	});
+}

@@ -1,41 +1,40 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { getHealth, getMe, getRuns, type Health } from '../../lib/api';
+	import { getHealth, getMe, getMeta, getRuns, type Health } from '../../lib/api';
+	import { friendlyError } from '../../lib/errors';
+	import { ago } from '../../lib/time';
 	import { prefs, type BandName, type Theme } from '../../lib/prefs.svelte';
-	import type { RunOut } from '../../lib/types.gen';
+	import type { MetaOut, RunOut } from '../../lib/types.gen';
 	import AlertsSettings from '../../lib/components/AlertsSettings.svelte';
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
+	let meta = $state<MetaOut | null>(null);
 	let manage = $state(false);
+	let statusError = $state<string | null>(null);
 
 	$effect(() => {
 		getHealth()
 			.then((h) => (health = h))
-			.catch(() => {});
-		getRuns(20)
+			.catch((e) => (statusError = friendlyError(e)));
+		getRuns(50)
 			.then((r) => (runs = r))
-			.catch(() => {});
+			.catch(() => {}); // the usage figure is optional
+		getMeta()
+			.then((m) => (meta = m))
+			.catch(() => {}); // only the budget and version
 		getMe()
 			.then((m) => (manage = m.is_owner || m.owner_login_enabled))
-			.catch(() => {});
+			.catch(() => {}); // no Manage link when the server can't say
 	});
 
-	const ago = (iso: string | null | undefined): string => {
-		if (!iso) return 'never';
-		const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
-		if (m < 60) return `${m} min ago`;
-		const h = Math.round(m / 60);
-		return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
-	};
-	const todayUtc = new Date().toISOString().slice(0, 10);
-	const usedToday = $derived(
-		Math.round(
-			runs
-				.filter((r) => r.started_at.slice(0, 10) === todayUtc)
-				.reduce((a, r) => a + r.api_weight, 0)
-		)
-	);
+	// Runs are stamped in UTC; count today's (UTC) calls.
+	const usedToday = $derived.by(() => {
+		const today = new Date().toISOString().slice(0, 10);
+		return Math.round(
+			runs.filter((r) => r.started_at.slice(0, 10) === today).reduce((a, r) => a + r.api_weight, 0)
+		);
+	});
 	const themes: [Theme, string][] = [
 		['auto', 'Match device'],
 		['light', 'Light'],
@@ -101,7 +100,11 @@
 
 	<section class="card">
 		<h2>Status</h2>
-		{#if health}
+		{#if statusError}
+			<p class="small muted" role="alert">{statusError}</p>
+		{:else if !health}
+			<p class="small muted" aria-live="polite">Loading…</p>
+		{:else}
 			<p class="small">
 				Data: <strong
 					>{health.status === 'ok'
@@ -111,7 +114,8 @@
 							: 'no data yet'}</strong
 				>
 				{#if health.last_run}· last run {ago(health.last_run.finished_at)}{/if}
-				· Open-Meteo today ≈ <strong>{usedToday}</strong> of 10,000 calls
+				{#if meta}· Open-Meteo today ≈ <strong>{usedToday.toLocaleString('en-US')}</strong> of
+					{meta.open_meteo_daily_budget.toLocaleString('en-US')} calls{/if}
 			</p>
 		{/if}
 		<a class="btn" href={resolve('/status')}>Sources, runs and data age →</a>

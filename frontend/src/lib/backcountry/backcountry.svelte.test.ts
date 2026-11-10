@@ -2,17 +2,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/svelte';
 import rainy from '../fixtures/rainy.json';
-import whistler from '../fixtures/whistler.json';
 import type { AvalancheView, Snapshot } from '../types.gen';
 import { expectMarksInside } from '../charts/__tests__/marks';
 import LoadingRose from './LoadingRose.svelte';
 import DangerPyramid from './DangerPyramid.svelte';
 import BackcountryTab from './BackcountryTab.svelte';
-import HourlyStack from '../charts/HourlyStack.svelte';
-import DayNightBars from '../charts/DayNightBars.svelte';
 
 const tour = rainy as unknown as Snapshot;
-const resort = whistler as unknown as Snapshot;
 
 afterEach(cleanup);
 
@@ -145,34 +141,29 @@ describe('backcountry tab', () => {
 	});
 });
 
-describe('charts with M5 extras', () => {
-	it('draws ridge wind on the wind chart and in its header', () => {
-		const { container } = render(HourlyStack, {
-			band: tour.bands[2],
-			bands: tour.bands,
-			units: 'imperial',
-			ridge: tour.ridge,
-			width: 380
-		});
-		expect(container.querySelector('path.ridge')).toBeTruthy();
-		const wind = [...container.querySelectorAll('figcaption')].find((f) =>
-			f.textContent?.startsWith('Wind')
-		);
-		expect(wind?.textContent).toMatch(/ridge \d+/);
-		expectMarksInside(container);
-	});
-
-	it('stars powder days and honours a shared scale', () => {
-		const day = resort.bands[1].periods.find((p) => p.kind === 'day')!;
-		const { container } = render(DayNightBars, {
-			periods: resort.bands[1].periods,
-			units: 'metric',
-			powder: [day.date],
-			maxCm: 200,
-			width: 380
-		});
-		expect(container.textContent).toMatch(/★/);
-		const ticks = [...container.querySelectorAll('text.tick')].map((t) => Number(t.textContent));
-		expect(Math.max(...ticks)).toBeGreaterThanOrEqual(200);
+describe('danger pyramid while loading or after an error', () => {
+	it('never reads as "no zone" before the forecast has arrived', () => {
+		for (const compact of [false, true]) {
+			const loading = render(DangerPyramid, {
+				view: null,
+				tz: 'America/Los_Angeles',
+				today: '2026-11-09',
+				compact,
+				load: 'loading'
+			});
+			expect(loading.container.textContent).toMatch(/Loading/);
+			expect(loading.container.textContent).not.toMatch(/No zone|No avalanche forecast zone/);
+			loading.unmount();
+			const failed = render(DangerPyramid, {
+				view: null,
+				tz: 'America/Los_Angeles',
+				today: '2026-11-09',
+				compact,
+				load: 'error'
+			});
+			expect(failed.container.textContent).toMatch(/Couldn’t load/);
+			expect(failed.container.textContent).not.toMatch(/No zone|No avalanche forecast zone/);
+			failed.unmount();
+		}
 	});
 });

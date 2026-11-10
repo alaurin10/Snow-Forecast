@@ -5,7 +5,7 @@
   added to the Home Screen.
 -->
 <script lang="ts">
-	import { getLocations } from '../api';
+	import { getLocations, getMeta } from '../api';
 	import { prefs } from '../prefs.svelte';
 	import {
 		currentSubscription,
@@ -18,14 +18,25 @@
 		turnOn,
 		type PushSupport
 	} from '../push';
-	import type { LocationSummary } from '../types.gen';
+	import type { LocationSummary, MetaOut } from '../types.gen';
 
-	const TYPES: [string, string][] = [
-		['powder_day', 'Powder days (6 in or more)'],
-		['storm_incoming', 'Storms on the way (12 in in 48 h)'],
+	// Thresholds come from the server's settings, in the viewer's units.
+	let meta = $state<MetaOut | null>(null);
+	const amount = (cm: number | undefined) =>
+		cm === undefined
+			? ''
+			: prefs.units === 'imperial'
+				? `${Math.round(cm / 2.54)} in`
+				: `${Math.round(cm)} cm`;
+	const TYPES = $derived<[string, string][]>([
+		['powder_day', meta ? `Powder days (${amount(meta.powder_cm)} or more)` : 'Powder days'],
+		[
+			'storm_incoming',
+			meta ? `Storms on the way (${amount(meta.storm_cm)} in 48 h)` : 'Storms on the way'
+		],
 		['wind_hold', 'Wind holds at resorts'],
 		['avalanche_danger', 'Avalanche danger High or Extreme']
-	];
+	]);
 
 	let support = $state<PushSupport>('unsupported');
 	let key = $state<string | null | undefined>(undefined); // undefined = still checking
@@ -35,6 +46,7 @@
 	let locations = $state<LocationSummary[]>([]);
 	let picked = $state<string[]>([]); // empty = all
 	let types = $state<string[]>(['powder_day', 'storm_incoming']);
+	let listError = $state(false);
 
 	$effect(() => {
 		support = pushSupport();
@@ -43,7 +55,10 @@
 			.catch(() => (key = null));
 		getLocations()
 			.then((l) => (locations = l))
-			.catch(() => {});
+			.catch(() => (listError = true));
+		getMeta()
+			.then((m) => (meta = m))
+			.catch(() => {}); // the labels just lose their numbers
 		if (support === 'ok') {
 			currentSubscription()
 				.then(async (s) => {
@@ -139,6 +154,9 @@
 					{l.name}</label
 				>
 			{/each}
+			{#if listError}
+				<p class="faint small">Couldn’t load the location list; alerts cover every location.</p>
+			{/if}
 		</fieldset>
 		<div class="actions">
 			{#if !on}

@@ -1,19 +1,23 @@
 // Shared checks for chart tests: every data mark stays inside its plot area.
 import { expect } from 'vitest';
 
-/** Points visited by an SVG path (absolute M/L/H/V/Q/C/A/Z, as our charts emit). */
+/** Points visited by an SVG path (M/L/H/V/Q/C/A/Z, and relative m/l/h/v). */
 export function pathPoints(d: string): [number, number][] {
 	const pts: [number, number][] = [];
 	let x = 0;
 	let y = 0;
-	for (const [, cmd, args] of d.matchAll(/([MLHVQCAZ])([^MLHVQCAZ]*)/g)) {
+	for (const [, cmd, args] of d.matchAll(/([MLHVQCAZmlhvz])([^MLHVQCAZmlhvz]*)/g)) {
 		const n = (args.match(/-?\d*\.?\d+(e-?\d+)?/g) ?? []).map(Number);
 		if (cmd === 'H') n.forEach((v) => pts.push([(x = v), y]));
 		else if (cmd === 'V') n.forEach((v) => pts.push([x, (y = v)]));
+		else if (cmd === 'h') n.forEach((v) => pts.push([(x += v), y]));
+		else if (cmd === 'v') n.forEach((v) => pts.push([x, (y += v)]));
+		else if (cmd === 'm' || cmd === 'l')
+			for (let i = 0; i + 1 < n.length; i += 2) pts.push([(x += n[i]), (y += n[i + 1])]);
 		else if (cmd === 'A')
 			// rx ry rotation large-arc sweep x y: only the end point is a position.
 			for (let i = 0; i + 6 < n.length; i += 7) pts.push([(x = n[i + 5]), (y = n[i + 6])]);
-		else if (cmd !== 'Z')
+		else if (cmd !== 'Z' && cmd !== 'z')
 			for (let i = 0; i + 1 < n.length; i += 2) pts.push([(x = n[i]), (y = n[i + 1])]);
 	}
 	return pts;

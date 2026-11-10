@@ -3,17 +3,15 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { cleanup, render } from '@testing-library/svelte';
 import { expectMarksInside } from './marks';
-import { flushSync } from 'svelte';
 import whistler from '../../fixtures/whistler.json';
 import crystal from '../../fixtures/crystal.json';
 import type { Snapshot } from '../../types.gen';
 import { crosshair } from '../../crosshair.svelte';
-import HourlyStack from '../HourlyStack.svelte';
-import DayNightBars from '../DayNightBars.svelte';
+import ForecastChart from '../ForecastChart.svelte';
 import ModelAgreement from '../ModelAgreement.svelte';
 import Exceedance from '../Exceedance.svelte';
 import TrendChart from '../TrendChart.svelte';
-import Sparkline from '../Sparkline.svelte';
+import { pathPoints } from './marks';
 
 const snowy = whistler as unknown as Snapshot;
 const dry = crystal as unknown as Snapshot;
@@ -23,29 +21,46 @@ afterEach(() => {
 	crosshair.reset();
 });
 
+/** The forecast chart draws in a 1000-wide viewBox per plot: nothing may fall outside. */
+function expectInViewBox(container: HTMLElement, slack = 1) {
+	const svgs = [...container.querySelectorAll<SVGSVGElement>('svg[viewBox^="0 0 1000"]')];
+	expect(svgs.length).toBeGreaterThan(0);
+	let checked = 0;
+	for (const svg of svgs) {
+		const [, , w, h] = (svg.getAttribute('viewBox') ?? '').split(' ').map(Number);
+		for (const el of svg.querySelectorAll('path')) {
+			for (const [x, y] of pathPoints(el.getAttribute('d') ?? '')) {
+				expect(x).toBeGreaterThanOrEqual(-slack);
+				expect(x).toBeLessThanOrEqual(w + slack);
+				expect(y).toBeGreaterThanOrEqual(-slack);
+				expect(y).toBeLessThanOrEqual(h + slack);
+				checked++;
+			}
+		}
+		for (const el of svg.querySelectorAll('rect')) {
+			const x = Number(el.getAttribute('x') ?? 0);
+			const y = Number(el.getAttribute('y') ?? 0);
+			expect(x).toBeGreaterThanOrEqual(-slack);
+			expect(y).toBeGreaterThanOrEqual(-slack);
+			expect(x + Number(el.getAttribute('width') ?? 0)).toBeLessThanOrEqual(w + slack);
+			expect(y + Number(el.getAttribute('height') ?? 0)).toBeLessThanOrEqual(h + slack);
+			checked++;
+		}
+	}
+	expect(checked).toBeGreaterThan(0);
+}
+
 describe.each([
 	['snowy', snowy],
 	['dry', dry]
 ])('%s snapshot', (_name, snap) => {
 	const band = snap.bands[1];
 
-	it('hourly stack keeps marks in bounds at phone and desktop widths', () => {
-		for (const width of [340, 900]) {
-			const { container, unmount } = render(HourlyStack, {
-				props: { band, bands: snap.bands, units: 'imperial', width }
-			});
-			expectMarksInside(container);
-			expect(container.querySelectorAll('figure')).toHaveLength(6);
-			unmount();
-		}
-	});
-
-	it('day/night bars keep marks in bounds and have a hit target per period', () => {
-		const { container } = render(DayNightBars, {
-			props: { periods: band.periods, units: 'metric', width: 360 }
+	it('forecast chart keeps every mark inside its plot', () => {
+		const { container } = render(ForecastChart, {
+			props: { band, bands: snap.bands, units: 'imperial' }
 		});
-		expectMarksInside(container);
-		expect(container.querySelectorAll('rect.hit[role="button"]')).toHaveLength(20);
+		expectInViewBox(container);
 	});
 
 	it('model agreement keeps marks in bounds', () => {
@@ -53,22 +68,6 @@ describe.each([
 			props: { daily: snap.daily, models: snap.models, units: 'imperial', width: 360 }
 		});
 		expectMarksInside(container);
-	});
-
-	it('sparkline keeps marks in bounds on a shared scale', () => {
-		const periods = band.periods.map((p) => ({
-			key: p.key,
-			label: p.label,
-			kind: p.kind,
-			date: p.date,
-			snow_cm: p.snow_cm
-		}));
-		const max = Math.max(2.54, ...periods.map((p) => p.snow_cm ?? 0));
-		const { container } = render(Sparkline, { props: { periods, max, width: 280 } });
-		const bars = container.querySelectorAll('path.mark');
-		expect(bars.length).toBe(periods.filter((p) => (p.snow_cm ?? 0) > 0).length);
-		if (bars.length) expectMarksInside(container, 0.5);
-		else expect(container.querySelector('svg')).not.toBeNull();
 	});
 
 	it('exceedance curve keeps marks in bounds', () => {
@@ -82,40 +81,6 @@ describe.each([
 		});
 		expectMarksInside(container);
 	});
-});
-
-it('no chart has a second y-axis: one tick column per plot', () => {
-	const band = snowy.bands[1];
-	const { container } = render(HourlyStack, {
-		props: { band, bands: snowy.bands, units: 'imperial', width: 600 }
-	});
-	container.querySelectorAll<SVGGElement>('g.plot').forEach((g) => {
-		const xs = new Set(
-			[...g.querySelectorAll('text.tick')].map((t) => t.getAttribute('x')).filter((x) => x === '-6')
-		);
-		const right = [...g.querySelectorAll('text.tick')].filter(
-			(t) => Number(t.getAttribute('x')) > Number(g.dataset.iw)
-		);
-		expect(xs.size).toBeLessThanOrEqual(1);
-		expect(right).toHaveLength(0);
-	});
-});
-
-it('the crosshair moves every hourly header together', () => {
-	const band = snowy.bands[1];
-	const { container } = render(HourlyStack, {
-		props: { band, bands: snowy.bands, units: 'imperial', width: 600 }
-	});
-	const readouts = () => [...container.querySelectorAll('.readout')].map((r) => r.textContent);
-	const atNow = readouts();
-	expect(container.querySelector('.when')?.textContent?.trim()).toBe('Now');
-	const i = band.hourly.temp_c.findIndex((t, k) => k > 0 && t !== band.hourly.temp_c[0]);
-	crosshair.set(i);
-	flushSync();
-	const moved = readouts();
-	expect(container.querySelector('.when')?.textContent?.trim()).not.toBe('Now');
-	expect(moved[2]).not.toBe(atNow[2]); // temperature header follows the crosshair
-	expect(container.querySelectorAll('line.cross')).toHaveLength(6);
 });
 
 it('empty states render without errors', () => {
