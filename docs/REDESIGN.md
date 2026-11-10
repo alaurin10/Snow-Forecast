@@ -34,6 +34,16 @@ were rejected; this document overrides it wherever they differ.
   the "Less certain" marker, and the period readout.
 - **Desktop is not a dashboard.** No three-column workspace, no merged "board", no storm
   timeline page. Keep Forecast / Models / Backcountry / Observed as tabs.
+- **No big total.** No oversized "next 5 days" number on any page and nothing that floats
+  with it on scroll. The 5-day total lives in the outlook card.
+- **Few controls on the page.** Units (in/cm) live only in More → Settings. On desktop,
+  navigation, the location list and the section tabs move to a left rail, so the content
+  column carries only the elevation control and the chart's range control.
+- **Phone chart is complete.** Six metric chips, the 1/3/5/10-day range selector, Share,
+  and the day-scrubbing strip are all required.
+- **Keep and improve the day-scrubbing strip** (today's phone overview strip; see 5.1).
+- **Calendar keeps its current layout** (storms ahead, locations × 10 days, totals,
+  legend) in the new style (see 6.5).
 - **Learn from the phone.** Desktop components are the phone components given more room:
   the same outlook card, day rows, segmented controls and chart card.
 
@@ -139,13 +149,25 @@ Files: `routes/+page.svelte`, `routes/location/[id]/+page.svelte`, `lib/componen
   and total; legend). Storms become a sideways-swiping row of glass cards (one per storm
   cycle from `stormcycles.ts`). Rows sit in one Frost panel. Each row gets a small sky dot
   (that location's scene now) and shows an alert in the subtitle when there is one.
-- **Location:** unchanged order (back, name, share; elevation numbers; section tabs;
-  chart card; outlook 3-up; day by day; heads up; about; links). Optional hero: a large
-  "next 5 days" number on the sky above the chart, collapsing into a glass title bar on
-  scroll. Build it behind a flag; the owner liked both.
-- **Chart card:** exactly today's phone chart (readout, plot with total line, overview
-  strip, six metric chips, range and share), restyled: Frost panel, 26 px radius, chips
-  as wells with the selected chip raised.
+- **Location:** unchanged order (back, name, share; a glass "now" pill and the elevation
+  numbers on one row; underline section tabs; chart card; outlook 3-up; day by day; heads
+  up; about; links). No hero number.
+- **Chart card**, top to bottom: readout (period, value of the chosen metric, its detail,
+  and "snow by then X of Y in" for snow); plot 200 px with axis labels inside the plot and
+  the running-total line; 34 px cloud/chance strip; day labels; **day-scrubbing strip**;
+  six metric chips in a 3 × 2 grid (label with colour key, value at the scrubbed step);
+  range selector (1/3/5/10 days) with Share. Frost panel, 26 px radius.
+
+### 5.1 Day-scrubbing strip
+
+A 50 px glass well spanning the card, one column per forecast day (10), each with a small
+daily snow bar and a two-letter day label. A raised capsule marks the days the chart shows
+and slides with the spring easing. Drag it, tap a day to centre on it, or use the ‹ ›
+buttons either side (44 px targets) to move one day. Bars inside the window use the snow
+colour; outside it they are muted. For 3- and 5-day ranges the chart shows that window at
+6-hour steps; for 1 day it shows the next 24 hours, for 10 days the whole strip is
+selected. A caption under it says what it does. `role="slider"` with arrow keys. On desktop
+the same strip sits under the chart (wider columns, bar values shown).
 - **Day by day:** today's rows (day/date, icon, high/low, wind, day and night heat cells,
   chevron), inside one panel, 54 px rows. Expanding a row shows both halves' snow level,
   chance, precipitation, ratio, wind, gust and cloud.
@@ -158,15 +180,17 @@ Content column `max-width: 1280px`, centred, 24 px side padding. Sky behind.
 
 ### 6.1 Location page, Forecast tab (top to bottom)
 
-1. **Glass header bar:** brand · nav capsule (Overview, Map, Calendar, More) · location
-   pill (‹ prev, "Jump to" with Ctrl K, next ›) · units segmented.
-2. **Hero on the sky:** "← All locations"; name (54 px); a glass pill with region and
-   updated time. Right side: next-5-days number (100 px, weight 300) with the likely range
-   under it, and the elevation segmented control showing name + elevation.
-3. **Outlook card** (phone's 3-up, four cells): Next storm (accent tint; amount, when,
-   heaviest period and snow level) · Days 6–10 (and last 24 h, SLR alternative) · Now
-   (temperature, wind and gusts, freezing level) · Avalanche (rating chip or "No rating").
-4. **Section tabs** (glass segmented, 500 px): Forecast, Models, Backcountry, Observed.
+Layout: a 248 px glass **left rail** (sticky) beside a content column (max 1120 px).
+Below ~1180 px the rail collapses to icons; on tablet it becomes the phone tab bar.
+
+1. **Left rail:** brand; nav (Overview, Calendar, Map, More); "Locations" list with sky
+   dot, name and 5-day total; the open location expands to show its sections (Forecast,
+   Models, Backcountry, Observed). Ctrl K opens the location palette.
+2. **Title on the sky:** name (46 px) and a glass pill with region, scene now and update
+   time. Right: the elevation segmented control (name + elevation). No other controls.
+3. **Outlook card** (four cells): Next 5 days (total, likely range, days 6–10, last 24 h)
+   · Next storm (accent tint) · Now (temperature, wind and gusts, freezing level) ·
+   Avalanche.
 5. **Chart card** (full width):
    - Header: "Forecast", step note ("Every 6 hours · hover or use the arrow keys"), range
      segmented, Share.
@@ -193,6 +217,16 @@ Content column `max-width: 1280px`, centred, 24 px side padding. Sky behind.
 Same column, same cards, one panel per block: Models (agreement, chance of each amount,
 trend), Backcountry (`BackcountryTab.svelte`), Observed (`StationPanel`, `Scorecard`).
 Only restyle; no layout merging.
+
+### 6.5 Calendar (desktop)
+
+Same rail. Title on the sky. **Storms ahead** card: one row per storm cycle (dates, "now /
+in N days", top locations with amounts, "+N more"). **Grid** card: location column (sky
+dot + name, links to the location), ten day columns (weekends in the accent, today
+labelled), 46 px heat cells using the ramp (rain cells green, empty cells a faint well),
+and a Total column. Pointing at a cell outlines it, highlights its column header and shows
+the details in the legend line; clicking opens that location at that day. Legend under
+the grid. Phone keeps today's calendar layout with the new skin.
 
 ### 6.3 Overview
 
