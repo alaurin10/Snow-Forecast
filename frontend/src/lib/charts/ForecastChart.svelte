@@ -8,6 +8,7 @@
      marked. Drag it, tap a day or step with ‹ › to read any part of the forecast; a new
      range always starts again at today. -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { BandOut } from '../types.gen';
 	import { converters, elevation, speed, type UnitSystem } from '../units';
 	import { compass } from '../conditions';
@@ -693,11 +694,16 @@
 	};
 
 	/** A new range always starts again at today; scrub forward from there. */
+	// With the timeline showing, a new range keeps the window where it is; without it,
+	// there is no way to move the window, so it always starts today.
 	function pickRange(r: Range) {
 		range = r;
-		startMs = null;
+		if (!showTimeline) startMs = null;
 		hoverT = null;
 	}
+	$effect(() => {
+		if (!showTimeline) untrack(() => (startMs = null));
+	});
 
 	// --- The timeline: one column per forecast day, the chart's window marked ---
 	const days = $derived.by(() => {
@@ -762,8 +768,10 @@
 		const last = steps[steps.length - 1];
 		const b = Date.parse(last.t) + last.hours * 3600e3;
 		const n = days.length;
-		const from = dayPos(a);
-		const to = dayPos(b);
+		// Steps of 6 or 12 h start on the next clean boundary, a little after now, and the
+		// data can end mid-step: at either end the window still meets the edge.
+		const from = off === 0 ? 0 : dayPos(a);
+		const to = off >= maxOff ? n : dayPos(b);
 		return {
 			left: `${((from / n) * 100).toFixed(2)}%`,
 			width: `${(((to - from) / n) * 100).toFixed(2)}%`,

@@ -1,10 +1,11 @@
 <!--
   Push alerts for this device. Turning them on asks the browser for permission
   (it must follow a tap), subscribes through the app's service worker and saves
-  which locations and alerts to send. On iPhone this only works from the app
-  added to the Home Screen.
+  which locations and alerts to send. Once on, every change saves itself. On
+  iPhone this only works from the app added to the Home Screen.
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { getLocations, getMeta } from '../api';
 	import { prefs } from '../prefs.svelte';
 	import {
@@ -100,6 +101,38 @@
 	};
 	const toggle = (list: string[], v: string) =>
 		list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+
+	// While alerts are on, a change saves itself a moment after the last tap.
+	let saveState = $state<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+	let saveTimer: ReturnType<typeof setTimeout> | undefined;
+	function queueSave() {
+		if (!on) return;
+		clearTimeout(saveTimer);
+		if (!types.length) {
+			saveState = 'idle';
+			return;
+		}
+		saveState = 'saving';
+		saveTimer = setTimeout(async () => {
+			try {
+				const res = await saveChoices(choices());
+				saveState = res.ok ? 'saved' : 'failed';
+				if (!res.ok) message = res.detail ?? 'Your changes couldn’t be saved. Try again.';
+			} catch {
+				saveState = 'failed';
+				message = 'Your changes couldn’t be saved. Check your connection and try again.';
+			}
+		}, 600);
+	}
+	$effect(() => () => clearTimeout(saveTimer));
+	// Alerts are written in the chosen units, so a change of units saves too.
+	let lastUnits = untrack(() => prefs.units);
+	$effect(() => {
+		const u = prefs.units;
+		if (u === lastUnits) return;
+		lastUnits = u;
+		untrack(queueSave);
+	});
 </script>
 
 <section class="card">
@@ -132,7 +165,10 @@
 					><input
 						type="checkbox"
 						checked={types.includes(t)}
-						onchange={() => (types = toggle(types, t))}
+						onchange={() => {
+							types = toggle(types, t);
+							queueSave();
+						}}
 					/>
 					{label}</label
 				>
@@ -141,15 +177,24 @@
 		<fieldset>
 			<legend>For</legend>
 			<label class="check"
-				><input type="checkbox" checked={picked.length === 0} onchange={() => (picked = [])} /> Every
-				location</label
+				><input
+					type="checkbox"
+					checked={picked.length === 0}
+					onchange={() => {
+						picked = [];
+						queueSave();
+					}}
+				/> Every location</label
 			>
 			{#each locations as l (l.id)}
 				<label class="check"
 					><input
 						type="checkbox"
 						checked={picked.includes(l.id)}
-						onchange={() => (picked = toggle(picked, l.id))}
+						onchange={() => {
+							picked = toggle(picked, l.id);
+							queueSave();
+						}}
 					/>
 					{l.name}</label
 				>
@@ -158,17 +203,25 @@
 				<p class="faint small">Couldn’t load the location list; alerts cover every location.</p>
 			{/if}
 		</fieldset>
+		{#if on}
+			<p class="small faint autosave" aria-live="polite">
+				{saveState === 'saving'
+					? 'Saving…'
+					: saveState === 'saved'
+						? 'Changes saved.'
+						: saveState === 'failed'
+							? 'Not saved.'
+							: !types.length
+								? 'Pick at least one alert to save your changes.'
+								: 'Changes save automatically.'}
+			</p>
+		{/if}
 		<div class="actions">
 			{#if !on}
 				<button class="btn primary" disabled={busy || !types.length} onclick={enable}
 					>Turn on alerts</button
 				>
 			{:else}
-				<button
-					class="btn primary"
-					disabled={busy || !types.length}
-					onclick={() => run(() => saveChoices(choices()), 'Saved.')}>Save</button
-				>
 				<button class="btn" disabled={busy} onclick={() => run(sendTest, 'Test sent.')}
 					>Send a test</button
 				>
@@ -192,6 +245,9 @@
 		margin: 8px 0;
 		display: grid;
 		gap: 4px;
+	}
+	.autosave {
+		margin: 0 0 8px;
 	}
 	legend {
 		font-size: 0.8rem;

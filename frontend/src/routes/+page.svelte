@@ -15,7 +15,9 @@
 	import { paint } from '../lib/share/canvas';
 	import { drawOverviewCard } from '../lib/share/overviewCard';
 	import { viewport } from '../lib/viewport.svelte';
-	import { stormCycles } from '../lib/stormcycles';
+	import { stormCycles, type StormCycle } from '../lib/stormcycles';
+	import LocationDaySheet from '../lib/components/LocationDaySheet.svelte';
+	import StormSheet from '../lib/components/StormSheet.svelte';
 	import { monthDay, weekday } from '../lib/time';
 
 	let rows = $state<OverviewRow[] | null>(null);
@@ -64,6 +66,9 @@
 	const dayLabels = $derived(list.find((x) => x.days.length)?.days ?? []);
 	const barH = (cm: number, tall: number) =>
 		cm > 0.1 ? Math.max(3, Math.round((cm / barMax) * tall)) : 0;
+	// A storm, and a day picked from it, open in popups over the overview.
+	let openStorm = $state<StormCycle | null>(null);
+	let openDay = $state<{ id: string; name: string; date: string } | null>(null);
 	const storms = $derived.by(() => {
 		const all = stormCycles((rows ?? []).filter((r) => r.run_id != null));
 		const todayDate = (rows ?? []).flatMap((r) => r.periods ?? [])[0]?.date ?? '';
@@ -72,6 +77,7 @@
 			const n = todayDate ? Math.round((Date.parse(s.start) - Date.parse(todayDate)) / 86400e3) : 0;
 			return {
 				key: s.start + s.end,
+				cycle: s,
 				first: k === 0,
 				when: s.start === s.end ? day(s.start) : `${day(s.start)} – ${day(s.end)}`,
 				soon: n <= 0 ? 'Now' : n === 1 ? 'Tomorrow' : `In ${n} days`,
@@ -118,7 +124,7 @@
 	{#if storms.length}
 		<div class="storms" aria-label="Storms ahead">
 			{#each storms as s (s.key)}
-				<a class="storm glass" class:first={s.first} href={resolve('/calendar')}>
+				<button class="storm glass" class:first={s.first} onclick={() => (openStorm = s.cycle)}>
 					<span class="eyebrow">{s.soon}</span>
 					<strong>{s.when}</strong>
 					<span class="where"
@@ -126,7 +132,7 @@
 							<b class="num">{snowNum(l.total_cm, prefs.units)} {c.snowUnit}</b
 							>{/each}{#if s.more}<span class="faint"> · +{s.more} more</span>{/if}</span
 					>
-				</a>
+				</button>
 			{/each}
 		</div>
 	{/if}
@@ -218,6 +224,28 @@
 	</div>
 {/if}
 
+{#if openStorm}
+	<StormSheet
+		cycle={openStorm}
+		rows={(rows ?? []).filter((r) => r.run_id != null)}
+		units={prefs.units}
+		onday={(id, name, date) => {
+			openStorm = null;
+			openDay = { id, name, date };
+		}}
+		onclose={() => (openStorm = null)}
+	/>
+{/if}
+{#if openDay}
+	<LocationDaySheet
+		id={openDay.id}
+		name={openDay.name}
+		date={openDay.date}
+		units={prefs.units}
+		onclose={() => (openDay = null)}
+	/>
+{/if}
+
 <style>
 	.head {
 		display: flex;
@@ -261,6 +289,10 @@
 		display: none;
 	}
 	.storm {
+		border: 1px solid var(--glass-border);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
 		scroll-snap-align: start;
 		box-shadow: var(--glass-shadow-sm);
 		display: grid;

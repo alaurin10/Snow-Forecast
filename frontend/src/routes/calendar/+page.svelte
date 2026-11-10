@@ -12,6 +12,9 @@
 	import { monthDay, weekday } from '../../lib/time';
 	import type { OverviewRow } from '../../lib/types.gen';
 	import { viewport } from '../../lib/viewport.svelte';
+	import type { StormCycle } from '../../lib/stormcycles';
+	import LocationDaySheet from '../../lib/components/LocationDaySheet.svelte';
+	import StormSheet from '../../lib/components/StormSheet.svelte';
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
@@ -70,10 +73,9 @@
 		return n <= 0 ? 'now' : n === 1 ? 'tomorrow' : `in ${n} days`;
 	};
 	const show = (cm: number) => Number(snowNum(cm, prefs.units)) > 0;
-	const cellHref = (id: string, key: string | null) =>
-		key
-			? `${resolve('/location/[id]', { id })}?period=${encodeURIComponent(key)}`
-			: resolve('/location/[id]', { id });
+	// A day or a storm opens in a popup over the calendar.
+	let openDay = $state<{ id: string; name: string; date: string } | null>(null);
+	let openStorm = $state<StormCycle | null>(null);
 	// Desktop: the cell under the pointer (its row and day light up, details below).
 	let hover = $state<{ id: string; d: string; text: string } | null>(null);
 	const legend = $derived(
@@ -110,20 +112,22 @@
 		<ul class="mstorms">
 			{#each storms as s, k (s.start + s.end)}
 				<li class:first={k === 0}>
-					<span class="ms-when"
-						>{soon(s.start)} · {dayName(s.start)}{s.end !== s.start
-							? ` – ${dayName(s.end)}`
-							: ''}</span
-					>
-					<span class="ms-top"
-						>{s.locations[0].name}
-						<strong class="num">{snow(s.locations[0].total_cm, prefs.units)}</strong></span
-					>
-					<span class="ms-more">
-						{#each s.locations.slice(1, 3) as l, i (l.id)}{i ? ' · ' : ''}{l.name}
-							{snowNum(l.total_cm, prefs.units)}{/each}{#if s.locations.length > 3}
-							· +{s.locations.length - 3} more{/if}
-					</span>
+					<button class="sbtn" onclick={() => (openStorm = s)}>
+						<span class="ms-when"
+							>{soon(s.start)} · {dayName(s.start)}{s.end !== s.start
+								? ` – ${dayName(s.end)}`
+								: ''}</span
+						>
+						<span class="ms-top"
+							>{s.locations[0].name}
+							<strong class="num">{snow(s.locations[0].total_cm, prefs.units)}</strong></span
+						>
+						<span class="ms-more">
+							{#each s.locations.slice(1, 3) as l, i (l.id)}{i ? ' · ' : ''}{l.name}
+								{snowNum(l.total_cm, prefs.units)}{/each}{#if s.locations.length > 3}
+								· +{s.locations.length - 3} more{/if}
+						</span>
+					</button>
 				</li>
 			{/each}
 		</ul>
@@ -150,16 +154,13 @@
 					{#each dates as d (d)}
 						{@const day = g.days.get(d)}
 						{#if day}
-							<!-- cellHref() builds the URL with resolve() and adds ?period= -->
-							<!-- eslint-disable svelte/no-navigation-without-resolve -->
-							<a
+							<button
 								class="heat b{bucket(day.cm)}"
 								class:rainy={day.rainy}
-								href={cellHref(g.r.id, day.key)}
-								aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}`}
-								>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</a
+								onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
+								aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
+								>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
 							>
-							<!-- eslint-enable svelte/no-navigation-without-resolve -->
 						{:else}
 							<span></span>
 						{/if}
@@ -180,17 +181,20 @@
 			<ul>
 				{#each storms as s (s.start + s.end)}
 					<li>
-						<span class="when"
-							><strong>{dayName(s.start)}{s.end !== s.start ? ` – ${dayName(s.end)}` : ''}</strong>
-							<span class="faint">{soon(s.start)}</span></span
-						>
-						<span class="where">
-							{#each s.locations.slice(0, 3) as l, i (l.id)}{i ? ' · ' : ''}{l.name}
-								<strong class="num">{snow(l.total_cm, prefs.units)}</strong
-								>{/each}{#if s.locations.length > 3}<span class="faint">
-									· +{s.locations.length - 3} more</span
-								>{/if}
-						</span>
+						<button class="srow" onclick={() => (openStorm = s)}>
+							<span class="when"
+								><strong>{dayName(s.start)}{s.end !== s.start ? ` – ${dayName(s.end)}` : ''}</strong
+								>
+								<span class="faint">{soon(s.start)}</span></span
+							>
+							<span class="where">
+								{#each s.locations.slice(0, 3) as l, i (l.id)}{i ? ' · ' : ''}{l.name}
+									<strong class="num">{snow(l.total_cm, prefs.units)}</strong
+									>{/each}{#if s.locations.length > 3}<span class="faint">
+										· +{s.locations.length - 3} more</span
+									>{/if}
+							</span>
+						</button>
 					</li>
 				{/each}
 			</ul>
@@ -226,13 +230,11 @@
 								{@const day = g.days.get(d)}
 								<td>
 									{#if day}
-										<!-- cellHref() builds the URL with resolve() and adds ?period= -->
-										<!-- eslint-disable svelte/no-navigation-without-resolve -->
-										<a
+										<button
 											class="tile b{bucket(day.cm)}"
 											class:rainy={day.rainy}
-											href={cellHref(g.r.id, day.key)}
-											aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}`}
+											onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
+											aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
 											onpointerenter={() =>
 												(hover = {
 													id: g.r.id,
@@ -247,9 +249,8 @@
 													text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
 												})}
 											onblur={() => (hover = null)}
-											>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</a
+											>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
 										>
-										<!-- eslint-enable svelte/no-navigation-without-resolve -->
 									{/if}
 								</td>
 							{/each}
@@ -264,10 +265,32 @@
 			<span class="faint">{c.snowUnit} of snow per day</span>
 			<span class="sw b0 rainy"></span><span>rain</span>
 			<span class="detail" aria-live="polite"
-				>{hover ? hover.text : 'Point at a day for details; pick it to open that forecast.'}</span
+				>{hover ? hover.text : 'Point at a day to see it here; pick it for its details.'}</span
 			>
 		</div>
 	</section>
+{/if}
+
+{#if openStorm}
+	<StormSheet
+		cycle={openStorm}
+		rows={shown}
+		units={prefs.units}
+		onday={(id, name, date) => {
+			openStorm = null;
+			openDay = { id, name, date };
+		}}
+		onclose={() => (openStorm = null)}
+	/>
+{/if}
+{#if openDay}
+	<LocationDaySheet
+		id={openDay.id}
+		name={openDay.name}
+		date={openDay.date}
+		units={prefs.units}
+		onclose={() => (openDay = null)}
+	/>
 {/if}
 
 <style>
@@ -309,12 +332,24 @@
 		display: grid;
 	}
 	.storms li {
+		border-top: 1px solid var(--grid);
+	}
+	.srow {
+		width: calc(100% + 16px);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 2px 16px;
-		padding: 10px 0;
-		border-top: 1px solid var(--grid);
+		padding: 10px 8px;
+		margin: 0 -8px;
+		border: 0;
+		border-radius: 12px;
+		background: none;
+		text-align: left;
 		font-size: 0.92rem;
+		cursor: pointer;
+	}
+	.srow:hover {
+		background: var(--hover);
 	}
 	.storms li:first-child {
 		border-top: 0;
@@ -396,6 +431,9 @@
 		color: var(--text);
 	}
 	.tile {
+		border: 0;
+		padding: 0;
+		cursor: pointer;
 		display: grid;
 		place-items: center;
 		width: 48px;
@@ -500,6 +538,15 @@
 	}
 	.mstorms li {
 		flex: 0 0 172px;
+		display: flex;
+		min-width: 0;
+	}
+	.sbtn {
+		width: 100%;
+		text-align: left;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
 		display: grid;
 		gap: 2px;
 		padding: 10px 14px;
@@ -511,7 +558,7 @@
 		-webkit-backdrop-filter: var(--blur-glass);
 		min-width: 0;
 	}
-	.mstorms li.first {
+	.mstorms li.first .sbtn {
 		background-image: linear-gradient(0deg, var(--accent-soft), var(--accent-soft));
 	}
 	.mstorms span {
@@ -571,20 +618,22 @@
 		color: var(--text);
 		font-weight: 600;
 	}
+	/* Compact rows, so more locations fit on one screen. */
 	.mrows li {
-		padding: 8px 0 6px;
+		padding: 4px 0 5px;
 	}
 	.mname {
 		display: flex;
 		justify-content: space-between;
 		align-items: baseline;
 		gap: 10px;
-		margin-bottom: 4px;
+		margin-bottom: 2px;
+		line-height: 1.2;
 	}
 	.mname a {
 		min-width: 0;
 		color: var(--text);
-		font-size: 0.88rem;
+		font-size: 0.82rem;
 		font-weight: 600;
 		text-decoration: none;
 		white-space: nowrap;
@@ -593,12 +642,16 @@
 	}
 	.mname span {
 		flex: 0 0 auto;
-		font-size: 0.78rem;
+		font-size: 0.74rem;
 		color: var(--text-2);
 	}
 	.mcells .heat {
-		height: 30px;
-		font-size: 0.72rem;
+		border: 0;
+		padding: 0;
+		cursor: pointer;
+		height: 24px;
+		border-radius: 8px;
+		font-size: 0.7rem;
 	}
 	.mcells .heat.rainy {
 		background: var(--rain-cell);

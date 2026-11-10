@@ -219,6 +219,16 @@
 	const avyRated = $derived(avy?.status === 'current' && !!avy.today_max);
 	const avyCenter = $derived(avy?.doc?.center ?? null);
 	const next5 = $derived(band?.windows['next5'] ?? null);
+
+	// Phones: the conditions and elevation row sticks to the top; once it has, it gets a
+	// frosted band so the page doesn't show through around it.
+	let stuck = $state(false);
+	function watchStuck(node: HTMLElement) {
+		if (typeof IntersectionObserver === 'undefined') return;
+		const io = new IntersectionObserver(([e]) => (stuck = !e.isIntersecting));
+		io.observe(node);
+		return { destroy: () => io.disconnect() };
+	}
 </script>
 
 <svelte:head
@@ -326,7 +336,11 @@
 			</a>
 			<h1>{snap.location.name}</h1>
 		</header>
-		<div class="mrow">
+		<p class="elevname" aria-hidden="true">
+			{band.label} <span class="faint">· {c.heightUnit}</span>
+		</p>
+		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
+		<div class="mrow" class:stuck>
 			<span class="pill glass" title="{band.label} · updated {updated}">
 				<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
 				{sky.label} · <span class="num">{temperature(band.hourly.temp_c[nowAt], units)}</span>
@@ -961,7 +975,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		margin: 0 0 10px;
+		margin: 0 0 4px;
 	}
 	.mhead h1 {
 		min-width: 0;
@@ -985,27 +999,72 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
+	/* Conditions and elevation: stays at the top of the screen while you scroll, so the
+	   elevation can be changed from anywhere on the page. */
+	.stuckmark {
+		height: 1px;
+		margin-bottom: -1px;
+	}
 	.mrow {
+		position: sticky;
+		top: env(safe-area-inset-top);
+		z-index: 30;
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 8px;
-		margin: 0 0 6px;
+		margin: -6px -16px 0;
+		padding: 6px 16px;
+		border-bottom: 1px solid transparent;
+		transition:
+			background-color var(--ease),
+			border-color var(--ease);
 	}
+	.mrow.stuck {
+		background: var(--header-glass);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
+		border-bottom-color: var(--border);
+	}
+	/* Fill the strip behind the status bar too. */
+	.mrow.stuck::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 100%;
+		height: env(safe-area-inset-top);
+		background: var(--header-glass);
+	}
+	/* The conditions never shrink; the elevations wrap below them if both can't fit. */
 	.mrow .pill {
-		flex: 0 1 auto;
-		min-width: 0;
-		padding: 5px 11px 5px 5px;
+		flex: 0 0 auto;
+		overflow: visible;
+		padding: 5px 12px 5px 5px;
 		font-size: 0.8rem;
 	}
 	.seg.elevs {
-		flex: 0 0 auto;
-		padding: 4px;
+		flex: 0 1 auto;
+		min-width: 0;
+		margin-left: auto;
+		padding: 3px;
 	}
 	.seg.elevs button {
 		min-width: 52px;
 		padding: 8px 6px;
 		font-size: 0.86rem;
+	}
+	/* The chosen elevation's name, above the selector (it scrolls away; the selector stays). */
+	.elevname {
+		margin: 0 6px 2px;
+		text-align: right;
+		font-size: 0.74rem;
+		font-weight: 600;
+		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.tabs.under {
 		display: flex;

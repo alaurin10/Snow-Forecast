@@ -781,7 +781,14 @@
 				fadeDuration: 150
 			});
 			map.addControl(new ml.NavigationControl({ visualizePitch: true }), 'top-left');
-			map.addControl(new ml.AttributionControl({ compact: true }), 'top-right');
+			map.addControl(
+				new ml.AttributionControl({
+					compact: true,
+					customAttribution:
+						'Weather: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0), NWS, NRCS SNOTEL'
+				}),
+				'top-right'
+			);
 			map.on('zoom', () => (zoom = map!.getZoom()));
 			// The "3D view" buttons inside marker popups.
 			el.addEventListener('click', (e) => {
@@ -1045,8 +1052,11 @@
 			/>
 		{/if}
 
-		{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline}
+		{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline || (on && tooClose)}
 			<p class="note glass" role="status">
+				{#if on && tooClose && !offline && locState !== 'locating' && locState !== 'denied' && locState !== 'unavailable'}
+					Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.
+				{/if}
 				{#if offline}
 					Offline: showing saved maps.
 				{/if}
@@ -1079,6 +1089,10 @@
 						Snow per hour assumes about 10 parts snow to 1 part water. Forecasts beyond a day are
 						rougher.
 					</p>
+					<p class="faint">
+						Snow total: the Canadian HRDPS model, snow at about 10:1; it covers Canada and the
+						northern US.
+					</p>
 				{/if}
 				<button class="close" onclick={() => (infoOpen = false)}>Close</button>
 			</div>
@@ -1094,113 +1108,113 @@
 						>Snow total</button
 					>
 				</div>
-				{#if totalsMode}
-					{#if total}
-						<div class="totals">
-							<div class="seg" role="group" aria-label="Window">
-								{#each totals as t (t.hours)}
-									<button
-										aria-pressed={t.hours === total.hours}
-										onclick={() => (totalHours = t.hours)}>Next {t.hours} h</button
-									>
-								{/each}
+				<!-- Fixed rows, so the box keeps its size whatever it shows. -->
+				<div class="main">
+					{#if totalsMode}
+						{#if total}
+							<div class="totals">
+								<div class="seg" role="group" aria-label="Window">
+									{#each totals as t (t.hours)}
+										<button
+											aria-pressed={t.hours === total.hours}
+											aria-label="Next {t.hours} hours"
+											onclick={() => (totalHours = t.hours)}>{t.hours} h</button
+										>
+									{/each}
+								</div>
+								<span class="span faint">{totalSpan(total)}</span>
 							</div>
-							<span class="span faint">{totalSpan(total)}</span>
+						{:else if loadError}
+							<p class="note">{loadError}</p>
+						{:else}
+							<p class="note">Snow totals aren't drawn yet.</p>
+						{/if}
+					{:else if count && label && current}
+						<div class="player">
+							<button
+								class="play"
+								onclick={() => (playing = !playing)}
+								aria-label={playing ? 'Pause' : 'Play'}
+							>
+								<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+									{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
+								</svg>
+							</button>
+							<div class="track">
+								<input
+									type="range"
+									min="0"
+									max={Math.max(0, count - 1)}
+									bind:value={frame}
+									oninput={() => (playing = false)}
+									aria-label="Time"
+									aria-valuetext={`${label.when}, ${label.rel}`}
+									style:--buffer={buffered}
+								/>
+								{#if nowcastBand}
+									<div class="bands" aria-hidden="true">
+										<span
+											class="nowband"
+											title="Nowcast"
+											style:left="{nowcastBand.left}%"
+											style:width="{nowcastBand.width}%"
+										></span>
+									</div>
+								{/if}
+								<div class="ticks" aria-hidden="true">
+									{#each ticks as d (d.at)}
+										<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
+									{/each}
+								</div>
+							</div>
+							<div class="time" aria-live="off">
+								<strong class="num">{label.when}</strong>
+								<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
+									>{label.rel}{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}</span
+								>
+							</div>
 						</div>
-						<div class="key total-key" aria-label="Snow total, {unit}">
-							<span class="name">{unit}</span>
-							<span class="ticks-ramp">
-								{#each TOTAL as s (s.from)}
-									<span class="cell" style:background={s.color}>{totalTick(s.from, units)}</span>
-								{/each}
-							</span>
-						</div>
-						<p class="note small-note">
-							Canadian HRDPS model, snow at about 10:1; covers Canada and the northern US.
-						</p>
 					{:else if loadError}
 						<p class="note">{loadError}</p>
 					{:else}
-						<p class="note">Snow totals aren't drawn yet.</p>
+						<p class="note">Loading…</p>
 					{/if}
-				{:else if count && label && current}
-					<div class="player">
-						<button
-							class="play"
-							onclick={() => (playing = !playing)}
-							aria-label={playing ? 'Pause' : 'Play'}
-						>
-							<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-								{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
-							</svg>
-						</button>
-						<div class="track">
-							<input
-								type="range"
-								min="0"
-								max={Math.max(0, count - 1)}
-								bind:value={frame}
-								oninput={() => (playing = false)}
-								aria-label="Time"
-								aria-valuetext={`${label.when}, ${label.rel}`}
-								style:--buffer={buffered}
-							/>
-							{#if nowcastBand}
-								<div class="bands" aria-hidden="true">
-									<span
-										class="nowband"
-										title="Nowcast"
-										style:left="{nowcastBand.left}%"
-										style:width="{nowcastBand.width}%"
-									></span>
-								</div>
-							{/if}
-							<div class="ticks" aria-hidden="true">
-								{#each ticks as d (d.at)}
-									<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
-								{/each}
+				</div>
+				<div class="foot">
+					{#if totalsMode}
+						{#if total}
+							<div class="key total-key" aria-label="Snow total, {unit}">
+								<span class="name">{unit}</span>
+								<span class="ticks-ramp">
+									{#each TOTAL as s (s.from)}
+										<span class="cell" style:background={s.color}>{totalTick(s.from, units)}</span>
+									{/each}
+								</span>
 							</div>
-						</div>
-						<div class="time" aria-live="off">
-							<strong class="num">{label.when}</strong>
-							<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
-								>{label.rel}{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}</span
-							>
-						</div>
-					</div>
-				{:else if loadError}
-					<p class="note">{loadError}</p>
-				{:else}
-					<p class="note">Loading…</p>
-				{/if}
-				{#if tooClose}
-					<p class="note">Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.</p>
-				{/if}
-				{#if !totalsMode}
-					<div class="key">
-						{#each legendRamps as r (r.kind)}
-							<span class="kind">
-								<span class="name">{r.label}</span>
-								<span class="ramp" aria-hidden="true">
-									{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
-								</span>
-								<span class="top">{rampTop(r, units)}</span>
-							</span>
-						{/each}
-						{#if untypedShown}
-							<span class="kind">
-								<span class="name">No type</span>
-								<span class="ramp" aria-hidden="true">
-									{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
-								</span>
-								<span class="top">{untypedTop(units)}</span>
-							</span>
 						{/if}
-						{#if radarShown}
-							<span class="gaps">{RADAR_GAPS}</span>
-						{/if}
-					</div>
-				{/if}
+					{:else}
+						<div class="key">
+							{#each legendRamps as r (r.kind)}
+								<span class="kind">
+									<span class="name">{r.label}</span>
+									<span class="ramp" aria-hidden="true">
+										{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
+									</span>
+									<span class="top">{rampTop(r, units)}</span>
+								</span>
+							{/each}
+							{#if untypedShown}
+								<span class="kind">
+									<span class="name">No type</span>
+									<span class="ramp" aria-hidden="true">
+										{#each UNTYPED as s (s.from)}<i style:background={s.color}></i>{/each}
+									</span>
+									<span class="top">{untypedTop(units)}</span>
+								</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
 			</section>
 		{/if}
 	{/if}
@@ -1286,38 +1300,75 @@
 		cursor: pointer;
 	}
 
+	/* MapLibre's zoom and compass buttons, as a glass column like ours. */
+	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group) {
+		margin: 10px 0 0 10px;
+		border-radius: 14px;
+		overflow: hidden;
+		background: var(--glass);
+		border: 1px solid var(--glass-border);
+		box-shadow: var(--glass-shadow-sm);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
+	}
+	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group button) {
+		width: 40px;
+		height: 38px;
+		background-color: transparent;
+	}
+	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group button + button) {
+		border-top: 1px solid var(--grid);
+	}
+	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group button:hover) {
+		background-color: var(--hover);
+	}
+	/* Its icons are dark drawings: lighten them on dark glass. */
+	:global(:root[data-mode='dark']) .map :global(.maplibregl-ctrl-icon) {
+		filter: invert(1) brightness(1.6);
+	}
+
 	.tools {
 		position: absolute;
-		top: 112px;
+		top: 136px;
 		left: 10px;
 		z-index: 1000;
 		display: grid;
-		gap: 6px;
+		gap: 8px;
 	}
-	/* Like MapLibre's own buttons, a touch bigger for fingers. */
+	/* Our own map buttons: glass tiles that light up in the accent when on. */
 	.tool {
-		width: 32px;
-		height: 32px;
+		width: 40px;
+		height: 40px;
 		display: grid;
 		place-items: center;
-		border-radius: 4px;
-		border: 0;
-		box-shadow: 0 0 0 2px rgb(0 0 0 / 0.1);
-		background: #fff;
-		color: #333;
+		border-radius: 14px;
+		border: 1px solid var(--glass-border);
+		background: var(--glass);
+		box-shadow: var(--glass-shadow-sm);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
+		color: var(--text);
 		cursor: pointer;
+		transition:
+			background-color var(--ease),
+			transform 160ms ease;
+	}
+	.tool:hover {
+		background-color: var(--hover);
+	}
+	.tool:active {
+		transform: scale(0.94);
 	}
 	.tool.three {
 		font: 700 0.8rem/1 var(--font-num, sans-serif);
 	}
 	.tool.active {
 		background: var(--accent);
+		border-color: transparent;
 		color: var(--on-accent);
 	}
-	/* The buttons stay white like MapLibre's own, so the accent is darkened to read on
-	   white in every theme. */
 	.tool.shown {
-		color: color-mix(in srgb, var(--accent) 62%, #000);
+		color: var(--accent-ink);
 	}
 	.tool svg .fill {
 		fill: currentColor;
@@ -1325,7 +1376,7 @@
 	.note {
 		position: absolute;
 		top: 10px;
-		left: 54px;
+		left: 60px;
 		right: 54px;
 		max-width: 420px;
 		margin: 0 auto;
@@ -1379,8 +1430,8 @@
 
 	.info {
 		position: absolute;
-		top: 112px;
-		left: 54px;
+		top: 136px;
+		left: 60px;
 		right: 10px;
 		max-width: 360px;
 		z-index: 1001;
@@ -1444,11 +1495,54 @@
 		font-size: 0.78rem;
 		padding: 3px 10px;
 	}
+	/* Two fixed rows under the mode switch, so the box never changes size: the player
+	   (or the total's window), then one line of key. */
+	.main {
+		height: 50px;
+		display: flex;
+		align-items: center;
+		min-width: 0;
+	}
+	.main > * {
+		flex: 1;
+		min-width: 0;
+	}
+	.main .note {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		overflow: hidden;
+		font-size: 0.8rem;
+		line-height: 1.3;
+	}
+	.foot {
+		height: 18px;
+		display: flex;
+		align-items: center;
+		min-width: 0;
+		overflow: hidden;
+	}
+	.foot .key {
+		flex: 1;
+		min-width: 0;
+		flex-wrap: nowrap;
+		white-space: nowrap;
+		overflow: hidden;
+	}
 	.totals {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
-		gap: 6px 10px;
+		gap: 10px;
+	}
+	.totals .seg {
+		flex: 0 0 auto;
+	}
+	.totals .span {
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.totals .seg button {
 		font-size: 0.78rem;
@@ -1456,6 +1550,9 @@
 	}
 	.totals .span {
 		font-size: 0.75rem;
+	}
+	.totals .seg button {
+		min-width: 48px;
 	}
 	.total-key {
 		gap: 6px;
@@ -1472,10 +1569,6 @@
 		text-align: center;
 		font: 600 0.62rem/1.6 var(--font-num, sans-serif);
 		color: #1f1b2e;
-	}
-	.small-note {
-		font-size: 0.68rem;
-		margin: 0 4px;
 	}
 	.player {
 		display: flex;
@@ -1552,10 +1645,6 @@
 	}
 	.time span.fc {
 		color: var(--accent-ink);
-	}
-	.gaps {
-		flex-basis: 100%;
-		font-size: 0.68rem;
 	}
 	.time span.nc {
 		color: var(--text);

@@ -18,7 +18,7 @@ were rejected; this document overrides it wherever they differ.
 
 ## 2. Decisions from review (hard rules)
 
-- **The sky is static.** It shows the location's weather *now* (time of day plus current
+- **The sky is static.** It shows the location's weather _now_ (time of day plus current
   conditions). It changes only when the location changes (900 ms crossfade) or when the
   data refreshes. Scrubbing the chart, hovering rows, or changing range/metric never
   changes the sky.
@@ -51,11 +51,11 @@ were rejected; this document overrides it wherever they differ.
 
 ### 3.1 Surfaces (two layers)
 
-| Layer | Used for | Recipe (light / dark) |
-|---|---|---|
-| Sky | Full-window backdrop | See 3.3 |
+| Layer | Used for                                                                                      | Recipe (light / dark)                                                                                                                                                                                     |
+| ----- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sky   | Full-window backdrop                                                                          | See 3.3                                                                                                                                                                                                   |
 | Glass | Floating controls only: header nav, tab bar, segmented controls, chips, sheets, location pill | Light `rgba(255,255,255,.5)`, rim `rgba(255,255,255,.8)`, `blur(22px) saturate(1.7)`, shadow `0 12px 32px rgba(24,44,84,.16)`, inset top highlight. Dark `rgba(26,36,60,.46)`, rim `rgba(255,255,255,.2)` |
-| Panel | All content: chart card, outlook card, day list, heads up | **Frost** (chosen default): light `rgba(255,255,255,.72)`, dark `rgba(26,36,58,.70)`, `blur(34px)`. Offer "Solid" (`.95`/`.96` opaque) as the reduce-transparency fallback |
+| Panel | All content: chart card, outlook card, day list, heads up                                     | **Frost** (chosen default): light `rgba(255,255,255,.72)`, dark `rgba(26,36,58,.70)`, `blur(34px)`. Offer "Solid" (`.95`/`.96` opaque) as the reduce-transparency fallback                                |
 
 Text never sits on bare sky except the hero title and the hero number (both ≥ 30 px).
 Small text that is on the sky today (region line, "likely" range) goes in a glass pill.
@@ -80,7 +80,7 @@ Fix today's duplication (dark block written twice, lines 78–163).
   `#c2479f`, wind `#14a3a3`; avalanche scale unchanged. Rain label ink: light `#1d7a4c`,
   dark `#5fd39a`.
 - Snow heat ramp (day/night cells, calendar): light `#d5e5fb #a9cbf5 #6aa5ee #2f6fd0
-  #173f86`; dark `#1f3a66 #2b5a9e #4a8fe7 #8fbdf3 #d3e6fc` (more snow is lighter in dark).
+#173f86`; dark `#1f3a66 #2b5a9e #4a8fe7 #8fbdf3 #d3e6fc` (more snow is lighter in dark).
 - Radius: controls are capsules; cards 24–28 px; inner cells 12–18 px; nested corners
   share a centre (inner radius = outer − padding).
 - Type: Inter for text and tables, Manrope for numerals and headings (replaces Space
@@ -129,13 +129,13 @@ and change the accent only. Values are in the canvas `themes()` table. Saved per
 
 ## 4. Shared components (build these first)
 
-| New component | Replaces / used by |
-|---|---|
-| `Glass.svelte` (wrapper with `variant="glass" or "panel"`) | every card and floating control |
-| `Segmented.svelte` (sliding capsule, keyboard arrows) | `.seg` in `theme.css`; units, elevation, range, tabs, sort |
-| `OutlookCard.svelte` (3 cells phone / 4 cells desktop) | `.mout` and `.outlook` in `location/[id]/+page.svelte` |
-| `HeatCell.svelte` (snow amount, "rain", or dash) | `.heat` cells in `DayList`, `PeriodGrid`, calendar |
-| `Skeleton.svelte` | every "Loading…" |
+| New component                                              | Replaces / used by                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `Glass.svelte` (wrapper with `variant="glass" or "panel"`) | every card and floating control                            |
+| `Segmented.svelte` (sliding capsule, keyboard arrows)      | `.seg` in `theme.css`; units, elevation, range, tabs, sort |
+| `OutlookCard.svelte` (3 cells phone / 4 cells desktop)     | `.mout` and `.outlook` in `location/[id]/+page.svelte`     |
+| `HeatCell.svelte` (snow amount, "rain", or dash)           | `.heat` cells in `DayList`, `PeriodGrid`, calendar         |
+| `Skeleton.svelte`                                          | every "Loading…"                                           |
 
 `ForecastChart.svelte` keeps its data logic (`forecast.ts`, `buildSteps`) untouched; only
 its markup and styles change (section 6).
@@ -167,8 +167,10 @@ the days the chart shows and slides with the spring easing.
 - **Every range scrubs except 10 days.** 1 day shows that calendar day hour by hour (any of
   the 10 days); 3 and 5 days show that many days from the chosen start at 6-hour steps; 10
   days selects the whole strip.
-- **Choosing a range resets the window to Today.** The user then scrubs forward. The
-  window never keeps a previous offset across range changes.
+- **Choosing a range keeps the window where it is while the timeline is shown**, so you
+  can look at the same days at another resolution. With the timeline hidden there is no
+  way to move the window, so it always starts at Today, and hiding the timeline moves it
+  back to Today.
 - Move it by dragging, tapping a day (centres the window on it), or the ‹ › buttons beside
   it (44 px targets) that step one day. `role="slider"`, arrow keys step one day.
 - Bars inside the window use the snow colour; outside they are muted. A one-line caption
@@ -204,7 +206,7 @@ Below ~1180 px the rail collapses to icons; on tablet it becomes the phone tab b
 3. **Outlook card** (four cells): Next 5 days (total, likely range, days 6–10, last 24 h)
    · Next storm (accent tint) · Now (temperature, wind and gusts, freezing level) ·
    Avalanche.
-5. **Chart card** (full width):
+4. **Chart card** (full width):
    - Header: "Forecast", step note ("Every 6 hours · hover or use the arrow keys"), range
      segmented, Share.
    - **Six metric cards in one row** (today's desktop cards): label with colour key, value
@@ -216,13 +218,13 @@ Below ~1180 px the rail collapses to icons; on tablet it becomes the phone tab b
      bars from the baseline, rain labels, crosshair and a dot on the line.
    - Lower panel 64 px: cloud cover area and chance-of-precipitation bars.
    - Day labels under the plot, weekends in the accent. Legend for the current metric.
-6. **Day by day card:** one row per day, the phone row widened: day + date + rating ·
+5. **Day by day card:** one row per day, the phone row widened: day + date + rating ·
    icon · high/low · day and night heat cells · then eight right-aligned columns, each
    showing day over night: snow ratio, snow level, chance, precipitation (in of water),
    wind (dir + speed), gust, cloud, rain. Pointing at a row shades that day on the chart;
    the hovered chart step highlights its row. This replaces the two-rows-per-day
    `PeriodGrid` table on desktop.
-7. **Bottom row, two cards:** Heads up (flags in two columns, "NEW" badge) · About this
+6. **Bottom row, two cards:** Heads up (flags in two columns, "NEW" badge) · About this
    forecast + links as capsules.
 
 ### 6.2 Other tabs
