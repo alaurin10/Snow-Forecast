@@ -12,7 +12,7 @@
 		/** Contours come from maplibre-contour, which may have failed to load. */
 		contours: boolean;
 		offline: boolean;
-		/** This viewer may see the experimental concern index (HAZARD_INDEX). */
+		/** The server offers the experimental concern index (HAZARD_INDEX isn't off). */
 		concern?: boolean;
 		onclose: () => void;
 	}

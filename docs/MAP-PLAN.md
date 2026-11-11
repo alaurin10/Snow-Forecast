@@ -396,7 +396,7 @@ New `frontend/src/lib/map/terrain/`:
 | 2 | Longer, better forecast | A2, A3 and the data-space blend (done, see "Milestone 2 notes") |
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) (done, see "Milestone 3 notes") |
 | 4 | Sun and wind | B4, B5 (done, see "Milestone 4 notes") |
-| 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes") |
+| 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes"; B7.3 is open to every visitor) |
 | 6 | Recent satellite | B6 |
 | 7 | More weather layers | A5, A6 |
 | 8 | Terrain-adjusted totals | A4 |
@@ -657,17 +657,18 @@ What shipped, and where it differs from the plan above:
     grid is for the whole day.
   - Classes are absolute score thresholds 1.5 / 2.5 / 3.5 (lower, elevated, high, very
     high); ground under 25° and pixels outside the zone are clear. Blues to magenta.
-  - Guard rails: `HAZARD_INDEX` (default `owner`); `GET /api/map/concern` sends the settings
-    only to viewers it allows (404 off, 403 not owner), so the option isn't offered
-    otherwise. A one-time acknowledgement per device, the fixed caption in the controls and
-    the Inspector, and the Inspector lists every factor. Drawn from zoom 10 like Wind effect.
+  - **Differs from the plan: open to everyone.** The site has no visitor accounts, so the
+    owner chose not to gate it behind the owner sign-in: `HAZARD_INDEX` is `on` (default)
+    or `off` (old values `public` and `owner` read as `on`), and `GET /api/map/concern`
+    answers 404 when it's off, so the option isn't offered. The other guard rails stay: a
+    warning each browser accepts once (remembered in `localStorage`), the fixed caption in
+    the controls and the Inspector, and the Inspector lists every factor. Drawn from zoom
+    10 like Wind effect.
   - The acknowledgement is a modal alert dialog: it takes the focus (the dialog, not either
     button), keeps Tab inside, and Escape cancels. `e2e/concern.spec.ts` checks, on phone
-    and desktop, that the option is offered only to the signed-in owner, that nothing is
-    drawn before "I understand", that Cancel and Escape leave the layer off and remember
-    nothing, that the answer is kept per device, and that signing out hides the layer again.
-  - Still to do: re-read the display terms of avalanche.org and Avalanche Canada before
-    `HAZARD_INDEX=public`.
+    and desktop, that a visitor who isn't signed in is offered it, that nothing is drawn
+    before "I understand", that Cancel and Escape leave the layer off and remember nothing,
+    that the answer is kept in that browser, and that another browser is asked again.
 - Known limits: the problems and concern layers use the zone in the middle of the map for the
   whole view (clipped to it); treeline bands are regional guesses; problems are not per day
   (both providers publish one list).
@@ -714,7 +715,8 @@ What shipped, and where it differs from the plan above:
 - **RRFS is brand new**; HRRR stays the primary US short-range source until RRFS has a season behind it.
 - **Bandwidth**: NBM long runs are ~60 MB a cycle; configurable cycles.
 - **Treeline elevations are approximations**, and so is everything built on them.
-- **Display terms** for the concern index must be re-read before `HAZARD_INDEX=public`.
+- **Display terms**: the concern index is public; avalanche.org's and Avalanche Canada's
+  terms for showing a product derived from their ratings haven't been re-read for it.
 - **Not verified from the sandbox**: ECMWF open-data paths, Avalanche Canada MIN
   endpoint. (`api.avalanche.ca` answered from the sandbox on 11 Nov 2026.)
 - **Not available for free**: an open ATES feed, US avalanche observations without a key,

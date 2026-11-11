@@ -113,10 +113,9 @@ class MapWindOut(BaseModel):
 
 
 class ConcernOut(BaseModel):
-    """The experimental terrain concern index's settings (config `terrain:`), served only
-    to whoever HAZARD_INDEX allows. The browser works the index out from these."""
+    """The experimental terrain concern index's settings (config `terrain:`), for every
+    visitor unless HAZARD_INDEX is off. The browser works the index out from these."""
 
-    mode: str  # owner or public
     caption: str
     slope: list[Annotated[list[float], Field(min_length=2, max_length=2)]]  # [from °, factor]
     match_listed: float

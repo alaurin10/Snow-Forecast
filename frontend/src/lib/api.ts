@@ -114,15 +114,12 @@ export function getAvalanche(): Promise<Record<string, AvalancheView>> {
 /** Every avalanche forecast zone in the map's box, with expiry applied (cache: a minute). */
 export const getAvalancheZones = () => get<ZonesOut>('/api/avalanche/zones.geojson');
 
-/**
- * The concern index's settings, or null when this viewer may not see it (the server's
- * HAZARD_INDEX: off, owner only, or everyone).
- */
+/** The concern index's settings, or null when the server has it off (HAZARD_INDEX). */
 export async function getConcern(): Promise<ConcernOut | null> {
 	try {
-		return await get<ConcernOut>('/api/map/concern', { cache: 'no-cache' });
+		return await get<ConcernOut>('/api/map/concern');
 	} catch (e) {
-		if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return null;
+		if (e instanceof ApiError && e.status === 404) return null;
 		throw e;
 	}
 }

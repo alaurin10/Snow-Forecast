@@ -6,8 +6,8 @@
   layer (radar, nowcast and forecast on one timeline, see ../radar.ts, or snow totals),
   one terrain overlay (slope, aspect, elevation bands, sun and shade, or the likely wind
   effect, all computed in the browser, see ../map/terrain/; or the avalanche layers:
-  terrain matching today's listed problems and, for whoever HAZARD_INDEX allows, the
-  experimental concern index), avalanche danger zones as published, hill shading,
+  terrain matching today's listed problems and, unless the server has it off, the
+  experimental concern index, once this browser has accepted its warning), avalanche danger zones as published, hill shading,
   contours, ski runs and peaks, chosen in the Layers sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
   switch on 3D terrain.
 -->
@@ -133,7 +133,7 @@
 	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
 	/** Contours show on satellite: the topo maps draw their own. */
 	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && satellite && !offline);
-	/** The concern index's settings; null until loaded, or when this viewer may not see it. */
+	/** The concern index's settings; null until loaded, or when the server has it off. */
 	let concernCfg = $state.raw<ConcernOut | null>(null);
 	/** The concern index is chosen but its warning hasn't been accepted on this device. */
 	const askAck = $derived(

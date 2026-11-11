@@ -288,8 +288,8 @@ export interface LookupStatus {
 	snotel_stations: number;
 }
 /**
- * The experimental terrain concern index's settings (config `terrain:`), served only
- * to whoever HAZARD_INDEX allows. The browser works the index out from these.
+ * The experimental terrain concern index's settings (config `terrain:`), for every
+ * visitor unless HAZARD_INDEX is off. The browser works the index out from these.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "ConcernOut".
@@ -304,7 +304,6 @@ export interface ConcernOut {
 	match_listed: number;
 	match_none: number;
 	match_other: number;
-	mode: string;
 	slope: [number, number][];
 	sun: number;
 	sun_hours: number;

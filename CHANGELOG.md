@@ -26,10 +26,11 @@ Notable changes to Snow Watch. The format follows
   (their aspects and elevation bands, steeper than 25, 30 or 35°) for the zone in the
   middle of the map, using approximate treeline bands from `config/treeline.yaml`,
   which the owner can override near a location.
-- **Experimental concern index**, behind `HAZARD_INDEX` (owner only by default): the
-  app's own estimate from the bulletin's rating for each band, slope angle, the listed
-  problems, likely wind loading and sun, in four classes in a non-danger palette, with
-  a one-time acknowledgement and a fixed caption. The Inspector shows every factor.
+- **Experimental concern index** on the map, for every visitor: the app's own
+  estimate from the bulletin's rating for each band, slope angle, the listed problems,
+  likely wind loading and sun, in four classes in a non-danger palette. Each browser
+  accepts a warning once (remembered there), and the layer always carries a fixed
+  caption. The Inspector shows every factor. `HAZARD_INDEX=off` hides it.
 - The map's Inspector names the avalanche zone, the spot's elevation band and today's
   rating for it.
 - `GET /api/avalanche/zones.geojson` and `GET /api/map/concern`; `snowwatch avalanche`

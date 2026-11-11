@@ -14,7 +14,6 @@ from fastapi.responses import Response
 from snowwatch import avalanche
 from snowwatch import avalanche_zones as zones
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
-from snowwatch.api.auth import viewer_from
 from snowwatch.api.models import (
     BandSummary,
     BestDay,
@@ -254,17 +253,13 @@ def make_router() -> APIRouter:
 
     @router.get("/map/concern", response_model=ConcernOut)
     def map_concern(request: Request, response: Response) -> ConcernOut:
-        """The concern index's settings, for whoever HAZARD_INDEX allows (see MAP-PLAN B7.3)."""
+        """The concern index's settings (see MAP-PLAN B7.3); 404 when HAZARD_INDEX is off."""
         settings: Settings = request.app.state.settings
-        mode = settings.hazard_index
-        if mode == "off":
+        if settings.hazard_index == "off":
             raise HTTPException(404, "the concern index is off on this server")
-        if mode == "owner" and not viewer_from(request).is_owner:
-            raise HTTPException(403, "the concern index is for the signed-in owner")
         t = request.app.state.forecast_config.terrain
-        response.headers["Cache-Control"] = "private, no-cache" if mode == "owner" else CACHE
+        response.headers["Cache-Control"] = CACHE
         return ConcernOut(
-            mode=mode,
             caption=CONCERN_CAPTION,
             slope=[list(x) for x in t.concern_slope],
             match_listed=t.concern_match_listed,

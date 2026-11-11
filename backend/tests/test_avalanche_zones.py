@@ -267,28 +267,32 @@ def test_zones_endpoint(settings: Settings, conn: sqlite3.Connection) -> None:
     assert "content-encoding" not in plain.headers and plain.json() == out
 
 
-def test_concern_settings_follow_hazard_index(settings: Settings, conn: sqlite3.Connection) -> None:
-    password = "correct horse battery"
-    off = app_client(settings, conn, hazard_index="off")
-    assert off.get("/api/map/concern").status_code == 404
-    public = TestClient(off.app)
-    public.app.state.settings = public.app.state.settings.model_copy(
-        update={"hazard_index": "public"}
-    )
-    r = public.get("/api/map/concern")
-    assert r.status_code == 200
+def test_concern_settings_are_for_everyone_unless_off(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    c = app_client(settings, conn, owner_password="correct horse battery")
+    assert c.app.state.settings.hazard_index == "on"  # the default
+    r = c.get("/api/map/concern")  # not signed in: there are no visitor accounts
+    assert r.status_code == 200 and "max-age=300" in r.headers["cache-control"]
     body = r.json()
-    assert body["mode"] == "public" and body["classes"] == [1.5, 2.5, 3.5]
+    assert body["classes"] == [1.5, 2.5, 3.5] and body["slope"][0] == [25, 0.5]
     assert (
         body["caption"].startswith("Experimental estimate") and "Not a forecast" in body["caption"]
     )
-    assert body["slope"][0] == [25, 0.5]
+    c.app.state.settings = c.app.state.settings.model_copy(update={"hazard_index": "off"})
+    assert c.get("/api/map/concern").status_code == 404
 
-    owner = app_client(settings, conn, owner_password=password)
-    assert owner.app.state.settings.hazard_index == "owner"  # the default
-    assert owner.get("/api/map/concern").status_code == 403
-    h = {"Origin": "http://testserver"}
-    assert owner.post("/api/auth/login", json={"password": password}, headers=h).status_code == 200
-    r = owner.get("/api/map/concern")
-    assert r.status_code == 200 and r.json()["mode"] == "owner"
-    assert r.headers["cache-control"] == "private, no-cache"
+
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [("on", "on"), ("OFF", "off"), ("true", "on"), ("0", "off"), ("public", "on"), ("owner", "on")],
+)
+def test_hazard_index_setting(value: str, want: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HAZARD_INDEX", value)
+    assert Settings().hazard_index == want
+
+
+def test_hazard_index_rejects_nonsense(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HAZARD_INDEX", "maybe")
+    with pytest.raises(ValidationError):
+        Settings()

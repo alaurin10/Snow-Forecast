@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from snowwatch import __version__
@@ -56,10 +57,24 @@ class Settings(BaseSettings):
     push_max_subscriptions: int = 500
     # Most disk the map tile cache may use; the oldest-used tiles go first.
     tiles_max_mb: int = 2000
-    # The map's experimental terrain concern index (docs/MAP-PLAN.md, B7.3): off, only
-    # for the signed-in owner, or for everyone. Owner-only until the avalanche centers'
-    # display terms have been re-read for a derived product.
-    hazard_index: Literal["off", "owner", "public"] = "owner"
+    # The map's experimental terrain concern index (docs/MAP-PLAN.md, B7.3), for every
+    # visitor: on (each browser accepts its warning once) or off for the whole site.
+    hazard_index: Literal["on", "off"] = "on"
+
+    @field_validator("hazard_index", mode="before")
+    @classmethod
+    def _on_off(cls, v: object) -> object:
+        """on/off, also as true/false, 1/0 or yes/no; "public" and "owner" from before it
+        was for everyone both mean on."""
+        if isinstance(v, bool):
+            return "on" if v else "off"
+        if isinstance(v, str):
+            w = v.strip().lower()
+            if w in ("on", "true", "1", "yes", "public", "owner"):
+                return "on"
+            if w in ("off", "false", "0", "no"):
+                return "off"
+        return v
 
     @property
     def static_root(self) -> Path | None:

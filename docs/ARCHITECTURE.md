@@ -112,10 +112,10 @@ older than `STALE_AFTER_H` (12 h).
   (`frontend/src/lib/map/terrain/concern.ts`, numbers in `config/forecast.yaml` →
   `terrain:`), drawn in four relative classes in a palette unlike the danger scale's,
   only inside the zone whose bulletin it uses, and only while that bulletin has a
-  current rating for today. It is off unless `HAZARD_INDEX` allows the viewer
-  (`owner` by default: the signed-in owner only, until the centers' display terms have
-  been re-read for a derived product); the server withholds its settings otherwise.
-  The viewer accepts a warning once per device, and it always carries the caption
+  current rating for today. It is open to every visitor (there are no visitor
+  accounts); `HAZARD_INDEX=off` hides it for the whole site. Each browser accepts a
+  warning before it is first drawn, remembered in that browser, and it always carries
+  the caption
   "Experimental estimate from the bulletin and terrain shape. Not a forecast. Doesn't
   show runouts or slopes above you." The Inspector shows every factor for a spot.
 - **Ski-day rating** for resorts: Powder, Great, Good, Fair or Poor, with the
@@ -158,9 +158,8 @@ and recorded by name. Nightly (`store/retention.py`):
   third parties limited to Mapterhorn and AWS elevation tiles, and https images), `nosniff`,
   frame denial, a referrer policy, a permissions policy, and HSTS in production.
 - **Links** shown to visitors must be http(s); bad upstream links are dropped.
-- **The concern index** (`HAZARD_INDEX`): `GET /api/map/concern` answers 404 when it
-  is off and 403 to anyone but the signed-in owner in `owner` mode, so the map has
-  nothing to work it out with.
+- **The concern index** (`HAZARD_INDEX`): when it is off, `GET /api/map/concern`
+  answers 404, so the map has nothing to work it out with and doesn't offer it.
 - **Privacy**: no analytics; the owner's contact email goes only to NWS, which
   asks for it; viewers' settings and positions stay in their browsers.
 

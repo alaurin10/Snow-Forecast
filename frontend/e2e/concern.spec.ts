@@ -1,5 +1,6 @@
-// The map's experimental concern index: offered only to whoever HAZARD_INDEX allows
-// (the signed-in owner by default), and never drawn before its warning is accepted.
+// The map's experimental concern index: open to every visitor (there are no visitor
+// accounts), but never drawn before this browser has accepted its warning, and the
+// answer is remembered here.
 import { expect, test, type Page } from '@playwright/test';
 
 const CAPTION = 'Experimental estimate from the bulletin and terrain shape. Not a forecast.';
@@ -9,33 +10,14 @@ async function openLayers(page: Page) {
 	return page.getByRole('group', { name: 'Terrain overlay' });
 }
 
-async function signIn(page: Page) {
-	const res = await page.request.post('/api/auth/login', {
-		data: { password: 'e2e-owner-password' },
-		headers: { Origin: 'http://localhost:8019' }
-	});
-	expect(res.status()).toBe(200);
-}
-
-test('the concern index is only offered to the owner', async ({ page }) => {
+test('the concern index asks first, and remembers the answer', async ({ page }) => {
+	// A visitor, not signed in.
+	expect((await page.request.get('/api/map/concern')).status()).toBe(200);
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const overlays = await openLayers(page);
-	await expect(overlays.getByRole('button', { name: 'Avalanche problems' })).toBeVisible();
-	await expect(overlays.getByRole('button', { name: /Concern index/ })).toHaveCount(0);
-	expect((await page.request.get('/api/map/concern')).status()).toBe(403);
-
-	await signIn(page);
-	await page.reload({ waitUntil: 'networkidle' });
-	const again = await openLayers(page);
-	await expect(again.getByRole('button', { name: 'Concern index (experimental)' })).toBeVisible();
-});
-
-test('the concern index asks first, and remembers the answer', async ({ page }) => {
-	await signIn(page);
-	await page.goto('/map', { waitUntil: 'networkidle' });
-	let overlays = await openLayers(page);
 	const none = overlays.getByRole('button', { name: 'None' });
 	const concern = overlays.getByRole('button', { name: 'Concern index (experimental)' });
+	await expect(concern).toBeVisible();
 
 	// Chosen: the warning, with the fixed caption, and the layer not on yet.
 	await concern.click();
@@ -75,15 +57,26 @@ test('the concern index asks first, and remembers the answer', async ({ page }) 
 	await expect(controls).toContainText('No avalanche forecast zone here.');
 	expect(await page.evaluate(() => localStorage.getItem('sw.concernAck'))).toBe('1');
 
-	// Next visit: straight to the layer, no second warning.
+	// Next visit in this browser: straight to the layer, no second warning.
 	await page.reload({ waitUntil: 'networkidle' });
 	await expect(page.getByRole('region', { name: 'Concern index' })).toBeVisible();
 	await expect(ack).toHaveCount(0);
+	// Switched off and on again: still no second warning.
+	const again = await openLayers(page);
+	await again.getByRole('button', { name: 'None' }).click();
+	await again.getByRole('button', { name: 'Concern index (experimental)' }).click();
+	await expect(ack).toHaveCount(0);
+});
 
-	// Signed out, the choice stays stored but the layer isn't drawn or offered.
-	await page.request.post('/api/auth/logout', { headers: { Origin: 'http://localhost:8019' } });
-	await page.reload({ waitUntil: 'networkidle' });
+test('another browser is asked again', async ({ browser }) => {
+	const context = await browser.newContext();
+	const page = await context.newPage();
+	await page.addInitScript(() => localStorage.setItem('sw.mapOverlay', 'concern'));
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	// The layer was chosen here, but this browser never accepted the warning.
+	await expect(
+		page.getByRole('alertdialog', { name: 'Concern index (experimental)' })
+	).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Concern index' })).toHaveCount(0);
-	overlays = await openLayers(page);
-	await expect(overlays.getByRole('button', { name: /Concern index/ })).toHaveCount(0);
+	await context.close();
 });

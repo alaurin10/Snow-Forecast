@@ -636,7 +636,7 @@
       "type": "object"
     },
     "ConcernOut": {
-      "description": "The experimental terrain concern index's settings (config `terrain:`), served only\nto whoever HAZARD_INDEX allows. The browser works the index out from these.",
+      "description": "The experimental terrain concern index's settings (config `terrain:`), for every\nvisitor unless HAZARD_INDEX is off. The browser works the index out from these.",
       "properties": {
         "caption": {
           "type": "string"
@@ -657,9 +657,6 @@
         },
         "match_other": {
           "type": "number"
-        },
-        "mode": {
-          "type": "string"
         },
         "slope": {
           "items": {
@@ -692,7 +689,6 @@
         }
       },
       "required": [
-        "mode",
         "caption",
         "slope",
         "match_listed",

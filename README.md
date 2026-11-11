@@ -71,7 +71,7 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
 | `TILES_MAX_MB` | `2000` | Disk cap for the map tile cache |
 | `PUSH_MAX_SUBSCRIPTIONS` | `500` | Most devices with alerts on |
-| `HAZARD_INDEX` | `owner` | Who sees the map's experimental avalanche concern index: `off`, `owner` (signed in) or `public` |
+| `HAZARD_INDEX` | `on` | The map's experimental avalanche concern index, for every visitor (each browser accepts its warning once); `off` hides it |
 
 Forecast models, thresholds and the schedule are in
 [`config/forecast.yaml`](config/forecast.yaml); the approximate treeline bands the map's
