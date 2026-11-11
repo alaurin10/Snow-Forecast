@@ -96,8 +96,8 @@
 		zonesGeojson
 	} from '../map/avalanche';
 	import { addZones, setZones } from '../map/layers/avalanche';
-	import { nearestSpot, recentSpec, type RecentSpec } from '../map/sat';
-	import { setRecent } from '../map/layers/sat';
+	import { nearestSpot, recentSpec, satViews, type RecentSpec } from '../map/sat';
+	import { setRecent, setRecentDates } from '../map/layers/sat';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
@@ -362,7 +362,7 @@
 	// ---- Recent satellite ----------------------------------------------------------
 	let satData = $state.raw<SatOut | null>(null);
 	let satState = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
-	/** Which of the nearest location's scenes is shown (0: the newest). */
+	/** Which of the nearest location's views is shown (0: stitched, when there is one). */
 	let sceneIndex = $state(0);
 	async function loadSat() {
 		if (satState === 'loading') return;
@@ -394,15 +394,18 @@
 			sceneIndex = 0;
 		}
 	});
-	const satScene = $derived(
-		satSpot?.scenes.length ? satSpot.scenes[Math.min(sceneIndex, satSpot.scenes.length - 1)] : null
-	);
-	const NO_RECENT: RecentSpec = { viirs: null, hls: null, s2: [] };
+	/** What the Sentinel-2 tier shows: stitched first, then whole scenes. */
+	const satView = $derived.by(() => {
+		const views = satViews(satSpot);
+		return views.length ? views[Math.min(sceneIndex, views.length - 1)] : null;
+	});
+	const NO_RECENT: RecentSpec = { viirs: null, hls: null, s2: [], dates: null };
 	$effect(() => {
-		const spec = recent && !offline ? recentSpec(satData, satScene, prefs.satBands) : NO_RECENT;
+		const spec = recent && !offline ? recentSpec(satData, satView, prefs.satBands) : NO_RECENT;
 		if (!ready || !map) return;
 		// Over the other bases, under the hill shading and everything else.
 		setRecent(map, spec, 'shade');
+		setRecentDates(map, spec.dates);
 	});
 
 	// ---- Avalanche: zones as published, problems as terrain, the concern index -----------

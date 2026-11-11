@@ -24,7 +24,9 @@ NOW = datetime(2026, 11, 11, 12, tzinfo=UTC)
 
 
 def crop(scl: int | np.ndarray, mask: int | np.ndarray = 255) -> np.ndarray:
-    a = np.zeros((2, 64, 64), np.uint8)
+    arrays = [x for x in (scl, mask) if isinstance(x, np.ndarray)]
+    n = arrays[0].shape[0] if arrays else sat.AREA_PX
+    a = np.zeros((2, n, n), np.uint8)
     a[0] = scl
     a[1] = mask
     return a
@@ -74,7 +76,7 @@ def test_judge_counts_cloud_snow_and_missing_data() -> None:
 
 
 def test_merge_fills_one_tiles_gap_from_the_next() -> None:
-    left = np.zeros((64, 64), np.uint8)
+    left = np.zeros((96, 96), np.uint8)
     left[:, :40] = 255
     merged = sat.merge_crops([crop(4, left), crop(11)])
     assert (merged[:, :40] == 4).all() and (merged[:, 40:] == 11).all()
@@ -158,14 +160,16 @@ class Upstream:
                 return httpx.Response(200, content=npy(crop(9)))
             if it.startswith(EDGE):
                 # Each tile of this pass sees half the square: together, all of it.
-                m = np.zeros((64, 64), np.uint8)
+                m = np.zeros((96, 96), np.uint8)
                 if "T10TET" in it:
-                    m[:, :32] = 255
+                    m[:, :48] = 255
                 else:
-                    m[:, 32:] = 255
+                    m[:, 48:] = 255
                 return httpx.Response(200, content=npy(crop(11, m)))
-            scl = np.full((64, 64), 11, np.uint8)
-            scl[:8] = 8  # an eighth cloud: still clear enough
+            scl = np.full((96, 96), 11, np.uint8)
+            # A band of cloud across the middle: an eighth of the 8 km square (rows
+            # 32-63), still clear enough.
+            scl[32:36] = 8
             return httpx.Response(200, content=npy(crop(scl)))
         if url.endswith(".xml") and sat.HLS in url:
             return httpx.Response(
@@ -200,6 +204,20 @@ def test_refresh_keeps_the_newest_clear_scenes_and_remembers_judged_passes(
     assert len(spot.scenes[2].items) == 2  # the two half-squares make a whole
     assert sat.allowed_items(index) == {i.id for s in spot.scenes for i in s.items}
 
+    # Stitched: the newest clear pass everywhere it saw the ground (less a cell's margin
+    # round its cloud), and the band under its cloud from the newest pass that saw it.
+    co = spot.composite
+    assert co is not None
+    assert [(x.id, x.share_pct) for x in co.layers] == [(CLEAR, 94), (EDGE, 6)]
+    assert co.filled_pct == 100 and co.at_location == spot.scenes[0].time
+    assert co.latest_pass == spot.scenes[0].time
+    assert len(co.boundaries) == 2  # either side of the band
+    assert len(co.labels) == 3  # each half of the newest pass, and the band
+    w, _, e, _ = co.box
+    assert all(
+        round(lon, 4) in (round(w, 4), round(e, 4)) for line in co.boundaries for lon, _ in line
+    )
+
     # Next time only the search, HLS's dates and VIIRS are asked for; passes aren't re-read.
     up.calls.clear()
     res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
@@ -228,7 +246,7 @@ def test_refresh_stops_at_keep_and_drops_moved_locations(tmp_path: Path) -> None
     )
     sat.refresh(tmp_path, client, [moved], keep=1, now=NOW)
     checked = json.loads((tmp_path / "checked.json").read_text())
-    assert list(checked) == ["testhill@48.000,-121.000"]
+    assert list(checked) == [f"testhill@48.000,-121.000#{sat.AREA_PX}"]
 
 
 def test_refresh_survives_gibs_being_down(tmp_path: Path) -> None:
@@ -265,6 +283,8 @@ def test_s2_tiles_only_for_items_in_the_index(tmp_path: Path) -> None:
     assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
     assert len(calls) == 1  # the second came from the cache
     assert "item=" + ITEM in calls[0] and "B04" in calls[0] and "@2x.webp" in calls[0]
+    # The band files don't mark no data themselves: without this, off-swath is opaque black.
+    assert "nodata=0" in calls[0]
     # Cached under the rendering version, so a new colour stretch is drawn afresh.
     assert (tmp_path / "s2" / f"r{S2_RENDER}" / "natural" / ITEM / "12" / "650" / "1385").exists()
     assert s2_tile(cache, "snow", ITEM, 12, 650, 1385, allowed) is not None
@@ -375,3 +395,193 @@ def test_worker_looks_for_scenes_and_survives_failures(
     monkeypatch.setattr(sat, "refresh", refresh)
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     assert cli.main(["map", "sat"]) == 0 and len(calls) == 2
+
+
+# ---- stitching -----------------------------------------------------------------------
+
+N = sat.AREA_PX
+BOX = (-121.0, 47.0, -120.0, 48.0)
+
+
+def grid(fill: int = sat.G_CLEAR) -> np.ndarray:
+    return np.full((N, N), fill, np.uint8)
+
+
+def pass_(day: int) -> sat.Pass:
+    pid = f"S2A_MSIL2A_202611{day:02d}T190000_R013"
+    return sat.Pass(
+        pid,
+        datetime(2026, 11, day, 19, tzinfo=UTC),
+        "Sentinel-2A",
+        [sat.SatItem(id=f"{pid}_T10TFT_202611{day:02d}T220000", bbox=[-122.0, 46.5, -119.5, 48.5])],
+    )
+
+
+def test_stitch_takes_each_cell_from_the_newest_pass_that_saw_it() -> None:
+    # The newest pass's swath ends a third of the way across (a strip like Snoqualmie's
+    # on 21 Oct); an older pass is clear everywhere.
+    strip = grid()
+    strip[:, N // 3 :] = sat.G_NODATA
+    co = sat.stitch([(pass_(10), strip), (pass_(1), grid(sat.G_SNOW))], BOX)
+    assert [x.id for x in co.layers] == [pass_(10).id, pass_(1).id]
+    assert [x.share_pct for x in co.layers] == [33, 67]
+    assert co.filled_pct == 100
+    assert co.at_location == pass_(1).time  # the middle is past the strip
+    # One dividing line, straight down at the strip's edge, and a date on each side.
+    assert len(co.boundaries) == 1
+    (lon0, lat0), (lon1, lat1) = co.boundaries[0]
+    assert lon0 == lon1 == round(-121 + (N // 3) / N, 5) and {lat0, lat1} == {47.0, 48.0}
+    assert sorted(lb.time.day for lb in co.labels) == [1, 10]
+    # The newest pass's part, with a cell's margin, for the map to draw it over.
+    assert co.layers[0].bbox[0] == -121.0 and co.layers[0].bbox[2] > -121 + 1 / 3
+
+
+def test_stitch_cuts_round_cloud_and_skips_cloudy_passes() -> None:
+    cloudy = grid(sat.G_CLOUD)
+    holey = grid()
+    holey[40:56, 40:56] = sat.G_CLOUD
+    co = sat.stitch(
+        [(pass_(11), cloudy), (pass_(10), holey), (pass_(1), grid())], BOX, pass_(11).time
+    )
+    assert [x.id for x in co.layers] == [pass_(10).id, pass_(1).id]
+    # The older pass fills the hole and a cell's margin all round it: 18 x 18 cells.
+    assert co.layers[1].share_pct == round(18 * 18 / N**2 * 100)
+    assert co.at_location == pass_(1).time  # the middle was under the cloud
+    assert co.latest_pass == pass_(11).time
+
+
+def test_stitch_keeps_a_small_strip_at_the_location_but_not_scraps_elsewhere() -> None:
+    near = grid(sat.G_NODATA)
+    near[40:56, 44:52] = sat.G_CLEAR  # 128 cells, 1.4% of the area, 12% of the 8 km square
+    far = grid(sat.G_NODATA)
+    far[0:12, 0:12] = sat.G_CLEAR  # 144 cells, 1.6% of the area, far from the location
+    co = sat.stitch([(pass_(12), far), (pass_(11), near), (pass_(1), grid())], BOX)
+    assert [x.id for x in co.layers] == [pass_(11).id, pass_(1).id]
+    assert co.at_location == pass_(11).time
+
+
+def test_stitch_drops_specks_and_stops_at_its_limits() -> None:
+    specks = grid(sat.G_NODATA)
+    specks[::8, ::8] = sat.G_CLEAR  # single cells everywhere: noise, not ground
+    co = sat.stitch([(pass_(12), specks), (pass_(1), grid())], BOX)
+    assert [x.id for x in co.layers] == [pass_(1).id]
+    # One column band each from nine passes: at most MAX_LAYERS of them are used.
+    bands = []
+    for i in range(9):
+        g = grid(sat.G_NODATA)
+        g[:, i * 10 : i * 10 + 10] = sat.G_CLEAR
+        bands.append((pass_(20 - i), g))
+    co = sat.stitch(bands, BOX)
+    assert len(co.layers) == sat.MAX_LAYERS
+    # Nothing clear at all: no layers, and nothing seen at the location.
+    co = sat.stitch([(pass_(5), grid(sat.G_CLOUD))], BOX)
+    assert co.layers == [] and co.at_location is None and co.filled_pct == 0
+
+
+def test_chain_joins_segments_and_drops_straight_middles() -> None:
+    segs = [((0, 0), (0, 1)), ((0, 1), (0, 2)), ((0, 2), (1, 2)), ((5, 5), (6, 5))]
+
+    def same(line: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        return min(line, line[::-1])  # either direction
+
+    lines = sorted((same(x) for x in sat.chain(segs)), key=len)
+    assert lines == [[(5, 5), (6, 5)], [(0, 0), (0, 2), (1, 2)]]
+
+
+# ---- cloud cut out of tiles ------------------------------------------------------------
+
+
+def test_erode_shrinks_clear_ground_but_not_at_the_tile_edge() -> None:
+    clear = np.ones((20, 20), bool)
+    clear[8:12, 8:12] = False
+    out = sat_erode(clear, 2)
+    assert not out[6:14, 6:14].any() and out[:6].all() and out[14:].all()
+    assert out[0, 0] and out[19, 19]  # the edge isn't eaten into
+    assert (sat_erode(clear, 0) == clear).all()
+
+
+def sat_erode(m: np.ndarray, r: int) -> np.ndarray:
+    from snowwatch.tiles import erode
+
+    return erode(m, r)
+
+
+def webp(rgba: tuple[int, int, int, int], n: int = 512) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGBA", (n, n), rgba).save(buf, "WEBP", lossless=True)
+    return buf.getvalue()
+
+
+def mask_png(cloud: slice, n: int = 512) -> bytes:
+    a = np.full((n, n, 2), 255, np.uint8)
+    a[cloud, :, 0] = 0
+    buf = io.BytesIO()
+    Image.fromarray(a, "LA").save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_cut_clouds_makes_cloud_and_a_margin_transparent() -> None:
+    from snowwatch.tiles import cut_clouds
+
+    out = Image.open(
+        io.BytesIO(cut_clouds(webp((50, 90, 60, 255)), mask_png(slice(0, 100)), 14, 5733))
+    )
+    alpha = np.asarray(out.convert("RGBA"))[..., 3]
+    # 512 px tiles at zoom 14 here are ~3.2 m a pixel: an 80 m margin is 24 (the cap).
+    assert (alpha[:124] == 0).all()
+    assert (alpha[125:] == 255).all()
+
+
+def test_clear_tiles_cut_cloud_once_and_are_cached(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if ".png" in str(req.url):
+            return httpx.Response(
+                200, content=mask_png(slice(0, 256)), headers={"content-type": "image/png"}
+            )
+        return httpx.Response(
+            200, content=webp((10, 20, 30, 255)), headers={"content-type": "image/webp"}
+        )
+
+    from snowwatch.tiles import s2_clear_path, s2_clear_tile
+
+    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
+    allowed = {ITEM}
+    data = s2_clear_tile(cache, "natural", ITEM, 13, 1333, 2866, allowed)
+    assert data is not None
+    alpha = np.asarray(Image.open(io.BytesIO(data)).convert("RGBA"))[..., 3]
+    assert (alpha[:256] == 0).all() and (alpha[-1] == 255).all()
+    assert len(calls) == 2 and "SCL_b1" in calls[1].replace("%5F", "_")
+    assert s2_clear_tile(cache, "natural", ITEM, 13, 1333, 2866, allowed) == data
+    assert len(calls) == 2  # from the cache
+    assert s2_clear_path(cache, "natural", "S2X_unknown", 13, 1, 1, allowed) is None
+    assert s2_clear_tile(cache, "natural", ITEM, 7, 1, 1, allowed) is None
+
+
+def test_api_serves_clear_tiles_for_stitched_items(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sat.refresh(
+        settings.sat_dir,
+        httpx.Client(transport=httpx.MockTransport(Upstream())),
+        [make_location()],
+        now=NOW,
+    )
+    client = TestClient(create_app(settings))
+    edge_item = item(EDGE, "T10TFT")  # only in the stitched view, not a kept scene
+    monkeypatch.setattr("snowwatch.api.app.s2_clear_tile", lambda *a: b"clear")
+    r = client.get(f"/api/tiles/s2c/natural/{edge_item}/12/650/1385.webp?r=2")
+    assert r.status_code == 200 and r.content == b"clear"
+    assert client.get("/api/tiles/s2c/natural/nope/12/650/1385.webp").status_code == 404
+    monkeypatch.setattr("snowwatch.api.app.s2_clear_tile", lambda *a: None)
+    assert client.get(f"/api/tiles/s2c/natural/{edge_item}/12/650/1386.webp").status_code == 404
+
+
+def test_small_patches_get_no_dividing_line() -> None:
+    owner = np.zeros((N, N), np.int16)
+    owner[:, N // 2 :] = 1  # two big halves: one line between them
+    owner[10:14, 10:14] = 1  # a 16-cell island of the other pass: no box round it
+    lines = sat.boundaries(sat.outlined(owner))
+    assert lines == [[(0, N // 2), (N, N // 2)]] or lines == [[(N, N // 2), (0, N // 2)]]

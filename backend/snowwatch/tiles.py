@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import math
 import os
 import re
 import threading
@@ -25,8 +26,10 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
+import numpy as np
 from PIL import Image
 
 
@@ -200,18 +203,22 @@ class TileCache:
 PC_TILES = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad"
 # Natural colour from the bands rather than the scene's ready-made picture, which turns
 # all snow flat white; and snow vs cloud (SWIR, near infrared, red): snow cyan, cloud
-# white. L2A values are reflectance x 10,000 plus 1,000.
+# white. L2A values are reflectance x 10,000 plus 1,000, and 0 off the swath: the band
+# files don't say so themselves (unlike the `visual` asset), so `nodata=0` is needed or
+# off-swath is drawn opaque black, hiding whatever is underneath.
 S2_MODES = {
     # Bright enough for dark forest and rock in low autumn sun; the S-curve keeps texture
     # in sunlit snow (~3% of a snowy Alta tile saturates).
     "natural": (
         "assets=B04&assets=B03&assets=B02&rescale=1000,12000"
-        "&color_formula=Gamma+RGB+2.4+Sigmoidal+RGB+4+0.3"
+        "&color_formula=Gamma+RGB+2.4+Sigmoidal+RGB+4+0.3&nodata=0"
     ),
-    "snow": "assets=B11&assets=B8A&assets=B04&rescale=1000,9000&color_formula=Gamma+RGB+1.3",
+    "snow": (
+        "assets=B11&assets=B8A&assets=B04&rescale=1000,9000&color_formula=Gamma+RGB+1.3&nodata=0"
+    ),
 }
 # Bumped whenever S2_MODES changes, so cached tiles (here and in browsers) are redrawn.
-S2_RENDER = 2
+S2_RENDER = 3
 # 512 px tiles: zoom 14 is ~5 m a pixel here, finer than Sentinel-2's 10 m.
 S2_ZOOMS = (8, 14)
 
@@ -264,6 +271,85 @@ def s2_tile(
         return None
     url = f"{PC_TILES}/{z}/{x}/{y}@2x.webp?collection=sentinel-2-l2a&item={item}&{S2_MODES[mode]}"
     return cache.through(path, url)
+
+
+# Stitched views: each pass's tiles with cloud and cloud shadow cut out (transparent),
+# so the older pass underneath shows through. The scene classification (SCL, 20 m) of
+# the same tile says where; Planetary Computer draws it as a small grey mask. The mask
+# misses thin cloud edges, so the cut reaches a little further.
+S2_CLEAR_MASK = (
+    "expression="
+    + quote("where((SCL_b1==3)|(SCL_b1==8)|(SCL_b1==9)|(SCL_b1==10),0,255)")
+    + "&rescale=0,255"
+)
+CLOUD_MARGIN_M = 80
+EARTH_M = 40075016.686
+
+
+def s2_clear_path(
+    cache: TileCache, mode: str, item: str, z: int, x: int, y: int, allowed: set[str]
+) -> Path | None:
+    """Where a cloud-free Sentinel-2 tile is cached; None unless the proxy may make it."""
+    if s2_path(cache, mode, item, z, x, y, allowed) is None:
+        return None
+    return cache.root / "s2" / f"r{S2_RENDER}" / f"{mode}-clear" / item / str(z) / str(x) / str(y)
+
+
+def erode(clear: np.ndarray, r: int) -> np.ndarray:
+    """Shrink the True region by `r` pixels (a square window). Beyond the edge counts as
+    True, so a tile's own edge isn't eaten into."""
+    if r <= 0:
+        return clear
+    h, w = clear.shape
+    bad = np.pad(~clear, r, constant_values=False).astype(np.int32)
+    cs = np.cumsum(np.pad(bad, ((0, 0), (1, 0))), axis=1)
+    rows = cs[:, 2 * r + 1 :] - cs[:, :w]
+    cs = np.cumsum(np.pad(rows, ((1, 0), (0, 0))), axis=0)
+    out: np.ndarray = (cs[2 * r + 1 :, :] - cs[:h, :]) == 0
+    return out
+
+
+def cut_clouds(rgb: bytes, mask: bytes, z: int, y: int) -> bytes:
+    """A colour tile with the mask's cloud (0) and a margin round it made transparent."""
+    im = Image.open(io.BytesIO(rgb)).convert("RGBA")
+    m = np.asarray(Image.open(io.BytesIO(mask)).convert("LA"))
+    a = np.asarray(im).copy()
+    if m.shape[:2] != a.shape[:2]:
+        m = np.asarray(Image.fromarray(m).resize(a.shape[1::-1], Image.Resampling.NEAREST))
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 0.5) / 2**z))))
+    metres = EARTH_M * math.cos(math.radians(lat)) / (a.shape[1] * 2**z)
+    # Cloud is 0; so is anywhere the scene classification has no data.
+    clear = erode((m[..., 0] > 0) & (m[..., 1] > 0), min(24, math.ceil(CLOUD_MARGIN_M / metres)))
+    a[..., 3] = np.where(clear, a[..., 3], 0)
+    out = io.BytesIO()
+    Image.fromarray(a, "RGBA").save(out, "WEBP", quality=85, method=4)
+    return out.getvalue()
+
+
+def s2_clear_tile(
+    cache: TileCache, mode: str, item: str, z: int, x: int, y: int, allowed: set[str]
+) -> bytes | None:
+    """A Sentinel-2 tile showing only what the pass saw clearly (transparent elsewhere)."""
+    path = s2_clear_path(cache, mode, item, z, x, y, allowed)
+    if path is None:
+        return None
+    if path.exists():
+        os.utime(path)
+        return path.read_bytes()
+    rgb = s2_tile(cache, mode, item, z, x, y, allowed)
+    if rgb is None:
+        return None
+    mask_path = cache.root / "s2" / "mask" / item / str(z) / str(x) / str(y)
+    url = f"{PC_TILES}/{z}/{x}/{y}@2x.png?collection=sentinel-2-l2a&item={item}&{S2_CLEAR_MASK}"
+    mask = cache.through(mask_path, url)
+    if mask is None:
+        return None
+    try:
+        data = cut_clouds(rgb, mask, z, y)
+    except OSError:
+        return None
+    cache._store(path, data)
+    return data
 
 
 def gibs_path(
