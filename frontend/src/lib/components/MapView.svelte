@@ -558,6 +558,10 @@
 	const label = $derived(current ? frameLabel(current, now) : null);
 	const waiting = $derived(!!current && shown !== current.file);
 	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
+	/** The slider's width in pixels, so day names can be kept far enough apart to read. */
+	let trackWidth = $state(300);
+	/** A day name needs about this much room (a three-letter name and its tick mark). */
+	const TICK_PX = 30;
 	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
 	// Beyond two days a day is only a few frames wide, so names that would crowd the one
 	// before are left out.
@@ -573,7 +577,7 @@
 			const newDay = prevDay >= 0 && day !== prevDay;
 			prevDay = day;
 			const last = out[out.length - 1];
-			if (newDay && !(last && pct(i) - last.at < 9))
+			if (newDay && !(last && ((pct(i) - last.at) / 100) * trackWidth < TICK_PX))
 				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
 		});
 		return out;
@@ -1176,7 +1180,7 @@
 									{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
 								</svg>
 							</button>
-							<div class="track">
+							<div class="track" bind:clientWidth={trackWidth}>
 								<input
 									type="range"
 									min="0"
@@ -1216,7 +1220,7 @@
 							<div class="time" aria-live="off">
 								<strong class="num">{label.when}</strong>
 								<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
-									>{label.rel}{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}</span
+									>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{label.rel}</span
 								>
 							</div>
 						</div>
@@ -1675,21 +1679,30 @@
 		font-weight: 600;
 		border-left-color: var(--accent);
 	}
+	/* One width whatever it says, so the slider beside it never changes size while it's
+	   being dragged. Wide enough for the longest labels ("Tue 11 PM–12 AM",
+	   "6-hour avg · in 10 days", "radar · 2 h 48 min ago"). */
 	.time {
 		display: grid;
 		text-align: right;
-		flex-shrink: 0;
-		min-width: 88px;
+		flex: 0 0 8.1rem;
+		width: 8.1rem;
 		line-height: 1.25;
+		font-variant-numeric: tabular-nums;
 	}
 	.time strong {
 		color: var(--text);
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.time span {
+		position: relative;
 		color: var(--text-2);
 		font-size: 0.72rem;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.time span.fc {
 		color: var(--accent-ink);
@@ -1729,7 +1742,7 @@
 		display: inline-block;
 		width: 9px;
 		height: 9px;
-		margin-left: 5px;
+		margin-right: 5px;
 		border: 2px solid currentColor;
 		border-right-color: transparent;
 		border-radius: 50%;

@@ -162,6 +162,13 @@ export class PrecipLayer {
 		// play() marks it changed and asks for a repaint; pause() uploads it right away.
 		src?.play();
 		src?.pause();
+		// In 3D, MapLibre drapes layers over the terrain from a cached texture per terrain
+		// tile, and only redraws that cache when an image source changes, not a canvas
+		// source. Without this, the frame on screen stays the same while the slider moves.
+		if (this.map.terrain) {
+			this.map.terrain.tileManager.releaseAllRTT();
+			this.map.triggerRepaint();
+		}
 	}
 
 	remove() {
