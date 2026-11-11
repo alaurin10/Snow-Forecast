@@ -1,6 +1,7 @@
 import type {
 	AvalancheView,
 	BudgetOut,
+	ConcernOut,
 	CatalogItem,
 	JobOut,
 	Location,
@@ -12,6 +13,7 @@ import type {
 	OverviewRow,
 	StatusOut,
 	VerificationOut,
+	ZonesOut,
 	ResolveIn,
 	ResolveOut,
 	RunOut,
@@ -107,6 +109,19 @@ export function getAvalanche(): Promise<Record<string, AvalancheView>> {
 		avalanche = { at: Date.now(), p };
 	}
 	return avalanche.p;
+}
+
+/** Every avalanche forecast zone in the map's box, with expiry applied (cache: a minute). */
+export const getAvalancheZones = () => get<ZonesOut>('/api/avalanche/zones.geojson');
+
+/** The concern index's settings, or null when the server has it off (HAZARD_INDEX). */
+export async function getConcern(): Promise<ConcernOut | null> {
+	try {
+		return await get<ConcernOut>('/api/map/concern');
+	} catch (e) {
+		if (e instanceof ApiError && e.status === 404) return null;
+		throw e;
+	}
 }
 
 export const getVerification = (id: string) =>

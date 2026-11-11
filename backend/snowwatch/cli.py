@@ -282,15 +282,25 @@ def cmd_lookups(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_avalanche(args: argparse.Namespace, settings: Settings) -> int:
-    from snowwatch.avalanche import refresh, views
+    from snowwatch.avalanche import Memo, refresh, views
+    from snowwatch.avalanche_zones import map_box, refresh_zones
+    from snowwatch.config import load_forecast_config
     from snowwatch.locations.service import list_locations
 
     conn = connect(settings.database)
     migrate(conn)
     locs = list_locations(conn)
+    cfg = load_forecast_config(settings.config_dir / "forecast.yaml")
     with _fetcher(settings) as fetcher:
-        out = refresh(conn, fetcher, locs)
+        memo: Memo = {}
+        out = refresh(conn, fetcher, locs, memo)
+        zones = refresh_zones(settings.zones_path, fetcher, map_box(cfg.map.region, locs), memo)
         repo.save_source_status(conn, fetcher.sources)
+    print(
+        f"map zones: {zones.us} US ({zones.products} products), {zones.ca} Canada"
+        f" -> {settings.zones_path}"
+    )
+    out.errors.extend(zones.errors)
     for loc_id, v in views(conn, {loc.id: loc.tz or "UTC" for loc in locs}).items():
         doc = v.doc
         where = f"{doc.center_id} · {doc.zone}" if doc else "-"
@@ -436,7 +446,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ski-map", help="fetch the map's ski runs, lifts and peaks now")
     s.set_defaults(func=cmd_ski_map)
 
-    s = sub.add_parser("avalanche", help="fetch the avalanche forecasts for every location")
+    s = sub.add_parser(
+        "avalanche", help="fetch the avalanche forecasts for every location and the map's zones"
+    )
     s.add_argument("action", choices=["refresh"])
     s.set_defaults(func=cmd_avalanche)
 

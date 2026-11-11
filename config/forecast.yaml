@@ -90,3 +90,24 @@ map:
   # NOAA NBM runs (UTC) for the US beyond 48 h and US snow totals. Only 00/06/12/18
   # reach 10 days; each new run costs ~60-80 MB of downloads.
   nbm_cycles: [0, 12]
+
+# The map's avalanche terrain layers (see docs/MAP-PLAN.md, B7). Treeline bands are in
+# config/treeline.yaml.
+terrain:
+  # "Avalanche problems": terrain matching today's listed problems from this slope up
+  # (25, 30 or 35; the map lets the viewer change it).
+  problem_slope_deg: 30
+  # "Concern index": the app's own experimental estimate, never a forecast. Who sees it
+  # is the HAZARD_INDEX setting (off, owner or public; owner by default).
+  #   score = (published danger for the band + wind + sun) × slope × match
+  concern_slope: [[25, 0.5], [30, 1.0], [46, 0.7], [56, 0.3]]  # [from degrees, factor]
+  concern_match_listed: 1.0    # the spot's aspect and band are in a listed problem
+  concern_match_other: 0.6     # they aren't
+  concern_match_none: 0.8      # the bulletin lists no problems
+  concern_wind_loaded: 0.5     # wind-loaded (with a wind or storm slab problem, or lots of new snow)
+  concern_wind_scoured: -0.25  # scoured
+  concern_wind_effect: 0.2     # wind effect beyond this counts as loaded or scoured
+  concern_wind_snow_cm: 20     # new snow in the last 48 h that brings in loading on its own
+  concern_sun: 0.5             # E to W slopes in the sun, on a day with a wet-snow problem or warming
+  concern_sun_hours: 3         # hours of direct sun that counts
+  concern_classes: [1.5, 2.5, 3.5]  # elevated, high, very high

@@ -13,7 +13,7 @@ import {
 	upsample,
 	type Pixels
 } from './dem';
-import { hornAt, paint, sectorOf, slopeClass, SLOPE_CLASSES } from './analysis';
+import { hornAt, paint, sectorOf, slopeClass, SLOPE_CLASSES, type Sector } from './analysis';
 import { matchQuery, parseMatch } from './client';
 
 const SIZE = 8;
@@ -140,22 +140,54 @@ describe('slope and aspect (Horn)', () => {
 	it('matches only the listed aspects, steep enough and in the band', () => {
 		const m = metresPerPixel(tileLat(1388.5, 12), 12, SIZE);
 		const westFacing = plane(35, 'east', m);
-		const hit = paint('match', westFacing, SIZE, 12, 1388, { slopeMin: 30, aspects: ['W', 'NW'] });
-		expect(hit).not.toBeNull();
-		expect(paint('match', westFacing, SIZE, 12, 1388, { slopeMin: 30, aspects: ['E'] })).toBeNull();
+		const rule = (aspects: Sector[], ranges: [number, number][] = []) => ({
+			slopeMin: 30,
+			rules: [{ aspects, ranges }]
+		});
+		expect(paint('match', westFacing, SIZE, 12, 1388, rule(['W', 'NW']))).not.toBeNull();
+		expect(paint('match', westFacing, SIZE, 12, 1388, rule(['E']))).toBeNull();
+		// The plane rises from 1000 m: a band below it misses, a second band over it hits.
+		expect(paint('match', westFacing, SIZE, 12, 1388, rule(['W'], [[500, 900]]))).toBeNull();
 		expect(
-			paint('match', westFacing, SIZE, 12, 1388, { slopeMin: 30, aspects: ['W'], maxM: 500 })
+			paint(
+				'match',
+				westFacing,
+				SIZE,
+				12,
+				1388,
+				rule(
+					['W'],
+					[
+						[500, 900],
+						[900, 2000]
+					]
+				)
+			)
+		).not.toBeNull();
+		expect(
+			paint('match', westFacing, SIZE, 12, 1388, { slopeMin: 40, rules: rule(['W']).rules })
 		).toBeNull();
+		// Any rule may match.
+		const two = { slopeMin: 30, rules: [...rule(['E']).rules, ...rule(['W']).rules] };
+		expect(paint('match', westFacing, SIZE, 12, 1388, two)).not.toBeNull();
 	});
 
 	it('carries match settings through a tile URL', () => {
-		const q = matchQuery({ slopeMin: 35, aspects: ['N', 'NE'], minM: 1800 });
-		expect(parseMatch(q)).toEqual({
+		const m = {
 			slopeMin: 35,
-			aspects: ['N', 'NE'],
-			minM: 1800,
-			maxM: undefined
-		});
+			rules: [
+				{ aspects: ['N', 'NE'] as Sector[], ranges: [[1800, 9000]] as [number, number][] },
+				{
+					aspects: ['S'] as Sector[],
+					ranges: [
+						[-500, 1500],
+						[1900, 9000]
+					] as [number, number][]
+				},
+				{ aspects: ['W'] as Sector[], ranges: [] }
+			]
+		};
+		expect(parseMatch(matchQuery(m))).toEqual(m);
 		expect(parseMatch('')).toBeUndefined();
 	});
 });

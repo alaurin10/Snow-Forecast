@@ -1,0 +1,60 @@
+# Approximate treeline bands for the map's avalanche layers (docs/MAP-PLAN.md, B7.2).
+#
+# Avalanche bulletins rate three elevation bands (alpine, treeline, below treeline)
+# but don't publish them as numbers, so the map needs a guess at where each band is.
+# `band` is [bottom, top] of the treeline band in metres: below `bottom` is "below
+# treeline", above `top` is "alpine". These are rough regional values, not the
+# centers' own definitions; the map always shows the numbers it used and calls them
+# approximate. Treeline varies a lot over short distances (aspect, valley, snow
+# climate), so check the bulletin's own description for the area you're in.
+#
+# Rules are tried in order and the first that matches wins. A rule matches when every
+# condition it gives matches:
+#   center: the avalanche center's id (US: NWAC, CAIC, UAC, ...; Canada: avcan)
+#   zone:   the forecast zone's name (case doesn't matter)
+#   box:    [south, west, north, east] in degrees, tested against the spot in question
+# The last rule, with no conditions, catches everything else.
+
+rules:
+  # --- Washington and Oregon (Northwest Avalanche Center) -------------------------
+  - {name: "Mt Hood", center: NWAC, zone: "Mt Hood", band: [1500, 2000]}
+  - {name: "Cascades east slopes", center: NWAC, zone: "East Slopes North", band: [1500, 1950]}
+  - {name: "Cascades east slopes", center: NWAC, zone: "East Slopes Central", band: [1500, 1950]}
+  - {name: "Cascades east slopes", center: NWAC, zone: "East Slopes South", band: [1500, 1950]}
+  - {name: "Cascades west slopes and Olympics", center: NWAC, band: [1200, 1550]}
+  - {name: "Central Oregon Cascades", center: COAA, band: [1800, 2250]}
+  - {name: "Mt Shasta", center: MSAC, band: [2300, 2750]}
+  - {name: "Wallowas", center: WAC, band: [2000, 2450]}
+  # --- California and Nevada -----------------------------------------------------
+  - {name: "Lake Tahoe Sierra", center: SAC, band: [2300, 2650]}
+  - {name: "Bridgeport", center: BAC, band: [2750, 3200]}
+  - {name: "Eastern Sierra", center: ESAC, band: [2900, 3350]}
+  # --- Northern Rockies ----------------------------------------------------------
+  - {name: "Idaho Panhandle", center: IPAC, band: [1500, 1850]}
+  - {name: "Flathead", center: FAC, band: [1700, 2100]}
+  - {name: "West Central Montana", center: WCMAC, band: [2000, 2400]}
+  - {name: "Southwest Montana", center: GNFAC, band: [2450, 2800]}
+  - {name: "Payette", center: PAC, band: [2000, 2450]}
+  - {name: "Sawtooths", center: SNFAC, band: [2300, 2700]}
+  - {name: "Teton and western Wyoming", center: BTAC, band: [2450, 2900]}
+  # --- Utah, Colorado, Southwest -------------------------------------------------
+  - {name: "Utah", center: UAC, band: [2450, 2900]}
+  - {name: "Colorado", center: CAIC, band: [3350, 3650]}
+  - {name: "Taos", center: TAC, band: [3350, 3650]}
+  - {name: "San Francisco Peaks", center: KPAC, band: [3200, 3550]}
+  # --- Canada (Avalanche Canada's regions change through the season, so by place) --
+  - {name: "Vancouver Island", center: avcan, box: [48.2, -128.6, 50.9, -124.5], band: [1200, 1600]}
+  - {name: "North Shore mountains", center: avcan, box: [49.25, -123.3, 49.55, -122.85], band: [1050, 1350]}
+  - {name: "South Coast Mountains", center: avcan, box: [49.0, -125.5, 51.3, -121.4], band: [1500, 1900]}
+  - {name: "North Coast Mountains", center: avcan, box: [51.3, -132.0, 57.0, -124.0], band: [1100, 1500]}
+  - {name: "Waterton Lakes", center: avcan, box: [48.95, -114.25, 49.25, -113.6], band: [1800, 2200]}
+  - {name: "Southern Rockies (Banff, Yoho, Kootenay, Kananaskis)", center: avcan, box: [49.0, -117.2, 52.2, -114.0], band: [2100, 2500]}
+  - {name: "Jasper and the North Rockies", center: avcan, box: [52.2, -120.5, 55.5, -115.5], band: [1900, 2300]}
+  - {name: "Columbia Mountains (Selkirks, Monashees, Purcells)", center: avcan, box: [49.0, -120.5, 52.6, -116.4], band: [1800, 2200]}
+  - {name: "BC interior", center: avcan, band: [1700, 2100]}
+  # --- Anything else ---------------------------------------------------------------
+  - {name: "Default", band: [1500, 2000]}
+
+# Your own numbers near a location: `location-id: [bottom, top]` in metres. They apply
+# within 40 km of the location and win over every rule above.
+locations: {}

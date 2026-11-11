@@ -8,11 +8,13 @@ export interface ApiTypes {
 	avalanche: {
 		[k: string]: AvalancheView;
 	};
+	avalanche_zones: ZonesOut;
 	budget: BudgetOut;
 	catalog: CatalogItem[];
 	job: JobOut;
 	locations: LocationSummary[];
 	lookups: LookupStatus;
+	map_concern: ConcernOut;
 	map_wind: MapWindOut;
 	me: Me;
 	meta: MetaOut;
@@ -135,6 +137,77 @@ export interface AvyProblem {
 	size?: string | null;
 }
 /**
+ * Every forecast zone in the map's box, as published, with expiry applied now.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ZonesOut".
+ */
+export interface ZonesOut {
+	features: ZoneFeature[];
+	generated_at: string | null;
+	problem_slope_deg?: number;
+	spot_km?: number;
+	treeline: TreelineRule[];
+	treeline_spots: TreelineSpot[];
+	type?: 'FeatureCollection';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ZoneFeature".
+ */
+export interface ZoneFeature {
+	geometry: {
+		[k: string]: unknown;
+	};
+	id: string;
+	properties: ZoneProps;
+	type?: 'Feature';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ZoneProps".
+ */
+export interface ZoneProps {
+	id: string;
+	today: string;
+	tz: string;
+	view: AvalancheView;
+}
+/**
+ * Where the treeline band is: the first rule whose conditions all match wins.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "TreelineRule".
+ */
+export interface TreelineRule {
+	/**
+	 * @minItems 2
+	 * @maxItems 2
+	 */
+	band: [number, number];
+	box?: [number, number, number, number] | null;
+	center?: string | null;
+	name: string;
+	zone?: string | null;
+}
+/**
+ * The owner's treeline numbers near one location.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "TreelineSpot".
+ */
+export interface TreelineSpot {
+	/**
+	 * @minItems 2
+	 * @maxItems 2
+	 */
+	band: [number, number];
+	lat: number;
+	location_id: string;
+	lon: number;
+	name: string;
+}
+/**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "BudgetOut".
  */
@@ -215,6 +288,31 @@ export interface LookupStatus {
 	snotel_stations: number;
 }
 /**
+ * The experimental terrain concern index's settings (config `terrain:`), for every
+ * visitor unless HAZARD_INDEX is off. The browser works the index out from these.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ConcernOut".
+ */
+export interface ConcernOut {
+	caption: string;
+	/**
+	 * @minItems 3
+	 * @maxItems 3
+	 */
+	classes: [number, number, number];
+	match_listed: number;
+	match_none: number;
+	match_other: number;
+	slope: [number, number][];
+	sun: number;
+	sun_hours: number;
+	wind_effect: number;
+	wind_loaded: number;
+	wind_scoured: number;
+	wind_snow_cm: number;
+}
+/**
  * Wind and new snow per location for the map's wind-effect layer.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -232,12 +330,30 @@ export interface MapWindOut {
  * via the `definition` "MapWindLocation".
  */
 export interface MapWindLocation {
+	flags?: Flag[];
 	generated_at: string;
 	id: string;
 	lat: number;
 	lon: number;
 	name: string;
 	roses: RoseOut[];
+}
+/**
+ * Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "Flag".
+ */
+export interface Flag {
+	date?: string | null;
+	detail?: string | null;
+	first_run?: number | null;
+	model?: string | null;
+	period_key?: string | null;
+	severity: string;
+	type: string;
+	value?: number | null;
+	value2?: number | null;
 }
 /**
  * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
@@ -324,23 +440,6 @@ export interface BestDay {
 export interface DangerChip {
 	level: number | null;
 	status: string;
-}
-/**
- * Something worth a look (see docs/ARCHITECTURE.md). The browser words it in your units.
- *
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "Flag".
- */
-export interface Flag {
-	date?: string | null;
-	detail?: string | null;
-	first_run?: number | null;
-	model?: string | null;
-	period_key?: string | null;
-	severity: string;
-	type: string;
-	value?: number | null;
-	value2?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

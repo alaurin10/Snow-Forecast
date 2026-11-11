@@ -396,7 +396,7 @@ New `frontend/src/lib/map/terrain/`:
 | 2 | Longer, better forecast | A2, A3 and the data-space blend (done, see "Milestone 2 notes") |
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) (done, see "Milestone 3 notes") |
 | 4 | Sun and wind | B4, B5 (done, see "Milestone 4 notes") |
-| 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` |
+| 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes"; B7.3 is open to every visitor) |
 | 6 | Recent satellite | B6 |
 | 7 | More weather layers | A5, A6 |
 | 8 | Terrain-adjusted totals | A4 |
@@ -612,6 +612,67 @@ What shipped, and where it differs from the plan above:
   is one position for the whole view; wind is one location's ridge wind for the whole view,
   and the effect is terrain shape only (no snow available for transport by elevation, no gusts).
 
+## Milestone 5 notes (done 11 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **B7.1 zones**: `backend/snowwatch/avalanche_zones.py` writes `data/avalanche/zones.geojson`
+  with every avalanche check (each forecast run, the `avalanche_utc` times, and
+  `snowwatch avalanche`), sharing its downloads with the per-location refresh (`avalanche.refresh`
+  takes a `memo`). The file keeps the forecasts as fetched; `GET /api/avalanche/zones.geojson`
+  applies expiry against the clock on each request (cached a minute, gzipped by hand, since
+  the app has no compression middleware). Each feature's `view` is an `AvalancheView`
+  whose `location_id` holds the zone id (`nac:2651`, `avcan:<area>`), so the Backcountry
+  tab's `DangerPyramid` shows a zone unchanged. Re-probed: 87 US zones, not 93; a product
+  can cover several zones (one fetch serves them all); Avalanche Canada answered from the
+  sandbox. Drawn as a Features option, "Avalanche danger zones", fill strong zoomed out and
+  faint up close, under the terrain overlays. Tapping the map gives the Inspector a line with
+  the zone, the spot's band and today's rating for it, and a link to the zone's bulletin
+  (`ZoneSheet.svelte`); without the terrain worker a tap on a zone opens the bulletin.
+- **B7.2 problems**: overlay "Avalanche problems" (`mapOverlay: 'problems'`). The `match`
+  mode now takes one rule per problem (aspects plus any number of elevation ranges, so
+  "alpine and below treeline" works), a problem with no aspects or bands listed means all of
+  them, and tiles name the zone so the worker clips them to it (the zone's polygons are sent
+  to the worker first). The match colour changed from red to teal: red read as danger
+  level 4. Slope 25/30/35° in the controls, default `terrain.problem_slope_deg`.
+  `config/treeline.yaml` is a list of rules tried in order (center id, zone name, a box
+  tested against the spot), ending with a default, plus `locations:` overrides that apply
+  within 40 km of a location. US centers have one band each (NWAC's east slopes and Mt Hood
+  their own); Canada is matched by place, because early-season Avalanche Canada areas span
+  whole ranges. The file is re-read when it changes. The B8 Inspector's band uses the same
+  numbers.
+- **B7.3 concern index**: as specified, in `terrain/concern.ts` (shared by the worker and the
+  Inspector), with these readings of the plan:
+  - "Today" is the zone's own date; no rating for today (even if tomorrow is rated) means
+    no layer, and a band without a rating draws nothing.
+  - Wind is the nearest location's (within 40 km) **last-48-hour** rose, the snow that built
+    today's slabs; beyond 40 km wind isn't counted and the controls say so. "Loaded" and
+    "scoured" mean a scaled wind effect beyond ±0.2 (`concern_wind_effect`). Loading adds
+    only with a wind or storm slab listed or ≥ 20 cm new snow (`concern_wind_snow_cm`);
+    scouring subtracts whenever wind moved snow.
+  - Sun: E, SE, S, SW and W aspects with ≥ 3 h of direct sun on the zone's date (cast
+    shadows included), on a day with a wet problem (names containing "wet" or "glide") or a
+    rapid-warming or rain-on-snow flag for that date at the nearest location
+    (`/api/map/wind` now carries those flags). Not limited to the afternoon: the sun-hours
+    grid is for the whole day.
+  - Classes are absolute score thresholds 1.5 / 2.5 / 3.5 (lower, elevated, high, very
+    high); ground under 25° and pixels outside the zone are clear. Blues to magenta.
+  - **Differs from the plan: open to everyone.** The site has no visitor accounts, so the
+    owner chose not to gate it behind the owner sign-in: `HAZARD_INDEX` is `on` (default)
+    or `off` (old values `public` and `owner` read as `on`), and `GET /api/map/concern`
+    answers 404 when it's off, so the option isn't offered. The other guard rails stay: a
+    warning each browser accepts once (remembered in `localStorage`), the fixed caption in
+    the controls and the Inspector, and the Inspector lists every factor. Drawn from zoom
+    10 like Wind effect.
+  - The acknowledgement is a modal alert dialog: it takes the focus (the dialog, not either
+    button), keeps Tab inside, and Escape cancels. `e2e/concern.spec.ts` checks, on phone
+    and desktop, that a visitor who isn't signed in is offered it, that nothing is drawn
+    before "I understand", that Cancel and Escape leave the layer off and remember nothing,
+    that the answer is kept in that browser, and that another browser is asked again.
+- Known limits: the problems and concern layers use the zone in the middle of the map for the
+  whole view (clipped to it); treeline bands are regional guesses; problems are not per day
+  (both providers publish one list).
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,tiles_render,probe,sat}.py`,
@@ -654,9 +715,9 @@ What shipped, and where it differs from the plan above:
 - **RRFS is brand new**; HRRR stays the primary US short-range source until RRFS has a season behind it.
 - **Bandwidth**: NBM long runs are ~60 MB a cycle; configurable cycles.
 - **Treeline elevations are approximations**, and so is everything built on them.
-- **Display terms** for the concern index must be re-read before `HAZARD_INDEX=public`.
-- **Not verified from the sandbox**: `api.avalanche.ca` (unreachable here, works in
-  production today), ECMWF open-data paths,
-  Avalanche Canada MIN endpoint.
+- **Display terms**: the concern index is public; avalanche.org's and Avalanche Canada's
+  terms for showing a product derived from their ratings haven't been re-read for it.
+- **Not verified from the sandbox**: ECMWF open-data paths, Avalanche Canada MIN
+  endpoint. (`api.avalanche.ca` answered from the sandbox on 11 Nov 2026.)
 - **Not available for free**: an open ATES feed, US avalanche observations without a key,
   sub-daily high-resolution satellite, and radar coverage in terrain-blocked valleys.

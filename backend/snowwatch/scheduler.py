@@ -14,10 +14,11 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from snowwatch import avalanche, jobs, push
+from snowwatch import avalanche, avalanche_zones, jobs, push
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, prune_raw
 from snowwatch.locations.service import list_locations
+from snowwatch.models import Location
 from snowwatch.pipeline import run_all
 from snowwatch.settings import Settings
 from snowwatch.store import repo, retention
@@ -118,8 +119,10 @@ class Worker:
         """Avalanche forecasts. A failure is logged and never fails the run."""
         try:
             locs = list_locations(conn)
-            res = avalanche.refresh(conn, fetcher, locs)
+            memo: avalanche.Memo = {}
+            res = avalanche.refresh(conn, fetcher, locs, memo)
             log.info("avalanche forecasts: %d saved, %d errors", res.saved, len(res.errors))
+            self._avalanche_zones(fetcher, locs, memo)
             if push.enabled(self.settings):
                 views = avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
                 levels = {}
@@ -133,6 +136,23 @@ class Worker:
             fetcher.sources.clear()
         except Exception:
             log.exception("avalanche refresh failed")
+
+    def _avalanche_zones(
+        self, fetcher: Fetcher, locs: list[Location], memo: avalanche.Memo
+    ) -> None:
+        """Every forecast zone in the map's box, for the map. Failures are only logged."""
+        try:
+            box = avalanche_zones.map_box(self.cfg.map.region, locs)
+            z = avalanche_zones.refresh_zones(self.settings.zones_path, fetcher, box, memo)
+            log.info(
+                "avalanche zones: %d US (%d products), %d Canada, %d errors",
+                z.us,
+                z.products,
+                z.ca,
+                len(z.errors),
+            )
+        except Exception:
+            log.exception("avalanche zones failed")
 
     def refresh_avalanche(self) -> None:
         with self.lock, self._fetcher() as fetcher:

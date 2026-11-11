@@ -1,6 +1,7 @@
 // What the page and the terrain worker say to each other.
 import type { MatchParams, TerrainMode } from './analysis';
 import type { Bounds } from './grid';
+import type { ConcernInputs, ConcernParams } from './concern';
 import type { SunFacts } from './shade';
 import type { Ymd } from './sun';
 
@@ -20,6 +21,19 @@ export interface PointFacts {
 	fallback: boolean;
 }
 
+/** The concern index for a view (see concern.ts). */
+export interface ConcernJob {
+	inputs: ConcernInputs;
+	params: ConcernParams;
+	/** The nearest location's loading by wind sector and its transport, when wind counts. */
+	windSectors: number[] | null;
+	windScale: number;
+	/** Today at the place, when sunny slopes count. */
+	sunDate: Ymd | null;
+	/** The forecast zone's polygons ([lon, lat] rings): nothing is drawn outside it. */
+	zone: number[][][][];
+}
+
 export type WorkerRequest =
 	| { id: number; type: 'init'; maxTiles: number }
 	| { id: number; type: 'dem'; z: number; x: number; y: number }
@@ -31,7 +45,10 @@ export type WorkerRequest =
 			x: number;
 			y: number;
 			match?: MatchParams;
+			/** Draw only inside this zone (registered with a `zone` message first). */
+			zone?: string;
 	  }
+	| { id: number; type: 'zone'; zone: string; polys: number[][][][] }
 	| { id: number; type: 'point'; lat: number; lon: number }
 	// Whole-view layers: one picture over `bounds`, at most `maxPx` on its longer side.
 	| { id: number; type: 'shade'; bounds: Bounds; maxPx: number; time: number }
@@ -46,6 +63,7 @@ export type WorkerRequest =
 			/** How much snow the wind could move, 0 to 1. */
 			scale: number;
 	  }
+	| ({ id: number; type: 'concern'; bounds: Bounds; maxPx: number } & ConcernJob)
 	| { id: number; type: 'sunpoint'; lat: number; lon: number; date: Ymd }
 	| { id: number; type: 'windpoint'; lat: number; lon: number; sectors: number[] }
 	| { id: number; type: 'cancel'; target: number };

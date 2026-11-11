@@ -635,6 +635,76 @@
       "title": "CatalogItem",
       "type": "object"
     },
+    "ConcernOut": {
+      "description": "The experimental terrain concern index's settings (config `terrain:`), for every\nvisitor unless HAZARD_INDEX is off. The browser works the index out from these.",
+      "properties": {
+        "caption": {
+          "type": "string"
+        },
+        "classes": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "match_listed": {
+          "type": "number"
+        },
+        "match_none": {
+          "type": "number"
+        },
+        "match_other": {
+          "type": "number"
+        },
+        "slope": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "sun": {
+          "type": "number"
+        },
+        "sun_hours": {
+          "type": "number"
+        },
+        "wind_effect": {
+          "type": "number"
+        },
+        "wind_loaded": {
+          "type": "number"
+        },
+        "wind_scoured": {
+          "type": "number"
+        },
+        "wind_snow_cm": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "caption",
+        "slope",
+        "match_listed",
+        "match_other",
+        "match_none",
+        "wind_loaded",
+        "wind_scoured",
+        "wind_effect",
+        "wind_snow_cm",
+        "sun",
+        "sun_hours",
+        "classes"
+      ],
+      "title": "ConcernOut",
+      "type": "object"
+    },
     "DailyEns": {
       "properties": {
         "n": {
@@ -2017,6 +2087,13 @@
     "MapWindLocation": {
       "description": "A location's loading roses, placed at its summit (where the wind is taken).",
       "properties": {
+        "flags": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Flag"
+          },
+          "type": "array"
+        },
         "generated_at": {
           "type": "string"
         },
@@ -3718,6 +3795,100 @@
       "title": "SunDay",
       "type": "object"
     },
+    "TreelineRule": {
+      "description": "Where the treeline band is: the first rule whose conditions all match wins.",
+      "properties": {
+        "band": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "box": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "center": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "zone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "band"
+      ],
+      "title": "TreelineRule",
+      "type": "object"
+    },
+    "TreelineSpot": {
+      "description": "The owner's treeline numbers near one location.",
+      "properties": {
+        "band": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "location_id": {
+          "type": "string"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id",
+        "name",
+        "lat",
+        "lon",
+        "band"
+      ],
+      "title": "TreelineSpot",
+      "type": "object"
+    },
     "TrendOut": {
       "properties": {
         "location_id": {
@@ -4143,6 +4314,110 @@
       ],
       "title": "WindowOut",
       "type": "object"
+    },
+    "ZoneFeature": {
+      "properties": {
+        "geometry": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "properties": {
+          "$ref": "#/$defs/ZoneProps"
+        },
+        "type": {
+          "const": "Feature",
+          "default": "Feature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "geometry",
+        "properties"
+      ],
+      "title": "ZoneFeature",
+      "type": "object"
+    },
+    "ZoneProps": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "today": {
+          "type": "string"
+        },
+        "tz": {
+          "type": "string"
+        },
+        "view": {
+          "$ref": "#/$defs/AvalancheView"
+        }
+      },
+      "required": [
+        "id",
+        "tz",
+        "today",
+        "view"
+      ],
+      "title": "ZoneProps",
+      "type": "object"
+    },
+    "ZonesOut": {
+      "description": "Every forecast zone in the map's box, as published, with expiry applied now.",
+      "properties": {
+        "features": {
+          "items": {
+            "$ref": "#/$defs/ZoneFeature"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problem_slope_deg": {
+          "default": 30,
+          "type": "integer"
+        },
+        "spot_km": {
+          "default": 40.0,
+          "type": "number"
+        },
+        "treeline": {
+          "items": {
+            "$ref": "#/$defs/TreelineRule"
+          },
+          "type": "array"
+        },
+        "treeline_spots": {
+          "items": {
+            "$ref": "#/$defs/TreelineSpot"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "FeatureCollection",
+          "default": "FeatureCollection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generated_at",
+        "features",
+        "treeline",
+        "treeline_spots"
+      ],
+      "title": "ZonesOut",
+      "type": "object"
     }
   },
   "description": "Every response shape, exported as one JSON Schema for the TypeScript types.",
@@ -4158,6 +4433,9 @@
         "$ref": "#/$defs/AvalancheView"
       },
       "type": "object"
+    },
+    "avalanche_zones": {
+      "$ref": "#/$defs/ZonesOut"
     },
     "budget": {
       "$ref": "#/$defs/BudgetOut"
@@ -4179,6 +4457,9 @@
     },
     "lookups": {
       "$ref": "#/$defs/LookupStatus"
+    },
+    "map_concern": {
+      "$ref": "#/$defs/ConcernOut"
     },
     "map_wind": {
       "$ref": "#/$defs/MapWindOut"
@@ -4231,6 +4512,8 @@
     "locations",
     "overview",
     "map_wind",
+    "map_concern",
+    "avalanche_zones",
     "trend",
     "runs",
     "me",
