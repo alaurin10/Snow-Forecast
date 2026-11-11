@@ -22,7 +22,7 @@ describe('SatControls', () => {
 		render(SatControls, { ...props, spot });
 		expect(screen.getByRole('status').textContent).toContain('Sentinel-2C · 9 Nov · yesterday');
 		expect(screen.getByText('1/2')).toBeTruthy();
-		const older = screen.getByRole('button', { name: 'Older scene' });
+		const older = screen.getByRole('button', { name: 'Older view' });
 		await fireEvent.click(older);
 		expect(screen.getByText('2/2')).toBeTruthy();
 		expect(screen.getByRole('status').textContent).toContain('77% clear');
@@ -45,5 +45,17 @@ describe('SatControls', () => {
 		expect(screen.getByRole('status').textContent).toContain('Zoom in for 10 m detail');
 		await fireEvent.click(screen.getByRole('button', { name: 'Snow vs cloud' }));
 		expect(onbands).toHaveBeenCalledWith('snow');
+	});
+
+	it('opens on the stitched view, says when the spot was seen, and that the newest pass was cloudy', async () => {
+		const spot = data.locations!.find((l) => l.id === 'snoqualmie')!;
+		render(SatControls, { ...props, spot });
+		const status = screen.getByRole('status').textContent ?? '';
+		expect(status).toContain('Newest clear view · 2 passes, 21 Oct – 4 Nov');
+		expect(status).toContain('Snoqualmie Pass: seen 21 Oct');
+		expect(screen.getByText(/The newest pass, 10 Nov, was cloudy there\./)).toBeTruthy();
+		expect(screen.getByText('1/2')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Older view' }));
+		expect(screen.getByRole('status').textContent).toContain('Sentinel-2C · 15 Oct');
 	});
 });

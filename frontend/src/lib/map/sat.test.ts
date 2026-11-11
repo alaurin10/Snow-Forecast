@@ -1,7 +1,17 @@
 // Recent satellite: which location's scene shows, how it's labelled, and what's drawn.
 import { describe, expect, it } from 'vitest';
-import { data, scene } from './sat.fixture';
-import { ago, dayLabel, nearestSpot, recentSpec, sceneDay, sceneLabel } from './sat';
+import { composite, data, scene } from './sat.fixture';
+import {
+	ago,
+	datesGeojson,
+	dayLabel,
+	nearestSpot,
+	recentSpec,
+	satViews,
+	sceneDay,
+	sceneLabel,
+	stitchedSpan
+} from './sat';
 import { mapStyle } from './style';
 
 describe('picking and labelling scenes', () => {
@@ -28,16 +38,52 @@ describe('picking and labelling scenes', () => {
 	});
 });
 
+describe('the stitched view', () => {
+	it('comes first, then the whole scenes', () => {
+		const spot = data.locations!.find((l) => l.id === 'snoqualmie')!;
+		expect(satViews(spot).map((v) => v.kind)).toEqual(['stitched', 'scene']);
+		expect(satViews(data.locations![1]).map((v) => v.kind)).toEqual(['scene', 'scene']);
+		expect(satViews(null)).toEqual([]);
+		expect(stitchedSpan(composite)).toBe('21 Oct – 4 Nov');
+	});
+
+	it('stacks the passes oldest first, cloud cut out, older ones only over their part', () => {
+		const spec = recentSpec(data, { kind: 'stitched', composite }, 'natural');
+		expect(spec.hls).toBeNull();
+		expect(spec.s2.map((s) => s.id)).toEqual([
+			's2c-natural-S2B_MSIL2A_20261021T191429_R056_T10TFT_20261021T211203',
+			// The older pass's other tile lies entirely outside the part it fills: no layer.
+			's2c-natural-S2A_MSIL2A_20261104T190821_R013_T10TFT_20261104T221403'
+		]);
+		expect(spec.s2[0].tiles[0]).toBe(
+			'/api/tiles/s2c/natural/S2B_MSIL2A_20261021T191429_R056_T10TFT_20261021T211203/{z}/{x}/{y}.webp?r=3'
+		);
+		// The older one is clipped to its part; the newest reaches as far as its tile.
+		expect(spec.s2[0].bounds).toEqual([-121.45, 47.3, -121.3, 47.5]);
+		expect(spec.s2[1].bounds).toEqual([-122.3, 46.9, -120.9, 47.9]);
+	});
+
+	it('marks where the passes meet, with their dates', () => {
+		const fc = datesGeojson(composite);
+		expect(fc.features[0].geometry).toEqual({
+			type: 'MultiLineString',
+			coordinates: composite.boundaries
+		});
+		expect(fc.features.slice(1).map((f) => f.properties?.label)).toEqual(['4 Nov', '21 Oct']);
+		expect(recentSpec(data, { kind: 'stitched', composite }, 'natural').dates).toEqual(fc);
+	});
+});
+
 describe('what the base draws', () => {
 	it('has daily VIIRS, HLS from the same pass and every Sentinel-2 tile of it', () => {
-		const spec = recentSpec(data, scene(), 'natural');
+		const spec = recentSpec(data, { kind: 'scene', scene: scene() }, 'natural');
 		expect(spec.viirs?.tiles[0]).toBe(
 			'/api/tiles/gibs/VIIRS_NOAA20_CorrectedReflectance_TrueColor/2026-11-10/{z}/{x}/{y}'
 		);
 		expect(spec.hls?.tiles[0]).toContain('/HLS_S30_Nadir_BRDF_Adjusted_Reflectance/2026-11-04/');
 		expect(spec.s2.map((s) => s.tiles[0])).toEqual([
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UEA_20261104T221403/{z}/{x}/{y}.webp',
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UDA_20261104T221403/{z}/{x}/{y}.webp'
+			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UEA_20261104T221403/{z}/{x}/{y}.webp?r=3',
+			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UDA_20261104T221403/{z}/{x}/{y}.webp?r=3'
 		]);
 		expect(spec.s2[0].bounds).toEqual([-123, 49.5, -121.5, 50.5]);
 		expect(spec.s2[0].tileSize).toBe(512);
@@ -45,7 +91,7 @@ describe('what the base draws', () => {
 	});
 
 	it('swaps to the snow-vs-cloud bands, without HLS (GIBS has no such view of it)', () => {
-		const spec = recentSpec(data, scene(), 'snow');
+		const spec = recentSpec(data, { kind: 'scene', scene: scene() }, 'snow');
 		expect(spec.viirs?.tiles[0]).toContain('BandsM11-I2-I1');
 		expect(spec.hls).toBeNull();
 		expect(spec.s2[0].tiles[0]).toContain('/api/tiles/s2/snow/');
@@ -53,11 +99,18 @@ describe('what the base draws', () => {
 
 	it('draws only the daily mosaic with no scene, and nothing without the index', () => {
 		expect(recentSpec(data, null, 'natural')).toMatchObject({ hls: null, s2: [] });
-		expect(recentSpec(data, scene({ hls: false }), 'natural').hls).toBeNull();
-		expect(recentSpec(null, null, 'natural')).toEqual({ viirs: null, hls: null, s2: [] });
+		expect(
+			recentSpec(data, { kind: 'scene', scene: scene({ hls: false }) }, 'natural').hls
+		).toBeNull();
+		expect(recentSpec(null, null, 'natural')).toEqual({
+			viirs: null,
+			hls: null,
+			s2: [],
+			dates: null
+		});
 	});
 
-	it('puts place names and contours over recent imagery, not Esri’s', () => {
+	it('puts place names and contours over recent imagery, and nothing that darkens it', () => {
 		const style = mapStyle({
 			dark: false,
 			full: true,
@@ -78,5 +131,8 @@ describe('what the base draws', () => {
 		expect(vis('contour-lines')).toBe('visible');
 		expect(vis('sat')).toBe('none');
 		expect(vis('esri')).toBe('none');
+		// Nothing dims it: no hill shading, and no 3D haze over the ground.
+		expect(vis('shade')).toBe('none');
+		expect(style.sky?.['fog-ground-blend']).toBe(1);
 	});
 });

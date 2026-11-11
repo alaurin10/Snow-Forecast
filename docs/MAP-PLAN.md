@@ -711,8 +711,40 @@ What shipped, and where it differs from the plan above:
   Banff Sunshine, 54% snow"), older/newer scene, and Natural / Snow vs cloud
   (`prefs.satBands`). Like Esri's satellite, it needs a connection: offline the map shows
   the saved topo map. Not saved for offline use.
+- **Follow-up: stitched newest-clear views.** Whole-scene picking threw away good new
+  ground: at Snoqualmie the newest accepted scene was 21 days old while newer passes had
+  clear strips. Now each location also gets a stitched view, shown first:
+  - Every pass in the window is read once as a 96 × 96 grid over 24 × 24 km (250 m cells;
+    the 8 km square for whole scenes is its middle), classed as no data, clear, cloud or
+    snow, and kept in `data/sat/grids/`.
+  - `stitch`: newest first, each pass takes the cells it saw clearly that no newer pass
+    did, less a cell's margin next to its own cloud and without specks under 12 cells
+    (0.75 km²). A pass counts only if it adds ≥ 2% of the area or ≥ 5% of the 8 km square
+    round the location, so a small new strip at the resort counts and scraps elsewhere
+    don't. It stops at 98% filled or 8 layers. The first cut (no margin, no speck rule,
+    0.5%, 6 layers) let cloud-gap confetti use up the layers before the clear passes.
+  - The map stacks each pass oldest at the bottom, through `/api/tiles/s2c/…`: the colour
+    tile with cloud and cloud shadow (SCL 3, 8, 9, 10) and an 80 m margin made transparent,
+    from a 2 KB mask tile Planetary Computer draws from an SCL expression (cutting inside
+    its tiler drew cloud as opaque black). The newest layer reaches as far as its tiles;
+    older ones only over their part.
+  - Dashed lines along the cell edges where one pass meets another (only round parts
+    ≥ 1% of the area) and a date in each part ≥ 2%, from `SatComposite.boundaries` and
+    `labels`. The chip says when the location itself was seen and, when newer, that the
+    newest pass was cloudy there. The arrows then step through whole clear scenes.
+  - Also found: the colour bands carry no no-data marker, so off-swath was opaque black
+    (it hid older passes, and darkened the edge of single scenes); tiles now ask for
+    `nodata=0` (render version 3).
+- Follow-up: nothing dims Recent satellite. It isn't darkened in the dark theme, hill
+  shading is off over it whatever the setting (Sun & shade still lights the hills, since
+  that is the layer), the 3D haze stops at the horizon, and natural colour has a brighter
+  stretch with an S-curve for snow.
 - Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–4).
-- Known limits: a location with no clear pass in 30 days (Whistler and Snoqualmie on
+- Known limits: Sentinel-2 is 10 m, so up close it is far softer than Esri's sub-metre
+  "Satellite"; a whole scene can end at a swath edge a few km from a location (the 8 km
+  square allows 10% without data); in stitched views the dates and lines are on a 250 m
+  grid, so they follow the 10 m cut edges only roughly, and the SCL cloud mask misses
+  some thin cloud and haze; a location with no clear pass in 30 days (Whistler and Snoqualmie on
   11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
   few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
 

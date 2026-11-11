@@ -611,12 +611,74 @@ export interface SatOut {
  */
 export interface SatLocation {
 	checked_at?: string | null;
+	composite?: SatComposite | null;
 	error?: string | null;
 	id: string;
 	lat: number;
 	lon: number;
 	name: string;
 	scenes: SatScene[];
+}
+/**
+ * The newest clear view round a location, stitched from passes: each cell from the
+ * newest pass that saw the ground there, cloud cut out (see `stitch`).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatComposite".
+ */
+export interface SatComposite {
+	at_location: string | null;
+	boundaries: [number, number][][];
+	/**
+	 * @minItems 4
+	 * @maxItems 4
+	 */
+	box: [number, number, number, number];
+	filled_pct: number;
+	labels: SatLabel[];
+	latest_pass: string | null;
+	layers: SatLayer[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatLabel".
+ */
+export interface SatLabel {
+	lat: number;
+	lon: number;
+	time: string;
+}
+/**
+ * One pass in a stitched view: its clear pixels, over every older layer.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatLayer".
+ */
+export interface SatLayer {
+	/**
+	 * @minItems 4
+	 * @maxItems 4
+	 */
+	bbox: [number, number, number, number];
+	id: string;
+	items: SatItem[];
+	platform: string;
+	share_pct: number;
+	time: string;
+}
+/**
+ * One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatItem".
+ */
+export interface SatItem {
+	/**
+	 * @minItems 4
+	 * @maxItems 4
+	 */
+	bbox: [number, number, number, number];
+	id: string;
 }
 /**
  * One Sentinel-2 pass that sees the ground at a location.
@@ -633,20 +695,6 @@ export interface SatScene {
 	platform: string;
 	snow_pct: number;
 	time: string;
-}
-/**
- * One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.
- *
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "SatItem".
- */
-export interface SatItem {
-	/**
-	 * @minItems 4
-	 * @maxItems 4
-	 */
-	bbox: [number, number, number, number];
-	id: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

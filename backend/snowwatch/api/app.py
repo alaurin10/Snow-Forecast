@@ -30,7 +30,16 @@ from snowwatch.http import Fetcher
 from snowwatch.maps.sat import SatOut, allowed_items, read_index
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
-from snowwatch.tiles import TileCache, gibs_path, gibs_tile, glyphs, s2_path, s2_tile
+from snowwatch.tiles import (
+    TileCache,
+    gibs_path,
+    gibs_tile,
+    glyphs,
+    s2_clear_path,
+    s2_clear_tile,
+    s2_path,
+    s2_tile,
+)
 
 log = logging.getLogger("snowwatch.api")
 access = logging.getLogger("snowwatch.access")
@@ -282,6 +291,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if data is None:
             raise HTTPException(404)
         # A scene never changes.
+        return Response(
+            data, media_type="image/webp", headers={"Cache-Control": "public, max-age=2592000"}
+        )
+
+    @app.get("/api/tiles/s2c/{mode}/{item}/{z}/{x}/{y}.webp")
+    def s2_clear(mode: str, item: str, z: int, x: int, y: int, request: Request) -> Response:
+        """Sentinel-2 tiles with cloud cut out, for stitched views (see s2_clear_tile)."""
+        cache = tiles()
+        _, allowed = sat_index()
+        path = s2_clear_path(cache, mode, item, z, x, y, allowed)
+        if path is None:
+            raise HTTPException(404)
+        if not path.exists():
+            tile_misses.check(request)
+        data = s2_clear_tile(cache, mode, item, z, x, y, allowed)
+        if data is None:
+            raise HTTPException(404)
         return Response(
             data, media_type="image/webp", headers={"Cache-Control": "public, max-age=2592000"}
         )

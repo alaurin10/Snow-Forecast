@@ -3206,6 +3206,81 @@
       "title": "RunOut",
       "type": "object"
     },
+    "SatComposite": {
+      "description": "The newest clear view round a location, stitched from passes: each cell from the\nnewest pass that saw the ground there, cloud cut out (see `stitch`).",
+      "properties": {
+        "at_location": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundaries": {
+          "items": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "box": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "filled_pct": {
+          "type": "integer"
+        },
+        "labels": {
+          "items": {
+            "$ref": "#/$defs/SatLabel"
+          },
+          "type": "array"
+        },
+        "latest_pass": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/SatLayer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "layers",
+        "filled_pct",
+        "at_location",
+        "latest_pass",
+        "box",
+        "boundaries",
+        "labels"
+      ],
+      "title": "SatComposite",
+      "type": "object"
+    },
     "SatItem": {
       "description": "One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.",
       "properties": {
@@ -3228,6 +3303,69 @@
       "title": "SatItem",
       "type": "object"
     },
+    "SatLabel": {
+      "properties": {
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lon",
+        "lat",
+        "time"
+      ],
+      "title": "SatLabel",
+      "type": "object"
+    },
+    "SatLayer": {
+      "description": "One pass in a stitched view: its clear pixels, over every older layer.",
+      "properties": {
+        "bbox": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SatItem"
+          },
+          "type": "array"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "share_pct": {
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "time",
+        "platform",
+        "share_pct",
+        "items",
+        "bbox"
+      ],
+      "title": "SatLayer",
+      "type": "object"
+    },
     "SatLocation": {
       "properties": {
         "checked_at": {
@@ -3235,6 +3373,17 @@
             {
               "format": "date-time",
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "composite": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SatComposite"
             },
             {
               "type": "null"

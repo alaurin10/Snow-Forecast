@@ -1,19 +1,19 @@
 <!--
-  Controls for the Recent satellite base: which Sentinel-2 scene of the nearest location
-  is shown (newest first, step to older ones), natural colour or snow vs cloud, and a
-  line saying what's on screen and how old it is.
+  Controls for the Recent satellite base: which view of the nearest location is shown
+  (first the stitched newest-clear view, then whole clear scenes, newest first), natural
+  colour or snow vs cloud, and a line saying what's on screen and how old it is.
 -->
 <script lang="ts">
 	import type { SatLocation, SatOut } from '../types.gen';
 	import type { SatBands } from '../prefs.svelte';
-	import { dayLabel, S2_MIN_ZOOM, sceneLabel } from './sat';
+	import { ago, dayLabel, S2_MIN_ZOOM, satViews, sceneLabel, shortDate, stitchedSpan } from './sat';
 
 	interface Props {
 		data: SatOut | null;
 		loadState: 'idle' | 'loading' | 'ready' | 'failed';
 		/** The location nearest the middle of the map, if one is close enough. */
 		spot: SatLocation | null;
-		/** Which of its scenes is shown (0: the newest). */
+		/** Which of its views is shown (0: stitched, when there is one). */
 		index: number;
 		bands: SatBands;
 		zoom: number;
@@ -23,19 +23,29 @@
 
 	let { data, loadState, spot, index = $bindable(), bands, zoom, now, onbands }: Props = $props();
 
-	const scenes = $derived(spot?.scenes ?? []);
-	const scene = $derived(scenes[Math.min(index, scenes.length - 1)] ?? null);
+	const views = $derived(satViews(spot));
+	const view = $derived(views[Math.min(index, views.length - 1)] ?? null);
+	const scene = $derived(view?.kind === 'scene' ? view.scene : null);
+	const stitched = $derived(view?.kind === 'stitched' ? view.composite : null);
 	const viirs = $derived(data?.viirs_date ? dayLabel(data.viirs_date) : null);
+	const zoomIn = $derived(zoom < S2_MIN_ZOOM ? '. Zoom in for 10 m detail' : '');
+	/** The newest pass was cloudy where the location is: say so, with its date. */
+	const cloudyNote = $derived(
+		stitched?.latest_pass &&
+			(!stitched.at_location ||
+				stitched.latest_pass.slice(0, 10) > stitched.at_location.slice(0, 10))
+			? `The newest pass, ${shortDate(stitched.latest_pass)}, was cloudy there.`
+			: ''
+	);
 	const foot = $derived(
 		[
 			bands === 'snow' ? 'Snow shows cyan, cloud white.' : '',
-			scene
-				? `Sentinel-2 10 m${scene.hls && bands === 'natural' ? ' and HLS 30 m' : ''} from one pass;`
-				: '',
-			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}.`,
-			spot
-				? `Clear: at least ${data?.min_clear_pct ?? 70}% of an 8 km square round the location free of cloud.`
-				: ''
+			stitched
+				? 'Each part is the newest Sentinel-2 pass (10 m) that saw the ground there, with cloud cut out; dashed lines and dates mark where one pass meets an older one.'
+				: scene
+					? `Sentinel-2 10 m${scene.hls && bands === 'natural' ? ' and HLS 30 m' : ''} from one pass. Clear: at least ${data?.min_clear_pct ?? 70}% of an 8 km square round the location free of cloud.`
+					: '',
+			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${stitched ? ' where no pass was clear' : ''}.`
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -48,20 +58,20 @@
 			<button aria-pressed={bands === 'natural'} onclick={() => onbands('natural')}>Natural</button>
 			<button aria-pressed={bands === 'snow'} onclick={() => onbands('snow')}>Snow vs cloud</button>
 		</div>
-		{#if scenes.length > 1}
-			<div class="step" role="group" aria-label="Scene">
+		{#if views.length > 1}
+			<div class="step" role="group" aria-label="View">
 				<button
-					onclick={() => (index = Math.min(scenes.length - 1, index + 1))}
-					disabled={index >= scenes.length - 1}
-					aria-label="Older scene"
-					title="Older scene">‹</button
+					onclick={() => (index = Math.min(views.length - 1, index + 1))}
+					disabled={index >= views.length - 1}
+					aria-label="Older view"
+					title="Older view">‹</button
 				>
-				<span class="num">{index + 1}/{scenes.length}</span>
+				<span class="num">{index + 1}/{views.length}</span>
 				<button
 					onclick={() => (index = Math.max(0, index - 1))}
 					disabled={index <= 0}
-					aria-label="Newer scene"
-					title="Newer scene">›</button
+					aria-label="Newer view"
+					title="Newer view">›</button
 				>
 			</div>
 		{/if}
@@ -71,13 +81,24 @@
 			<p class="note">Loading recent imagery…</p>
 		{:else if !data}
 			<p class="note">Recent imagery isn't available right now.</p>
+		{:else if spot && stitched}
+			<p class="note" role="status">
+				<strong
+					>Newest clear view · {stitched.layers.length === 1
+						? '1 pass'
+						: `${stitched.layers.length} passes`}, {stitchedSpan(stitched)}</strong
+				>
+				<span class="faint"
+					>· {spot.name}: {stitched.at_location
+						? `seen ${shortDate(stitched.at_location)}, ${ago(stitched.at_location, now)}`
+						: `no clear view in ${data.days ?? 30} days`}{zoomIn}</span
+				>
+			</p>
 		{:else if spot && scene}
 			<p class="note" role="status">
 				<strong>{sceneLabel(scene, now)}</strong>
 				<span class="faint"
-					>· {spot.name}{scene.snow_pct ? `, ${scene.snow_pct}% snow` : ''}{zoom < S2_MIN_ZOOM
-						? '. Zoom in for 10 m detail'
-						: ''}</span
+					>· {spot.name}{scene.snow_pct ? `, ${scene.snow_pct}% snow` : ''}{zoomIn}</span
 				>
 			</p>
 		{:else if spot}
@@ -93,7 +114,7 @@
 			</p>
 		{/if}
 	</div>
-	<p class="foot faint">{foot}</p>
+	<p class="foot faint">{cloudyNote ? `${cloudyNote} ` : ''}{foot}</p>
 </section>
 
 <style>
