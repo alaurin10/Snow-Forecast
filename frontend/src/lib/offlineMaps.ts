@@ -4,7 +4,7 @@
 //
 // Only sources whose terms allow it are saved: OpenTopoMap (CC-BY-SA, asked not to be
 // hammered, so it's capped at zoom 15 and fetched a few at a time through the server's
-// cache) and the AWS terrain tiles. Esri's topo and satellite tiles may not be stored
+// cache) and the Mapterhorn elevation tiles (open data). Esri's topo and satellite tiles may not be stored
 // for offline use outside Esri's own apps, so offline the map uses OpenTopoMap at every
 // zoom and satellite isn't available.
 
@@ -13,12 +13,20 @@ const KEY = 'offlineMaps';
 /** Half-width of a saved area: about 16 x 16 km around the location. */
 export const RADIUS_KM = 8;
 const TOPO_ZOOMS = [8, 9, 10, 11, 12, 13, 14, 15];
-const DEM_ZOOMS = [8, 9, 10, 11, 12, 13, 14];
+// Elevation tiles are 512 px, so one zoom lower than the topo map gives the same detail.
+const DEM_ZOOMS = [7, 8, 9, 10, 11, 12, 13];
 /** The finest terrain only close in: it's 4x the tiles for each step. */
-const DEM_FINE = { zoom: 15, radiusKm: 4 };
-const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+const DEM_FINE = { zoom: 14, radiusKm: 4 };
+const DEM_URL = 'https://tiles.mapterhorn.com';
+const DEM_EXT = 'webp';
+/** Areas saved before the switch to Mapterhorn hold AWS terrain tiles; removing one clears them. */
+const LEGACY_DEM = {
+	url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium',
+	zooms: [8, 9, 10, 11, 12, 13, 14],
+	fine: { zoom: 15, radiusKm: 4 }
+};
 /** Rough sizes from real tiles, for the estimate shown before downloading. */
-const AVG_BYTES = { topo: 28_000, dem: 75_000 };
+const AVG_BYTES = { topo: 28_000, dem: 100_000 };
 const PARALLEL = 3;
 
 export interface SavedArea {
@@ -81,19 +89,28 @@ export function areaUrls(
 	const topo = TOPO_ZOOMS.flatMap((z) =>
 		urlsAt(lat, lon, RADIUS_KM, z, (x, y) => `${origin}/api/tiles/otm/${z}/${x}/${y}.png`)
 	);
-	const dem = [
-		...DEM_ZOOMS.flatMap((z) =>
-			urlsAt(lat, lon, RADIUS_KM, z, (x, y) => `${DEM_URL}/${z}/${x}/${y}.png`)
+	return { topo, dem: demUrls(lat, lon, DEM_URL, DEM_EXT, DEM_ZOOMS, DEM_FINE) };
+}
+
+function demUrls(
+	lat: number,
+	lon: number,
+	base: string,
+	ext: string,
+	zooms: number[],
+	fine: { zoom: number; radiusKm: number }
+): string[] {
+	return [
+		...zooms.flatMap((z) =>
+			urlsAt(lat, lon, RADIUS_KM, z, (x, y) => `${base}/${z}/${x}/${y}.${ext}`)
 		),
-		...urlsAt(
-			lat,
-			lon,
-			DEM_FINE.radiusKm,
-			DEM_FINE.zoom,
-			(x, y) => `${DEM_URL}/${DEM_FINE.zoom}/${x}/${y}.png`
-		)
+		...urlsAt(lat, lon, fine.radiusKm, fine.zoom, (x, y) => `${base}/${fine.zoom}/${x}/${y}.${ext}`)
 	];
-	return { topo, dem };
+}
+
+/** The AWS terrain URLs an area saved before the switch to Mapterhorn holds. */
+export function legacyDemUrls(lat: number, lon: number): string[] {
+	return demUrls(lat, lon, LEGACY_DEM.url, 'png', LEGACY_DEM.zooms, LEGACY_DEM.fine);
 }
 
 /** The shared files every area needs: ski runs and label fonts. */
@@ -150,6 +167,8 @@ export async function downloadArea(
 	const all = [...shared, ...topo, ...dem];
 	const cache = await caches.open(OFFLINE_CACHE);
 	const p: Progress = { done: 0, total: all.length, bytes: 0, failed: 0 };
+	/** Elevation tiles the source doesn't have (open water, or finer than the area's data). */
+	let absent = 0;
 	onProgress({ ...p });
 	let next = 0;
 	const worker = async () => {
@@ -167,6 +186,13 @@ export async function downloadArea(
 						mode: url.startsWith(origin) ? 'same-origin' : 'cors',
 						signal
 					});
+					// No elevation tile here: the map fills it in from a coarser one, so not a failure.
+					if (res.status === 404 && url.startsWith(DEM_URL)) {
+						absent++;
+						p.done++;
+						onProgress({ ...p });
+						continue;
+					}
 					if (!res.ok) throw new Error(String(res.status));
 					const body = await res.blob();
 					p.bytes += body.size;
@@ -187,7 +213,7 @@ export async function downloadArea(
 	const saved: SavedArea = {
 		...area,
 		at: Date.now(),
-		tiles: all.length - p.failed,
+		tiles: all.length - p.failed - absent,
 		bytes: p.bytes
 	};
 	const areas = savedAreas();
@@ -207,11 +233,12 @@ export async function removeArea(id: string): Promise<void> {
 	const keep = new Set<string>();
 	for (const a of Object.values(areas)) {
 		const { topo, dem } = areaUrls(a.lat, a.lon, origin);
-		for (const u of [...topo, ...dem]) keep.add(u);
+		for (const u of [...topo, ...dem, ...legacyDemUrls(a.lat, a.lon)]) keep.add(u);
 	}
 	const cache = await caches.open(OFFLINE_CACHE);
 	const { topo, dem } = areaUrls(gone.lat, gone.lon, origin);
-	await Promise.all([...topo, ...dem].filter((u) => !keep.has(u)).map((u) => cache.delete(u)));
+	const all = [...topo, ...dem, ...legacyDemUrls(gone.lat, gone.lon)];
+	await Promise.all(all.filter((u) => !keep.has(u)).map((u) => cache.delete(u)));
 	if (!Object.keys(areas).length) await caches.delete(OFFLINE_CACHE);
 }
 

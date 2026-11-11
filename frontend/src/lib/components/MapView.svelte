@@ -2,21 +2,17 @@
   Every location on a map. Each marker shows the next-5-day snow on the
   Calendar's colour ramp, with a ring in the avalanche danger colour when the
   center's rating is current. Tap a marker for the numbers and a link.
-  With `radar`, the map fills the window and precipitation plays over it on one
-  timeline: the last three hours of observed radar, a 72-minute radar nowcast, then the
-  next ~48 hours of forecast
-  (see ../radar.ts). It's a MapLibre map: tilt and turn it, and switch on 3D terrain.
+  With `radar`, the map fills the window and becomes the full Map page: one weather
+  layer (radar, nowcast and forecast on one timeline, see ../radar.ts, or snow totals),
+  one terrain overlay (slope, aspect or elevation bands, computed in the browser, see
+  ../map/terrain/), hill shading, contours, ski runs and peaks, chosen in the Layers
+  sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
+  switch on 3D terrain.
 -->
 <script lang="ts">
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-	import type {
-		ExpressionSpecification,
-		Map as MlMap,
-		Marker,
-		Popup,
-		StyleSpecification
-	} from 'maplibre-gl';
+	import type { Map as MlMap, Marker, Popup } from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -31,24 +27,50 @@
 		RADAR_GAPS,
 		RAMPS,
 		rampTop,
-		TOTAL,
-		totalLabel,
-		totalName,
 		totalSources,
-		totalSpan,
-		totalTick,
 		type Frame,
 		type Timeline
 	} from '../radar';
 	import { FrameStore, PrecipLayer } from '../precipOverlay';
 	import { UserLocation, type LocState } from '../userLocation';
 	import OfflineMaps from './OfflineMaps.svelte';
+	import {
+		basePaint,
+		DETAIL_ZOOM,
+		EXAGGERATION,
+		halo,
+		mapStyle,
+		OTM_OPACITY,
+		peakColor,
+		peakLabel,
+		peakText,
+		PEAK_LAYERS,
+		PRECIP_BEFORE,
+		PRECIP_OPACITY,
+		sky,
+		SKI_LAYERS,
+		TOTAL_OPACITY
+	} from '../map/style';
+	import {
+		contourTiles,
+		setContours,
+		setOverlay,
+		setShade,
+		setTerrainUnits,
+		setupTerrain
+	} from '../map/layers/terrain';
+	import { terrainClient } from '../map/terrain/client';
+	import type { PointFacts } from '../map/terrain/messages';
+	import TimelineControls from '../map/Timeline.svelte';
+	import LayersSheet from '../map/LayersSheet.svelte';
+	import Legend from '../map/Legend.svelte';
+	import Inspector from '../map/Inspector.svelte';
 
 	interface Props {
 		rows: OverviewRow[];
 		units: UnitSystem;
 		href: (id: string) => string;
-		/** The full map: precipitation, its controls, and the whole window. */
+		/** The full map: weather, terrain, their controls, and the whole window. */
 		radar?: boolean;
 	}
 
@@ -60,372 +82,33 @@
 	let markers: Marker[] = [];
 	let popups: Popup[] = [];
 	let ready = $state(false);
-	let infoOpen = $state(false);
-	let offlineOpen = $state(false);
+	/** Which floating panel is open (one at a time). */
+	let panel = $state<'none' | 'info' | 'offline' | 'layers'>('none');
 	let loc: UserLocation | null = null;
 	let locState = $state<LocState>('off');
 	const canLocate = UserLocation.supported();
 	/** No connection: the map shows only what's saved (OpenTopoMap at every zoom). */
 	let offline = $state(typeof navigator !== 'undefined' && navigator.onLine === false);
 	let zoom = $state(0);
+	/** The terrain worker is running (slope, aspect, the inspector, gap-filled elevation). */
+	let analysis = $state(false);
+	let contoursReady = $state(false);
 
-	/** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
-	const DETAIL_ZOOM = 12;
-	const PISTE_ZOOM = 11;
-	/** A little extra height reads well zoomed out without making couloirs cartoonish up close. */
-	const EXAGGERATION = 1.15;
-	const pistesOn = $derived(radar && prefs.mapPistes === 'on');
 	const terrainOn = $derived(radar && prefs.mapTerrain === 'on');
 	const satellite = $derived(radar && prefs.mapBase === 'satellite');
+	const runsOn = $derived(radar && prefs.mapFeatures.has('runs'));
+	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
+	/** Contours show on satellite: the topo maps draw their own. */
+	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && satellite && !offline);
+	const overlayMode = $derived(radar ? prefs.mapOverlay : 'none');
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
-	const totalsMode = $derived(radar && prefs.mapMode === 'totals');
+	const totalsMode = $derived(radar && prefs.mapWeather === 'totals');
 	/** Snow totals are smooth fields: they stay on further in than the hourly frames. */
 	const tooClose = $derived(zoom >= (totalsMode ? 15 : 13));
-	const TOTAL_OPACITY: ExpressionSpecification = [
-		'interpolate',
-		['linear'],
-		['zoom'],
-		10,
-		0.72,
-		13,
-		0.5,
-		15,
-		0
-	];
-	const PRECIP_OPACITY: ExpressionSpecification = [
-		'interpolate',
-		['linear'],
-		['zoom'],
-		10,
-		0.8,
-		11,
-		0.65,
-		12,
-		0.4,
-		13,
-		0
-	];
 
-	/** Cross-fade from Esri over half a zoom level. */
-	const OTM_OPACITY: ExpressionSpecification = [
-		'interpolate',
-		['linear'],
-		['zoom'],
-		DETAIL_ZOOM - 0.5,
-		0,
-		DETAIL_ZOOM + 0.3,
-		1
-	];
-
-	// Base map and ski-run tiles come through the server, which caches them.
-	const tiles = (layer: string) => [`/api/tiles/${layer}/{z}/{x}/{y}.png`];
-
-	function mapStyle(dark: boolean): StyleSpecification {
-		return {
-			version: 8,
-			sources: {
-				esri: {
-					type: 'raster',
-					tiles: tiles('esri'),
-					tileSize: 256,
-					maxzoom: 17,
-					attribution:
-						'Map © <a href="https://www.esri.com">Esri</a>, HERE, Garmin, USGS, NGA, EPA, USDA, NPS'
-				},
-				otm: {
-					type: 'raster',
-					tiles: tiles('otm'),
-					tileSize: 256,
-					maxzoom: 17,
-					attribution:
-						'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
-				},
-				sat: {
-					type: 'raster',
-					tiles: tiles('sat'),
-					tileSize: 256,
-					maxzoom: 18,
-					attribution:
-						'Imagery © <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics, USDA, USGS'
-				},
-				satlabels: {
-					type: 'raster',
-					tiles: tiles('satlabels'),
-					tileSize: 256,
-					maxzoom: 18,
-					attribution: 'Labels © <a href="https://www.esri.com">Esri</a>'
-				},
-				// Runs, lifts and peaks from OpenStreetMap, fetched weekly by the server.
-				ski: {
-					type: 'geojson',
-					data: '/api/osm/ski.geojson',
-					attribution:
-						'Runs, lifts, peaks © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
-				},
-				// Elevation for 3D, straight from AWS (fast, and big enough not to proxy).
-				dem: {
-					type: 'raster-dem',
-					tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-					encoding: 'terrarium',
-					tileSize: 256,
-					// Down to ~3 m a pixel (zoom 15, the finest these tiles have): enough to
-					// see couloirs. Only the tiles in view load, so memory stays bounded.
-					maxzoom: 15,
-					attribution:
-						'Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Mapzen, AWS</a>'
-				}
-			},
-			layers: [
-				{
-					id: 'esri',
-					type: 'raster',
-					source: 'esri',
-					maxzoom: DETAIL_ZOOM + 1,
-					layout: { visibility: baseVis('topo') },
-					paint: { 'raster-fade-duration': 150, ...basePaint(dark) }
-				},
-				{
-					id: 'otm',
-					type: 'raster',
-					source: 'otm',
-					minzoom: DETAIL_ZOOM - 0.5,
-					layout: { visibility: baseVis('topo') },
-					paint: {
-						'raster-opacity': OTM_OPACITY,
-						'raster-fade-duration': 150,
-						...basePaint(dark)
-					}
-				},
-				// Satellite: imagery, then place names and borders over it (and over the
-				// precipitation, so names stay readable).
-				{
-					id: 'sat',
-					type: 'raster',
-					source: 'sat',
-					layout: { visibility: baseVis('satellite') },
-					paint: { 'raster-fade-duration': 150, ...basePaint(dark, 0.8) }
-				},
-				{
-					id: 'satlabels',
-					type: 'raster',
-					source: 'satlabels',
-					layout: { visibility: baseVis('satellite') },
-					paint: { 'raster-fade-duration': 150 }
-				},
-				...skiLayers(dark)
-			],
-			glyphs: '/api/glyphs/{fontstack}/{range}.pbf',
-			sky: {
-				'sky-color': dark ? '#0d1626' : '#9cc6ec',
-				'horizon-color': dark ? '#2a3a52' : '#e4eef7',
-				'fog-color': dark ? '#1b2638' : '#dfe8f0',
-				'sky-horizon-blend': 0.6,
-				'horizon-fog-blend': 0.6,
-				'fog-ground-blend': 0.8,
-				'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0]
-			}
-		};
-	}
-
-	// ---- Runs, lifts and peaks (vector, so names follow the runs and stay upright) -----
-	const RUN = ['==', ['get', 'kind'], 'run'] as const;
-	const runColor: ExpressionSpecification = [
-		'match',
-		['get', 'difficulty'],
-		['novice', 'easy'],
-		'#2f9e44',
-		'intermediate',
-		'#1f6fd6',
-		['advanced'],
-		'#111111',
-		['expert', 'extreme'],
-		'#111111',
-		'freeride',
-		'#e8862a',
-		['match', ['get', 'type'], ['skitour', 'backcountry'], '#7b3fb0', '#5b6b7a']
-	];
-	const FONT = ['Open Sans Semibold'];
-	// Run and lift names keep a white outline in both themes: the difficulty colours
-	// (black runs especially) are only readable on a light edge.
-	const LABEL_HALO = 'rgba(255,255,255,0.95)';
-	const LABEL_PAINT = {
-		'text-halo-color': LABEL_HALO,
-		'text-halo-width': 2,
-		'text-halo-blur': 0.2
-	};
-	const SKI_LAYERS = ['run-casing', 'runs', 'lifts', 'run-labels', 'lift-labels'];
-
-	function peakLabel(): ExpressionSpecification {
-		const ft = units === 'imperial';
-		return [
-			'case',
-			['has', 'ele'],
-			[
-				'format',
-				['get', 'name'],
-				{},
-				'\n',
-				{},
-				[
-					'concat',
-					[
-						'number-format',
-						['round', ft ? ['*', ['get', 'ele'], 3.28084] : ['get', 'ele']],
-						{ 'max-fraction-digits': 0 }
-					],
-					ft ? ' ft' : ' m'
-				],
-				{ 'font-scale': 0.85 }
-			],
-			['get', 'name']
-		] as ExpressionSpecification;
-	}
-
-	function skiLayers(dark: boolean): StyleSpecification['layers'] {
-		const vis = radar && prefs.mapPistes === 'on' ? 'visible' : 'none';
-		const halo = dark ? 'rgba(10,15,25,0.85)' : 'rgba(255,255,255,0.9)';
-		// Zoom may only feed a top-level interpolate, so the casing gets its own stops.
-		const lineWidth = (add: number): ExpressionSpecification => [
-			'interpolate',
-			['linear'],
-			['zoom'],
-			11,
-			1 + add,
-			14,
-			2.2 + add,
-			17,
-			4 + add
-		];
-		const width = lineWidth(0);
-		return [
-			{
-				id: 'run-casing',
-				type: 'line',
-				source: 'ski',
-				minzoom: PISTE_ZOOM,
-				filter: RUN as unknown as ExpressionSpecification,
-				layout: { visibility: vis, 'line-cap': 'round', 'line-join': 'round' },
-				paint: { 'line-color': halo, 'line-width': lineWidth(2) }
-			},
-			{
-				id: 'runs',
-				type: 'line',
-				source: 'ski',
-				minzoom: PISTE_ZOOM,
-				filter: RUN as unknown as ExpressionSpecification,
-				layout: { visibility: vis, 'line-cap': 'round', 'line-join': 'round' },
-				paint: {
-					'line-color': runColor,
-					'line-width': width,
-					// Touring and backcountry routes dashed, like on paper maps.
-					'line-dasharray': [
-						'match',
-						['get', 'type'],
-						['skitour', 'backcountry', 'nordic', 'hike'],
-						['literal', [2, 1.5]],
-						['literal', [1, 0]]
-					] as unknown as number[]
-				}
-			},
-			{
-				id: 'lifts',
-				type: 'line',
-				source: 'ski',
-				minzoom: PISTE_ZOOM,
-				filter: ['==', ['get', 'kind'], 'lift'],
-				layout: { visibility: vis },
-				paint: {
-					'line-color': '#d6303a',
-					'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 16, 2.5]
-				}
-			},
-			{
-				id: 'run-labels',
-				type: 'symbol',
-				source: 'ski',
-				minzoom: 13,
-				filter: ['all', RUN as unknown as ExpressionSpecification, ['!=', ['get', 'name'], '']],
-				layout: {
-					visibility: vis,
-					'symbol-placement': 'line',
-					'text-field': ['get', 'name'],
-					'text-font': FONT,
-					'text-size': ['interpolate', ['linear'], ['zoom'], 13, 11.5, 17, 15],
-					// Face the viewer when tilted, so names on steep runs stay readable.
-					'text-pitch-alignment': 'viewport',
-					'text-letter-spacing': 0.02,
-					'symbol-spacing': 280,
-					'text-max-angle': 35,
-					// Beside the run rather than on it, so a dark line doesn't swallow the name.
-					'text-offset': [0, -0.9]
-				},
-				paint: { 'text-color': runColor, ...LABEL_PAINT }
-			},
-			{
-				id: 'lift-labels',
-				type: 'symbol',
-				source: 'ski',
-				minzoom: 14,
-				filter: ['all', ['==', ['get', 'kind'], 'lift'], ['!=', ['get', 'name'], '']],
-				layout: {
-					visibility: vis,
-					'symbol-placement': 'line',
-					'text-field': ['get', 'name'],
-					'text-font': FONT,
-					'text-size': 12,
-					'text-pitch-alignment': 'viewport',
-					'text-offset': [0, -0.85]
-				},
-				paint: { 'text-color': '#b0202a', ...LABEL_PAINT }
-			},
-			{
-				id: 'peaks',
-				type: 'circle',
-				source: 'ski',
-				minzoom: 10,
-				filter: ['==', ['get', 'kind'], 'peak'],
-				paint: {
-					'circle-radius': 3,
-					'circle-color': dark ? '#e8edf5' : '#3a3346',
-					'circle-stroke-width': 1.2,
-					'circle-stroke-color': halo
-				}
-			},
-			{
-				id: 'peak-labels',
-				type: 'symbol',
-				source: 'ski',
-				minzoom: 10,
-				filter: ['==', ['get', 'kind'], 'peak'],
-				layout: {
-					'text-field': peakLabel(),
-					'text-font': FONT,
-					'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10.5, 15, 13],
-					'text-anchor': 'top',
-					'text-offset': [0, 0.5],
-					'text-max-width': 8
-				},
-				paint: {
-					'text-color': dark ? '#eef2f8' : '#2a2433',
-					'text-halo-color': halo,
-					'text-halo-width': 1.6
-				}
-			}
-		];
-	}
-
-	function baseVis(base: 'topo' | 'satellite'): 'visible' | 'none' {
-		const want = radar ? prefs.mapBase : 'topo';
-		return want === base ? 'visible' : 'none';
-	}
-
-	/** Dimmed a little in the dark theme so the map doesn't glare. */
-	function basePaint(dark: boolean, darkBrightness = 0.72) {
-		return {
-			'raster-brightness-max': dark ? darkBrightness : 1,
-			'raster-saturation': dark ? -0.15 : 0
-		} as const;
+	function togglePanel(p: 'info' | 'offline' | 'layers') {
+		panel = panel === p ? 'none' : p;
 	}
 
 	// ---- Theme ----------------------------------------------------------------
@@ -448,8 +131,8 @@
 			map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
 			map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
 		}
-		const sky = mapStyle(d).sky;
-		if (sky) map.setSky(sky);
+		const s = sky(d);
+		if (s) map.setSky(s);
 	});
 
 	$effect(() => {
@@ -477,23 +160,82 @@
 	});
 
 	$effect(() => {
-		const want = pistesOn;
+		const runs = runsOn;
+		const peaks = peaksOn;
 		if (!ready || !map) return;
-		for (const id of SKI_LAYERS) map.setLayoutProperty(id, 'visibility', want ? 'visible' : 'none');
+		for (const id of SKI_LAYERS) map.setLayoutProperty(id, 'visibility', runs ? 'visible' : 'none');
+		for (const id of PEAK_LAYERS)
+			map.setLayoutProperty(id, 'visibility', peaks ? 'visible' : 'none');
 	});
 
-	// Peak heights in the viewer's units; label colours with the theme.
+	// Peak heights and contours in the viewer's units; label colours with the theme.
 	$effect(() => {
-		void units;
+		const u = units;
 		const d = dark;
 		if (!ready || !map) return;
-		map.setLayoutProperty('peak-labels', 'text-field', peakLabel());
-		const halo = d ? 'rgba(10,15,25,0.85)' : 'rgba(255,255,255,0.9)';
-		map.setPaintProperty('peak-labels', 'text-halo-color', halo);
-		map.setPaintProperty('run-casing', 'line-color', halo);
-		map.setPaintProperty('peak-labels', 'text-color', d ? '#eef2f8' : '#2a2433');
-		map.setPaintProperty('peaks', 'circle-color', d ? '#e8edf5' : '#3a3346');
+		map.setLayoutProperty('peak-labels', 'text-field', peakLabel(u));
+		map.setPaintProperty('peak-labels', 'text-halo-color', halo(d));
+		map.setPaintProperty('run-casing', 'line-color', halo(d));
+		map.setPaintProperty('peak-labels', 'text-color', peakText(d));
+		map.setPaintProperty('peaks', 'circle-color', peakColor(d));
+		if (radar) setTerrainUnits(map, u);
 	});
+
+	// ---- Terrain layers ------------------------------------------------------------
+	$effect(() => {
+		const o = overlayMode;
+		if (ready && map && radar) setOverlay(map, o);
+	});
+	$effect(() => {
+		const s = prefs.mapShade;
+		const d = dark;
+		const b = satellite ? 'satellite' : 'topo';
+		if (ready && map && radar) setShade(map, s, d, b);
+	});
+	$effect(() => {
+		const c = contoursOn;
+		const d = dark;
+		if (ready && map && radar) setContours(map, c, d);
+	});
+
+	// ---- Inspector: tap the map for the terrain there --------------------------------
+	let probe = $state<{ lat: number; lon: number } | null>(null);
+	let facts = $state<PointFacts | null>(null);
+	let factsError = $state<string | null>(null);
+	let probeMarker: Marker | null = null;
+	let probeToken = 0;
+
+	async function inspect(lat: number, lon: number) {
+		const c = terrainClient();
+		if (!c || !map || !ml) return;
+		const token = ++probeToken;
+		probe = { lat, lon };
+		facts = null;
+		factsError = null;
+		if (!probeMarker) {
+			const dot = document.createElement('div');
+			dot.className = 'probe';
+			probeMarker = new ml.Marker({ element: dot, opacityWhenCovered: '1' });
+		}
+		probeMarker.setLngLat([lon, lat]).addTo(map);
+		try {
+			const f = await c.point(lat, lon);
+			if (token === probeToken) facts = f;
+		} catch (e) {
+			if (token === probeToken)
+				factsError = offline
+					? 'No saved terrain here. Save this area for offline use first.'
+					: `Couldn't measure the terrain here (${e instanceof Error ? e.message : e}).`;
+		}
+	}
+
+	function closeInspector() {
+		probeToken++;
+		probe = null;
+		facts = null;
+		factsError = null;
+		probeMarker?.remove();
+	}
 
 	// 3D: drape everything over the terrain and tilt the view; back to flat and north-up
 	// when it's switched off.
@@ -535,9 +277,9 @@
 		return () => window.removeEventListener('resize', measure);
 	});
 
-	// ---- Precipitation timeline ------------------------------------------------
+	// ---- Weather timeline ------------------------------------------------------------
 	// The server draws every frame; here we download them all once and swap them.
-	const on = $derived(radar && prefs.mapPrecip === 'on');
+	const on = $derived(radar && prefs.mapWeather !== 'off');
 	let timeline = $state<Timeline | null>(null);
 	/** Why precipitation isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
@@ -557,56 +299,6 @@
 	const current = $derived<Frame | undefined>(frames[Math.min(frame, count - 1)]);
 	const label = $derived(current ? frameLabel(current, now) : null);
 	const waiting = $derived(!!current && shown !== current.file);
-	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
-	/** The slider's width in pixels, so day names can be kept far enough apart to read. */
-	let trackWidth = $state(300);
-	/** A day name needs about this much room (a three-letter name and its tick mark). */
-	const TICK_PX = 30;
-	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
-	// Beyond two days a day is only a few frames wide, so names that would crowd the one
-	// before are left out.
-	const ticks = $derived.by(() => {
-		const out: { at: number; name: string; now?: boolean }[] = [];
-		const nowAt = timeline?.now ?? -1;
-		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
-		let prevDay = -1;
-		frames.forEach((f, i) => {
-			if (f.kind !== 'forecast') return;
-			const start = new Date((f.t - (f.span_h || 1) * 3600) * 1000);
-			const day = start.getDate();
-			const newDay = prevDay >= 0 && day !== prevDay;
-			prevDay = day;
-			const last = out[out.length - 1];
-			if (newDay && !(last && ((pct(i) - last.at) / 100) * trackWidth < TICK_PX))
-				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
-		});
-		return out;
-	});
-	// The nowcast's stretch of the slider, between the radar and the forecast.
-	const nowcastBand = $derived.by(() => {
-		const from = timeline?.now ?? -1;
-		const to = timeline?.nowcastEnd ?? -1;
-		if (from < 0 || to <= from) return null;
-		return { left: pct(from), width: pct(to) - pct(from) };
-	});
-	// Beyond ~48 h: 3- and 6-hour averages, a coarser stretch of the slider.
-	const extendedBand = $derived.by(() => {
-		const from = timeline?.extendedFrom ?? -1;
-		if (from < 1 || count < 2) return null;
-		const left = (pct(from - 1) + pct(from)) / 2;
-		return { left, width: 100 - left };
-	});
-	// The slider track: downloaded frames shaded, like a video's buffered range.
-	const buffered = $derived.by(() => {
-		if (count < 2 || ready_.size >= count) return 'none';
-		const w = 100 / (count - 1);
-		const stops: string[] = [];
-		frames.forEach((f, i) => {
-			const c = ready_.has(f.file) ? 'var(--buffered)' : 'transparent';
-			stops.push(`${c} ${Math.max(0, (i - 0.5) * w)}%`, `${c} ${Math.min(100, (i + 0.5) * w)}%`);
-		});
-		return `linear-gradient(90deg, ${stops.join(', ')})`;
-	});
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
@@ -715,7 +407,7 @@
 					tl.width,
 					tl.height,
 					totalsMode ? TOTAL_OPACITY : PRECIP_OPACITY,
-					'satlabels'
+					PRECIP_BEFORE
 				);
 			}
 			void show();
@@ -795,16 +487,34 @@
 	$effect(() => {
 		if (!el) return;
 		let cancelled = false;
-		import('maplibre-gl').then((mod) => {
+		import('maplibre-gl').then(async (mod) => {
 			if (cancelled || !el) return;
 			ml = (mod as unknown as { default?: typeof mod }).default ?? mod;
 			// MapLibre 6 looks for its worker next to its own file, which bundling moves;
 			// point it at the copy Vite ships.
 			ml.setWorkerUrl(maplibreWorker);
+			// The terrain worker and contours only matter on the full map.
+			const terrain = radar ? await setupTerrain(ml) : { worker: false };
+			if (cancelled || !el) return;
+			analysis = terrain.worker;
+			const ctiles = radar ? contourTiles(units) : undefined;
+			contoursReady = !!ctiles;
 			const phone = matchMedia('(max-width: 700px)').matches;
 			map = new ml.Map({
 				container: el,
-				style: mapStyle(dark),
+				style: mapStyle({
+					dark,
+					full: radar,
+					units,
+					base: prefs.mapBase,
+					runs: prefs.mapFeatures.has('runs'),
+					peaks: prefs.mapFeatures.has('peaks'),
+					contours: contoursOn,
+					shade: prefs.mapShade,
+					overlay: overlayMode,
+					worker: terrain.worker,
+					contourTiles: ctiles
+				}),
 				center: [-120, 48],
 				zoom: 5,
 				maxZoom: 18,
@@ -837,6 +547,19 @@
 			map.on('pitchend', () => {
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
 			});
+			// A tap on the map itself (not a marker or a popup) asks what the terrain is there.
+			map.on('click', (e) => {
+				if (!radar || !analysis) return;
+				if (popups.some((p) => p.isOpen())) {
+					for (const p of popups) p.remove();
+					return;
+				}
+				if (panel !== 'none') {
+					panel = 'none';
+					return;
+				}
+				void inspect(e.lngLat.lat, e.lngLat.lng);
+			});
 			map.on('load', () => {
 				if (cancelled) return;
 				// Credits start folded to their (i) button, which opens them.
@@ -861,6 +584,8 @@
 			store.clear();
 			for (const m of markers) m.remove();
 			markers = [];
+			probeMarker?.remove();
+			probeMarker = null;
 			map?.remove();
 			map = null;
 		};
@@ -957,12 +682,14 @@
 	}
 
 	const unit = $derived(units === 'imperial' ? 'in' : 'cm');
-	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
 	const source = $derived(current ? frameSource(current) : '');
 	const radarShown = $derived(!!current && current.kind !== 'forecast');
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && infoOpen && (infoOpen = false)} />
+<svelte:window
+	onkeydown={(e) =>
+		e.key === 'Escape' && (panel !== 'none' ? (panel = 'none') : probe && closeInspector())}
+/>
 
 <div
 	class="wrap"
@@ -1009,11 +736,12 @@
 			>
 			<button
 				class="tool"
-				class:active={satellite}
-				aria-pressed={satellite}
-				onclick={() => prefs.setMapBase(satellite ? 'topo' : 'satellite')}
-				title={satellite ? 'Back to the topo map' : 'Satellite imagery'}
-				aria-label="Satellite"
+				class:active={panel === 'layers'}
+				aria-expanded={panel === 'layers'}
+				aria-controls="map-layers"
+				onclick={() => togglePanel('layers')}
+				title="Base map, weather, terrain and what's shown"
+				aria-label="Layers"
 			>
 				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
 					><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" /></svg
@@ -1021,42 +749,9 @@
 			</button>
 			<button
 				class="tool"
-				class:active={on}
-				aria-pressed={on}
-				onclick={() => prefs.setMapPrecip(!on)}
-				title="Show or hide precipitation"
-				aria-label="Precipitation"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path
-						d="M7 15a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 8a3.5 3.5 0 0 1 .5 7M8 18l-1 2M12 18l-1 2M16 18l-1 2"
-					/></svg
-				>
-			</button>
-			<button
-				class="tool"
-				class:active={pistesOn}
-				aria-pressed={pistesOn}
-				onclick={() => prefs.setMapPistes(!pistesOn)}
-				title={zoom < PISTE_ZOOM
-					? 'Ski runs (zoom in to see them)'
-					: 'Show or hide ski runs and touring routes'}
-				aria-label="Ski runs"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><circle cx="15" cy="4.5" r="1.8" /><path
-						d="M3 20l18-6M7 18.7l3.5-6 4 1.5-1.5-5-3.5 1.5L8 9M14 8.7l3 2.3"
-					/></svg
-				>
-			</button>
-			<button
-				class="tool"
-				class:active={offlineOpen}
-				aria-expanded={offlineOpen}
-				onclick={() => {
-					offlineOpen = !offlineOpen;
-					infoOpen = false;
-				}}
+				class:active={panel === 'offline'}
+				aria-expanded={panel === 'offline'}
+				onclick={() => togglePanel('offline')}
 				title="Save maps for use with no signal"
 				aria-label="Offline maps"
 			>
@@ -1066,13 +761,10 @@
 			</button>
 			<button
 				class="tool"
-				class:active={infoOpen}
-				aria-expanded={infoOpen}
+				class:active={panel === 'info'}
+				aria-expanded={panel === 'info'}
 				aria-controls="map-info"
-				onclick={() => {
-					infoOpen = !infoOpen;
-					offlineOpen = false;
-				}}
+				onclick={() => togglePanel('info')}
 				aria-label="About this map"
 			>
 				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
@@ -1081,35 +773,53 @@
 			</button>
 		</div>
 
-		{#if offlineOpen}
+		{#if panel === 'layers'}
+			<LayersSheet {analysis} contours={contoursReady} {offline} onclose={() => (panel = 'none')} />
+		{/if}
+
+		{#if panel === 'offline'}
 			<OfflineMaps
 				places={rows
 					.filter((r) => r.lat != null && r.lon != null)
 					.map((r) => ({ id: r.id, name: r.name, lat: r.lat!, lon: r.lon! }))}
-				onclose={() => (offlineOpen = false)}
+				onclose={() => (panel = 'none')}
 			/>
 		{/if}
 
-		{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline || (on && tooClose)}
-			<p class="note glass" role="status">
-				{#if on && tooClose && !offline && locState !== 'locating' && locState !== 'denied' && locState !== 'unavailable'}
-					Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.
-				{/if}
-				{#if offline}
-					Offline: showing saved maps.
-				{/if}
-				{#if locState === 'locating'}
-					Finding you…
-				{:else if locState === 'denied'}
-					Location is off for this site. On iPhone: Settings → Privacy & Security → Location
-					Services → Safari Websites → While Using.
-				{:else if locState === 'unavailable'}
-					No GPS fix yet. Keep the phone where it can see the sky.
-				{/if}
-			</p>
-		{/if}
+		<Legend overlay={overlayMode} {units} {zoom} />
 
-		{#if infoOpen}
+		<div class="top">
+			{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline || (on && tooClose)}
+				<p class="note glass" role="status">
+					{#if on && tooClose && !offline && locState !== 'locating' && locState !== 'denied' && locState !== 'unavailable'}
+						Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.
+					{/if}
+					{#if offline}
+						Offline: showing saved maps.
+					{/if}
+					{#if locState === 'locating'}
+						Finding you…
+					{:else if locState === 'denied'}
+						Location is off for this site. On iPhone: Settings → Privacy & Security → Location
+						Services → Safari Websites → While Using.
+					{:else if locState === 'unavailable'}
+						No GPS fix yet. Keep the phone where it can see the sky.
+					{/if}
+				</p>
+			{/if}
+			{#if probe}
+				<Inspector
+					lat={probe.lat}
+					lon={probe.lon}
+					{facts}
+					error={factsError}
+					{units}
+					onclose={closeInspector}
+				/>
+			{/if}
+		</div>
+
+		{#if panel === 'info'}
 			<div class="info" role="dialog" aria-label="About this map" id="map-info">
 				<p class="item">
 					<span class="pin" aria-hidden="true">1.2</span> Next 5 days of snow ({unit}). Tap one for
@@ -1134,129 +844,31 @@
 						{#if totalsMode && total}{totalSources(total)}{/if}
 					</p>
 				{/if}
-				<button class="close" onclick={() => (infoOpen = false)}>Close</button>
+				<p class="faint">
+					Terrain: elevation from Mapterhorn (US lidar to 1 m, Canadian lidar to 2 m, 10–30 m
+					elsewhere). Slope and aspect are worked out on this device from about 10 m terrain, so
+					small features like cornices and gully walls don't show. Tap the map for the numbers at a
+					spot.
+				</p>
+				<button class="close" onclick={() => (panel = 'none')}>Close</button>
 			</div>
 		{/if}
 
 		{#if on}
-			<section class="controls glass" aria-label="Precipitation">
-				<div class="modes seg" role="group" aria-label="Show">
-					<button aria-pressed={!totalsMode} onclick={() => prefs.setMapMode('timeline')}
-						>Radar & forecast</button
-					>
-					<button aria-pressed={totalsMode} onclick={() => prefs.setMapMode('totals')}
-						>Snow total</button
-					>
-				</div>
-				<!-- Fixed rows, so the box keeps its size whatever it shows. -->
-				<div class="main">
-					{#if totalsMode}
-						{#if total}
-							<div class="totals">
-								<div class="seg" role="group" aria-label="Window">
-									{#each totals as t (t.window)}
-										<button
-											aria-pressed={t.window === total.window}
-											aria-label={totalName(t)}
-											onclick={() => (totalWindow = t.window)}>{totalLabel(t)}</button
-										>
-									{/each}
-								</div>
-								<span class="span faint" title={totalSources(total)}>{totalSpan(total)}</span>
-							</div>
-						{:else if loadError}
-							<p class="note">{loadError}</p>
-						{:else}
-							<p class="note">Snow totals aren't drawn yet.</p>
-						{/if}
-					{:else if count && label && current}
-						<div class="player">
-							<button
-								class="play"
-								onclick={() => (playing = !playing)}
-								aria-label={playing ? 'Pause' : 'Play'}
-							>
-								<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-									{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
-								</svg>
-							</button>
-							<div class="track" bind:clientWidth={trackWidth}>
-								<input
-									type="range"
-									min="0"
-									max={Math.max(0, count - 1)}
-									bind:value={frame}
-									oninput={() => (playing = false)}
-									aria-label="Time"
-									aria-valuetext={`${label.when}, ${label.rel}`}
-									style:--buffer={buffered}
-								/>
-								{#if nowcastBand || extendedBand}
-									<div class="bands" aria-hidden="true">
-										{#if nowcastBand}
-											<span
-												class="nowband"
-												title="Nowcast"
-												style:left="{nowcastBand.left}%"
-												style:width="{nowcastBand.width}%"
-											></span>
-										{/if}
-										{#if extendedBand}
-											<span
-												class="extband"
-												title="3- and 6-hour averages"
-												style:left="{extendedBand.left}%"
-												style:width="{extendedBand.width}%"
-											></span>
-										{/if}
-									</div>
-								{/if}
-								<div class="ticks" aria-hidden="true">
-									{#each ticks as d (d.at)}
-										<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
-									{/each}
-								</div>
-							</div>
-							<div class="time" aria-live="off">
-								<strong class="num">{label.when}</strong>
-								<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
-									>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{label.rel}</span
-								>
-							</div>
-						</div>
-					{:else if loadError}
-						<p class="note">{loadError}</p>
-					{:else}
-						<p class="note">Loading…</p>
-					{/if}
-				</div>
-				<div class="foot">
-					{#if totalsMode}
-						{#if total}
-							<div class="key total-key" aria-label="Snow total, {unit}">
-								<span class="name">{unit}</span>
-								<span class="ticks-ramp">
-									{#each TOTAL as s (s.from)}
-										<span class="cell" style:background={s.color}>{totalTick(s.from, units)}</span>
-									{/each}
-								</span>
-							</div>
-						{/if}
-					{:else}
-						<div class="key">
-							{#each legendRamps as r (r.kind)}
-								<span class="kind">
-									<span class="name">{r.label}</span>
-									<span class="ramp" aria-hidden="true">
-										{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
-									</span>
-									<span class="top">{rampTop(r, units)}</span>
-								</span>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			</section>
+			<TimelineControls
+				{timeline}
+				{units}
+				{totalsMode}
+				bind:frame
+				bind:playing
+				bind:totalWindow
+				{total}
+				{current}
+				{label}
+				{waiting}
+				ready={ready_}
+				{loadError}
+			/>
 		{/if}
 	{/if}
 </div>
@@ -1414,19 +1026,42 @@
 	.tool svg .fill {
 		fill: currentColor;
 	}
-	.note {
+	/* Notes and the inspector: a column at the top centre, clear of the side controls. */
+	.top {
 		position: absolute;
 		top: 10px;
 		left: 60px;
 		right: 54px;
-		max-width: 420px;
-		margin: 0 auto;
 		z-index: 1001;
+		display: grid;
+		justify-items: center;
+		gap: 8px;
+		pointer-events: none;
+	}
+	.note {
+		max-width: 420px;
+		margin: 0;
 		padding: 8px 12px;
 		border-radius: 12px;
 		font-size: 0.8rem;
 		text-align: center;
 		color: var(--text);
+		pointer-events: auto;
+	}
+	/* Phones: the inspector spans the top, so the terrain key steps aside while it's open. */
+	@media (max-width: 700px) {
+		.wrap:has(:global(.insp)) :global(.legend) {
+			display: none;
+		}
+	}
+	/* The spot the inspector is describing. */
+	:global(.probe) {
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: var(--accent);
+		border: 3px solid #fff;
+		box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
 	}
 	:global(.userloc) {
 		width: 22px;
@@ -1497,305 +1132,6 @@
 		font-weight: 600;
 		cursor: pointer;
 		padding: 2px 4px;
-	}
-
-	/* A note inside the controls sits in the flow, not over the map. */
-	.controls .note {
-		position: static;
-		max-width: none;
-		margin: 0;
-		padding: 0 4px;
-		color: var(--text-2);
-		font-weight: 500;
-		cursor: default;
-	}
-	.controls {
-		position: absolute;
-		left: 10px;
-		right: 10px;
-		bottom: 10px;
-		z-index: 1000;
-		max-width: 640px;
-		margin: 0 auto;
-		display: grid;
-		gap: 6px;
-		padding: 8px 12px 8px 8px;
-		border-radius: 18px;
-		font-size: 0.85rem;
-	}
-	/* Clear the floating tab bar on phones. */
-	@media (max-width: 1099px) {
-		.controls {
-			bottom: calc(84px + env(safe-area-inset-bottom));
-		}
-	}
-	.modes {
-		justify-self: start;
-	}
-	.modes button {
-		font-size: 0.78rem;
-		padding: 3px 10px;
-	}
-	/* Two fixed rows under the mode switch, so the box never changes size: the player
-	   (or the total's window), then one line of key. */
-	.main {
-		height: 50px;
-		display: flex;
-		align-items: center;
-		min-width: 0;
-	}
-	.main > * {
-		flex: 1;
-		min-width: 0;
-	}
-	.main .note {
-		display: -webkit-box;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
-		overflow: hidden;
-		font-size: 0.8rem;
-		line-height: 1.3;
-	}
-	.foot {
-		height: 18px;
-		display: flex;
-		align-items: center;
-		min-width: 0;
-		overflow: hidden;
-	}
-	.foot .key {
-		flex: 1;
-		min-width: 0;
-		flex-wrap: nowrap;
-		white-space: nowrap;
-		overflow: hidden;
-	}
-	/* The window picker scrolls sideways on a phone; the dates sit under it. */
-	.totals {
-		display: flex;
-		flex-direction: column;
-		align-items: stretch;
-		gap: 3px;
-	}
-	.totals .seg {
-		flex: 0 0 auto;
-		display: flex;
-		overflow-x: auto;
-		scrollbar-width: none;
-		-webkit-overflow-scrolling: touch;
-	}
-	.totals .seg::-webkit-scrollbar {
-		display: none;
-	}
-	.totals .span {
-		min-width: 0;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.totals .seg button {
-		font-size: 0.78rem;
-		padding: 3px 9px;
-	}
-	.totals .span {
-		font-size: 0.75rem;
-	}
-	.totals .seg button {
-		min-width: 44px;
-		flex: 0 0 auto;
-		white-space: nowrap;
-	}
-	.total-key {
-		gap: 6px;
-	}
-	.ticks-ramp {
-		display: flex;
-		flex: 1;
-		min-width: 0;
-		border-radius: 4px;
-		overflow: hidden;
-	}
-	.ticks-ramp .cell {
-		flex: 1;
-		text-align: center;
-		font: 600 0.62rem/1.6 var(--font-num, sans-serif);
-		color: #1f1b2e;
-	}
-	.player {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-	.play {
-		width: 38px;
-		height: 38px;
-		flex-shrink: 0;
-		display: grid;
-		place-items: center;
-		border: 0;
-		border-radius: 999px;
-		background: var(--accent);
-		color: var(--on-accent);
-		cursor: pointer;
-	}
-	.play svg {
-		fill: currentColor;
-		stroke: currentColor;
-		stroke-width: 2.4;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	}
-	.track {
-		flex: 1;
-		min-width: 0;
-		position: relative;
-	}
-	.track input {
-		width: 100%;
-		margin: 0;
-		accent-color: var(--accent);
-		background: var(--buffer, none);
-		border-radius: 999px;
-	}
-	.ticks {
-		position: relative;
-		height: 13px;
-		margin: 0 8px;
-	}
-	.ticks span {
-		position: absolute;
-		top: 0;
-		transform: translateX(-50%);
-		font-size: 0.68rem;
-		color: var(--text-2);
-		border-left: 1px solid var(--border);
-		padding-left: 3px;
-		line-height: 1;
-		white-space: nowrap;
-	}
-	.ticks span.now {
-		color: var(--accent-ink);
-		font-weight: 600;
-		border-left-color: var(--accent);
-	}
-	/* One width whatever it says, so the slider beside it never changes size while it's
-	   being dragged. Wide enough for the longest labels ("Tue 11 PM–12 AM",
-	   "6-hour avg · in 10 days", "radar · 2 h 48 min ago"). */
-	.time {
-		display: grid;
-		text-align: right;
-		flex: 0 0 8.1rem;
-		width: 8.1rem;
-		line-height: 1.25;
-		font-variant-numeric: tabular-nums;
-	}
-	.time strong {
-		color: var(--text);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.time span {
-		position: relative;
-		color: var(--text-2);
-		font-size: 0.72rem;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.time span.fc {
-		color: var(--accent-ink);
-	}
-	.time span.nc {
-		color: var(--text);
-	}
-	/* The nowcast's stretch: a thin bar just above the slider, inset like the ticks. */
-	.bands {
-		position: absolute;
-		top: -3px;
-		left: 8px;
-		right: 8px;
-		height: 3px;
-		pointer-events: none;
-	}
-	.nowband {
-		position: absolute;
-		top: 0;
-		height: 100%;
-		border-radius: 2px;
-		background: color-mix(in srgb, var(--accent) 60%, transparent);
-	}
-	/* The 3- and 6-hour stretch: dashed, to read as coarser. */
-	.extband {
-		position: absolute;
-		top: 0;
-		height: 100%;
-		border-radius: 2px;
-		background: repeating-linear-gradient(
-			90deg,
-			color-mix(in srgb, var(--text-2) 55%, transparent) 0 4px,
-			transparent 4px 7px
-		);
-	}
-	.spin {
-		display: inline-block;
-		width: 9px;
-		height: 9px;
-		margin-right: 5px;
-		border: 2px solid currentColor;
-		border-right-color: transparent;
-		border-radius: 50%;
-		vertical-align: -1px;
-		animation: spin 0.8s linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.spin {
-			animation-duration: 3s;
-		}
-	}
-	.note {
-		margin: 4px 6px;
-		color: var(--text-2);
-	}
-	.key {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 4px 12px;
-		font-size: 0.7rem;
-		color: var(--text-2);
-		padding-left: 4px;
-	}
-	.kind {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-	}
-	.kind .name {
-		font-weight: 600;
-		color: var(--text);
-	}
-	.ramp {
-		display: inline-flex;
-		height: 9px;
-		border-radius: 3px;
-		overflow: hidden;
-		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
-	}
-	.ramp i {
-		width: 9px;
-	}
-	/* Phones: keep the key to one line; the amounts are in the info panel. */
-	@media (max-width: 480px) {
-		.key .top {
-			display: none;
-		}
 	}
 
 	.legend {

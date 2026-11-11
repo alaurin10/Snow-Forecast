@@ -68,7 +68,8 @@ def inline_script_hashes(index: Path) -> list[str]:
 
 
 def content_security_policy(script_hashes: list[str]) -> str:
-    """What the page may load. Third parties: AWS terrain tiles for the 3D map (fetched),
+    """What the page may load. Third parties: Mapterhorn elevation tiles (with AWS terrain
+    tiles as the fallback) for 3D, shading, slope and contours (fetched),
     and any https image (webcam stills come from each resort's own server)."""
     return "; ".join(
         [
@@ -79,7 +80,7 @@ def content_security_policy(script_hashes: list[str]) -> str:
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "font-src 'self' data:",
-            "connect-src 'self' https://s3.amazonaws.com",
+            "connect-src 'self' https://tiles.mapterhorn.com https://s3.amazonaws.com",
             "manifest-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",

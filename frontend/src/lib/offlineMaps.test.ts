@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { areaUrls, estimateBytes, latToY, lonToX, sharedUrls, tileRange } from './offlineMaps';
+import {
+	areaUrls,
+	estimateBytes,
+	latToY,
+	legacyDemUrls,
+	lonToX,
+	sharedUrls,
+	tileRange
+} from './offlineMaps';
 
 describe('offline map areas', () => {
 	it('finds the same tile as the map for Alpental', () => {
@@ -16,20 +24,31 @@ describe('offline map areas', () => {
 		expect(r.y1 - r.y0 + 1).toBeLessThanOrEqual(22);
 	});
 
-	it('asks for the topo map to zoom 15 and terrain through the server and AWS', () => {
+	it('asks for the topo map to zoom 15 through the server and terrain from Mapterhorn', () => {
 		const { topo, dem } = areaUrls(47.445, -121.427, 'https://snow.example');
 		expect(topo.every((u) => u.startsWith('https://snow.example/api/tiles/otm/'))).toBe(true);
 		expect(topo.some((u) => u.includes('/otm/15/'))).toBe(true);
 		expect(topo.some((u) => u.includes('/otm/16/'))).toBe(false);
-		expect(dem.every((u) => u.startsWith('https://s3.amazonaws.com/elevation-tiles-prod/'))).toBe(
-			true
-		);
-		expect(dem.some((u) => u.includes('/terrarium/15/'))).toBe(true);
+		expect(
+			dem.every((u) => /^https:\/\/tiles\.mapterhorn\.com\/\d+\/\d+\/\d+\.webp$/.test(u))
+		).toBe(true);
+		// 512 px tiles: zoom 14 is as detailed as the old 256 px zoom 15.
+		expect(dem.some((u) => u.includes('.com/14/'))).toBe(true);
+		expect(dem.some((u) => u.includes('.com/15/'))).toBe(false);
+		expect(new Set(dem).size).toBe(dem.length);
 		// Never Esri: its terms don't allow storing tiles for offline use.
 		expect([...topo, ...dem].some((u) => /esri|sat/.test(u))).toBe(false);
 		expect(new Set(topo).size).toBe(topo.length);
 		// Light on OpenTopoMap's volunteer servers: a few hundred tiles an area.
 		expect(topo.length).toBeLessThan(700);
+	});
+
+	it('still knows the AWS tiles older saved areas hold, to clear them', () => {
+		const old = legacyDemUrls(47.445, -121.427);
+		expect(old.every((u) => u.startsWith('https://s3.amazonaws.com/elevation-tiles-prod/'))).toBe(
+			true
+		);
+		expect(old.some((u) => u.includes('/terrarium/15/'))).toBe(true);
 	});
 
 	it('keeps an area to tens of megabytes', () => {

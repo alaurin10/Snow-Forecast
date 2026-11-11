@@ -48,6 +48,9 @@ frontend/src/
   routes/     overview, location/[id], map, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
+              map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
+              Legend, Inspector; terrain/ decodes elevation and works out slope and
+              aspect in a Web Worker, served to MapLibre as dem:// and terrain://)
   service-worker.ts
 ```
 
@@ -131,7 +134,7 @@ and recorded by name. Nightly (`store/retention.py`):
   push service, are capped in size and number, and are rate limited; map tile
   cache misses are rate limited and the cache is capped on disk.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
-  third parties limited to AWS terrain tiles and https images), `nosniff`,
+  third parties limited to Mapterhorn and AWS elevation tiles, and https images), `nosniff`,
   frame denial, a referrer policy, a permissions policy, and HSTS in production.
 - **Links** shown to visitors must be http(s); bad upstream links are dropped.
 - **Privacy**: no analytics; the owner's contact email goes only to NWS, which

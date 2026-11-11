@@ -394,7 +394,7 @@ New `frontend/src/lib/map/terrain/`:
 |---|---|---|
 | 1 | Foundations and wide radar | A0, A1, fixed West box (done, see "Milestone 1 notes") |
 | 2 | Longer, better forecast | A2, A3 and the data-space blend (done, see "Milestone 2 notes") |
-| 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) |
+| 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) (done, see "Milestone 3 notes") |
 | 4 | Sun and wind | B4, B5 |
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` |
 | 6 | Recent satellite | B6 |
@@ -524,6 +524,41 @@ What shipped, and where it differs from the plan above:
   actual border (they are the same line across this box, except the south tip of Vancouver
   Island, which is in the fade).
 
+## Milestone 3 notes (done 11 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **Split**: `lib/map/style.ts` (sources and layers), `lib/map/layers/terrain.ts` (wiring and
+  updates), `lib/map/Timeline.svelte` (the weather controls and key), `LayersSheet.svelte`,
+  `Legend.svelte` (terrain key), `Inspector.svelte`. `MapView.svelte` is ~1,200 lines (was
+  1,880); the precipitation state and its effects stay in it for now rather than in
+  `layers/precip.ts`. The tool column is Location, 3D, Layers, Offline, About.
+- **Prefs**: `mapWeather` (`radar | totals | off`), `mapOverlay` (`none | slope | aspect | bands`),
+  `mapFeatures` (`runs`, `peaks`, `contours`) and `mapShade` (`off | light | strong`, the
+  "strength in settings" lives in the Layers sheet). Old `mapPrecip`/`mapMode`/`mapPistes`
+  values are read once as defaults.
+- **B1 differs**: Mapterhorn answers 404 over open sea at every zoom and beyond each area's
+  finest zoom (z15 in Canadian lidar, z12 in remote BC), so `maxzoom: 16` on a plain URL
+  would leave holes. Elevation goes through a `dem://` protocol served by the terrain
+  worker, which fills a missing tile from its parent (z > 12) or as sea level (z ≤ 12),
+  and switches to the AWS tiles after four failures in a row. Two raster-dem sources
+  (3D to z16, shading/bands to z15) as MapLibre advises. Offline areas: Mapterhorn
+  z7–13 plus z14 within 4 km (~7 MB of terrain instead of ~20 MB); 404s are skipped;
+  removing an area also clears AWS tiles saved before the switch. PMTiles hardening not done.
+- **B2**: `terrain/dem.ts` (fetch, decode, gap-fill, LRU of decoded tiles: 48 desktop,
+  28 phone), `terrain/analysis.ts` (Horn slope/aspect, painting), `analysis.worker.ts`,
+  `client.ts` (`dem://` and `terrain://` protocols). Overlays from zoom 8. `match` mode
+  is built and tested, waiting for B7.2. Elevation bands: `color-relief` with hard steps
+  every 500 m / 1,500 ft (it only accepts `interpolate`, so each step is two stops 0.5 m apart).
+- **B3**: hill shading (`igor`) on every base, lighter on Esri topo. Contours are drawn on
+  the satellite base only; `maplibre-contour` works with MapLibre 6.17 (checked in headless
+  Chromium), loaded on demand, to z12.
+- **B8 (terrain facts only)**: tap the map (not a marker) for elevation (finest tile to
+  z15), slope and aspect (on the z12 grid) and the grid sizes behind them. The avalanche
+  elevation band is left for milestone 5, which brings the treeline numbers.
+- Not done: the ≤ 300 MB phone memory measurement (headless Chromium here renders with
+  SwiftShader, where a 3D screenshot alone takes ~30 s).
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,tiles_render,probe,sat}.py`,
@@ -568,7 +603,7 @@ What shipped, and where it differs from the plan above:
 - **Treeline elevations are approximations**, and so is everything built on them.
 - **Display terms** for the concern index must be re-read before `HAZARD_INDEX=public`.
 - **Not verified from the sandbox**: `api.avalanche.ca` (unreachable here, works in
-  production today), ECMWF open-data paths, `maplibre-contour` with MapLibre 6,
+  production today), ECMWF open-data paths,
   Avalanche Canada MIN endpoint.
 - **Not available for free**: an open ATES feed, US avalanche observations without a key,
   sub-daily high-resolution satellite, and radar coverage in terrain-blocked valleys.

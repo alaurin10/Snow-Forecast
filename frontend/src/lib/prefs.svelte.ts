@@ -16,6 +16,16 @@ export const THEME_FAMILIES: readonly ThemeFamily[] = [
 /** Full: everything moves. Subtle: no falling snow or count-ups. Off: nothing moves. */
 export type Motion = 'full' | 'subtle' | 'off';
 export type BandName = 'base' | 'mid' | 'summit';
+/** The one weather layer on the map. */
+export type MapWeather = 'radar' | 'totals' | 'off';
+export const MAP_WEATHER: readonly MapWeather[] = ['radar', 'totals', 'off'] as const;
+/** The one terrain overlay on the map. */
+export type MapOverlay = 'none' | 'slope' | 'aspect' | 'bands';
+export const MAP_OVERLAYS: readonly MapOverlay[] = ['none', 'slope', 'aspect', 'bands'] as const;
+/** Things drawn on top that can each be on or off. */
+export type MapFeature = 'runs' | 'peaks' | 'contours';
+export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours'] as const;
+export type MapShade = 'off' | 'light' | 'strong';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
 	try {
@@ -24,6 +34,36 @@ function load<T extends string>(key: string, allowed: readonly T[], fallback: T)
 	} catch {
 		return fallback;
 	}
+}
+
+function read(key: string): string | null {
+	try {
+		return localStorage.getItem(key);
+	} catch {
+		return null;
+	}
+}
+
+/** The weather layer, from before it had its own setting (precipitation on/off + mode). */
+function loadWeather(): MapWeather {
+	const v = read('sw.mapWeather');
+	if (v !== null && (MAP_WEATHER as readonly string[]).includes(v)) return v as MapWeather;
+	if (read('sw.mapPrecip') === 'off') return 'off';
+	return read('sw.mapMode') === 'totals' ? 'totals' : 'radar';
+}
+
+function loadFeatures(): Set<MapFeature> {
+	const v = read('sw.mapFeatures');
+	if (v === null) {
+		// Before: only ski runs could be switched off.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale on change
+		const all = new Set<MapFeature>(MAP_FEATURES);
+		if (read('sw.mapPistes') === 'off') all.delete('runs');
+		return all;
+	}
+	return new Set(
+		v.split(',').filter((f): f is MapFeature => (MAP_FEATURES as readonly string[]).includes(f))
+	);
 }
 
 function save(key: string, value: string): void {
@@ -42,12 +82,11 @@ class Prefs {
 	/** The day-scrubbing strip under the forecast chart. */
 	showTimeline = $state<'on' | 'off'>(load('sw.showTimeline', ['on', 'off'] as const, 'on'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
-	mapPrecip = $state<'on' | 'off'>(load('sw.mapPrecip', ['on', 'off'] as const, 'on'));
-	mapPistes = $state<'on' | 'off'>(load('sw.mapPistes', ['on', 'off'] as const, 'on'));
+	mapWeather = $state<MapWeather>(loadWeather());
+	mapOverlay = $state<MapOverlay>(load('sw.mapOverlay', MAP_OVERLAYS, 'none'));
+	mapFeatures = $state<Set<MapFeature>>(loadFeatures());
+	mapShade = $state<MapShade>(load('sw.mapShade', ['off', 'light', 'strong'] as const, 'light'));
 	mapTerrain = $state<'on' | 'off'>(load('sw.mapTerrain', ['on', 'off'] as const, 'off'));
-	mapMode = $state<'timeline' | 'totals'>(
-		load('sw.mapMode', ['timeline', 'totals'] as const, 'timeline')
-	);
 	mapBase = $state<'topo' | 'satellite'>(
 		load('sw.mapBase', ['topo', 'satellite'] as const, 'topo')
 	);
@@ -90,14 +129,28 @@ class Prefs {
 		save('sw.band', b);
 	}
 
-	setMapPrecip(on: boolean) {
-		this.mapPrecip = on ? 'on' : 'off';
-		save('sw.mapPrecip', this.mapPrecip);
+	setMapWeather(w: MapWeather) {
+		this.mapWeather = w;
+		save('sw.mapWeather', w);
 	}
 
-	setMapMode(mode: 'timeline' | 'totals') {
-		this.mapMode = mode;
-		save('sw.mapMode', mode);
+	setMapOverlay(o: MapOverlay) {
+		this.mapOverlay = o;
+		save('sw.mapOverlay', o);
+	}
+
+	setMapFeature(f: MapFeature, on: boolean) {
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale on change
+		const next = new Set(this.mapFeatures);
+		if (on) next.add(f);
+		else next.delete(f);
+		this.mapFeatures = next;
+		save('sw.mapFeatures', [...next].join(','));
+	}
+
+	setMapShade(s: MapShade) {
+		this.mapShade = s;
+		save('sw.mapShade', s);
 	}
 
 	setMapBase(base: 'topo' | 'satellite') {
@@ -108,11 +161,6 @@ class Prefs {
 	setMapTerrain(on: boolean) {
 		this.mapTerrain = on ? 'on' : 'off';
 		save('sw.mapTerrain', this.mapTerrain);
-	}
-
-	setMapPistes(on: boolean) {
-		this.mapPistes = on ? 'on' : 'off';
-		save('sw.mapPistes', this.mapPistes);
 	}
 }
 
