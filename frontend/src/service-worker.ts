@@ -24,8 +24,11 @@ const API_MAX_AGE_MS = 2 * 24 * 3600 * 1000;
 // Keep in step with OFFLINE_CACHE in lib/offlineMaps.ts.
 const OFFLINE = 'offline-maps-v1';
 const PRIVATE = ['/api/me', '/api/auth/', '/api/admin/', '/api/push/'];
-const DEM_HOST = 's3.amazonaws.com';
-const DEM_PATH = '/elevation-tiles-prod/terrarium/';
+// Elevation tiles: Mapterhorn, and AWS (older saved areas, and the fallback).
+const DEM_HOSTS: Record<string, string> = {
+	'tiles.mapterhorn.com': '/',
+	's3.amazonaws.com': '/elevation-tiles-prod/terrarium/'
+};
 
 function hash(s: string): string {
 	let h = 0;
@@ -114,7 +117,8 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 	const { request } = event;
 	if (request.method !== 'GET') return;
 	const url = new URL(request.url);
-	if (url.host === DEM_HOST && url.pathname.startsWith(DEM_PATH)) {
+	const demPath = DEM_HOSTS[url.host];
+	if (demPath && url.pathname.startsWith(demPath)) {
 		event.respondWith(savedFirst(request));
 		return;
 	}

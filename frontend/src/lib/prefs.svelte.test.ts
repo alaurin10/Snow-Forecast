@@ -22,6 +22,30 @@ describe('prefs', () => {
 		expect(localStorage.getItem('sw.band')).toBe('summit');
 	});
 
+	it('carries the old map settings over', async () => {
+		localStorage.setItem('sw.mapPrecip', 'on');
+		localStorage.setItem('sw.mapMode', 'totals');
+		localStorage.setItem('sw.mapPistes', 'off');
+		const { prefs } = await import('./prefs.svelte');
+		expect(prefs.mapWeather).toBe('totals');
+		expect(prefs.mapFeatures.has('runs')).toBe(false);
+		expect(prefs.mapFeatures.has('peaks')).toBe(true);
+	});
+
+	it('reads precipitation switched off as no weather layer', async () => {
+		localStorage.setItem('sw.mapPrecip', 'off');
+		localStorage.setItem('sw.mapMode', 'totals');
+		const { prefs } = await import('./prefs.svelte');
+		expect(prefs.mapWeather).toBe('off');
+	});
+
+	it('saves map features as a list', async () => {
+		const { prefs } = await import('./prefs.svelte');
+		prefs.setMapFeature('contours', false);
+		expect(localStorage.getItem('sw.mapFeatures')).toBe('runs,peaks');
+		expect(prefs.mapFeatures.has('contours')).toBe(false);
+	});
+
 	it('keeps working when storage is blocked', async () => {
 		vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
 			throw new Error('blocked');

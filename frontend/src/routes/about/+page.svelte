@@ -79,9 +79,15 @@
 			terms: 'Esri terms of use'
 		},
 		{
+			name: 'Mapterhorn',
+			href: 'https://mapterhorn.com/attribution/',
+			what: 'Elevation for 3D terrain, shading, slope, aspect and contours (USGS 3DEP, NRCan HRDEM, Copernicus GLO-30 and others)',
+			terms: 'Open data, each source under its own licence (see Mapterhorn)'
+		},
+		{
 			name: 'Mapzen terrain tiles on AWS',
 			href: 'https://registry.opendata.aws/terrain-tiles/',
-			what: '3D terrain',
+			what: 'Backup elevation when Mapterhorn is unavailable',
 			terms: 'Various open licences (see the registry)'
 		}
 	];
