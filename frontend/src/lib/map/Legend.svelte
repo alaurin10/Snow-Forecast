@@ -1,4 +1,7 @@
-<!-- The key for the terrain overlay on the map: slope classes, aspect colours or elevation bands. -->
+<!--
+  The key for the terrain overlay on the map: slope classes, aspect colours or elevation
+  bands. (Sun & shade and Wind effect carry their keys in their controls.)
+-->
 <script lang="ts">
 	import type { UnitSystem } from '../units';
 	import type { MapOverlay } from '../prefs.svelte';
@@ -15,7 +18,7 @@
 	const bands = $derived(elevationBands(units).bands.slice().reverse());
 </script>
 
-{#if overlay !== 'none'}
+{#if overlay === 'slope' || overlay === 'aspect' || overlay === 'bands'}
 	<div class="legend glass" role="note" aria-label="Terrain key">
 		{#if overlay === 'slope'}
 			<strong>Slope</strong>

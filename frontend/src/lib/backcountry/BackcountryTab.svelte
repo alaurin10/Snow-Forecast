@@ -88,7 +88,7 @@
 		{/if}
 		{#if bc}
 			<div class="roses">
-				{#each bc.rose as r (r.window)}
+				{#each bc.rose.filter((r) => r.window === 'past72' || r.window === 'next48') as r (r.window)}
 					<LoadingRose rose={r} title={r.window === 'past72' ? 'Last 72 h' : 'Next 48 h'} {units} />
 				{/each}
 			</div>

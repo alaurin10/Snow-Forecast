@@ -3,7 +3,16 @@
 //   terrain://{mode}/{z}/{x}/{y}?…    the slope, aspect and matching-terrain overlays
 import type { AddProtocolAction } from 'maplibre-gl';
 import type { MatchParams, Sector, TerrainMode } from './analysis';
+import type { Bounds } from './grid';
 import type { PointFacts, WorkerRequest, WorkerResponse } from './messages';
+import type { SunFacts } from './shade';
+import type { Ymd } from './sun';
+
+/** A whole-view picture: shade at a time, sun hours in a day, or the wind effect. */
+export type AreaJob =
+	| { type: 'shade'; time: number }
+	| { type: 'sunhours'; date: Ymd }
+	| { type: 'wind'; sectors: number[]; scale: number };
 
 type Pending = { resolve: (r: WorkerResponse & { ok: true }) => void; reject: (e: Error) => void };
 type Body = WorkerRequest extends infer R
@@ -48,22 +57,57 @@ export class TerrainClient {
 		void this.ask({ type: 'init', maxTiles });
 	}
 
-	ask(body: Body, signal?: AbortSignal): Promise<WorkerResponse & { ok: true }> {
+	private post(body: Body): { id: number; done: Promise<WorkerResponse & { ok: true }> } {
 		const id = this.next++;
-		return new Promise((resolve, reject) => {
+		const done = new Promise<WorkerResponse & { ok: true }>((resolve, reject) => {
 			this.waiting.set(id, { resolve, reject });
 			this.worker.postMessage({ ...body, id } as WorkerRequest);
-			signal?.addEventListener('abort', () => {
-				if (!this.waiting.delete(id)) return;
-				this.worker.postMessage({ type: 'cancel', id: this.next++, target: id });
-				reject(new DOMException('Aborted', 'AbortError'));
-			});
 		});
+		return { id, done };
+	}
+
+	ask(body: Body, signal?: AbortSignal): Promise<WorkerResponse & { ok: true }> {
+		const { id, done } = this.post(body);
+		signal?.addEventListener('abort', () => {
+			const p = this.waiting.get(id);
+			if (!p || !this.waiting.delete(id)) return;
+			this.worker.postMessage({ type: 'cancel', id: this.next++, target: id });
+			p.reject(new DOMException('Aborted', 'AbortError'));
+		});
+		return done;
 	}
 
 	async point(lat: number, lon: number): Promise<PointFacts> {
 		const r = await this.ask({ type: 'point', lat, lon });
 		return r.point!;
+	}
+
+	/**
+	 * The picture for a view and the box it covers. `cancel` tells the worker to stop;
+	 * `done` then settles with null as soon as it has, so the next job can follow it.
+	 */
+	area(
+		job: AreaJob,
+		bounds: Bounds,
+		maxPx: number
+	): { done: Promise<{ bitmap: ImageBitmap; bounds: Bounds } | null>; cancel: () => void } {
+		const { id, done } = this.post({ ...job, bounds, maxPx });
+		return {
+			done: done.then((r) =>
+				r.bitmap && r.bounds ? { bitmap: r.bitmap, bounds: r.bounds } : null
+			),
+			cancel: () => this.worker.postMessage({ type: 'cancel', id: this.next++, target: id })
+		};
+	}
+
+	/** First and last direct sun at a spot on a date. */
+	async sunPoint(lat: number, lon: number, date: Ymd): Promise<SunFacts> {
+		return (await this.ask({ type: 'sunpoint', lat, lon, date })).sun!;
+	}
+
+	/** Wind effect at a spot, −1 (stripped) to 1 (loaded), before scaling by the transport. */
+	async windPoint(lat: number, lon: number, sectors: number[]): Promise<number> {
+		return (await this.ask({ type: 'windpoint', lat, lon, sectors })).wind!;
 	}
 }
 

@@ -20,8 +20,15 @@ export type BandName = 'base' | 'mid' | 'summit';
 export type MapWeather = 'radar' | 'totals' | 'off';
 export const MAP_WEATHER: readonly MapWeather[] = ['radar', 'totals', 'off'] as const;
 /** The one terrain overlay on the map. */
-export type MapOverlay = 'none' | 'slope' | 'aspect' | 'bands';
-export const MAP_OVERLAYS: readonly MapOverlay[] = ['none', 'slope', 'aspect', 'bands'] as const;
+export type MapOverlay = 'none' | 'slope' | 'aspect' | 'bands' | 'sun' | 'wind';
+export const MAP_OVERLAYS: readonly MapOverlay[] = [
+	'none',
+	'slope',
+	'aspect',
+	'bands',
+	'sun',
+	'wind'
+] as const;
 /** Things drawn on top that can each be on or off. */
 export type MapFeature = 'runs' | 'peaks' | 'contours';
 export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours'] as const;

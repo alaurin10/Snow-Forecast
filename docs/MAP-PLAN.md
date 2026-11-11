@@ -395,7 +395,7 @@ New `frontend/src/lib/map/terrain/`:
 | 1 | Foundations and wide radar | A0, A1, fixed West box (done, see "Milestone 1 notes") |
 | 2 | Longer, better forecast | A2, A3 and the data-space blend (done, see "Milestone 2 notes") |
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) (done, see "Milestone 3 notes") |
-| 4 | Sun and wind | B4, B5 |
+| 4 | Sun and wind | B4, B5 (done, see "Milestone 4 notes") |
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` |
 | 6 | Recent satellite | B6 |
 | 7 | More weather layers | A5, A6 |
@@ -558,6 +558,59 @@ What shipped, and where it differs from the plan above:
   elevation band is left for milestone 5, which brings the treeline numbers.
 - Not done: the ≤ 300 MB phone memory measurement (headless Chromium here renders with
   SwiftShader, where a 3D screenshot alone takes ~30 s).
+
+## Milestone 4 notes (done 11 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **Two new terrain overlays**, "Sun & shade" and "Wind effect" (`mapOverlay` `sun`, `wind`),
+  with their own controls above the weather timeline (`lib/map/TerrainControls.svelte`; both
+  now sit in one dock at the foot of the map). Their keys are in those controls, not in
+  `Legend.svelte`. Sun from zoom 9, wind from zoom 10.
+- **B4 sun**: `terrain/sun.ts` (NOAA formulas; within 0.1° of PyEphem at six test moments,
+  sunrise and sunset within 2 minutes). Dates are the place's own, by longitude; clock times
+  are shown in the device's time zone, with the zone named.
+- **B4 lit by the real sun**: while Shade shows, the hillshade layer switches to MapLibre's
+  `basic` method with the sun's direction and height (anchored to the map), whatever the
+  hill-shading setting. `igor`, the everyday method, ignores the light's height.
+- **B4 cast shadows differ in method**: not a march per pixel. One sweep across the grid from
+  the sun's side carries the height of the shadow's upper surface from pixel to pixel
+  (`terrain/shade.ts` `cast`), about 10 ms for a phone-sized grid, so a day of them is cheap.
+  It agrees with ray marching on 97%+ of pixels in the tests. It runs twice: on a coarse grid
+  (half the pixels a side, 15 km beyond the view on every side, not only toward the sun,
+  so one pair of grids serves every time of day) and then on the view's own grid (zoom 12 at
+  most), which takes the coarse result at its edges. The noon sun here is only ~18° up in
+  December, so distant terrain matters all winter.
+- **B4 sun hours**: a sweep every ~30 minutes from sunrise to sunset, drawn in six classes.
+  About 0.3–0.7 s on a desktop core; cancellable between sweeps.
+- **Inspector**: first and last direct sun and the hours between come from the spot's own
+  horizon (a ray every 2° out to 15 km, fine terrain near and coarse far), checked each
+  minute of the day, so they are to the minute and don't need the layer to be on. They are
+  for the date in the sun controls (today unless changed).
+- **B5 wind**: `terrain/wind.ts`. Sx as in Winstral et al. (2002): for each wind sector, the
+  mean over three rays (−15°, 0°, +15°) of the steepest angle up to the terrain upwind; a
+  near search (0–300 m) on the ~25 m grid and a far one (300–1,500 m) on a half-resolution
+  copy, combined 60/40 and scaled so ±20° is fully sheltered or exposed. Rays step in whole
+  pixels, so there is no interpolation in the inner loop. Sectors under 5% of the loading are
+  skipped. The result is multiplied by a transport factor: 0 below `rose_min_snow_cm` or
+  `rose_min_wind_kmh` (the layer then says why it is empty), rising to 1 at 30 km/h and 20 cm
+  above them. 0.3–1.8 s on a desktop core depending on how many sectors matter.
+- **Wind input**: the snapshot's roses gain `past48`, `next24` and `next72` (the Backcountry
+  tab still shows `past72` and `next48`), and `GET /api/map/wind` returns every location's
+  roses at its summit coordinates with the two thresholds. The map uses the location nearest
+  its centre within 40 km and names it. Beyond 40 km the layer is empty and says so: the
+  wind-layer fallback waits for A5/A6 (milestone 7). A location whose forecast predates this
+  change has no such rose until its next run; the controls say that too.
+- **Drawing**: one canvas source for whichever of the three is showing
+  (`layers/analysis.ts`), under the precipitation. One job at a time; a newer request calls
+  off the running one and follows it, so dragging the time slider never queues work. The
+  worker keeps the last view's grids, so a new time or wind window repeats only the
+  arithmetic. Grids are 768 px on phones, 1,024 px otherwise; in a tilted view the area is
+  capped at about two screens from the centre.
+- Not done: the ≤ 300 MB phone memory measurement (as in milestone 3, for the same reason).
+- Known limits: shadows ignore trees, cloud and the Earth's curve (17 m at 15 km); the sun
+  is one position for the whole view; wind is one location's ridge wind for the whole view,
+  and the effect is terrain shape only (no snow available for transport by elevation, no gusts).
 
 ## Files
 

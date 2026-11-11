@@ -1,7 +1,8 @@
 <!--
   Terrain facts for a tapped spot: elevation, slope and the way it faces, with the
-  detail of the data behind them. More facts (forecast snow, sun, wind effect, the
-  avalanche rating) join it in later milestones.
+  detail of the data behind them; when direct sun first and last reaches it on the day
+  in question; and the likely wind effect there when a location's wind is in range.
+  More facts (forecast snow, the avalanche rating) join it in later milestones.
 -->
 <script lang="ts">
 	import type { UnitSystem } from '../units';
@@ -9,6 +10,8 @@
 	import type { PointFacts } from './terrain/messages';
 	import { FLAT_DEG, SLOPE_CLASSES, sectorOf, slopeClass } from './terrain/analysis';
 	import { metresPerPixel } from './terrain/dem';
+	import type { SunFacts } from './terrain/shade';
+	import { windWord } from './terrain/wind';
 
 	interface Props {
 		lat: number;
@@ -16,10 +19,14 @@
 		facts: PointFacts | null;
 		error: string | null;
 		units: UnitSystem;
+		/** Direct sun at the spot through a day; null while it's being worked out or can't be. */
+		sun?: SunFacts | null;
+		/** Wind effect at the spot (−1 stripped to 1 loaded) and the stretch of forecast it's for. */
+		wind?: { value: number; window: string } | null;
 		onclose: () => void;
 	}
 
-	let { lat, lon, facts, error, units, onclose }: Props = $props();
+	let { lat, lon, facts, error, units, sun = null, wind = null, onclose }: Props = $props();
 
 	const SECTOR_WORDS: Record<string, string> = {
 		N: 'north',
@@ -47,6 +54,35 @@
 			? units === 'imperial'
 				? `${Math.round(facts.metresPerPixel * 3.28084)} ft`
 				: `${Math.round(facts.metresPerPixel)} m`
+			: ''
+	);
+	const clock = (ms: number) =>
+		new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+	const zone = $derived(
+		sun?.first != null
+			? (new Date(sun.first)
+					.toLocaleTimeString('en-US', { timeZoneName: 'short' })
+					.split(' ')
+					.pop() ?? '')
+			: ''
+	);
+	/** "today", or "Dec 21" for another day. */
+	const sunDay = $derived.by(() => {
+		if (!sun) return '';
+		const [y, m, d] = sun.date;
+		const now = new Date();
+		if (y === now.getFullYear() && m === now.getMonth() + 1 && d === now.getDate()) return 'today';
+		return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+			month: 'short',
+			day: 'numeric',
+			timeZone: 'UTC'
+		});
+	});
+	const sunHours = $derived(
+		sun
+			? sun.hours < 0.95
+				? `${Math.round(sun.hours * 60)} min`
+				: `${sun.hours.toFixed(1)} h`
 			: ''
 	);
 	const coords = $derived(
@@ -90,8 +126,33 @@
 				</dd>
 			</div>
 		</dl>
+		{#if sun || wind}
+			<ul class="more">
+				{#if sun}
+					<li>
+						<span class="k">Sun {sunDay}</span>
+						{#if sun.first != null && sun.last != null}
+							<span class="num">{clock(sun.first)} – {clock(sun.last)} {zone}</span>
+							<span class="faint num">{sunHours} direct</span>
+						{:else if sun.sunrise == null}
+							<span class="faint">no sunrise or sunset</span>
+						{:else}
+							<span>No direct sun</span>
+						{/if}
+					</li>
+				{/if}
+				{#if wind}
+					<li>
+						<span class="k">Wind effect</span>
+						<span>{windWord(wind.value)}</span>
+						<span class="faint">{wind.window.toLowerCase()}</span>
+					</li>
+				{/if}
+			</ul>
+		{/if}
 		<p class="faint small">
 			Elevation grid {grid}{facts.fallback ? ' (backup source)' : ''}; slope over {slopeGrid}.
+			{#if sun || wind}Sun and wind from terrain shape alone: estimates.{/if}
 		</p>
 	{/if}
 	<p class="faint small coords">{coords}</p>
@@ -157,6 +218,28 @@
 		height: 10px;
 		border-radius: 3px;
 		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15);
+	}
+	.more {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 2px;
+		font-size: 0.82rem;
+	}
+	.more li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 2px 8px;
+	}
+	.more .k {
+		font-size: 0.7rem;
+		color: var(--text-2);
+		min-width: 5.2rem;
+	}
+	.more .faint {
+		font-size: 0.76rem;
 	}
 	.small {
 		font-size: 0.72rem;

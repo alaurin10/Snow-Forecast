@@ -141,11 +141,37 @@ export function shadePaint(shade: MapShade, dark: boolean, base: 'topo' | 'satel
 	return {
 		'hillshade-method': 'igor' as const,
 		'hillshade-exaggeration': ex,
+		// The map-drawing convention: lit from the top-left of the screen.
+		'hillshade-illumination-direction': 335,
+		'hillshade-illumination-altitude': 45,
+		'hillshade-illumination-anchor': 'viewport' as const,
 		'hillshade-shadow-color': dark ? '#000000' : '#2a2f3a',
 		'hillshade-highlight-color': dark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.35)',
 		'hillshade-accent-color': dark ? '#000000' : '#3b3f4a'
 	};
 }
+
+/** Hill shading lit by the sun where it really is (compass degrees, degrees up). */
+export function sunPaint(azimuth: number, altitude: number, dark: boolean) {
+	return {
+		// Brightness by the angle the light strikes the ground at.
+		'hillshade-method': 'basic' as const,
+		'hillshade-exaggeration': 0.3,
+		'hillshade-illumination-direction': Math.round(azimuth) % 360,
+		// Very low light would blacken every slope turned slightly away.
+		'hillshade-illumination-altitude': Math.min(90, Math.max(8, altitude)),
+		'hillshade-illumination-anchor': 'map' as const,
+		'hillshade-shadow-color': dark ? '#000000' : '#1d2333',
+		'hillshade-highlight-color': dark ? 'rgba(255,244,214,0.2)' : 'rgba(255,244,214,0.45)',
+		'hillshade-accent-color': dark ? '#000000' : '#3b3f4a'
+	};
+}
+
+/** How strongly each whole-view analysis picture is laid over the map. */
+export const ANALYSIS_OPACITY = { shade: 0.42, hours: 0.6, wind: 0.75 } as const;
+/** Whole-view layers are worked out from this zoom in; further out they'd say little. */
+export const SUN_MIN_ZOOM = 9;
+export const WIND_MIN_ZOOM = 10;
 
 /**
  * Elevation bands: a colour every 500 m (metric) or 1,500 ft (imperial), as hard steps.
@@ -186,7 +212,7 @@ export function elevationBands(units: UnitSystem) {
 	return { expr, bands };
 }
 
-export function overlayTiles(mode: Exclude<MapOverlay, 'none' | 'bands'>, query = ''): string[] {
+export function overlayTiles(mode: 'slope' | 'aspect', query = ''): string[] {
 	return [`terrain://${mode}/{z}/{x}/{y}${query ? `?${query}` : ''}`];
 }
 

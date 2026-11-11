@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
 from snowwatch.api.auth import Me
 from snowwatch.avalanche import AvalancheView
-from snowwatch.doc import DayOut, Flag, Snapshot
+from snowwatch.doc import DayOut, Flag, RoseOut, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.models import Location
 from snowwatch.verify import VerificationOut
@@ -86,6 +86,25 @@ class OverviewRow(BaseModel):
     flags: list[Flag] = []  # most important first; avalanche danger added when served
     lat: float | None = None  # mid band, for the map
     lon: float | None = None
+
+
+class MapWindLocation(BaseModel):
+    """A location's loading roses, placed at its summit (where the wind is taken)."""
+
+    id: str
+    name: str
+    lat: float
+    lon: float
+    generated_at: str
+    roses: list[RoseOut]
+
+
+class MapWindOut(BaseModel):
+    """Wind and new snow per location for the map's wind-effect layer."""
+
+    min_snow_cm: float  # less new snow than this: nothing to move
+    min_wind_kmh: float  # lighter than this: little drifting
+    locations: list[MapWindLocation]
 
 
 class PlanDate(BaseModel):
@@ -177,6 +196,7 @@ class ApiTypes(BaseModel):
     snapshot: Snapshot
     locations: list[LocationSummary]
     overview: list[OverviewRow]
+    map_wind: MapWindOut
     trend: TrendOut
     runs: list[RunOut]
     me: Me

@@ -49,8 +49,10 @@ frontend/src/
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
-              Legend, Inspector; terrain/ decodes elevation and works out slope and
-              aspect in a Web Worker, served to MapLibre as dem:// and terrain://)
+              TerrainControls, Legend, Inspector; terrain/ decodes elevation and
+              works out slope, aspect, sun and shade, and the wind effect in a Web
+              Worker, served to MapLibre as dem:// and terrain:// and as one picture
+              for the view)
   service-worker.ts
 ```
 
@@ -96,7 +98,10 @@ older than `STALE_AFTER_H` (12 h).
   coordinates; freezing level comes from the model or from the upper-air levels.
 - **Backcountry** (no safety judgement anywhere): avalanche danger exactly as
   published and hidden once expired, ridge-height wind, a snow-loading rose,
-  warming, rain on snow, refreeze, cloud above treeline, daylight.
+  warming, rain on snow, refreeze, cloud above treeline, daylight. The map's Sun &
+  shade and Wind effect layers are estimates from the shape of the terrain (and, for
+  wind, the nearest location's loading rose), labelled as such; they describe sun and
+  likely drifting, not stability.
 - **Ski-day rating** for resorts: Powder, Great, Good, Fair or Poor, with the
   reasons, from new snow, snow quality, rain, summit gusts, cloud and temperature.
 - **Flags**: powder day, storm incoming, model outlier, low confidence, rain on

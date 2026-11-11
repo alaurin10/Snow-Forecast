@@ -13,6 +13,7 @@ export interface ApiTypes {
 	job: JobOut;
 	locations: LocationSummary[];
 	lookups: LookupStatus;
+	map_wind: MapWindOut;
 	me: Me;
 	meta: MetaOut;
 	overview: OverviewRow[];
@@ -212,6 +213,46 @@ export interface LookupStatus {
 	avy_zones: number;
 	ski_areas: number;
 	snotel_stations: number;
+}
+/**
+ * Wind and new snow per location for the map's wind-effect layer.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MapWindOut".
+ */
+export interface MapWindOut {
+	locations: MapWindLocation[];
+	min_snow_cm: number;
+	min_wind_kmh: number;
+}
+/**
+ * A location's loading roses, placed at its summit (where the wind is taken).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MapWindLocation".
+ */
+export interface MapWindLocation {
+	generated_at: string;
+	id: string;
+	lat: number;
+	lon: number;
+	name: string;
+	roses: RoseOut[];
+}
+/**
+ * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "RoseOut".
+ */
+export interface RoseOut {
+	label: string;
+	loading: string[];
+	mean_kmh: number | null;
+	sectors: number[];
+	snow_cm: number;
+	wind_from: string | null;
+	window: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -516,21 +557,6 @@ export interface RefreezeNight {
 	date: string;
 	low_c: number | null;
 	status: string;
-}
-/**
- * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
- *
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "RoseOut".
- */
-export interface RoseOut {
-	label: string;
-	loading: string[];
-	mean_kmh: number | null;
-	sectors: number[];
-	snow_cm: number;
-	wind_from: string | null;
-	window: string;
 }
 /**
  * Daytime sky at the summit: mean cloud per layer (%) and the lowest visibility.

@@ -1,5 +1,8 @@
 // What the page and the terrain worker say to each other.
 import type { MatchParams, TerrainMode } from './analysis';
+import type { Bounds } from './grid';
+import type { SunFacts } from './shade';
+import type { Ymd } from './sun';
 
 export interface PointFacts {
 	/** Metres above sea level. */
@@ -30,6 +33,21 @@ export type WorkerRequest =
 			match?: MatchParams;
 	  }
 	| { id: number; type: 'point'; lat: number; lon: number }
+	// Whole-view layers: one picture over `bounds`, at most `maxPx` on its longer side.
+	| { id: number; type: 'shade'; bounds: Bounds; maxPx: number; time: number }
+	| { id: number; type: 'sunhours'; bounds: Bounds; maxPx: number; date: Ymd }
+	| {
+			id: number;
+			type: 'wind';
+			bounds: Bounds;
+			maxPx: number;
+			/** Share of the loading by wind sector, north first. */
+			sectors: number[];
+			/** How much snow the wind could move, 0 to 1. */
+			scale: number;
+	  }
+	| { id: number; type: 'sunpoint'; lat: number; lon: number; date: Ymd }
+	| { id: number; type: 'windpoint'; lat: number; lon: number; sectors: number[] }
 	| { id: number; type: 'cancel'; target: number };
 
 export type WorkerResponse =
@@ -41,4 +59,9 @@ export type WorkerResponse =
 			bitmap?: ImageBitmap;
 			empty?: boolean;
 			point?: PointFacts;
+			/** The box a whole-view picture covers. */
+			bounds?: Bounds;
+			sun?: SunFacts;
+			/** Wind effect at a spot, −1 (stripped) to 1 (loaded), before scaling. */
+			wind?: number;
 	  };

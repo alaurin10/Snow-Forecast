@@ -26,7 +26,9 @@
 		{ id: 'none', label: 'None' },
 		{ id: 'slope', label: 'Slope', worker: true },
 		{ id: 'aspect', label: 'Aspect', worker: true },
-		{ id: 'bands', label: 'Elevation' }
+		{ id: 'bands', label: 'Elevation' },
+		{ id: 'sun', label: 'Sun & shade', worker: true },
+		{ id: 'wind', label: 'Wind effect', worker: true }
 	];
 	const FEATURES = $derived<{ id: MapFeature; label: string; hint?: string; off?: boolean }[]>([
 		{ id: 'runs', label: 'Ski runs', hint: 'From zoom 11' },
@@ -80,7 +82,8 @@
 			{/each}
 		</div>
 		<p class="faint">
-			Slope and aspect from about 10 m terrain, from zoom 8. Tap the map for numbers.
+			Worked out on this device from about 10 m terrain, once zoomed in. Sun & shade and Wind effect
+			are estimates from the shape of the ground. Tap the map for numbers.
 		</p>
 	</section>
 

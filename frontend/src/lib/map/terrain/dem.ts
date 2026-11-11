@@ -19,7 +19,7 @@ export const BASE_ZOOM = 12;
 export const MAX_ZOOM = 16;
 /** Network failures in a row before switching to the AWS tiles. */
 const FAILS_BEFORE_FALLBACK = 4;
-const EARTH = 40075016.686;
+export const EARTH = 40075016.686;
 
 export const mapterhornUrl = (z: number, x: number, y: number) =>
 	`${MAPTERHORN}/${z}/${x}/${y}.webp`;
