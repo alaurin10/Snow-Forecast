@@ -133,7 +133,7 @@ describe('frameLabel', () => {
 		const end = new Date(2026, 10, 13, 10).getTime() / 1000; // Fri 10 AM local
 		const lab = frameLabel(ext(end, 6), (end - 6 * 3600 - 72 * 3600) * 1000);
 		expect(lab.when).toBe('Fri 4–10 AM');
-		expect(lab.rel).toBe('6-hour average · in 3 days');
+		expect(lab.rel).toBe('6-hour avg · in 3 days');
 	});
 });
 

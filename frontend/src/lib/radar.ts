@@ -252,7 +252,7 @@ function aheadText(hours: number): string {
 /**
  * "2:40 PM" and "radar · 20 min ago" for a radar frame, "3:04 PM" and "nowcast · in 24 min"
  * for a nowcast, "Sat 5–6 AM" and "forecast · in 4 h" ahead, and beyond two days
- * "Fri 4–10 AM" and "6-hour average · in 3 days".
+ * "Fri 4–10 AM" and "6-hour avg · in 3 days" (short, so the label keeps one width).
  */
 export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: string } {
 	if (f.kind === 'nowcast') {
@@ -287,7 +287,7 @@ export function frameLabel(f: Frame, now = Date.now()): { when: string; rel: str
 	if (f.span_h > 1) {
 		return {
 			when: `${day} ${range}`,
-			rel: `${f.span_h}-hour average${ahead > 0 ? ` · ${aheadText(ahead)}` : ''}`
+			rel: `${f.span_h}-hour avg${ahead > 0 ? ` · ${aheadText(ahead)}` : ''}`
 		};
 	}
 	return {
