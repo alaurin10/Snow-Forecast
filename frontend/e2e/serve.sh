@@ -9,4 +9,8 @@ cd "$here/../../backend"
 export DATA_DIR="$data" STATIC_DIR="$here/../build" OWNER_PASSWORD="e2e-owner-password"
 uv run --frozen snowwatch init >/dev/null
 uv run --frozen snowwatch rebuild --from tests/fixtures/live-20261104 >/dev/null
+# No avalanche zones (they come from the network), but the file, so the map's
+# avalanche layers load and say there's no zone here.
+mkdir -p "$data/avalanche"
+echo '{"type":"FeatureCollection","generated_at":null,"features":[]}' >"$data/avalanche/zones.geojson"
 exec uv run --frozen uvicorn --factory snowwatch.api.app:production_app --port 8019

@@ -1,6 +1,8 @@
 <!--
   Shown once per device before the concern index is first drawn: what it is, what it
-  isn't, and an explicit "I understand" before anything shows.
+  isn't, and an explicit "I understand" before anything shows. It takes the focus (the
+  dialog itself, so neither answer is picked for you), keeps Tab inside, and Escape
+  means Cancel.
 -->
 <script lang="ts">
 	interface Props {
@@ -10,9 +12,43 @@
 	}
 
 	let { caption, onaccept, oncancel }: Props = $props();
+	let box = $state<HTMLDivElement>();
+
+	$effect(() => {
+		box?.focus();
+	});
+
+	function onkeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
+			oncancel();
+		} else if (e.key === 'Tab' && box) {
+			const buttons = [...box.querySelectorAll<HTMLButtonElement>('button')];
+			const first = buttons[0];
+			const last = buttons[buttons.length - 1];
+			const at = document.activeElement;
+			if (e.shiftKey && (at === first || at === box)) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && at === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	}
 </script>
 
-<div class="ack" role="alertdialog" aria-labelledby="ack-title" aria-describedby="ack-body">
+<div
+	class="ack"
+	role="alertdialog"
+	aria-modal="true"
+	aria-labelledby="ack-title"
+	aria-describedby="ack-body"
+	tabindex="-1"
+	bind:this={box}
+	{onkeydown}
+>
 	<h3 id="ack-title">Concern index (experimental)</h3>
 	<div id="ack-body">
 		<p><strong>{caption}</strong></p>
@@ -58,6 +94,13 @@
 		display: grid;
 		gap: 8px;
 	}
+	.ack:focus {
+		outline: none;
+	}
+	.ack:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
 	h3 {
 		margin: 0;
 		font-size: 1rem;
@@ -75,5 +118,11 @@
 		display: flex;
 		justify-content: flex-end;
 		gap: 8px;
+	}
+	/* Clear the floating tab bar on phones, so the last button can be tapped. */
+	@media (max-width: 1099px) {
+		.ack {
+			max-height: calc(100% - 56px - 94px - env(safe-area-inset-bottom));
+		}
 	}
 </style>

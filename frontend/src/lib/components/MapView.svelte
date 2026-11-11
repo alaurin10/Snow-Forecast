@@ -1026,11 +1026,13 @@
 <svelte:window
 	onkeydown={(e) =>
 		e.key === 'Escape' &&
-		(zoneOpen
-			? (zoneOpen = null)
-			: panel !== 'none'
-				? (panel = 'none')
-				: probe && closeInspector())}
+		(askAck
+			? prefs.setMapOverlay('none')
+			: zoneOpen
+				? (zoneOpen = null)
+				: panel !== 'none'
+					? (panel = 'none')
+					: probe && closeInspector())}
 />
 
 <div

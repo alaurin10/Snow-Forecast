@@ -1,0 +1,89 @@
+// The map's experimental concern index: offered only to whoever HAZARD_INDEX allows
+// (the signed-in owner by default), and never drawn before its warning is accepted.
+import { expect, test, type Page } from '@playwright/test';
+
+const CAPTION = 'Experimental estimate from the bulletin and terrain shape. Not a forecast.';
+
+async function openLayers(page: Page) {
+	await page.getByRole('button', { name: 'Layers' }).click();
+	return page.getByRole('group', { name: 'Terrain overlay' });
+}
+
+async function signIn(page: Page) {
+	const res = await page.request.post('/api/auth/login', {
+		data: { password: 'e2e-owner-password' },
+		headers: { Origin: 'http://localhost:8019' }
+	});
+	expect(res.status()).toBe(200);
+}
+
+test('the concern index is only offered to the owner', async ({ page }) => {
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	const overlays = await openLayers(page);
+	await expect(overlays.getByRole('button', { name: 'Avalanche problems' })).toBeVisible();
+	await expect(overlays.getByRole('button', { name: /Concern index/ })).toHaveCount(0);
+	expect((await page.request.get('/api/map/concern')).status()).toBe(403);
+
+	await signIn(page);
+	await page.reload({ waitUntil: 'networkidle' });
+	const again = await openLayers(page);
+	await expect(again.getByRole('button', { name: 'Concern index (experimental)' })).toBeVisible();
+});
+
+test('the concern index asks first, and remembers the answer', async ({ page }) => {
+	await signIn(page);
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	let overlays = await openLayers(page);
+	const none = overlays.getByRole('button', { name: 'None' });
+	const concern = overlays.getByRole('button', { name: 'Concern index (experimental)' });
+
+	// Chosen: the warning, with the fixed caption, and the layer not on yet.
+	await concern.click();
+	const ack = page.getByRole('alertdialog', { name: 'Concern index (experimental)' });
+	await expect(ack).toBeVisible();
+	await expect(ack).toContainText(CAPTION);
+	await expect(ack).toContainText("Doesn't show runouts or slopes above you.");
+	await expect(page.getByRole('region', { name: 'Concern index' })).toHaveCount(0);
+	// It has the focus, and Tab stays inside it.
+	await expect(ack).toBeFocused();
+	for (let i = 0; i < 5; i++) await page.keyboard.press('Tab');
+	expect(await page.evaluate(() => !!document.activeElement?.closest('[role=alertdialog]'))).toBe(
+		true
+	);
+
+	// Escape is Cancel: no layer, and nothing remembered.
+	await page.keyboard.press('Escape');
+	await expect(ack).toHaveCount(0);
+	await expect(none).toHaveAttribute('aria-pressed', 'true');
+	expect(await page.evaluate(() => localStorage.getItem('sw.concernAck'))).toBeNull();
+
+	// So is the Cancel button.
+	await concern.click();
+	await ack.getByRole('button', { name: 'Cancel' }).click();
+	await expect(ack).toHaveCount(0);
+	await expect(none).toHaveAttribute('aria-pressed', 'true');
+
+	// Accepted: the layer's controls, with the caption, and the answer kept.
+	await concern.click();
+	await ack.getByRole('button', { name: 'I understand' }).click();
+	await expect(ack).toHaveCount(0);
+	await expect(concern).toHaveAttribute('aria-pressed', 'true');
+	await page.getByRole('button', { name: 'Done' }).click();
+	const controls = page.getByRole('region', { name: 'Concern index' });
+	await expect(controls).toBeVisible();
+	await expect(controls).toContainText(CAPTION);
+	await expect(controls).toContainText('No avalanche forecast zone here.');
+	expect(await page.evaluate(() => localStorage.getItem('sw.concernAck'))).toBe('1');
+
+	// Next visit: straight to the layer, no second warning.
+	await page.reload({ waitUntil: 'networkidle' });
+	await expect(page.getByRole('region', { name: 'Concern index' })).toBeVisible();
+	await expect(ack).toHaveCount(0);
+
+	// Signed out, the choice stays stored but the layer isn't drawn or offered.
+	await page.request.post('/api/auth/logout', { headers: { Origin: 'http://localhost:8019' } });
+	await page.reload({ waitUntil: 'networkidle' });
+	await expect(page.getByRole('region', { name: 'Concern index' })).toHaveCount(0);
+	overlays = await openLayers(page);
+	await expect(overlays.getByRole('button', { name: /Concern index/ })).toHaveCount(0);
+});

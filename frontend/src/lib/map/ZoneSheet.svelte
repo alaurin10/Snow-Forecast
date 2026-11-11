@@ -56,4 +56,10 @@
 		cursor: pointer;
 		padding: 4px 6px;
 	}
+	/* Clear the floating tab bar on phones, so the last button can be tapped. */
+	@media (max-width: 1099px) {
+		.sheet {
+			max-height: calc(100% - 56px - 94px - env(safe-area-inset-bottom));
+		}
+	}
 </style>

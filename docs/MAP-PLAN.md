@@ -661,8 +661,12 @@ What shipped, and where it differs from the plan above:
     only to viewers it allows (404 off, 403 not owner), so the option isn't offered
     otherwise. A one-time acknowledgement per device, the fixed caption in the controls and
     the Inspector, and the Inspector lists every factor. Drawn from zoom 10 like Wind effect.
-  - Not done: an e2e test for the acknowledgement (checked by hand in headless Chromium).
-    Display terms of avalanche.org and Avalanche Canada still need re-reading before
+  - The acknowledgement is a modal alert dialog: it takes the focus (the dialog, not either
+    button), keeps Tab inside, and Escape cancels. `e2e/concern.spec.ts` checks, on phone
+    and desktop, that the option is offered only to the signed-in owner, that nothing is
+    drawn before "I understand", that Cancel and Escape leave the layer off and remember
+    nothing, that the answer is kept per device, and that signing out hides the layer again.
+  - Still to do: re-read the display terms of avalanche.org and Avalanche Canada before
     `HAZARD_INDEX=public`.
 - Known limits: the problems and concern layers use the zone in the middle of the map for the
   whole view (clipped to it); treeline bands are regional guesses; problems are not per day
