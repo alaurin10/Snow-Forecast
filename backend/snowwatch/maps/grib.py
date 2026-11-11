@@ -15,6 +15,7 @@ import contextlib
 import hashlib
 import logging
 import math
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -105,6 +106,7 @@ def fetch_messages(
                 with contextlib.suppress(OSError):
                     out[i] = path.read_bytes()
                     todo.remove(i)
+                    os.utime(path)  # still in use: pruning goes by last use
     if not todo:
         return out
     r = net.get(url + ".idx")
@@ -125,8 +127,8 @@ def fetch_messages(
     return out
 
 
-def prune_cache(cache_dir: Path, max_age_s: float = 2 * 86400) -> int:
-    """Drop cached messages older than `max_age_s` (their model runs are long superseded)."""
+def prune_cache(cache_dir: Path, max_age_s: float = 86400) -> int:
+    """Drop cached messages not used for `max_age_s` (their model runs have been replaced)."""
     cutoff = time.time() - max_age_s
     removed = 0
     for p in cache_dir.glob("*.grib2"):

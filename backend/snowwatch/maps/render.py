@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -33,24 +34,22 @@ import numpy as np
 
 from snowwatch.config import SlrBand
 from snowwatch.maps import grib, totals
-from snowwatch.maps.files import write_atomic
-from snowwatch.maps.geomet import (
-    Net,
-    capabilities_dims,
-    geomet_map,
-    iso_ts,
-    parse_times,
-    sld,
-    ts_iso,
+from snowwatch.maps.blend import (
+    WET_MM,
+    Layer,
+    Mosaic,
+    feather,
+    feather_px,
+    fill_kinds,
+    mosaic,
+    north_weight,
 )
+from snowwatch.maps.files import save_npy, write_atomic
+from snowwatch.maps.geomet import Net, iso_ts, prune_wcs_cache, ts_iso
 from snowwatch.maps.palette import (
-    MIX,
-    RAIN,
-    SNOW,
     decode_indices,
     encode,
     kinds_of,
-    over,
     paint_total,
     paint_typed,
     repaint,
@@ -59,7 +58,7 @@ from snowwatch.maps.palette import (
 from snowwatch.maps.region import Region, stitch
 from snowwatch.maps.sources import hrrr, nbm, radar_eccc, rainviewer, rdps_gdps
 from snowwatch.maps.sources.nbm import Nbm
-from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, Run, run_of
+from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run, run_of
 
 log = logging.getLogger("snowwatch.precip")
 
@@ -67,15 +66,10 @@ HOUR = 3600
 INDEX_VERSION = 2
 RETIRE_S = 15 * 60  # how long a file that left the index stays on disk
 
-HRDPS_LAYERS = [
-    ("HRDPS.CONTINENTAL.DIAG_RN_PT1H", RAIN),
-    ("HRDPS.CONTINENTAL.DIAG_FR_PT1H", MIX),
-    ("HRDPS.CONTINENTAL.DIAG_SN_PT1H", SNOW),
-]
-DOMAIN_LAYER = "HRDPS.CONTINENTAL.DIAG_PR_PT1H"
-# Beyond the hourly frames, the US (NBM) and Canada (RDPS/GDPS) meet here. Milestone 2's
-# last task replaces this hard join with a blend in data space (MAP-PLAN decision 8).
-SEAM_LAT = 49.0
+DOMAIN_LAYER = HRDPS.precip  # drawn solid, it shows where HRDPS has data
+# Splitting NBM's 6-hour amount between two 3-hour frames follows RDPS's split, softened
+# by this much water (mm) so a trace in one half doesn't take everything.
+SPLIT_SOFT_MM = 0.25
 
 TOTAL_HOURS = totals.WINDOWS
 SN_TOTAL_LAYER = HRDPS.accum  # water equivalent (mm) since the run began
@@ -170,12 +164,16 @@ class Renderer:
         self.now = now
         self.nbm_cycles = nbm_cycles
         self.slr_bands = slr_bands or []
-        # Working files the browser never sees: model grid maps, cached GRIB messages,
-        # and the snow totals as numbers.
+        # Working files the browser never sees: model grid maps, cached downloads (GRIB
+        # messages and GeoMet grids), and the snow totals as numbers.
         work = work_dir or out_dir / ".work"
         self.grids_dir = work / "grids"
         self.grib_dir = work / "grib"
+        self.wcs_dir = work / "wcs"
         self.totals_dir = work / "totals"
+        self._weights: dict[str, np.ndarray] = {}
+        self._wlock = threading.Lock()
+        self._nbm_obj: Nbm | None = None
         self.totals: list[TotalOut] = []
         self._prev_totals: dict[str, TotalOut] = {}
         self._nbm_run: int | None = None
@@ -401,6 +399,61 @@ class Renderer:
             out.append(FrameOut(rf.t, True, name, key, "", "radar", 0, src))
         return out
 
+    # ---- Weights for the blend -------------------------------------------------------
+
+    def _once(self, name: str, region: Region, make: Callable[[], np.ndarray]) -> np.ndarray:
+        """A per-pixel weight that doesn't change within a job, worked out once."""
+        key = f"{name}|{region.key}"
+        with self._wlock:
+            if key not in self._weights:
+                self._weights[key] = make()
+            return self._weights[key]
+
+    def _domain_weight(self, name: str, region: Region, amount: np.ndarray) -> np.ndarray:
+        """A source's weight from where it has data: 1 inside, fading to 0 at its edge."""
+        return self._once(name, region, lambda: feather(np.isfinite(amount), feather_px(region)))
+
+    def _us_weight(self, region: Region, amount: np.ndarray) -> np.ndarray:
+        """NOAA's weight beyond the hourly frames and for totals: its domain, and south of
+        the border (fading out between 48.5 and 49.5°N)."""
+        return self._once(
+            "us",
+            region,
+            lambda: feather(np.isfinite(amount), feather_px(region)) * (1 - north_weight(region)),
+        )
+
+    def _hrdps_weight(self, region: Region) -> np.ndarray | None:
+        """HRDPS's domain weight. Its grids hold 0 outside the domain, so the domain comes
+        from a picture; the last one seen is kept on disk for when GeoMet won't draw it."""
+        key = f"hrdps|{region.key}"
+        with self._wlock:
+            if key in self._weights:
+                return self._weights[key]
+        path = (
+            self.grids_dir
+            / f"domain-hrdps-{hashlib.sha1(region.key.encode()).hexdigest()[:16]}.npy"
+        )
+        mask = rdps_gdps.domain_mask(self.net, HRDPS, region)
+        if mask is not None and mask.any():
+            save_npy(path, mask)
+        else:
+            try:
+                mask = np.load(path)
+            except (OSError, ValueError):
+                return None
+            if mask.shape != (region.height, region.width):
+                return None
+        weight = feather(mask.astype(bool), feather_px(region))
+        with self._wlock:
+            self._weights[key] = weight
+        return weight
+
+    @staticmethod
+    def _paint(m: Mosaic) -> np.ndarray:
+        """Colours, once, after blending."""
+        wet = np.nan_to_num(m.amount, nan=0.0) >= WET_MM
+        return paint_typed(m.amount, fill_kinds(m.kind, wet))
+
     # ---- Forecast -----------------------------------------------------------------
 
     def _nbm(self, region: Region) -> Nbm | None:
@@ -410,93 +463,137 @@ class Renderer:
             self._nbm_run = run if run is not None else 0
         if not self._nbm_run:
             return None
-        return Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
+        if self._nbm_obj is None or self._nbm_obj.region != region:
+            self._nbm_obj = Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
+        return self._nbm_obj
 
     def forecast(self, region: Region) -> dict[str, Any]:
-        """The forecast timeline to 10 days.
+        """The forecast timeline to 10 days, every source blended as numbers (blend.py).
 
-        Hourly to ~48 h: HRDPS where its domain covers, our HRRR elsewhere (NBM's hourly
-        fields for hours no HRRR run reaches). Then 3-hourly to ~84 h (RDPS north of 49°N)
-        and 6-hourly to ~240 h (GDPS), with NBM south of 49°N."""
+        Hourly to ~48 h: HRDPS across its domain, fading over its last ~100 km into our
+        HRRR (NBM's hourly fields for hours no HRRR run reaches), with RDPS filling in
+        wherever neither has data. Then 3-hourly to ~84 h (RDPS) and 6-hourly to ~240 h
+        (GDPS) in Canada, cross-fading across the border into NBM in the US."""
         now = int(self.now())
         prev = {f.key: f for f in self._frames_of(self._read(), region)}
-        dims = capabilities_dims(self.net, HRDPS_LAYERS[2][0])
-        times = [t for t in parse_times(dims.get("time", "")) if t > now]
-        if not times:
+        hrdps = run_of(self.net, HRDPS, HRDPS.snow)
+        times = [t for t in hrdps.times if t > now] if hrdps is not None else []
+        if hrdps is None or not times:
             # GeoMet didn't answer: keep the frames we have rather than blanking them.
             log.warning("no HRDPS forecast times; keeping the current forecast frames")
             return self._read()
-        run_ref = dims.get("reference_time.default", "")
         slots = hrrr.slots(self.net, now)
-        blend = self._nbm(region)
+        us = self._nbm(region)
+        fill = run_of(self.net, RDPS_HOURLY, RDPS_HOURLY.snow)
         frames: list[FrameOut] = []
         todo: list[tuple[int, str, tuple[str, int, int] | None]] = []
         for t in times:
             south: tuple[str, int, int] | None = None
             if t in slots:
                 south = ("hrrr", *slots[t])
-            elif blend is not None and 1 <= blend.lead(t) <= nbm.HOURLY_TO_H:
-                south = ("nbm", blend.run, blend.lead(t))
+            elif us is not None and 1 <= us.lead(t) <= nbm.HOURLY_TO_H:
+                south = ("nbm", us.run, us.lead(t))
             south_key = ":".join(map(str, south)) if south else "none"
-            key = f"fc|{t}|{run_ref}|{south_key}|{region.key}"
+            fill_key = f"rdps:{fill.ref}" if fill is not None and t in fill.times else "none"
+            key = f"fb|{t}|{hrdps.ref}|{south_key}|{fill_key}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 frames.append(had)
             else:
                 todo.append((t, key, south))
 
+        w_hrdps = self._hrdps_weight(region) if todo else None
+        if todo and w_hrdps is None:
+            log.warning("no HRDPS domain picture; keeping the current forecast frames")
+            return self._read()
+
+        def draw(job: tuple[int, str, tuple[str, int, int] | None]) -> FrameOut | None:
+            t, key, south = job
+            assert w_hrdps is not None
+            north = rdps_gdps.fields(self.net, hrdps, t, region, self.wcs_dir)
+            if north is None:
+                return None  # try again next time rather than keep a frame without HRDPS
+            layers = [Layer("hrdps", north.rate, w_hrdps, north.kind)]
+            left = 1 - w_hrdps
+            kind = ""
+            got: tuple[np.ndarray, np.ndarray] | None = None
+            if south is not None and south[0] == "hrrr":
+                got = hrrr.fields(
+                    self.net, south[1], south[2], region, self.grids_dir, self.grib_dir
+                )
+                if got is not None:
+                    kind = "hrrr"
+            if not kind and us is not None and 1 <= us.lead(t) <= nbm.HOURLY_TO_H:
+                got = us.precip(us.lead(t), 1)
+                if got is not None:
+                    kind = "nbm"
+            if kind and got is not None:
+                w = self._domain_weight(kind, region, got[0])
+                layers.append(Layer(kind, got[0], w, got[1]))
+                left = left * (1 - w)
+            # RDPS covers everything: it takes whatever the finer models leave.
+            filled = False
+            if fill is not None and t in fill.times and float(left.max()) > 0.02:
+                under = rdps_gdps.fields(self.net, fill, t, region, self.wcs_dir)
+                if under is not None:
+                    layers.append(Layer("rdps", under.rate, 1.0, under.kind))
+                    filled = True
+            src = {"north": "hrdps", "south": kind or ("rdps" if filled else "")}
+            if filled and kind:
+                src["fill"] = "rdps"
+            name = self._save(self._paint(mosaic(layers)), region, f"f{t}")
+            return FrameOut(t, False, name, key, kind, "forecast", 1, src)
+
         if todo:
-            d = geomet_map(
-                self.net, DOMAIN_LAYER, sld(DOMAIN_LAYER, [(-1, "#000000")]), region, None
-            )
-            domain = (
-                (d[..., 3] > 0) if d is not None else np.zeros((region.height, region.width), bool)
-            )
-            blank = np.zeros((region.height, region.width, 4), np.uint8)
-
-            def draw(job: tuple[int, str, tuple[str, int, int] | None]) -> FrameOut:
-                t, key, south = job
-                pic, kind = None, ""
-                if south and south[0] == "hrrr":
-                    pic = hrrr.draw(self.net, south[1], south[2], region, self.grids_dir)
-                    kind = "hrrr" if pic is not None else ""
-                if pic is None and blend is not None and 1 <= blend.lead(t) <= nbm.HOURLY_TO_H:
-                    pic = blend.draw(blend.lead(t), 1)
-                    kind = "nbm" if pic is not None else ""
-                img = (pic if pic is not None else blank).copy()
-                img[domain] = 0
-                for name, ramp in HRDPS_LAYERS:
-                    img = over(geomet_map(self.net, name, sld(name, ramp), region, ts_iso(t)), img)
-                src = {"north": "hrdps", "south": kind}
-                name = self._save(img, region, f"f{t}")
-                return FrameOut(t, False, name, key, kind, "forecast", 1, src)
-
             # Two frames at a time (the sources are the slow part; more costs worker
             # memory), soonest first, with the index rewritten as they land so a first
             # build is usable early.
             with ThreadPoolExecutor(2) as pool:
                 for i, frame in enumerate(pool.map(draw, todo), 1):
-                    frames.append(frame)
+                    if frame is not None:
+                        frames.append(frame)
                     if i % 6 == 0:
                         self._commit(region, FORECAST_KINDS, frames)
             self._commit(region, FORECAST_KINDS, frames)
 
-        frames += self._extended(region, prev, max(times), blend, frames)
-        return self._commit(region, FORECAST_KINDS, frames)
+        frames += self._extended(region, prev, max(times), us, frames)
+        index = self._commit(region, FORECAST_KINDS, frames)
+        self._prune_work()
+        return index
+
+    def _share(
+        self, run: Run, t: int, block_end: int, this: np.ndarray, region: Region
+    ) -> np.ndarray | float:
+        """How much of NBM's 6-hour amount falls in the 3 hours ending at t, taken from how
+        RDPS splits the same 6 hours (NBM has no 3-hour sums beyond 48 h). The two halves'
+        shares add up to 1, so nothing is lost or counted twice; where RDPS is dry the
+        split is even."""
+        span = run.model.span_h * HOUR
+        other_t = block_end if t < block_end else t - span
+        other = (
+            rdps_gdps.amount(self.net, run, run.model.precip, other_t, region, self.wcs_dir)
+            if other_t in run.times
+            else None
+        )
+        if other is None:
+            return 0.5
+        a, b = np.nan_to_num(this, nan=0.0), np.nan_to_num(other, nan=0.0)
+        share: np.ndarray = (a + SPLIT_SOFT_MM) / (a + b + 2 * SPLIT_SOFT_MM)
+        return share
 
     def _extended(
         self,
         region: Region,
         prev: dict[str, FrameOut],
         after: int,
-        blend: Nbm | None,
+        us: Nbm | None,
         done: list[FrameOut],
     ) -> list[FrameOut]:
         """3-hourly then 6-hourly frames beyond the hourly ones."""
         plan: list[tuple[int, Run]] = []
         edge = after
-        for model, layer in ((RDPS, RDPS.snow), (GDPS, GDPS.snow)):
-            run = run_of(self.net, model, layer)
+        for model in (RDPS, GDPS):
+            run = run_of(self.net, model, model.snow)
             if run is None:
                 continue
             span = model.span_h * HOUR
@@ -510,41 +607,41 @@ class Renderer:
                 edge = plan[-1][0]
         if not plan:
             return []
-        lats = region.lonlats()[1]
-        south_rows = (lats < SEAM_LAT)[:, None]
         out: list[FrameOut] = []
 
         def job(item: tuple[int, Run]) -> FrameOut | None:
             t, run = item
             span_h = run.model.span_h
-            # NBM's 6-hour block holding this frame (a 3-hour frame shows its block's average).
+            # NBM's 6-hour block holding this frame.
             block = None
-            if blend is not None:
-                lead = blend.lead(t)
-                end = -(-lead // nbm.BLOCK_H) * nbm.BLOCK_H
-                if nbm.HOURLY_TO_H < end <= nbm.LAST_H:
+            if us is not None:
+                end = -(-us.lead(t) // nbm.BLOCK_H) * nbm.BLOCK_H
+                if 0 < end <= nbm.LAST_H:
                     block = end
-            south_key = f"nbm:{blend.run}:{block}" if blend is not None and block else "none"
-            key = f"fx|{t}|{span_h}|{run.model.name}:{run.ref}|{south_key}|{region.key}"
+            south_key = f"nbm:{us.run}:{block}" if us is not None and block else "none"
+            key = f"fy|{t}|{span_h}|{run.model.name}:{run.ref}|{south_key}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 return had
-            north = rdps_gdps.draw(self.net, run, t, region)
+            north = rdps_gdps.fields(self.net, run, t, region, self.wcs_dir)
             if north is None:
                 return None
-            img = north
+            layers: list[Layer] = []
             kind = ""
-            if blend is not None and block:
-                got = blend.precip(block, nbm.BLOCK_H)
+            if us is not None and block:
+                got = us.precip(block, nbm.BLOCK_H)
                 if got is not None:
                     apcp, k = got
-                    south = paint_typed(apcp / nbm.BLOCK_H, k)
-                    take = south_rows & np.isfinite(apcp)
-                    img = north.copy()
-                    img[take] = south[take]
+                    if span_h < nbm.BLOCK_H:
+                        block_end = us.run + block * HOUR
+                        rate = apcp * self._share(run, t, block_end, north.total, region) / span_h
+                    else:
+                        rate = apcp / nbm.BLOCK_H
+                    layers.append(Layer("nbm", rate, self._us_weight(region, apcp), k))
                     kind = "nbm"
+            layers.append(Layer(run.model.name, north.rate, 1.0, north.kind))
             src = {"north": run.model.name, "south": kind or run.model.name}
-            name = self._save(img, region, f"f{t}")
+            name = self._save(self._paint(mosaic(layers)), region, f"f{t}")
             return FrameOut(t, False, name, key, kind, "forecast", span_h, src)
 
         with ThreadPoolExecutor(2) as pool:
@@ -555,6 +652,11 @@ class Renderer:
                     self._commit(region, FORECAST_KINDS, done + out)
         return out
 
+    def _prune_work(self) -> None:
+        """Drop cached downloads that haven't been used for a day."""
+        grib.prune_cache(self.grib_dir)
+        prune_wcs_cache(self.wcs_dir)
+
     # ---- Snowfall totals ------------------------------------------------------------
 
     def snow_totals(self, region: Region) -> dict[str, Any]:
@@ -564,12 +666,12 @@ class Renderer:
         if not self.totals and self._prev_totals:
             return self._read()  # GeoMet didn't answer: keep what we have
         index = self._commit(region, set(), None, self.totals)
-        grib.prune_cache(self.grib_dir)
+        self._prune_work()
         return index
 
     def _snow_totals(self, region: Region, now: int) -> list[TotalOut]:
-        """Snow over the next 12 h to 10 days: Canada's models chained north of the seam,
-        NBM south of it (see totals.py)."""
+        """Snow over the next 12 h to 10 days: Canada's models chained in Canada, NBM in
+        the US, cross-faded across the border (see totals.py)."""
         hrdps = run_of(self.net, HRDPS, HRDPS.accum)
         if hrdps is None:
             return []
@@ -580,19 +682,19 @@ class Renderer:
             run = run_of(self.net, model, model.accum)
             if run is not None:
                 chain.append(run)
-        blend = self._nbm(region)
+        us = self._nbm(region)
         # Windows end where both sides still have data (or where the one side does).
         last = max(r.end for r in chain)
-        if blend is not None:
-            last = min(last, blend.run + nbm.LAST_H * HOUR)
+        if us is not None:
+            last = min(last, us.run + nbm.LAST_H * HOUR)
         wins = totals.window_ends(t0, last)
         runs_key = "|".join(f"{r.model.name}:{r.ref}" for r in chain)
-        runs_key += f"|nbm:{blend.run if blend else ''}"
+        runs_key += f"|nbm:{us.run if us else ''}"
 
         out: list[TotalOut] = []
         todo: list[tuple[int, int, str]] = []
         for w, end in wins:
-            key = f"tot|{w}|{t0}|{end}|{runs_key}|{region.key}"
+            key = f"tb|{w}|{t0}|{end}|{runs_key}|{region.key}"
             had = self._prev_totals.get(key)
             if had and (self.dir / had.file).exists():
                 out.append(had)
@@ -602,18 +704,28 @@ class Renderer:
             return out
 
         ends = [end for _, end, _ in todo]
-        north = totals.north_totals(self.net, region, t0, ends, chain, self.slr_bands)
-        south = totals.south_totals(blend, t0, ends)
-        weight = totals.seam_weight(region)
+        # HRDPS only needs help from RDPS if its domain stops short of where Canada's
+        # models are used (it doesn't over the default box).
+        north_w = north_weight(region)
+        w_hrdps = self._hrdps_weight(region)
+        domain = (
+            {"hrdps": w_hrdps}
+            if w_hrdps is not None and bool(((w_hrdps < 0.999) & (north_w > 0)).any())
+            else None
+        )
+        north = totals.north_totals(
+            self.net, region, t0, ends, chain, self.slr_bands, self.wcs_dir, domain
+        )
+        south = totals.south_totals(us, t0, ends)
         used = {k: _run_ts(v) for k, v in north.runs.items()}
         for w, end, key in todo:
             n, s = north.cm.get(end), south.get(end)
             if n is None and s is None:
                 continue
-            cm = totals.blend(n, s, weight)
-            runs = {k: v for k, v in used.items() if n is not None}
-            if s is not None and blend is not None:
-                runs["nbm"] = blend.run
+            cm = totals.join(n, s, self._us_weight(region, s) if s is not None else 0.0)
+            runs = dict(used) if n is not None else {}
+            if s is not None and us is not None:
+                runs["nbm"] = us.run
             totals.save_grid(cm, self.totals_dir / f"{w}h.npy")
             span = round((end - t0) / HOUR)
             name = self._save(paint_total(cm), region, f"t{span}")

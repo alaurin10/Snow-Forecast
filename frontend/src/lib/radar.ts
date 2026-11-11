@@ -7,7 +7,8 @@
 // Sources: Environment Canada's North American radar composite (past 3 h, typed) and its
 // nowcast (next 72 min); hourly to ~48 h, Environment Canada's HRDPS (Canada and the
 // northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
-// RDPS) and 6-hourly to 10 days (Canadian GDPS), with NOAA's National Blend south of 49°N.
+// RDPS) and 6-hourly to 10 days (Canadian GDPS) in Canada, with NOAA's National Blend in
+// the US. The server blends the sources as numbers, so there are no joins to see.
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -86,8 +87,11 @@ export interface Frame {
 	 * as the average hourly rate), 0 for a rate at an instant (radar, nowcast).
 	 */
 	span_h: number;
-	/** Which source drew the north (Canada) and south (US) parts, e.g. "hrdps", "nbm". */
-	src: { north?: string; south?: string };
+	/**
+	 * The sources blended into the frame: the main one for Canada (`north`) and for the US
+	 * (`south`), e.g. "hrdps", "nbm", and one filling in where neither reaches (`fill`).
+	 */
+	src: { north?: string; south?: string; fill?: string };
 }
 
 /** Forecast snow over a window: Canada's models north of 49°N, NOAA's blend south of it. */
@@ -318,11 +322,11 @@ export function frameSource(f: Frame): string {
 	if (f.span_h > 1) {
 		const avg = `Forecast, ${f.span_h}-hour average`;
 		if (!south || south === north) return `${avg}: ${modelName(north)} model.`;
-		return `${avg}: ${modelName(north)} model north of 49°N; ${modelName(south)} south of it.`;
+		return `${avg}: ${modelName(north)} model in Canada, ${modelName(south)} in the US, blended across the border.`;
 	}
-	if (!south)
-		return `Forecast: ${modelName(north)} model (nothing for the rest of the US this hour).`;
-	return `Forecast: ${modelName(north)} model; rest of the US, ${modelName(south)}.`;
+	if (!south) return `Forecast: ${modelName(north)} model where it reaches.`;
+	const beyond = f.src.fill ? `${modelName(south)} and ${modelName(f.src.fill)}` : modelName(south);
+	return `Forecast: ${modelName(north)} model where it reaches (Canada and the northern US), ${beyond} beyond, blended where they meet.`;
 }
 
 /** Shown with radar and nowcast frames. */

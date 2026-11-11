@@ -91,11 +91,12 @@ def png(color: tuple[int, int, int] | None, w: int, h: int) -> bytes:
 
 
 class FakeNet(precip.Net):
-    """Answers like the real sources, with flat colours, and counts image requests."""
+    """Answers like the real sources, with flat fields, and counts what was fetched."""
 
     def __init__(self, now: int) -> None:
         self.now = now
         self.images = 0
+        self.grids = 0
 
     def json(self, url: str, params: dict[str, str] | None = None) -> Any:
         if "rainviewer" in url:
@@ -114,22 +115,37 @@ class FakeNet(precip.Net):
                 '<Dimension name="reference_time" default="RUN1">x</Dimension>'
             )
             return type("R", (), {"text": text})()
+        if "GetCoverage" in url:
+            # GeoMet's numbers: HRDPS snows 0.6 mm an hour everywhere (its domain comes
+            # from the picture below); RDPS, which fills in elsewhere, is dry.
+            self.grids += 1
+            import urllib.parse
+
+            layer = urllib.parse.parse_qs(url.split("?", 1)[1])["coverageId"][0]
+            value = 0.6 if layer == "HRDPS.CONTINENTAL.DIAG_SN_PT1H" else 0.0
+            body = float_tiff(np.full((40, 60), value, np.float32), -126.0, 51.0, 0.25)
+            return type("R", (), {"content": body, "headers": {"content-type": "image/tiff"}})()
         return None
 
     def image(
         self, url: str, params: dict[str, str] | None = None, tries: int = 3
     ) -> np.ndarray | None:
         self.images += 1
-        if params:  # GeoMet: domain covers the top half; snow everywhere it covers
+        if params:  # GeoMet: HRDPS's domain covers the top half
+            assert params["layers"] == precip.DOMAIN_LAYER
             w, h = int(params["width"]), int(params["height"])
             out = np.zeros((h, w, 4), np.uint8)
-            color = (0, 0, 0) if params["layers"] == precip.DOMAIN_LAYER else snow[1]
-            if "SN_PT1H" in params["layers"] or params["layers"] == precip.DOMAIN_LAYER:
-                out[: h // 2] = (*color, 255)
+            out[: h // 2] = (0, 0, 0, 255)
             return out
         tile = np.zeros((256, 256, 4), np.uint8)
         tile[...] = (0x00, 0x77, 0xAA, 255) if "tiles.example" in url else (0x73, 0xC4, 0x76, 255)
         return tile
+
+
+def precip_rain_t() -> int:
+    from snowwatch.maps.palette import RAIN_T
+
+    return RAIN_T
 
 
 def fake_hrrr(monkeypatch: Any, now: int) -> None:
@@ -140,12 +156,11 @@ def fake_hrrr(monkeypatch: Any, now: int) -> None:
     slots = {init + h * 3600: (init, h) for h in range(1, 7)}
     monkeypatch.setattr(hrrr, "slots", lambda net, now: slots)
 
-    def draw(net: Any, run: int, f: int, region: Region, grids: Any = None) -> np.ndarray:
-        out = np.zeros((region.height, region.width, 4), np.uint8)
-        out[...] = (*rain[1], 255)
-        return out
+    def fields(net: Any, run: int, f: int, region: Region, *dirs: Any) -> Any:
+        shape = (region.height, region.width)
+        return np.full(shape, 0.6, np.float32), np.full(shape, precip_rain_t(), np.uint8)
 
-    monkeypatch.setattr(hrrr, "draw", draw)
+    monkeypatch.setattr(hrrr, "fields", fields)
     monkeypatch.setattr(nbm, "latest_run", lambda net, now, cycles: None)
 
 
@@ -165,23 +180,30 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path, monkeypatch: Any)
     assert len(past) == 3 and index["now"] == now
     assert {f["kind"] for f in past} == {"radar"} and past[0]["src"]["north"] == "rainviewer"
     assert len(future) == 12 and {f["kind"] for f in future} == {"forecast"}
-    assert {f["south"] for f in future} == {"hrrr", ""}  # HRRR to 6 h, nothing after
-    assert {f["src"]["south"] for f in future} == {"hrrr", ""}
+    assert {f["south"] for f in future} == {"hrrr", ""}  # HRRR to 6 h, nothing after…
+    assert {f["src"]["south"] for f in future} == {"hrrr", "rdps"}  # …so RDPS fills in
+    assert future[0]["src"] == {"north": "hrdps", "south": "hrrr"}
     assert index["version"] == 2 and "Radar: RainViewer" in index["attribution"]
     for f in frames:
         assert (out / f["file"]).exists()
     on_disk = json.loads((out / "index.json").read_text())
     assert on_disk["bounds"] == region.bounds
 
-    # A forecast frame: snow from HRDPS on top, HRRR rain below, cut out under the domain.
+    # A forecast frame: HRDPS's snow well inside its domain, HRRR's rain well outside it,
+    # and the same amount (0.6 mm/h) all the way across the join.
     first = np.asarray(Image.open(out / future[0]["file"]).convert("RGBA"))
     assert tuple(first[10, 10][:3]) == snow[1]
     assert tuple(first[90, 10][:3]) == rain[1]
+    column = [tuple(px[:3]) for px in first[:, 10]]
+    assert set(column) == {snow[1], rain[1]} and first[:, 10, 3].min() == 255
+    # Beyond HRRR's reach, RDPS (dry here) fills in outside HRDPS's domain.
+    late = np.asarray(Image.open(out / future[-1]["file"]).convert("RGBA"))
+    assert tuple(late[10, 10][:3]) == snow[1] and late[90, 10, 3] == 0
 
-    # Nothing changed: nothing redrawn.
-    before = net.images
+    # Nothing changed: nothing fetched or redrawn.
+    before = (net.images, net.grids)
     again = Renderer(out, net, now=lambda: now).run(region)
-    assert net.images == before
+    assert (net.images, net.grids) == before
     assert [f["file"] for f in again["frames"]] == [f["file"] for f in frames]
 
 

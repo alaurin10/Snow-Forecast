@@ -393,7 +393,7 @@ New `frontend/src/lib/map/terrain/`:
 | # | Milestone | Contains |
 |---|---|---|
 | 1 | Foundations and wide radar | A0, A1, fixed West box (done, see "Milestone 1 notes") |
-| 2 | Longer, better forecast | A2, A3 (done with hard joins; the data-space blend is still to do, see "Milestone 2 notes") |
+| 2 | Longer, better forecast | A2, A3 and the data-space blend (done, see "Milestone 2 notes") |
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) |
 | 4 | Sun and wind | B4, B5 |
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` |
@@ -453,7 +453,7 @@ What shipped, and where it differs from the plan above:
 - The whole first-load timeline is ~3.8 MB (radar, nowcast and 44 h of forecast), above the
   2–3 MB aim; loading beyond 48 h on demand (milestone 2) keeps it from growing.
 
-## Milestone 2 notes (A2 and A3 done 10 Nov 2026; the blend is next)
+## Milestone 2 notes (done 10–11 Nov 2026)
 
 What shipped, and where it differs from the plan above:
 
@@ -462,11 +462,12 @@ What shipped, and where it differs from the plan above:
 - **Timeline**: hourly frames as before (HRDPS in its domain, HRRR outside, NBM's hourly fields
   for any hour no HRRR run reaches); then 3-hourly frames to the RDPS run's end (~84 h) and
   6-hourly to the GDPS run's end (240 h), each model's stretch ending on a 00/06/12/18 UTC
-  hour. North of 49°N the Canadian model, south of it NBM, wherever NBM has data.
+  hour. The Canadian model in Canada, NBM in the US (first shipped with a hard join at 49°N,
+  then blended; see below).
 - **NBM differs from the table above**: only 00/06/12/18 UTC runs reach 264 h; between 48 and
   192 h the 3-hourly files hold only a 1-hour APCP, and ASNOW exists only as 6-hour sums
-  (1-hour to 48 h). So there are no NBM 3-hour sums: a 3-hour frame's US side shows its
-  6-hour block's average. NBM's rows alternate direction (scanning mode 0x50), which
+  (1-hour to 48 h). So there are no NBM 3-hour sums: a 3-hour frame takes its share of its
+  6-hour block from how RDPS splits the same six hours. NBM's rows alternate direction (scanning mode 0x50), which
   `gribberish` doesn't undo; `grib.decode` now does (it showed as striped fields).
 - **RDPS differs**: `…-Accum3h` layers are 3-hourly, not hourly; freezing rain and ice pellets
   are `…FreezingRain-Accum-3h` / `-6h` (extra hyphen).
@@ -477,7 +478,7 @@ What shipped, and where it differs from the plan above:
   10-day one ends where the shorter of GDPS and NBM ends (~230 h). Canada is chained
   HRDPS → RDPS → GDPS in 6-hour steps, each step with the temperature-based ratio from
   `slr_bands` (already, not "10:1 first"). WCS requests are pinned to their run
-  (`DIM_REFERENCE_TIME`, verified). Seam: linear 48.5–49.5°N as planned.
+  (`DIM_REFERENCE_TIME`, verified). Joined with NBM across 48.5–49.5°N as planned.
   Grids saved as `data/maps/totals/<window>h.npy` (float16 cm).
 - Index: frames' `south` is now `"hrrr"`, `"nbm"` or `""`; `src` names `hrdps`, `rdps`,
   `gdps`, `hrrr`, `nbm`. Totals gain `window` and `runs`; `hours` stays the actual length.
@@ -485,28 +486,43 @@ What shipped, and where it differs from the plan above:
   slider shows that stretch as a dashed band; labels read "Fri 4–10 AM · 6-hour average · in
   3 days"; day names that would crowd are skipped; the totals picker scrolls sideways.
 - Config: `map.nbm_cycles` (default `[0, 12]`). Renderer working files: `data/maps/`.
-- Measured: forecast cold build ~150 s, ~375 MB; totals ~50 s, ~410 MB; first-load forecast
-  frames 2.7 MB, the extended frames 1.6 MB more on demand.
+- Measured with the blend: forecast cold build ~180 s (~85 s from the caches), ~570 MB;
+  totals ~45 s (~17 s from the caches), ~400 MB; first-load forecast frames 2.5 MB, the
+  extended frames 1.8 MB more on demand.
 
-### Still to do in milestone 2: the data-space blend (decision 8)
+### The data-space blend (decision 8), as built
 
-The hard joins left to replace, all in `backend/snowwatch/maps/`:
+`maps/blend.py`; details and probe results in `docs/SOURCES.md`.
 
-1. Hourly frames (`render.py` `forecast` → `draw`): HRDPS domain mask cut-out
-   (`DOMAIN_LAYER`), HRRR or NBM elsewhere. HRRR's grid also stops short of the box's
-   south-west corner (open Pacific), which is simply clear today.
-2. Extended frames (`render.py` `_extended`): `SEAM_LAT = 49.0` row cut between the RDPS/GDPS
-   picture and NBM. A 3-hour frame's NBM side is a 6-hour average, so amounts and periods
-   don't line up across the seam; NBM's grid edge (~138°W in the south-west) also shows.
-3. Totals (`totals.py` `blend`/`seam_weight`): a latitude-only weight, no domain-edge weights.
-
-What the blend needs: every source as numbers on the region grid (rate in mm/h of water over
-the frame's period, plus a type code), a per-pixel weight per source (1 well inside its
-domain and preferred lead time, falling to 0 over ~100 km at its edge), weighted mean
-amounts, the type from the highest-weight source, colours applied once with `paint_typed`.
-The Canadian side must move from styled WMS pictures to WCS floats (`wcs_grid` + `on_region`,
-as `totals.north_totals` already does; HRDPS layers `…DIAG_{RN,FR,SN}_PT1H`, RDPS/GDPS names in
-`sources/rdps_gdps.py`). HRRR and NBM already produce numbers (`hrrr.fields`, `Nbm.precip`).
+- Every source is numbers on the region grid (hourly rate in mm of water, plus a type
+  code) before anything is coloured. The Canadian side moved from styled WMS pictures to
+  WCS floats (`sources/rdps_gdps.py` `fields`): rain, snow, freezing rain and ice pellets
+  per period, interpolated between cells.
+- Weights: `feather` gives 1 well inside a source's domain, easing to 0 over ~100 km at its
+  edge. `mosaic` lays sources down in order of preference, each taking its weight of what
+  is left, so two models are never averaged inside the preferred one (that would smear two
+  slightly different storms into one weaker one); they cross-fade only near its edge.
+  Amounts are the weighted mean, the type comes from the highest-weight source that has
+  one, and colours go on once (`paint_typed`).
+- Hourly frames: HRDPS → HRRR (NBM hourly if no HRRR run has the hour) → RDPS hourly, which
+  covers everything and so fills the Pacific south-west of HRRR's grid.
+- Extended frames and totals: NBM's weight is its domain weight times a US preference that
+  fades out between 48.5 and 49.5°N; the Canadian model takes the rest.
+- Differences from decision 8 as written, and things it didn't foresee:
+  - "Preferred lead time" is handled by which model each frame or totals step uses
+    (HRDPS to 48 h, RDPS to 84 h, GDPS beyond), not by a weight inside a frame: a change of
+    model between one frame and the next is not a visible join.
+  - HRDPS's WCS grids hold 0 outside its domain, so its domain still comes from one WMS
+    picture (kept on disk as a fallback).
+  - WCS floats are 2.4 MB a layer uncompressed; `geotiff:compression=Deflate` and a disk
+    cache by run keep a full rebuild to a few tens of MB.
+  - Interpolating amounts rings snow areas with a false "mix"; mix is kept only next to a
+    model cell that is itself mixed.
+  - NBM's 6-hour amounts are split between 3-hour frames by RDPS's timing (shares add to 1).
+- Known limits: where two models disagree, the lightest contour (0.1 mm/h) can run parallel
+  to a domain edge inside the fade; and the Canada/US preference follows 49°N, not the
+  actual border (they are the same line across this box, except the south tip of Vancouver
+  Island, which is in the fade).
 
 ## Files
 

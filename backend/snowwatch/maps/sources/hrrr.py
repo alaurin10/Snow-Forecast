@@ -7,10 +7,11 @@ small messages by byte range (about 0.3 MB in all):
   APCP   precipitation over the hour (mm of water)
   CSNOW, CRAIN, CFRZR, CICEP   the type at the end of the hour (yes/no each)
 
-and draw the rate on our SNOW / MIX / RAIN ramps. Freezing rain and ice pellets count as
-mix, and so does snow and rain together. The type flags are for the end of the hour while
-the amount covers all of it, so a wet pixel without a type takes the nearest type within a
-few pixels, else rain.
+and hand the amount and a type code to the blend (blend.py). Freezing rain and ice pellets
+count as mix, and so does snow and rain together. The type flags are for the end of the
+hour while the amount covers all of it, so a wet pixel without a type takes the nearest
+type within a few pixels, else rain. Messages are cached on disk: an hour is wanted again
+whenever another model's run changes.
 
 Bucket: noaa-hrrr-bdp-pds (NOAA Open Data Dissemination), free, no key.
 """
@@ -26,9 +27,10 @@ from pathlib import Path
 import numpy as np
 
 from snowwatch.maps import grib
+from snowwatch.maps.blend import TRACE_MM, fill_kinds
 from snowwatch.maps.geomet import Net
-from snowwatch.maps.palette import MIX_T, NONE, RAIN_T, SNOW_T, paint_typed
-from snowwatch.maps.region import Region, spread
+from snowwatch.maps.palette import MIX_T, RAIN_T, SNOW_T
+from snowwatch.maps.region import Region
 
 log = logging.getLogger("snowwatch.precip")
 
@@ -36,8 +38,6 @@ BUCKET = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 HOUR = 3600
 HOURLY_BACK_H = 8  # hourly runs older than this are beaten by a newer one at every hour
 LONG_BACK_H = 14  # how far back to look for a run that reaches 48 h
-WET_MM = 0.1  # the lightest amount the ramps draw
-FILL_PX = 8
 
 
 def file_url(run: int, fhour: int) -> str:
@@ -92,34 +92,20 @@ def kinds(csnow: np.ndarray, crain: np.ndarray, cfrzr: np.ndarray, cicep: np.nda
     return out
 
 
-def fill(types: np.ndarray, wet: np.ndarray) -> np.ndarray:
-    """A type for every wet pixel: its own, the nearest within a few pixels, else rain."""
-    out = spread(types, FILL_PX)
-    out[wet & (out == NONE)] = RAIN_T
-    out[~wet] = NONE
-    return out
-
-
 def fields(
-    net: Net, run: int, fhour: int, region: Region, grids_dir: Path | None
+    net: Net,
+    run: int,
+    fhour: int,
+    region: Region,
+    grids_dir: Path | None = None,
+    cache_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """The hour's precipitation (mm) and type codes on the region, or None."""
-    raw = grib.fetch_messages(net, file_url(run, fhour), patterns(fhour))
+    """The hour's precipitation (mm, NaN off HRRR's grid) and type codes on the region."""
+    raw = grib.fetch_messages(net, file_url(run, fhour), patterns(fhour), cache_dir)
     grids = [grib.on_region(m, region, grids_dir) for m in raw]
     apcp = grids[0]
     if apcp is None:
         return None
     flags = [g if g is not None else np.zeros_like(apcp) for g in grids[1:]]
-    wet = np.nan_to_num(apcp) >= WET_MM
-    return apcp, fill(kinds(*flags), wet)
-
-
-def draw(
-    net: Net, run: int, fhour: int, region: Region, grids_dir: Path | None = None
-) -> np.ndarray | None:
-    """One hour's typed precipitation as RGBA over the region (clear off HRRR's grid)."""
-    got = fields(net, run, fhour, region, grids_dir)
-    if got is None:
-        return None
-    apcp, k = got
-    return paint_typed(apcp, k)
+    wet = np.nan_to_num(apcp) >= TRACE_MM
+    return apcp, fill_kinds(kinds(*flags), wet)

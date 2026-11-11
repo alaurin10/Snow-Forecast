@@ -48,7 +48,6 @@ from snowwatch.maps.region import (
 from snowwatch.maps.render import (
     DOMAIN_LAYER,
     HOUR,
-    HRDPS_LAYERS,
     SN_TOTAL_LAYER,
     TOTAL_HOURS,
     FrameOut,
@@ -68,7 +67,6 @@ __all__ = [
     "DOMAIN_LAYER",
     "GEOMET",
     "HOUR",
-    "HRDPS_LAYERS",
     "MIX",
     "PALETTE",
     "RAIN",

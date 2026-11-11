@@ -11,8 +11,9 @@ What the files hold (probed 10 Nov 2026; it differs from the plan's first readin
 - Probability and percentile messages share the plain message's name (see grib.find).
 - `ASNOW` is a depth in metres with NBM's own snow-to-liquid ratio; `APCP` is mm of water.
 
-So beyond 48 h we work in 6-hour blocks. Each run is fetched once: messages are cached on
-disk (grib.fetch_messages).
+So beyond 48 h we work in 6-hour blocks (a 3-hour frame takes its share of its block from
+how RDPS splits the same six hours; see render.py). Each run is fetched once: messages are
+cached on disk (grib.fetch_messages).
 
 Bucket: noaa-nbm-grib2-pds (NOAA Open Data Dissemination), free, no key.
 """
@@ -28,8 +29,8 @@ from pathlib import Path
 import numpy as np
 
 from snowwatch.maps import grib
+from snowwatch.maps.blend import kinds_from_parts
 from snowwatch.maps.geomet import Net
-from snowwatch.maps.palette import MIX_T, NONE, RAIN_T, SNOW_T, paint_typed
 from snowwatch.maps.region import Region
 
 log = logging.getLogger("snowwatch.precip")
@@ -39,11 +40,6 @@ HOUR = 3600
 LAST_H = 264
 HOURLY_TO_H = 48  # 1-hour APCP and ASNOW exist to here
 BLOCK_H = 6
-WET_MM = 0.1
-# Share of the water falling as snow (at 10:1) above which a pixel is snow, or mix.
-# 10:1 is on the wet side for NBM's ratios, so colder snow lands well above 1.
-SNOW_FRAC = 0.6
-MIX_FRAC = 0.2
 
 
 def file_url(run: int, fhour: int) -> str:
@@ -114,18 +110,9 @@ class Nbm:
             if apcp is not None:
                 if asnow is None:
                     asnow = np.zeros_like(apcp)
-                got = apcp, kinds(apcp, asnow, WET_MM * hours)
+                got = apcp, kinds(apcp, asnow)
             self._last = ((end, hours), got)
             return got
-
-    def draw(self, end: int, hours: int) -> np.ndarray | None:
-        """RGBA of the average hourly rate over the period ending at forecast hour `end`
-        (colours always mean an hourly rate, whatever the period)."""
-        got = self.precip(end, hours)
-        if got is None:
-            return None
-        apcp, k = got
-        return paint_typed(apcp / hours, k)
 
     def snow_cm(self, start: int, end: int) -> np.ndarray | None:
         """Snow depth (cm) forecast between two forecast hours, using 1-hour sums where a
@@ -153,13 +140,7 @@ class Nbm:
         return total
 
 
-def kinds(apcp: np.ndarray, asnow_m: np.ndarray, wet_mm: float) -> np.ndarray:
-    """Type codes from how much of the water fell as snow (snow depth at 10:1 as water)."""
-    water = np.nan_to_num(apcp, nan=0.0)
-    snow_water = np.nan_to_num(asnow_m, nan=0.0) * 1000 / 10
-    frac = snow_water / np.maximum(water, 1e-6)
-    out = np.full(apcp.shape, RAIN_T, np.uint8)
-    out[frac >= MIX_FRAC] = MIX_T
-    out[frac >= SNOW_FRAC] = SNOW_T
-    out[water < wet_mm] = NONE
-    return out
+def kinds(apcp: np.ndarray, asnow_m: np.ndarray) -> np.ndarray:
+    """Type codes from how much of the water fell as snow (snow depth at 10:1 as water;
+    10:1 is on the wet side for NBM's ratios, so colder snow lands well above a share of 1)."""
+    return kinds_from_parts(apcp, np.nan_to_num(asnow_m, nan=0.0) * 1000 / 10, 0.0)

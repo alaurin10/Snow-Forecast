@@ -142,10 +142,17 @@ describe('frameSource', () => {
 		expect(frameSource(f(1, true))).toMatch(/Environment Canada/);
 		expect(frameSource({ ...f(1, true), src: { north: 'rainviewer' } })).toMatch(/RainViewer/);
 		expect(frameSource(nc(1))).toMatch(/^Nowcast/);
-		expect(frameSource(f(1, false, 'hrrr'))).toMatch(/HRDPS model; rest of the US, NOAA HRRR/);
+		expect(frameSource(f(1, false, 'hrrr'))).toMatch(
+			/HRDPS model where it reaches .*, NOAA HRRR beyond, blended where they meet/
+		);
 		expect(frameSource(f(1, false, 'nbm'))).toMatch(/National Blend/);
-		expect(frameSource(f(1, false, ''))).toMatch(/nothing for the rest of the US/);
-		expect(frameSource(ext(1, 6))).toMatch(/6-hour average: Canadian GDPS model north of 49°N/);
+		expect(frameSource(f(1, false, ''))).toBe('Forecast: Canadian HRDPS model where it reaches.');
+		expect(
+			frameSource({ ...f(1, false, 'hrrr'), src: { north: 'hrdps', south: 'hrrr', fill: 'rdps' } })
+		).toMatch(/NOAA HRRR and Canadian RDPS beyond/);
+		expect(frameSource(ext(1, 6))).toMatch(
+			/6-hour average: Canadian GDPS model in Canada, .* in the US, blended across the border/
+		);
 		expect(frameSource(ext(1, 3, 'rdps', 'rdps'))).toBe(
 			'Forecast, 3-hour average: Canadian RDPS model.'
 		);

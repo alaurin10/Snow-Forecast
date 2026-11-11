@@ -1124,8 +1124,9 @@
 						frames are 3- and 6-hour averages, and forecasts get rougher the further out they go.
 					</p>
 					<p class="faint">
-						Snow total: Canadian models north of 49°N (HRDPS, then RDPS, then GDPS), with the snow
-						ratio from the forecast temperature; NOAA's National Blend of Models south of it.
+						Snow total: Canadian models in Canada (HRDPS, then RDPS, then GDPS), with the snow ratio
+						from the forecast temperature; NOAA's National Blend of Models in the US; blended across
+						the border.
 						{#if totalsMode && total}{totalSources(total)}{/if}
 					</p>
 				{/if}

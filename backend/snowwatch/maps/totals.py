@@ -13,9 +13,10 @@ temperature is missing).
 The US (and the south of the box): NOAA NBM's snow depth (`ASNOW`), which already uses
 NBM's own ratio (see sources/nbm.py).
 
-The two meet in a linear blend between 48.5 and 49.5°N; where one side has no data the
-other fills in. (Milestone 2's last task replaces this with a per-pixel blend in data space,
-docs/MAP-PLAN.md decision 8.)
+The two are joined as numbers (blend.py): NBM's weight is 1 in the US well inside its
+grid, fading out between 48.5 and 49.5°N and over the last ~100 km before its grid ends;
+Canada's chain takes the rest. Within the chain, HRDPS fades into RDPS at the edge of its
+own domain, where that matters.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from snowwatch.config import SlrBand
+from snowwatch.maps.blend import Layer, mosaic
 from snowwatch.maps.files import save_npy
 from snowwatch.maps.geomet import Net, on_region, ts_iso, wcs_grid
 from snowwatch.maps.region import Region
@@ -45,7 +47,6 @@ WINDOWS = (12, 24, 48, 72, 120, 168, 240)
 # 6-hour sums end; and it is dropped if the models stop well short of it.
 SHORT_H = 48
 MIN_SHARE = 0.9
-SEAM = (48.5, 49.5)  # degrees north: all south below, all north above, linear between
 DEFAULT_RATIO = 10.0
 TEMP_RANGE = (-90.0, 60.0)
 
@@ -100,8 +101,13 @@ def north_totals(
     ends: list[int],
     chain: list[Run],
     bands: Sequence[SlrBand],
+    cache_dir: Path | None = None,
+    domain: dict[str, np.ndarray] | None = None,
 ) -> North:
-    """Snow depth (cm) from t0 to each end, chaining the runs (finest first)."""
+    """Snow depth (cm) from t0 to each end, chaining the runs (finest first).
+
+    `domain` gives a model's weight per pixel where it doesn't cover the whole box (HRDPS):
+    there each step fades into the next model that covers the step."""
     out = North()
     if not ends or not chain:
         return out
@@ -114,26 +120,41 @@ def north_totals(
     def grid(run: Run, layer: str, t: int, valid: tuple[float, float]) -> np.ndarray | None:
         key = (layer, t)
         if key not in cache:
-            g = wcs_grid(net, layer, ts_iso(t), region, ref=run.ref or None)
-            cache[key] = None if g is None else on_region(g, region, valid)
+            g = wcs_grid(net, layer, ts_iso(t), region, ref=run.ref or None, cache_dir=cache_dir)
+            cache[key] = None if g is None else on_region(g, region, valid, smooth=True)
         return cache[key]
+
+    def step(run: Run, a: int, b: int) -> np.ndarray | None:
+        """One run's snow depth (cm) between two of its times."""
+        start = grid(run, run.model.accum, a, (0, 5000))
+        stop = grid(run, run.model.accum, b, (0, 5000))
+        if start is None or stop is None:
+            return None
+        water = np.clip(stop - start, 0, None)
+        temp = grid(run, run.model.temp, b, TEMP_RANGE)
+        cm: np.ndarray = np.nan_to_num(water * ratio_grid(temp, bands) / 10, nan=0.0)
+        return cm
 
     total = np.zeros((region.height, region.width), np.float32)
     want = set(ends)
     for a, b in pairwise(points):
-        run = next((r for r in chain if a in r.times and b in r.times), None)
-        if run is None:
+        covering = [r for r in chain if a in r.times and b in r.times]
+        if not covering:
             log.info("snow totals: no Canadian run covers %s–%s", ts_iso(a), ts_iso(b))
             break
-        start = grid(run, run.model.accum, a, (0, 5000))
-        stop = grid(run, run.model.accum, b, (0, 5000))
-        if start is None or stop is None:
+        run = covering[0]
+        cm = step(run, a, b)
+        if cm is None:
             log.warning("snow totals: %s missing at %s or %s", run.model.name, ts_iso(a), ts_iso(b))
             break
-        water = np.clip(stop - start, 0, None)
-        temp = grid(run, run.model.temp, b, TEMP_RANGE)
-        total += np.nan_to_num(water * ratio_grid(temp, bands) / 10, nan=0.0)
         out.runs[run.model.name] = run.ref
+        w = domain.get(run.model.name) if domain else None
+        if w is not None and len(covering) > 1:
+            under = step(covering[1], a, b)
+            if under is not None:
+                cm = w * cm + (1 - w) * under
+                out.runs[covering[1].model.name] = covering[1].ref
+        total += cm
         if b in want:
             out.cm[b] = total.copy()
         # Drop grids the walk has passed.
@@ -166,28 +187,19 @@ def south_totals(nbm: Nbm | None, t0: int, ends: list[int]) -> dict[int, np.ndar
     return out
 
 
-def seam_weight(region: Region) -> np.ndarray:
-    """Weight of the northern source for each row: 0 south of the seam, 1 north of it."""
-    _, lats = region.lonlats()
-    lo, hi = SEAM
-    w: np.ndarray = np.clip((lats - lo) / (hi - lo), 0, 1).astype(np.float32)
-    return w[:, None]
-
-
-def blend(north: np.ndarray | None, south: np.ndarray | None, weight: np.ndarray) -> np.ndarray:
-    """North and south joined across the seam; either fills in where the other has nothing."""
+def join(
+    north: np.ndarray | None, south: np.ndarray | None, us_weight: np.ndarray | float
+) -> np.ndarray:
+    """Canada's chain and NBM as one field: NBM where its weight is 1, the chain where it
+    is 0, a weighted mean between; either fills in where the other has no data."""
     if north is None and south is None:
-        raise ValueError("nothing to blend")
+        raise ValueError("nothing to join")
     if north is None:
         assert south is not None
         return south
     if south is None:
         return north
-    w = np.broadcast_to(weight, north.shape)
-    w = np.where(np.isnan(south), 1.0, np.where(np.isnan(north), 0.0, w))
-    out: np.ndarray = w * np.nan_to_num(north) + (1 - w) * np.nan_to_num(south)
-    out[np.isnan(north) & np.isnan(south)] = np.nan
-    return out.astype(np.float32)
+    return mosaic([Layer("nbm", south, us_weight), Layer("eccc", north)]).amount
 
 
 def save_grid(cm: np.ndarray, path: Path) -> None:
