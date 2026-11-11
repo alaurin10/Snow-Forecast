@@ -18,6 +18,13 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Sun & shade on the map.** Terrain shadows for any date and time of day (with the
+  hills lit from where the sun really is), or the day's hours of direct sun. Tap the
+  map for when the sun first and last reaches a spot.
+- **Wind effect on the map.** Where the forecast wind at the nearest location's summit
+  would likely strip or load snow, from the shape of the terrain (Winstral's Sx), for
+  the last 48 hours or the next 24 or 72. An estimate, labelled as one.
+- `GET /api/map/wind`; snapshots carry loading roses for those three windows.
 - A 72-minute radar nowcast between the radar and the forecast on the map's slider.
 - `snowwatch map radar|forecast|totals|all`.
 - `backend/snowwatch/maps/`, including NOAA GRIB2 reading by byte range

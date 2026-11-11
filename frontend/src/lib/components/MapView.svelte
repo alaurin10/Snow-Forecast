@@ -4,9 +4,9 @@
   center's rating is current. Tap a marker for the numbers and a link.
   With `radar`, the map fills the window and becomes the full Map page: one weather
   layer (radar, nowcast and forecast on one timeline, see ../radar.ts, or snow totals),
-  one terrain overlay (slope, aspect or elevation bands, computed in the browser, see
-  ../map/terrain/), hill shading, contours, ski runs and peaks, chosen in the Layers
-  sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
+  one terrain overlay (slope, aspect, elevation bands, sun and shade, or the likely wind
+  effect, all computed in the browser, see ../map/terrain/), hill shading, contours, ski
+  runs and peaks, chosen in the Layers sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
   switch on 3D terrain.
 -->
 <script lang="ts">
@@ -17,6 +17,8 @@
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
+	import { getMapWind } from '../api';
+	import type { MapWindOut } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
 	import { viewport } from '../viewport.svelte';
 	import {
@@ -45,12 +47,21 @@
 		peakLabel,
 		peakText,
 		PEAK_LAYERS,
+		ANALYSIS_OPACITY,
 		PRECIP_BEFORE,
 		PRECIP_OPACITY,
 		sky,
 		SKI_LAYERS,
-		TOTAL_OPACITY
+		SUN_MIN_ZOOM,
+		TOTAL_OPACITY,
+		WIND_MIN_ZOOM
 	} from '../map/style';
+	import { AnalysisLayer, AreaRunner, viewBounds, type AreaState } from '../map/layers/analysis';
+	import type { AreaJob } from '../map/terrain/client';
+	import type { SunFacts } from '../map/terrain/shade';
+	import { sunDay, sunPosition, type Ymd } from '../map/terrain/sun';
+	import { WIND_WINDOWS, windSource, type WindWindow } from '../map/windsource';
+	import TerrainControls from '../map/TerrainControls.svelte';
 	import {
 		contourTiles,
 		setContours,
@@ -190,7 +201,8 @@
 		const s = prefs.mapShade;
 		const d = dark;
 		const b = satellite ? 'satellite' : 'topo';
-		if (ready && map && radar) setShade(map, s, d, b);
+		const sun = sunLight;
+		if (ready && map && radar) setShade(map, s, d, b, sun);
 	});
 	$effect(() => {
 		const c = contoursOn;
@@ -198,10 +210,93 @@
 		if (ready && map && radar) setContours(map, c, d);
 	});
 
+	// ---- Sun & shade and Wind effect: one picture for the view, from the terrain worker --
+	const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 700px)').matches;
+	/** The longer side of the grid the worker works on. */
+	const AREA_PX = phone ? 768 : 1024;
+	const pad2 = (n: number) => String(n).padStart(2, '0');
+	const today = () => {
+		const d = new Date();
+		return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+	};
+	/** The middle of the map, as of the last time it came to rest. */
+	let centre = $state({ lat: 48, lon: -120 });
+	/** Counts the map coming to rest, so the picture is redone for the new view. */
+	let viewTick = $state(0);
+	let sunMode = $state<'shade' | 'hours'>('shade');
+	let sunDate = $state(today());
+	/** The time on the shade slider; 0 until first placed. */
+	let sunTime = $state(0);
+	let windWindow = $state<WindWindow>('next24');
+	let windData = $state<MapWindOut | null>(null);
+	let windLoaded = $state(false);
+	let areaState = $state<AreaState>('idle');
+	let analysisLayer: AnalysisLayer | null = null;
+	let runner: AreaRunner | null = null;
+
+	const sunYmd = $derived.by<Ymd>(() => {
+		const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sunDate);
+		const d = new Date();
+		return m ? [+m[1], +m[2], +m[3]] : [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+	});
+	const day = $derived(sunDay(sunYmd, centre.lat, centre.lon));
+	// Keep the slider inside the day: at this moment if the sun is up, else at its highest.
+	$effect(() => {
+		const { sunrise, sunset, noon } = day;
+		if (sunrise == null || sunset == null) return;
+		const step = 15 * 60000;
+		if (sunTime >= sunrise && sunTime <= sunset) return;
+		const now = Date.now();
+		sunTime = Math.round((now > sunrise && now < sunset ? now : noon) / step) * step;
+	});
+	const sunPos = $derived(sunTime ? sunPosition(sunTime, centre.lat, centre.lon) : null);
+	const sunOn = $derived(overlayMode === 'sun');
+	const windOn = $derived(overlayMode === 'wind');
+	const areaTooFar = $derived((sunOn && zoom < SUN_MIN_ZOOM) || (windOn && zoom < WIND_MIN_ZOOM));
+	/** Hill shading lit from where the sun is, while the shade is showing. */
+	const sunLight = $derived(
+		sunOn && sunMode === 'shade' && sunPos && sunPos.altitude > 0 && !areaTooFar ? sunPos : null
+	);
+	const wind = $derived(windSource(windData, centre.lat, centre.lon, windWindow));
+
+	// The locations' wind, fetched when the layer is first switched on.
+	$effect(() => {
+		if (!windOn || windLoaded) return;
+		getMapWind()
+			.then((d) => (windData = d))
+			.catch((e) => console.error('wind', e))
+			.finally(() => (windLoaded = true));
+	});
+
+	// Ask for the picture again whenever what it shows changes, or the map comes to rest.
+	$effect(() => {
+		void viewTick;
+		const mode = overlayMode;
+		let job: AreaJob | null = null;
+		let opacity = 0.5;
+		if (mode === 'sun' && !areaTooFar && day.sunrise != null && day.sunset != null) {
+			if (sunMode === 'hours') {
+				job = { type: 'sunhours', date: sunYmd };
+				opacity = ANALYSIS_OPACITY.hours;
+			} else if (sunTime) {
+				job = { type: 'shade', time: sunTime };
+				opacity = ANALYSIS_OPACITY.shade;
+			}
+		} else if (mode === 'wind' && !areaTooFar && wind?.rose && wind.scale > 0) {
+			job = { type: 'wind', sectors: $state.snapshot(wind.rose.sectors), scale: wind.scale };
+			opacity = ANALYSIS_OPACITY.wind;
+		}
+		if (!ready || !map || !runner) return;
+		if (job) runner.request(job, viewBounds(map), AREA_PX, opacity);
+		else runner.request(null);
+	});
+
 	// ---- Inspector: tap the map for the terrain there --------------------------------
 	let probe = $state<{ lat: number; lon: number } | null>(null);
 	let facts = $state<PointFacts | null>(null);
 	let factsError = $state<string | null>(null);
+	let probeSun = $state<SunFacts | null>(null);
+	let probeWind = $state<{ value: number; window: string } | null>(null);
 	let probeMarker: Marker | null = null;
 	let probeToken = 0;
 
@@ -212,6 +307,8 @@
 		probe = { lat, lon };
 		facts = null;
 		factsError = null;
+		probeSun = null;
+		probeWind = null;
 		if (!probeMarker) {
 			const dot = document.createElement('div');
 			dot.className = 'probe';
@@ -220,7 +317,24 @@
 		probeMarker.setLngLat([lon, lat]).addTo(map);
 		try {
 			const f = await c.point(lat, lon);
-			if (token === probeToken) facts = f;
+			if (token !== probeToken) return;
+			facts = f;
+			if (f.sea) return;
+			// Sun and wind take a little longer and join the numbers when ready; neither is
+			// worth an error message if its terrain can't be had.
+			c.sunPoint(lat, lon, sunYmd).then(
+				(s) => token === probeToken && (probeSun = s),
+				() => {}
+			);
+			const w = windSource(windData, lat, lon, windWindow);
+			if (windOn && w?.rose && w.scale > 0) {
+				const { scale } = w;
+				const label = WIND_WINDOWS.find((x) => x.id === windWindow)!.label;
+				c.windPoint(lat, lon, $state.snapshot(w.rose.sectors)).then(
+					(v) => token === probeToken && (probeWind = { value: v * scale, window: label }),
+					() => {}
+				);
+			}
 		} catch (e) {
 			if (token === probeToken)
 				factsError = offline
@@ -234,6 +348,8 @@
 		probe = null;
 		facts = null;
 		factsError = null;
+		probeSun = null;
+		probeWind = null;
 		probeMarker?.remove();
 	}
 
@@ -499,7 +615,6 @@
 			analysis = terrain.worker;
 			const ctiles = radar ? contourTiles(units) : undefined;
 			contoursReady = !!ctiles;
-			const phone = matchMedia('(max-width: 700px)').matches;
 			map = new ml.Map({
 				container: el,
 				style: mapStyle({
@@ -538,6 +653,17 @@
 				'top-right'
 			);
 			map.on('zoom', () => (zoom = map!.getZoom()));
+			// The map came to rest: the view's sun or wind picture is redone a moment later.
+			let rest: ReturnType<typeof setTimeout>;
+			map.on('moveend', () => {
+				clearTimeout(rest);
+				rest = setTimeout(() => {
+					if (!map) return;
+					const c = map.getCenter();
+					centre = { lat: c.lat, lon: c.lng };
+					viewTick++;
+				}, 250);
+			});
 			// The "3D view" buttons inside marker popups.
 			el.addEventListener('click', (e) => {
 				const id = (e.target as HTMLElement).closest<HTMLElement>('[data-fly]')?.dataset.fly;
@@ -569,8 +695,17 @@
 					loc = new UserLocation(map!, ml!);
 					loc.onChange = (st) => (locState = st);
 				}
+				const tc = radar && analysis ? terrainClient() : null;
+				if (tc) {
+					// Over the terrain overlays, under the precipitation (added later, above it).
+					analysisLayer = new AnalysisLayer(map!, PRECIP_BEFORE);
+					runner = new AreaRunner(tc, analysisLayer);
+					runner.onstate = (st) => (areaState = st);
+				}
 				ready = true;
 				draw();
+				const c = map!.getCenter();
+				centre = { lat: c.lat, lon: c.lng };
 				if (radar) refresh();
 			});
 		});
@@ -580,6 +715,9 @@
 			loc = null;
 			ready = false;
 			fetchRun++;
+			runner?.stop();
+			runner = null;
+			analysisLayer = null;
 			overlay = null;
 			store.clear();
 			for (const m of markers) m.remove();
@@ -814,6 +952,8 @@
 					{facts}
 					error={factsError}
 					{units}
+					sun={probeSun}
+					wind={probeWind}
 					onclose={closeInspector}
 				/>
 			{/if}
@@ -850,26 +990,51 @@
 					small features like cornices and gully walls don't show. Tap the map for the numbers at a
 					spot.
 				</p>
+				<p class="faint">
+					Sun & shade: the sun's position by NOAA's formulas, and shadows cast by terrain up to 15
+					km away. Wind effect: how sheltered each slope is from the forecast wind at the nearest
+					location's summit, weighted by the snow that wind could move. Both are estimates from the
+					shape of the ground, not observations, and say nothing about how stable the snow is.
+				</p>
 				<button class="close" onclick={() => (panel = 'none')}>Close</button>
 			</div>
 		{/if}
 
-		{#if on}
-			<TimelineControls
-				{timeline}
-				{units}
-				{totalsMode}
-				bind:frame
-				bind:playing
-				bind:totalWindow
-				{total}
-				{current}
-				{label}
-				{waiting}
-				ready={ready_}
-				{loadError}
-			/>
-		{/if}
+		<div class="dock">
+			{#if (sunOn || windOn) && analysis}
+				<TerrainControls
+					overlay={sunOn ? 'sun' : 'wind'}
+					{units}
+					tooFar={areaTooFar}
+					state={areaState}
+					{offline}
+					bind:sunMode
+					bind:sunDate
+					bind:sunTime
+					{day}
+					position={sunPos}
+					bind:windWindow
+					{wind}
+					{windLoaded}
+				/>
+			{/if}
+			{#if on}
+				<TimelineControls
+					{timeline}
+					{units}
+					{totalsMode}
+					bind:frame
+					bind:playing
+					bind:totalWindow
+					{total}
+					{current}
+					{label}
+					{waiting}
+					ready={ready_}
+					{loadError}
+				/>
+			{/if}
+		</div>
 	{/if}
 </div>
 {#if !radar}
@@ -980,6 +1145,29 @@
 		filter: invert(1) brightness(1.6);
 	}
 
+	/* The controls at the foot of the map: terrain (when its layer has any) over weather. */
+	.dock {
+		position: absolute;
+		left: 10px;
+		right: 10px;
+		bottom: 10px;
+		z-index: 1000;
+		display: grid;
+		gap: 8px;
+		justify-items: center;
+		pointer-events: none;
+	}
+	.dock > :global(*) {
+		width: 100%;
+		max-width: 640px;
+		pointer-events: auto;
+	}
+	/* Clear the floating tab bar on phones. */
+	@media (max-width: 1099px) {
+		.dock {
+			bottom: calc(84px + env(safe-area-inset-bottom));
+		}
+	}
 	.tools {
 		position: absolute;
 		top: 136px;

@@ -11,7 +11,8 @@ import {
 	contourThresholds,
 	elevationBands,
 	overlayTiles,
-	shadePaint
+	shadePaint,
+	sunPaint
 } from '../style';
 
 type MapLibre = typeof import('maplibre-gl');
@@ -73,12 +74,24 @@ export function setOverlay(map: MlMap, overlay: MapOverlay) {
 	map.setLayoutProperty('overlay', 'visibility', vis(on));
 }
 
-export function setShade(map: MlMap, shade: MapShade, dark: boolean, base: 'topo' | 'satellite') {
+/**
+ * Hill shading as chosen, or, with `sun`, lit from where the sun is (whatever the
+ * shading setting: the Sun & shade layer needs it to read).
+ */
+export function setShade(
+	map: MlMap,
+	shade: MapShade,
+	dark: boolean,
+	base: 'topo' | 'satellite',
+	sun?: { azimuth: number; altitude: number } | null
+) {
 	if (!map.getLayer('shade')) return;
-	map.setLayoutProperty('shade', 'visibility', vis(shade !== 'off'));
-	if (shade === 'off') return;
-	for (const [k, v] of Object.entries(shadePaint(shade, dark, base)))
-		map.setPaintProperty('shade', k as never, v as never);
+	map.setLayoutProperty('shade', 'visibility', vis(shade !== 'off' || !!sun));
+	if (shade === 'off' && !sun) return;
+	const paint = sun
+		? sunPaint(sun.azimuth, sun.altitude, dark)
+		: shadePaint(shade === 'off' ? 'light' : shade, dark, base);
+	for (const [k, v] of Object.entries(paint)) map.setPaintProperty('shade', k as never, v as never);
 }
 
 export function setContours(map: MlMap, on: boolean, dark: boolean) {

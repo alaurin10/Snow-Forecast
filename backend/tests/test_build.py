@@ -54,7 +54,7 @@ def test_backcountry_ridge_and_days(loc_id: str) -> None:
     assert snap.ridge.level_m == snap.bands[2].elev_m
     bc = snap.backcountry
     assert bc is not None
-    assert [r.window for r in bc.rose] == ["past72", "next48"]
+    assert [r.window for r in bc.rose] == ["past72", "next48", "past48", "next24", "next72"]
     for rose in bc.rose:
         assert len(rose.sectors) == 8
         assert sum(rose.sectors) == pytest.approx(1, abs=0.01) or sum(rose.sectors) == 0

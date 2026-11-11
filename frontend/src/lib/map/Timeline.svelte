@@ -244,25 +244,13 @@
 		font-weight: 500;
 		cursor: default;
 	}
+	/* Placed by the map's dock (MapView), under the terrain controls when both show. */
 	.controls {
-		position: absolute;
-		left: 10px;
-		right: 10px;
-		bottom: 10px;
-		z-index: 1000;
-		max-width: 640px;
-		margin: 0 auto;
 		display: grid;
 		gap: 6px;
 		padding: 8px 12px 8px 8px;
 		border-radius: 18px;
 		font-size: 0.85rem;
-	}
-	/* Clear the floating tab bar on phones. */
-	@media (max-width: 1099px) {
-		.controls {
-			bottom: calc(84px + env(safe-area-inset-bottom));
-		}
 	}
 	.modes {
 		justify-self: start;

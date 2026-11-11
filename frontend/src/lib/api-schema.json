@@ -2014,6 +2014,66 @@
       "title": "LookupStatus",
       "type": "object"
     },
+    "MapWindLocation": {
+      "description": "A location's loading roses, placed at its summit (where the wind is taken).",
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "roses": {
+          "items": {
+            "$ref": "#/$defs/RoseOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "lat",
+        "lon",
+        "generated_at",
+        "roses"
+      ],
+      "title": "MapWindLocation",
+      "type": "object"
+    },
+    "MapWindOut": {
+      "description": "Wind and new snow per location for the map's wind-effect layer.",
+      "properties": {
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/MapWindLocation"
+          },
+          "type": "array"
+        },
+        "min_snow_cm": {
+          "type": "number"
+        },
+        "min_wind_kmh": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "min_snow_cm",
+        "min_wind_kmh",
+        "locations"
+      ],
+      "title": "MapWindOut",
+      "type": "object"
+    },
     "Me": {
       "properties": {
         "is_owner": {
@@ -4120,6 +4180,9 @@
     "lookups": {
       "$ref": "#/$defs/LookupStatus"
     },
+    "map_wind": {
+      "$ref": "#/$defs/MapWindOut"
+    },
     "me": {
       "$ref": "#/$defs/Me"
     },
@@ -4167,6 +4230,7 @@
     "snapshot",
     "locations",
     "overview",
+    "map_wind",
     "trend",
     "runs",
     "me",

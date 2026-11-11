@@ -19,6 +19,8 @@ from snowwatch.api.models import (
     DangerChip,
     LocationAge,
     LocationSummary,
+    MapWindLocation,
+    MapWindOut,
     OverviewPeriod,
     OverviewRow,
     PlanDate,
@@ -209,6 +211,32 @@ def make_router() -> APIRouter:
             rows.append(row)
         response.headers["Cache-Control"] = CACHE
         return rows
+
+    @router.get("/map/wind", response_model=MapWindOut)
+    def map_wind(conn: Conn, request: Request, response: Response) -> MapWindOut:
+        """Every location's loading roses: the wind behind the map's wind-effect layer."""
+        cfg = request.app.state.forecast_config.backcountry
+        snaps = latest_snapshots(conn)
+        out = []
+        for loc in service.list_locations(conn):
+            snap = snaps.get(loc.id)
+            if snap is None or snap.backcountry is None:
+                continue
+            top = loc.band("summit")
+            out.append(
+                MapWindLocation(
+                    id=loc.id,
+                    name=loc.name,
+                    lat=top.lat,
+                    lon=top.lon,
+                    generated_at=snap.generated_at,
+                    roses=snap.backcountry.rose,
+                )
+            )
+        response.headers["Cache-Control"] = CACHE
+        return MapWindOut(
+            min_snow_cm=cfg.rose_min_snow_cm, min_wind_kmh=cfg.rose_min_wind_kmh, locations=out
+        )
 
     @router.get("/avalanche", response_model=dict[str, AvalancheView])
     def avalanche_all(conn: Conn, response: Response) -> dict[str, AvalancheView]:

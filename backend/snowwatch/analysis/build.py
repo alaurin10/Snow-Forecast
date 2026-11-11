@@ -432,8 +432,16 @@ def _backcountry(
     direction = _first(ridge_dir, _first(top.wdir, blend_top.get("wind_direction_10m")))
     future_snow = {h: None if v is None else v * k for h, v in top.hourly_sw.items()}
 
+    # The first two are the Backcountry tab's; the rest feed the map's wind-effect layer.
+    windows = (
+        ("past72", past72, past_snow),
+        ("next48", next48, future_snow),
+        ("past48", _past(past_snow, now_h, 48), past_snow),
+        ("next24", list(all_hours[:24]), future_snow),
+        ("next72", list(all_hours[:72]), future_snow),
+    )
     roses = []
-    for name, hours, snow in (("past72", past72, past_snow), ("next48", next48, future_snow)):
+    for name, hours, snow in windows:
         rose = bc.loading_rose(hours, snow, speed, direction, bcfg)
         roses.append(
             RoseOut(

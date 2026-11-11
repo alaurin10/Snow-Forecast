@@ -130,6 +130,16 @@ def test_overview_rows(client: TestClient) -> None:
     assert sunshine["run_id"] is None and sunshine["periods"] == []
 
 
+def test_map_wind_has_every_window(client: TestClient) -> None:
+    out = client.get("/api/map/wind").json()
+    assert out["min_snow_cm"] == 2 and out["min_wind_kmh"] == 15
+    assert out["locations"]
+    for loc in out["locations"]:
+        assert {"past48", "next24", "next72"} <= {r["window"] for r in loc["roses"]}
+        assert -90 < loc["lat"] < 90 and loc["generated_at"]
+        assert all(len(r["sectors"]) == 8 for r in loc["roses"])
+
+
 def test_overview_cache_follows_new_runs(
     client: TestClient, settings: Settings, conn: sqlite3.Connection
 ) -> None:

@@ -202,7 +202,7 @@ class RidgeOut(BaseModel):
 class RoseOut(BaseModel):
     """Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise)."""
 
-    window: str  # "past72" or "next48"
+    window: str  # past72, next48 (the Backcountry tab), past48, next24, next72 (the map)
     sectors: list[float]  # share of the loading, wind blowing from that sector
     snow_cm: float  # summit snowfall in the window
     mean_kmh: float | None
