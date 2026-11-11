@@ -4,7 +4,6 @@
 // daily mosaic underneath on screen.
 import type { Map as MlMap } from 'maplibre-gl';
 import type { RecentSource, RecentSpec } from '../sat';
-import { basePaint } from '../style';
 
 const PREFIX = 'recent-';
 
@@ -27,7 +26,7 @@ export function recentLayers(map: MlMap): string[] {
  * Make the map draw `spec` (empty when the base isn't Recent satellite). `before` is the
  * layer the topmost one goes under.
  */
-export function setRecent(map: MlMap, spec: RecentSpec, dark: boolean, before?: string) {
+export function setRecent(map: MlMap, spec: RecentSpec, before?: string) {
 	const want = wanted(spec);
 	const ids = new Set(want.map((w) => PREFIX + w.src.id));
 	for (const id of recentLayers(map)) {
@@ -35,7 +34,6 @@ export function setRecent(map: MlMap, spec: RecentSpec, dark: boolean, before?: 
 		map.removeLayer(id);
 		if (map.getSource(id)) map.removeSource(id);
 	}
-	const paint = basePaint(dark, 0.8);
 	// From the top down, each goes just under the one above it.
 	let above = before && map.getLayer(before) ? before : undefined;
 	for (const w of [...want].reverse()) {
@@ -59,20 +57,12 @@ export function setRecent(map: MlMap, spec: RecentSpec, dark: boolean, before?: 
 					source: id,
 					minzoom: w.minzoom,
 					...(w.maxzoom ? { maxzoom: w.maxzoom } : {}),
-					paint: { 'raster-fade-duration': 150, ...paint }
+					// Never dimmed, even in the dark theme: the point is to see the ground.
+					paint: { 'raster-fade-duration': 150 }
 				},
 				above
 			);
 		}
 		above = id;
-	}
-}
-
-/** Dim the imagery with the theme, like the other bases. */
-export function setRecentTheme(map: MlMap, dark: boolean) {
-	const p = basePaint(dark, 0.8);
-	for (const id of recentLayers(map)) {
-		map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
-		map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
 	}
 }

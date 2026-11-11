@@ -93,14 +93,16 @@ export function basePaint(dark: boolean, darkBrightness = 0.72) {
 	} as const;
 }
 
-export function sky(dark: boolean): StyleSpecification['sky'] {
+/** The 3D sky and haze. `clearGround` keeps the haze off the terrain (recent satellite). */
+export function sky(dark: boolean, clearGround = false): StyleSpecification['sky'] {
 	return {
 		'sky-color': dark ? '#0d1626' : '#9cc6ec',
 		'horizon-color': dark ? '#2a3a52' : '#e4eef7',
 		'fog-color': dark ? '#1b2638' : '#dfe8f0',
 		'sky-horizon-blend': 0.6,
 		'horizon-fog-blend': 0.6,
-		'fog-ground-blend': 0.8,
+		// 1 puts the start of the haze at the horizon: none over the ground itself.
+		'fog-ground-blend': clearGround ? 1 : 0.8,
 		'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0]
 	};
 }
@@ -301,7 +303,7 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 				id: 'shade',
 				type: 'hillshade',
 				source: 'demshade',
-				layout: { visibility: vis(o.shade !== 'off') },
+				layout: { visibility: vis(o.shade !== 'off' && o.base !== 'recent') },
 				paint: shadePaint(o.shade === 'off' ? 'light' : o.shade, o.dark, o.base)
 			},
 			{
@@ -352,7 +354,7 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 		sources,
 		layers,
 		glyphs: '/api/glyphs/{fontstack}/{range}.pbf',
-		sky: sky(o.dark)
+		sky: sky(o.dark, full && o.base === 'recent')
 	};
 }
 

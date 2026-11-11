@@ -97,7 +97,7 @@
 	} from '../map/avalanche';
 	import { addZones, setZones } from '../map/layers/avalanche';
 	import { nearestSpot, recentSpec, type RecentSpec } from '../map/sat';
-	import { setRecent, setRecentTheme } from '../map/layers/sat';
+	import { setRecent } from '../map/layers/sat';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
@@ -184,8 +184,8 @@
 			map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
 			map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
 		}
-		setRecentTheme(map, d);
-		const s = sky(d);
+		// No haze over recent satellite imagery in 3D: nothing should dim it.
+		const s = sky(d, recent);
 		if (s) map.setSky(s);
 	});
 
@@ -246,7 +246,9 @@
 		setOverlay(map, o, q);
 	});
 	$effect(() => {
-		const s = prefs.mapShade;
+		// No hill shading over recent satellite (the Sun & shade layer still lights the
+		// hills, since that's what it shows).
+		const s = recent ? 'off' : prefs.mapShade;
 		const d = dark;
 		const b = prefs.mapBase === 'topo' || !radar ? 'topo' : prefs.mapBase;
 		const sun = sunLight;
@@ -398,10 +400,9 @@
 	const NO_RECENT: RecentSpec = { viirs: null, hls: null, s2: [] };
 	$effect(() => {
 		const spec = recent && !offline ? recentSpec(satData, satScene, prefs.satBands) : NO_RECENT;
-		const d = dark;
 		if (!ready || !map) return;
 		// Over the other bases, under the hill shading and everything else.
-		setRecent(map, spec, d, 'shade');
+		setRecent(map, spec, 'shade');
 	});
 
 	// ---- Avalanche: zones as published, problems as terrain, the concern index -----------

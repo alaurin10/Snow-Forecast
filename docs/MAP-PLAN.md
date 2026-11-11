@@ -711,8 +711,14 @@ What shipped, and where it differs from the plan above:
   Banff Sunshine, 54% snow"), older/newer scene, and Natural / Snow vs cloud
   (`prefs.satBands`). Like Esri's satellite, it needs a connection: offline the map shows
   the saved topo map. Not saved for offline use.
+- Follow-up: nothing dims Recent satellite. It isn't darkened in the dark theme, hill
+  shading is off over it whatever the setting (Sun & shade still lights the hills, since
+  that is the layer), the 3D haze stops at the horizon, and natural colour has a brighter
+  stretch with an S-curve for snow.
 - Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–4).
-- Known limits: a location with no clear pass in 30 days (Whistler and Snoqualmie on
+- Known limits: Sentinel-2 is 10 m, so up close it is far softer than Esri's sub-metre
+  "Satellite"; a scene can end at a swath edge a few km from a location (the 8 km square
+  allows 10% without data); a location with no clear pass in 30 days (Whistler and Snoqualmie on
   11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
   few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
 

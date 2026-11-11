@@ -202,9 +202,16 @@ PC_TILES = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMe
 # all snow flat white; and snow vs cloud (SWIR, near infrared, red): snow cyan, cloud
 # white. L2A values are reflectance x 10,000 plus 1,000.
 S2_MODES = {
-    "natural": "assets=B04&assets=B03&assets=B02&rescale=1000,12000&color_formula=Gamma+RGB+1.8",
+    # Bright enough for dark forest and rock in low autumn sun; the S-curve keeps texture
+    # in sunlit snow (~3% of a snowy Alta tile saturates).
+    "natural": (
+        "assets=B04&assets=B03&assets=B02&rescale=1000,12000"
+        "&color_formula=Gamma+RGB+2.4+Sigmoidal+RGB+4+0.3"
+    ),
     "snow": "assets=B11&assets=B8A&assets=B04&rescale=1000,9000&color_formula=Gamma+RGB+1.3",
 }
+# Bumped whenever S2_MODES changes, so cached tiles (here and in browsers) are redrawn.
+S2_RENDER = 2
 # 512 px tiles: zoom 14 is ~5 m a pixel here, finer than Sentinel-2's 10 m.
 S2_ZOOMS = (8, 14)
 
@@ -245,7 +252,7 @@ def s2_path(
         return None
     if not _xy_ok(z, x, y):
         return None
-    return cache.root / "s2" / mode / item / str(z) / str(x) / str(y)
+    return cache.root / "s2" / f"r{S2_RENDER}" / mode / item / str(z) / str(x) / str(y)
 
 
 def s2_tile(

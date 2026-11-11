@@ -36,8 +36,8 @@ describe('what the base draws', () => {
 		);
 		expect(spec.hls?.tiles[0]).toContain('/HLS_S30_Nadir_BRDF_Adjusted_Reflectance/2026-11-04/');
 		expect(spec.s2.map((s) => s.tiles[0])).toEqual([
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UEA_20261104T221403/{z}/{x}/{y}.webp',
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UDA_20261104T221403/{z}/{x}/{y}.webp'
+			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UEA_20261104T221403/{z}/{x}/{y}.webp?r=2',
+			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UDA_20261104T221403/{z}/{x}/{y}.webp?r=2'
 		]);
 		expect(spec.s2[0].bounds).toEqual([-123, 49.5, -121.5, 50.5]);
 		expect(spec.s2[0].tileSize).toBe(512);
@@ -57,7 +57,7 @@ describe('what the base draws', () => {
 		expect(recentSpec(null, null, 'natural')).toEqual({ viirs: null, hls: null, s2: [] });
 	});
 
-	it('puts place names and contours over recent imagery, not Esri’s', () => {
+	it('puts place names and contours over recent imagery, and nothing that darkens it', () => {
 		const style = mapStyle({
 			dark: false,
 			full: true,
@@ -78,5 +78,8 @@ describe('what the base draws', () => {
 		expect(vis('contour-lines')).toBe('visible');
 		expect(vis('sat')).toBe('none');
 		expect(vis('esri')).toBe('none');
+		// Nothing dims it: no hill shading, and no 3D haze over the ground.
+		expect(vis('shade')).toBe('none');
+		expect(style.sky?.['fog-ground-blend']).toBe(1);
 	});
 });

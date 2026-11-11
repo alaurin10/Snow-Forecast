@@ -15,6 +15,8 @@ export const HLS_MIN_ZOOM = 8;
 export const HLS_MAX_ZOOM = 12;
 export const S2_MIN_ZOOM = 10;
 export const S2_MAX_ZOOM = 14;
+/** Keep in step with S2_RENDER in backend/snowwatch/tiles.py: a new value refetches tiles. */
+export const S2_RENDER = 2;
 
 export const VIIRS_LAYERS: Record<SatBands, string> = {
 	natural: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
@@ -130,7 +132,7 @@ export function recentSpec(
 			: null;
 	const s2 = (scene?.items ?? []).map((it) => ({
 		id: `s2-${bands}-${it.id}`,
-		tiles: [`/api/tiles/s2/${bands}/${it.id}/{z}/{x}/{y}.webp`],
+		tiles: [`/api/tiles/s2/${bands}/${it.id}/{z}/{x}/{y}.webp?r=${S2_RENDER}`],
 		tileSize: 512,
 		minzoom: S2_MIN_ZOOM - 1,
 		maxzoom: S2_MAX_ZOOM,

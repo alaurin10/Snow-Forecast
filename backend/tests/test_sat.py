@@ -17,7 +17,7 @@ from PIL import Image
 from snowwatch.api.app import create_app
 from snowwatch.maps import sat
 from snowwatch.settings import Settings
-from snowwatch.tiles import TileCache, gibs_path, gibs_tile, s2_path, s2_tile
+from snowwatch.tiles import S2_RENDER, TileCache, gibs_path, gibs_tile, s2_path, s2_tile
 from tests.conftest import make_location
 
 NOW = datetime(2026, 11, 11, 12, tzinfo=UTC)
@@ -265,6 +265,8 @@ def test_s2_tiles_only_for_items_in_the_index(tmp_path: Path) -> None:
     assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
     assert len(calls) == 1  # the second came from the cache
     assert "item=" + ITEM in calls[0] and "B04" in calls[0] and "@2x.webp" in calls[0]
+    # Cached under the rendering version, so a new colour stretch is drawn afresh.
+    assert (tmp_path / "s2" / f"r{S2_RENDER}" / "natural" / ITEM / "12" / "650" / "1385").exists()
     assert s2_tile(cache, "snow", ITEM, 12, 650, 1385, allowed) is not None
     assert "B11" in calls[1]
     for args in (
