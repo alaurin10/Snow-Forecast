@@ -2,7 +2,7 @@
 // changes that follow the viewer's choices (overlay, shading, contours, units).
 import type { Map as MlMap, RasterTileSource, VectorTileSource } from 'maplibre-gl';
 import type { UnitSystem } from '../../units';
-import type { MapOverlay, MapShade } from '../../prefs.svelte';
+import type { MapOverlay, MapShade, MapBase } from '../../prefs.svelte';
 import { registerProtocols } from '../terrain/client';
 import { BASE_ZOOM, MAPTERHORN } from '../terrain/dem';
 import {
@@ -88,7 +88,7 @@ export function setShade(
 	map: MlMap,
 	shade: MapShade,
 	dark: boolean,
-	base: 'topo' | 'satellite',
+	base: MapBase,
 	sun?: { azimuth: number; altitude: number } | null
 ) {
 	if (!map.getLayer('shade')) return;

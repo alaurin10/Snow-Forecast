@@ -397,7 +397,7 @@ New `frontend/src/lib/map/terrain/`:
 | 3 | Terrain basics | Frontend split + Layers sheet, B1, B2, B3, B8 inspector (terrain facts) (done, see "Milestone 3 notes") |
 | 4 | Sun and wind | B4, B5 (done, see "Milestone 4 notes") |
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes"; B7.3 is open to every visitor) |
-| 6 | Recent satellite | B6 |
+| 6 | Recent satellite | B6 (done, see "Milestone 6 notes") |
 | 7 | More weather layers | A5, A6 |
 | 8 | Terrain-adjusted totals | A4 |
 | 9 | Tools and features | B8 measure/GPX, B9, B7.4, B7.5 |
@@ -672,6 +672,49 @@ What shipped, and where it differs from the plan above:
 - Known limits: the problems and concern layers use the zone in the middle of the map for the
   whole view (clipped to it); treeline bands are regional guesses; problems are not per day
   (both providers publish one list).
+
+## Milestone 6 notes (done 11 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **Backend**: `maps/sat.py`, the worker's `satellite` job every `map.sat_hours` (6), and
+  `snowwatch map sat`. Per location (the mid band's point) a STAC search over the last
+  `sat_days` (30) for a ±4 km box, so every MGRS tile of a pass that touches the square is
+  found, not only the one under the point. A **scene is a pass** (datatake), with all its
+  tiles; their SCL crops are merged before judging, since a location on a tile edge saw
+  23–42% no data from one tile alone. Judged passes are remembered in
+  `data/sat/checked.json` (up to 24 new ones per location a run), so a refresh after the
+  first only reads new passes (6 s for six locations, against 29 s). Thresholds in
+  `config/forecast.yaml` → `map.sat_*`. Probe results in `docs/SOURCES.md`.
+- **Index** `data/sat/index.json` at `GET /api/sat` (`SatOut`): per location its clear
+  scenes, newest first (id, time, platform, clear/snow/no-data %, items with their bbox,
+  and whether GIBS has HLS for that day); plus the VIIRS day and the newest HLS day.
+- **Tile proxy** as planned, with two changes: Sentinel-2 URLs carry a band mode
+  (`/api/tiles/s2/{natural|snow}/{item}/…webp`, WebP to keep transparency at swath edges,
+  z8–14 at 512 px), and natural colour is drawn from the bands rather than the
+  `visual` asset, which flattens sunlit snow to white. GIBS: three layers (VIIRS true and
+  false colour, HLS S30), days from 2015 to tomorrow. Both share the tile cache, its size
+  cap, pruning and miss rate limit.
+- **Which day of VIIRS**: the newest of the last four days whose tile over the locations
+  isn't black (today's is black until the afternoon pass is processed).
+- **HLS differs**: HLS on a fixed day is only the swaths imaged that day, so it isn't drawn
+  for its own sake. It is drawn for the day of the Sentinel-2 scene on screen (HLS S30 is
+  made from the same pass, and covers its whole swath), when GIBS has that day yet (about
+  six days behind). GIBS has no false-colour HLS, so the snow-vs-cloud view goes from
+  VIIRS straight to Sentinel-2.
+- **Frontend**: base option "Recent satellite" (`prefs.mapBase: 'recent'`; Esri's stays
+  "Satellite"); VIIRS at every zoom, HLS from zoom 8, Sentinel-2 from zoom 10, each tile
+  of the scene a raster source with its bounds (`lib/map/layers/sat.ts`, under the hill
+  shading); place names and contours drawn over it as over Esri imagery. The scene is the
+  one of the location nearest the map's middle within 60 km. Controls in the dock
+  (`SatControls.svelte`): the chip ("Sentinel-2C · 9 Nov · 2 days ago · 98% clear ·
+  Banff Sunshine, 54% snow"), older/newer scene, and Natural / Snow vs cloud
+  (`prefs.satBands`). Like Esri's satellite, it needs a connection: offline the map shows
+  the saved topo map. Not saved for offline use.
+- Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–4).
+- Known limits: a location with no clear pass in 30 days (Whistler and Snoqualmie on
+  11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
+  few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
 
 ## Files
 

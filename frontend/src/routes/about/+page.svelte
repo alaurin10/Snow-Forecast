@@ -79,6 +79,18 @@
 			terms: 'Esri terms of use'
 		},
 		{
+			name: 'Copernicus Sentinel-2, via Microsoft Planetary Computer',
+			href: 'https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a',
+			what: 'Recent 10 m satellite views near each location. Contains modified Copernicus Sentinel data',
+			terms: 'Copernicus open data policy'
+		},
+		{
+			name: 'NASA GIBS',
+			href: 'https://earthdata.nasa.gov/gibs',
+			what: 'Daily VIIRS and 30 m HLS satellite imagery',
+			terms: 'NASA open data'
+		},
+		{
 			name: 'Mapterhorn',
 			href: 'https://mapterhorn.com/attribution/',
 			what: 'Elevation for 3D terrain, shading, slope, aspect and contours (USGS 3DEP, NRCan HRDEM, Copernicus GLO-30 and others)',

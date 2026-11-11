@@ -60,6 +60,13 @@ class MapConfig(BaseModel):
     # NOAA NBM runs (UTC hours) used for the US beyond 48 h and for US snow totals. Only
     # the 00, 06, 12 and 18 UTC runs reach 10 days; each new run is ~60–80 MB to fetch.
     nbm_cycles: list[int] = [0, 12]
+    # Recent satellite (Sentinel-2 near each location, docs/MAP-PLAN.md B6): how often to
+    # look for new scenes, how far back, and what counts as a clear view of a location.
+    sat_hours: int = Field(6, ge=1, le=48)
+    sat_days: int = Field(30, ge=3, le=90)
+    sat_min_clear: float = Field(0.7, gt=0, le=1)
+    sat_max_nodata: float = Field(0.1, ge=0, lt=1)
+    sat_keep: int = Field(3, ge=1, le=10)
 
     @field_validator("region")
     @classmethod

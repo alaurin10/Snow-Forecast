@@ -1,0 +1,375 @@
+"""Recent satellite imagery: picking clear Sentinel-2 scenes, the index, the tile proxy."""
+
+from __future__ import annotations
+
+import io
+import json
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from snowwatch.api.app import create_app
+from snowwatch.maps import sat
+from snowwatch.settings import Settings
+from snowwatch.tiles import TileCache, gibs_path, gibs_tile, s2_path, s2_tile
+from tests.conftest import make_location
+
+NOW = datetime(2026, 11, 11, 12, tzinfo=UTC)
+
+
+def crop(scl: int | np.ndarray, mask: int | np.ndarray = 255) -> np.ndarray:
+    a = np.zeros((2, 64, 64), np.uint8)
+    a[0] = scl
+    a[1] = mask
+    return a
+
+
+def npy(a: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    np.save(buf, a)
+    return buf.getvalue()
+
+
+def jpeg(color: tuple[int, int, int]) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (256, 256), color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def item(pid: str, tile: str, processed: str = "20261110T221403") -> str:
+    return f"{pid}_{tile}_{processed}"
+
+
+def feature(fid: str, when: str, bbox: list[float] | None = None) -> dict[str, Any]:
+    return {
+        "id": fid,
+        "bbox": bbox or [-121.5, 46.5, -120.5, 47.5],
+        "properties": {"datetime": when, "platform": f"Sentinel-2{fid[2]}"},
+    }
+
+
+# ---- judging a pass -------------------------------------------------------------
+
+
+def test_judge_counts_cloud_snow_and_missing_data() -> None:
+    scl = np.full((64, 64), 4, np.uint8)  # vegetation
+    scl[:16] = 9  # a quarter high cloud
+    scl[16:24] = 11  # an eighth snow
+    look = sat.judge(sat.merge_crops([crop(scl)]))
+    assert look.clear == pytest.approx(0.75)
+    assert look.snow == pytest.approx(0.125)
+    assert look.nodata == 0
+    # The mask, not only class 0, marks pixels without data.
+    half = np.zeros((64, 64), np.uint8)
+    half[:, :32] = 255
+    look = sat.judge(sat.merge_crops([crop(5, half)]))
+    assert look.nodata == pytest.approx(0.5) and look.clear == 1
+    assert sat.judge(np.zeros((4, 4), np.uint8)) == sat.Look(clear=0, nodata=1, snow=0)
+
+
+def test_merge_fills_one_tiles_gap_from_the_next() -> None:
+    left = np.zeros((64, 64), np.uint8)
+    left[:, :40] = 255
+    merged = sat.merge_crops([crop(4, left), crop(11)])
+    assert (merged[:, :40] == 4).all() and (merged[:, 40:] == 11).all()
+    with pytest.raises(ValueError):
+        sat.merge_crops([])
+
+
+def test_passes_group_tiles_and_keep_the_newest_processing() -> None:
+    a = "S2C_MSIL2A_20261110T182601_R127"
+    b = "S2B_MSIL2A_20261105T182539_R127"
+    feats = [
+        feature(item(b, "T12TVL"), "2026-11-05T18:25:39Z"),
+        feature(item(a, "T12TVL"), "2026-11-10T18:26:01Z"),
+        feature(item(a, "T12TVK"), "2026-11-10T18:26:01Z"),
+        feature(item(a, "T12TVK", "20261111T010101"), "2026-11-10T18:26:01Z"),  # reprocessed
+        feature("not-a-sentinel-item", "2026-11-10T18:26:01Z"),
+        {"id": item(b, "T12TVK"), "properties": {}},
+    ]
+    passes = sat.group_passes(feats)
+    assert [p.id for p in passes] == [a, b]
+    assert {i.id for i in passes[0].items} == {
+        item(a, "T12TVL"),
+        item(a, "T12TVK", "20261111T010101"),
+    }
+    assert passes[0].platform == "Sentinel-2C"
+    assert sat.pass_id(item(a, "T12TVL")) == a
+
+
+def test_crop_box_is_square_on_the_ground() -> None:
+    w, s, e, n = sat.crop_box(60.0, -120.0)
+    assert n - s == pytest.approx(8 / 111.32, rel=1e-3)
+    assert e - w == pytest.approx(2 * (n - s), rel=1e-2)  # cos 60° = 0.5
+
+
+def test_viirs_tile_check_tells_black_from_imagery() -> None:
+    assert not sat.has_imagery(jpeg((0, 0, 0)))
+    assert sat.has_imagery(jpeg((120, 130, 140)))
+    assert not sat.has_imagery(b"not an image")
+    assert sat.tile_xy(0, 0, 1) == (1, 1)
+
+
+# ---- the refresh ----------------------------------------------------------------
+
+CLEAR = "S2C_MSIL2A_20261110T182601_R127"
+CLOUDY = "S2B_MSIL2A_20261108T182539_R084"
+OLDER = "S2A_MSIL2A_20261101T182539_R127"
+EDGE = "S2A_MSIL2A_20261030T182539_R127"
+
+
+class Upstream:
+    """Planetary Computer and GIBS, as far as the refresh uses them."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.fail_search = False
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        self.calls.append(url)
+        if url.startswith(sat.STAC_SEARCH):
+            if self.fail_search:
+                return httpx.Response(502)
+            body = json.loads(req.content)
+            assert body["collections"] == ["sentinel-2-l2a"] and len(body["bbox"]) == 4
+            return httpx.Response(
+                200,
+                json={
+                    "features": [
+                        feature(item(CLEAR, "T10TET"), "2026-11-10T18:26:01Z"),
+                        feature(item(CLOUDY, "T10TET"), "2026-11-08T18:25:39Z"),
+                        feature(item(OLDER, "T10TET"), "2026-11-01T18:25:39Z"),
+                        feature(item(EDGE, "T10TET"), "2026-10-30T18:25:39Z"),
+                        feature(item(EDGE, "T10TFT"), "2026-10-30T18:25:39Z"),
+                    ]
+                },
+            )
+        if "/item/bbox/" in url:
+            it = req.url.params["item"]
+            assert req.url.params["assets"] == "SCL"
+            if it.startswith(CLOUDY):
+                return httpx.Response(200, content=npy(crop(9)))
+            if it.startswith(EDGE):
+                # Each tile of this pass sees half the square: together, all of it.
+                m = np.zeros((64, 64), np.uint8)
+                if "T10TET" in it:
+                    m[:, :32] = 255
+                else:
+                    m[:, 32:] = 255
+                return httpx.Response(200, content=npy(crop(11, m)))
+            scl = np.full((64, 64), 11, np.uint8)
+            scl[:8] = 8  # an eighth cloud: still clear enough
+            return httpx.Response(200, content=npy(crop(scl)))
+        if url.endswith(".xml") and sat.HLS in url:
+            return httpx.Response(
+                200,
+                text="<Domains><DimensionDomain><Domain>2026-03-02/2026-11-04/P1D</Domain>"
+                "</DimensionDomain></Domains>",
+            )
+        if sat.VIIRS in url:
+            dark = "/2026-11-11/" in url
+            return httpx.Response(200, content=jpeg((0, 0, 0) if dark else (90, 100, 110)))
+        return httpx.Response(404)
+
+
+def test_refresh_keeps_the_newest_clear_scenes_and_remembers_judged_passes(
+    tmp_path: Path,
+) -> None:
+    up = Upstream()
+    client = httpx.Client(transport=httpx.MockTransport(up))
+    loc = make_location()
+    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
+    assert res.errors == [] and res.locations == 1 and res.checked == 4
+    index = sat.read_index(tmp_path / "index.json")
+    assert index is not None
+    assert index.viirs_date == "2026-11-10"  # today's mosaic is still black
+    assert index.hls_date == "2026-11-04"
+    spot = index.locations[0]
+    assert (spot.id, spot.lat, spot.lon) == ("testhill", 47.0, -121.0)
+    assert [s.id for s in spot.scenes] == [CLEAR, OLDER, EDGE]  # the cloudy one is out
+    first = spot.scenes[0]
+    assert (first.clear_pct, first.snow_pct, first.nodata_pct) == (88, 88, 0)
+    assert first.hls is False and spot.scenes[1].hls is True  # HLS ends on 4 Nov
+    assert len(spot.scenes[2].items) == 2  # the two half-squares make a whole
+    assert sat.allowed_items(index) == {i.id for s in spot.scenes for i in s.items}
+
+    # Next time only the search, HLS's dates and VIIRS are asked for; passes aren't re-read.
+    up.calls.clear()
+    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
+    assert res.checked == 0 and not any("/item/bbox/" in c for c in up.calls)
+
+    # A failed search keeps what was found, and says so.
+    up.fail_search = True
+    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
+    again = sat.read_index(tmp_path / "index.json")
+    assert again is not None and len(res.errors) == 1
+    assert [s.id for s in again.locations[0].scenes] == [CLEAR, OLDER, EDGE]
+    assert again.locations[0].error
+
+
+def test_refresh_stops_at_keep_and_drops_moved_locations(tmp_path: Path) -> None:
+    client = httpx.Client(transport=httpx.MockTransport(Upstream()))
+    sat.refresh(tmp_path, client, [make_location()], keep=1, now=NOW)
+    index = sat.read_index(tmp_path / "index.json")
+    assert index is not None and [s.id for s in index.locations[0].scenes] == [CLEAR]
+    moved = make_location(
+        bands=[
+            {"band": "base", "label": "Base", "lat": 48.0, "lon": -121.0, "elev_m": 1000},
+            {"band": "mid", "label": "Mid", "lat": 48.0, "lon": -121.0, "elev_m": 1500},
+            {"band": "summit", "label": "Top", "lat": 48.0, "lon": -121.0, "elev_m": 2000},
+        ]
+    )
+    sat.refresh(tmp_path, client, [moved], keep=1, now=NOW)
+    checked = json.loads((tmp_path / "checked.json").read_text())
+    assert list(checked) == ["testhill@48.000,-121.000"]
+
+
+def test_refresh_survives_gibs_being_down(tmp_path: Path) -> None:
+    up = Upstream()
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        if "gibs" in str(req.url):
+            return httpx.Response(503)
+        return up(req)
+
+    client = httpx.Client(transport=httpx.MockTransport(answer))
+    res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
+    index = sat.read_index(tmp_path / "index.json")
+    assert index is not None and index.viirs_date is None and index.hls_date is None
+    assert len(res.errors) == 2 and index.locations[0].scenes
+    assert not any(s.hls for s in index.locations[0].scenes)
+
+
+# ---- the tile proxy ----------------------------------------------------------------
+
+ITEM = item(CLEAR, "T10TET")
+
+
+def test_s2_tiles_only_for_items_in_the_index(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        return httpx.Response(200, content=b"RIFFwebp", headers={"content-type": "image/webp"})
+
+    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
+    allowed = {ITEM}
+    assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
+    assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
+    assert len(calls) == 1  # the second came from the cache
+    assert "item=" + ITEM in calls[0] and "B04" in calls[0] and "@2x.webp" in calls[0]
+    assert s2_tile(cache, "snow", ITEM, 12, 650, 1385, allowed) is not None
+    assert "B11" in calls[1]
+    for args in (
+        ("natural", "S2C_MSIL2A_20261110T182601_R127_T10TEX_20261110T221403", 12, 650, 1385),
+        ("infrared", ITEM, 12, 650, 1385),  # not a mode
+        ("natural", ITEM, 7, 20, 40),  # too far out
+        ("natural", ITEM, 15, 0, 0),  # too far in
+        ("natural", ITEM, 12, 5000, 1385),  # not a tile
+    ):
+        assert s2_path(cache, *args, allowed) is None
+        assert s2_tile(cache, *args, allowed) is None
+    assert len(calls) == 2
+
+
+def test_gibs_tiles_only_for_listed_layers_and_real_days(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if "/9/" in str(req.url):
+            return httpx.Response(400, text="bad zoom")
+        return httpx.Response(200, content=b"jpg", headers={"content-type": "image/jpeg"})
+
+    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
+    today = date(2026, 11, 11)
+    got = gibs_tile(cache, sat.VIIRS, "2026-11-10", 6, 11, 21, today)
+    assert got == (b"jpg", "image/jpeg")
+    assert calls[0].endswith(
+        f"{sat.VIIRS}/default/2026-11-10/GoogleMapsCompatible_Level9/6/21/11.jpeg"
+    )
+    hls = gibs_tile(cache, sat.HLS, "2026-11-04", 12, 777, 1542, today)
+    assert hls is not None and hls[1] == "image/png" and calls[1].endswith("/12/1542/777.png")
+    assert gibs_tile(cache, sat.VIIRS, "2026-11-10", 9, 1, 1, today) is None  # upstream 400
+    for layer, day, z in (
+        ("MODIS_Terra_CorrectedReflectance_TrueColor", "2026-11-10", 6),
+        (sat.VIIRS, "2026-11-13", 6),  # the future
+        (sat.VIIRS, "2026-02-30", 6),  # not a day
+        (sat.VIIRS, "../../etc", 6),
+        (sat.VIIRS, "2026-11-10", 10),  # VIIRS stops at 9
+    ):
+        assert gibs_path(cache, layer, day, z, 1, 1, today) is None
+    assert len(calls) == 3
+
+
+def test_api_serves_the_index_and_proxies_tiles(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = TestClient(create_app(settings))
+    assert client.get("/api/sat").status_code == 503
+    assert client.get(f"/api/tiles/s2/natural/{ITEM}/12/650/1385.webp").status_code == 404
+
+    up = Upstream()
+    sat.refresh(
+        settings.sat_dir,
+        httpx.Client(transport=httpx.MockTransport(up)),
+        [make_location()],
+        now=NOW,
+    )
+    r = client.get("/api/sat")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["viirs_date"] == "2026-11-10" and body["locations"][0]["scenes"][0]["id"] == CLEAR
+    assert "Copernicus" in " ".join(body["attribution"])
+
+    monkeypatch.setattr(TileCache, "through", lambda self, path, url, fix=False: b"tile")
+    r = client.get(f"/api/tiles/s2/natural/{ITEM}/12/650/1385.webp")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
+    assert client.get(f"/api/tiles/s2/natural/{ITEM[:-1]}X/12/650/1385.webp").status_code == 404
+    r = client.get(f"/api/tiles/gibs/{sat.VIIRS}/2026-11-10/6/11/21")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/tiles/gibs/nope/2026-11-10/6/11/21").status_code == 404
+
+    monkeypatch.setattr(TileCache, "through", lambda self, path, url, fix=False: None)
+    assert client.get(f"/api/tiles/s2/snow/{ITEM}/12/650/1386.webp").status_code == 404
+    assert client.get(f"/api/tiles/gibs/{sat.VIIRS}/2026-11-10/6/11/22").status_code == 404
+
+
+def test_worker_looks_for_scenes_and_survives_failures(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from snowwatch import cli
+    from snowwatch.scheduler import Worker, build_scheduler
+    from tests.helpers import config
+
+    calls: list[dict[str, Any]] = []
+
+    def refresh(sat_dir: Path, client: Any, locs: Any, **kw: Any) -> sat.SatResult:
+        calls.append(kw)
+        return sat.SatResult(locations=len(locs), errors=["one went wrong"])
+
+    monkeypatch.setattr(sat, "refresh", refresh)
+    w = Worker(settings, config())
+    w.satellite()
+    assert calls == [{"days": 30, "min_clear": 0.7, "max_nodata": 0.1, "keep": 3}]
+    w.sat_lock.acquire()
+    w.satellite()  # still running from last time: skip
+    assert len(calls) == 1
+    w.sat_lock.release()
+    assert "satellite" in {j.id for j in build_scheduler(w).get_jobs()}
+
+    def broken(*a: Any, **kw: Any) -> sat.SatResult:
+        raise RuntimeError("Planetary Computer fell over")
+
+    monkeypatch.setattr(sat, "refresh", broken)
+    w.satellite()  # logged, not raised
+    monkeypatch.setattr(sat, "refresh", refresh)
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    assert cli.main(["map", "sat"]) == 0 and len(calls) == 2

@@ -21,7 +21,7 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache |
 | `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check) |
+| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the clear Sentinel-2 scenes near each location, and the passes already judged) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
 Python 3.12 slim stage runs it, as uid 1000, read-only, with no capabilities).
@@ -41,6 +41,7 @@ backend/snowwatch/
               Canada's WMS/WCS) grib.py (NOAA GRIB2 by byte range) palette.py
               blend.py (joins sources as numbers, with no visible seams)
               render.py (frames, index, pruning) totals.py (snow totals to 10 days)
+              sat.py (recent Sentinel-2 scenes near each location, daily VIIRS)
               sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
@@ -50,7 +51,7 @@ frontend/src/
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
-              TerrainControls, AvalancheControls, Legend, Inspector, ZoneSheet;
+              TerrainControls, AvalancheControls, SatControls, sat.ts, Legend, Inspector, ZoneSheet;
               avalanche.ts (zones, treeline, problems); terrain/ decodes elevation
               and works out slope, aspect, sun and shade, the wind effect and the
               concern index in a Web Worker, served to MapLibre as dem:// and
@@ -155,7 +156,9 @@ and recorded by name. Nightly (`store/retention.py`):
   push service, are capped in size and number, and are rate limited; map tile
   cache misses are rate limited and the cache is capped on disk.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
-  third parties limited to Mapterhorn and AWS elevation tiles, and https images), `nosniff`,
+  third parties limited to Mapterhorn and AWS elevation tiles, and https images; satellite
+  imagery comes through the server's tile cache, which fetches only Sentinel-2 items in its
+  own index and a fixed list of GIBS layers), `nosniff`,
   frame denial, a referrer policy, a permissions policy, and HSTS in production.
 - **Links** shown to visitors must be http(s); bad upstream links are dropped.
 - **The concern index** (`HAZARD_INDEX`): when it is off, `GET /api/map/concern`

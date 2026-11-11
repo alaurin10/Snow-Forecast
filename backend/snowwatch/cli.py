@@ -176,13 +176,19 @@ def cmd_precip(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_map(args: argparse.Namespace, settings: Settings) -> int:
-    """Redraw one part of the map's pictures now (`all` is the same as `precip`)."""
+    """Redraw one part of the map's pictures now (`all` is the same as `precip`), or
+    look for new satellite scenes (`sat`)."""
     from snowwatch.scheduler import Worker
 
     w = Worker(settings, get_forecast_config())
-    {"radar": w.radar, "forecast": w.forecast_frames, "totals": w.totals_fields, "all": w.precip}[
-        args.part
-    ]()
+    jobs = {
+        "radar": w.radar,
+        "forecast": w.forecast_frames,
+        "totals": w.totals_fields,
+        "sat": w.satellite,
+        "all": w.precip,
+    }
+    jobs[args.part]()
     return 0
 
 
@@ -440,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_precip)
 
     s = sub.add_parser("map", help="redraw one part of the map's pictures now")
-    s.add_argument("part", choices=["radar", "forecast", "totals", "all"])
+    s.add_argument("part", choices=["radar", "forecast", "totals", "sat", "all"])
     s.set_defaults(func=cmd_map)
 
     s = sub.add_parser("ski-map", help="fetch the map's ski runs, lifts and peaks now")

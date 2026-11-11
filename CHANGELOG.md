@@ -18,6 +18,13 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Recent satellite base map.** Near each location, the newest Sentinel-2 views
+  (10 m) that actually see the ground there, judged by the scene's own cloud mask over
+  an 8 km square, not its overall cloud percentage; step back through the last three,
+  and switch to a snow-vs-cloud view (snow cyan, cloud white). Elsewhere NOAA-20's
+  daily VIIRS mosaic (375 m), with 30 m HLS from the same pass. Imagery comes through
+  the server's tile cache; the worker looks for new scenes every 6 hours (`sat_*` in
+  `map:`, `snowwatch map sat`). Esri's imagery stays as "Satellite".
 - **Avalanche danger zones on the map.** Every forecast zone in the West from
   avalanche.org's centers and Avalanche Canada, in the official danger colours for
   today's highest rating (grey when expired or unrated), exactly as published; tap one

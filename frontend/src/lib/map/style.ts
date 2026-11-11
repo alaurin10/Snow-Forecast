@@ -8,7 +8,7 @@ import type {
 	StyleSpecification
 } from 'maplibre-gl';
 import type { UnitSystem } from '../units';
-import type { MapOverlay, MapShade } from '../prefs.svelte';
+import type { MapBase, MapOverlay, MapShade } from '../prefs.svelte';
 import { AWS_DEM, MAX_ZOOM } from './terrain/dem';
 import { ANALYSIS_ZOOM } from './terrain/analysis';
 
@@ -73,7 +73,7 @@ export interface StyleOptions {
 	/** The full map (all layers and controls) rather than the small overview map. */
 	full: boolean;
 	units: UnitSystem;
-	base: 'topo' | 'satellite';
+	base: MapBase;
 	runs: boolean;
 	peaks: boolean;
 	contours: boolean;
@@ -134,8 +134,8 @@ export function demSources(worker: boolean): Record<string, SourceSpecification>
 }
 
 /** Hillshade strength for each setting. */
-export function shadePaint(shade: MapShade, dark: boolean, base: 'topo' | 'satellite') {
-	// Esri topo is already shaded; satellite has its own shadows. Both want less.
+export function shadePaint(shade: MapShade, dark: boolean, base: MapBase) {
+	// Esri topo is already shaded; satellite imagery has its own shadows. Both want less.
 	const k = shade === 'strong' ? 1 : 0.55;
 	const ex = (base === 'topo' ? 0.35 : 0.45) * k;
 	return {
@@ -224,6 +224,8 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 	const full = o.full;
 	const topo = !full || o.base === 'topo';
 	const sat = full && o.base === 'satellite';
+	/** Imagery of some kind: place names go over it, and contours. */
+	const imagery = full && o.base !== 'topo';
 	const sources: StyleSpecification['sources'] = {
 		esri: {
 			type: 'raster',
@@ -337,12 +339,12 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 		id: 'satlabels',
 		type: 'raster',
 		source: 'satlabels',
-		layout: { visibility: vis(sat) },
+		layout: { visibility: vis(imagery) },
 		paint: { 'raster-fade-duration': 150 }
 	});
 	if (full && o.contourTiles) {
 		sources.contours = { type: 'vector', tiles: [o.contourTiles], maxzoom: 15 };
-		layers.push(...contourLayers(o.dark, o.units, o.contours && sat));
+		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
 	}
 	layers.push(...skiLayers(o.dark, o.units, full && o.runs, !full || o.peaks));
 	return {
