@@ -12,27 +12,34 @@
 		/** Contours come from maplibre-contour, which may have failed to load. */
 		contours: boolean;
 		offline: boolean;
+		/** This viewer may see the experimental concern index (HAZARD_INDEX). */
+		concern?: boolean;
 		onclose: () => void;
 	}
 
-	let { analysis, contours, offline, onclose }: Props = $props();
+	let { analysis, contours, offline, concern = false, onclose }: Props = $props();
 
 	const WEATHER: { id: MapWeather; label: string }[] = [
 		{ id: 'radar', label: 'Radar & forecast' },
 		{ id: 'totals', label: 'Snow total' },
 		{ id: 'off', label: 'None' }
 	];
-	const OVERLAYS: { id: MapOverlay; label: string; worker?: boolean }[] = [
+	const OVERLAYS = $derived<{ id: MapOverlay; label: string; worker?: boolean }[]>([
 		{ id: 'none', label: 'None' },
 		{ id: 'slope', label: 'Slope', worker: true },
 		{ id: 'aspect', label: 'Aspect', worker: true },
 		{ id: 'bands', label: 'Elevation' },
 		{ id: 'sun', label: 'Sun & shade', worker: true },
-		{ id: 'wind', label: 'Wind effect', worker: true }
-	];
+		{ id: 'wind', label: 'Wind effect', worker: true },
+		{ id: 'problems', label: 'Avalanche problems', worker: true },
+		...(concern
+			? [{ id: 'concern' as const, label: 'Concern index (experimental)', worker: true }]
+			: [])
+	]);
 	const FEATURES = $derived<{ id: MapFeature; label: string; hint?: string; off?: boolean }[]>([
 		{ id: 'runs', label: 'Ski runs', hint: 'From zoom 11' },
 		{ id: 'peaks', label: 'Peaks' },
+		{ id: 'zones', label: 'Avalanche danger zones', hint: 'Today, as published' },
 		{
 			id: 'contours',
 			label: 'Contours',
@@ -83,7 +90,10 @@
 		</div>
 		<p class="faint">
 			Worked out on this device from about 10 m terrain, once zoomed in. Sun & shade and Wind effect
-			are estimates from the shape of the ground. Tap the map for numbers.
+			are estimates from the shape of the ground. Avalanche problems shows the terrain today's
+			bulletin describes{concern
+				? '; the concern index is the app’s own experimental estimate, not a forecast'
+				: ''}. Tap the map for numbers.
 		</p>
 	</section>
 

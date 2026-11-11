@@ -26,7 +26,7 @@ from snowwatch.geo import contains
 from snowwatch.http import Fetcher, FetchError
 from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us
-from snowwatch.sources.base import fetch
+from snowwatch.sources.base import Request, fetch
 from snowwatch.store.db import utcnow_iso
 from snowwatch.urls import clean_url
 
@@ -327,13 +327,36 @@ class RefreshResult:
     errors: list[str] = field(default_factory=list)
 
 
+Memo = dict[str, Any]
+
+
+def fetch_once(fetcher: Fetcher, req: Request, memo: Memo | None) -> Any:
+    """Fetch, or reuse what this refresh already fetched (the zones map shares answers)."""
+    if memo is None:
+        return fetch(fetcher, req)
+    key = req.url + "?" + "&".join(f"{k}={v}" for k, v in sorted(req.params.items()))
+    if key not in memo:
+        try:
+            memo[key] = fetch(fetcher, req)
+        except FetchError as e:
+            memo[key] = e
+    got = memo[key]
+    if isinstance(got, FetchError):
+        raise got
+    return got
+
+
 def refresh(
-    conn: sqlite3.Connection, fetcher: Fetcher, locations: Iterable[Location]
+    conn: sqlite3.Connection,
+    fetcher: Fetcher,
+    locations: Iterable[Location],
+    memo: Memo | None = None,
 ) -> RefreshResult:
     """Fetch the current forecast for every active location's zone and store it.
 
     Each US zone is fetched once however many locations share it; Canada's
     products and areas are fetched once. A failed fetch keeps the stored forecast.
+    `memo` keeps the answers for the zones map, which needs many of the same.
     """
     out = RefreshResult()
     locs = [loc for loc in locations if loc.active and loc.avy is not None]
@@ -346,7 +369,7 @@ def refresh(
     layer: dict[str, Any] = {}
     if us:
         try:
-            data = fetch(fetcher, avalanche_us.map_layer_request())
+            data = fetch_once(fetcher, avalanche_us.map_layer_request(), memo)
             layer = {str(f.get("id")): f for f in data.get("features") or []}
         except Exception as e:  # a missing or reshaped layer: products still work
             out.errors.append(f"avalanche.org map layer: {e}")
@@ -356,7 +379,7 @@ def refresh(
         key = (center, zone)
         if key not in products:
             try:
-                products[key] = fetch(fetcher, avalanche_us.product_request(*key))
+                products[key] = fetch_once(fetcher, avalanche_us.product_request(*key), memo)
             except FetchError as e:
                 out.errors.append(f"avalanche.org {center} {zone}: {e}")
                 products[key] = None
@@ -373,8 +396,8 @@ def refresh(
             out.errors.append(f"avalanche.org {center} {zone}: {type(e).__name__}: {e}")
     if ca:
         try:
-            areas = fetch(fetcher, avalanche_ca.areas_request())
-            prods = fetch(fetcher, avalanche_ca.products_request())
+            areas = fetch_once(fetcher, avalanche_ca.areas_request(), memo)
+            prods = fetch_once(fetcher, avalanche_ca.products_request(), memo)
             by_area = {str((p.get("area") or {}).get("id")): p for p in prods or []}
         except Exception as e:
             out.errors.append(f"Avalanche Canada: {e}")

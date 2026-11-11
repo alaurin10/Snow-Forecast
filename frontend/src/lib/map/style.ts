@@ -168,10 +168,14 @@ export function sunPaint(azimuth: number, altitude: number, dark: boolean) {
 }
 
 /** How strongly each whole-view analysis picture is laid over the map. */
-export const ANALYSIS_OPACITY = { shade: 0.42, hours: 0.6, wind: 0.75 } as const;
+export const ANALYSIS_OPACITY = { shade: 0.42, hours: 0.6, wind: 0.75, concern: 0.8 } as const;
 /** Whole-view layers are worked out from this zoom in; further out they'd say little. */
 export const SUN_MIN_ZOOM = 9;
 export const WIND_MIN_ZOOM = 10;
+/** The concern index needs the wind grid's detail. */
+export const CONCERN_MIN_ZOOM = 10;
+/** Terrain tile overlays (slope, aspect, avalanche problems) start here. */
+export const OVERLAY_MIN_ZOOM = 8;
 
 /**
  * Elevation bands: a colour every 500 m (metric) or 1,500 ft (imperial), as hard steps.
@@ -212,7 +216,7 @@ export function elevationBands(units: UnitSystem) {
 	return { expr, bands };
 }
 
-export function overlayTiles(mode: 'slope' | 'aspect', query = ''): string[] {
+export function overlayTiles(mode: 'slope' | 'aspect' | 'match', query = ''): string[] {
 	return [`terrain://${mode}/{z}/{x}/{y}${query ? `?${query}` : ''}`];
 }
 

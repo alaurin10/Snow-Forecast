@@ -12,10 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from snowwatch import avalanche
+from snowwatch import avalanche_zones as zones
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
+from snowwatch.api.auth import viewer_from
 from snowwatch.api.models import (
     BandSummary,
     BestDay,
+    ConcernOut,
     DangerChip,
     LocationAge,
     LocationSummary,
@@ -33,6 +36,7 @@ from snowwatch.api.models import (
     TrendRun,
 )
 from snowwatch.avalanche import AvalancheView
+from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import Snapshot
 from snowwatch.locations import service
 from snowwatch.settings import Settings
@@ -55,6 +59,14 @@ def db(request: Request) -> Iterator[sqlite3.Connection]:
 
 
 Conn = Annotated[sqlite3.Connection, Depends(db)]
+
+# The map's avalanche zones as last served: (file times, when, JSON, gzipped JSON).
+_zones_cache: dict[str, tuple[tuple[float, float], datetime, bytes, bytes]] = {}
+WET_FLAGS = {"rapid_warming", "rain_on_snow"}
+CONCERN_CAPTION = (
+    "Experimental estimate from the bulletin and terrain shape. Not a forecast. "
+    "Doesn't show runouts or slopes above you."
+)
 
 # Decoded snapshots, by location: (run_id, snapshot). A newer run replaces the entry.
 _snapshots: dict[str, tuple[int, Snapshot]] = {}
@@ -127,6 +139,7 @@ def _today() -> str:
 def make_router() -> APIRouter:
     router = APIRouter(prefix="/api")
     _snapshots.clear()  # a new app may point at a different database
+    _zones_cache.clear()
 
     @router.get("/locations", response_model=list[LocationSummary])
     def locations(conn: Conn, response: Response) -> list[LocationSummary]:
@@ -231,12 +244,72 @@ def make_router() -> APIRouter:
                     lon=top.lon,
                     generated_at=snap.generated_at,
                     roses=snap.backcountry.rose,
+                    flags=[f for f in snap.flags if f.type in WET_FLAGS],
                 )
             )
         response.headers["Cache-Control"] = CACHE
         return MapWindOut(
             min_snow_cm=cfg.rose_min_snow_cm, min_wind_kmh=cfg.rose_min_wind_kmh, locations=out
         )
+
+    @router.get("/map/concern", response_model=ConcernOut)
+    def map_concern(request: Request, response: Response) -> ConcernOut:
+        """The concern index's settings, for whoever HAZARD_INDEX allows (see MAP-PLAN B7.3)."""
+        settings: Settings = request.app.state.settings
+        mode = settings.hazard_index
+        if mode == "off":
+            raise HTTPException(404, "the concern index is off on this server")
+        if mode == "owner" and not viewer_from(request).is_owner:
+            raise HTTPException(403, "the concern index is for the signed-in owner")
+        t = request.app.state.forecast_config.terrain
+        response.headers["Cache-Control"] = "private, no-cache" if mode == "owner" else CACHE
+        return ConcernOut(
+            mode=mode,
+            caption=CONCERN_CAPTION,
+            slope=[list(x) for x in t.concern_slope],
+            match_listed=t.concern_match_listed,
+            match_other=t.concern_match_other,
+            match_none=t.concern_match_none,
+            wind_loaded=t.concern_wind_loaded,
+            wind_scoured=t.concern_wind_scoured,
+            wind_effect=t.concern_wind_effect,
+            wind_snow_cm=t.concern_wind_snow_cm,
+            sun=t.concern_sun,
+            sun_hours=t.concern_sun_hours,
+            classes=list(t.concern_classes),
+        )
+
+    @router.get("/avalanche/zones.geojson", response_model=ZonesOut)
+    def avalanche_zones(conn: Conn, request: Request) -> Response:
+        """Every forecast zone in the map's box, as published, with expiry applied now,
+        and the approximate treeline bands the map's avalanche layers use."""
+        settings: Settings = request.app.state.settings
+        path = settings.zones_path
+        tl_path = settings.config_dir / "treeline.yaml"
+        try:
+            key = (path.stat().st_mtime, tl_path.stat().st_mtime if tl_path.exists() else 0)
+        except OSError as e:
+            raise HTTPException(503, "avalanche zones not fetched yet") from e
+        now = datetime.now(UTC)
+        hit = _zones_cache.get("zones")
+        if hit is None or hit[0] != key or (now - hit[1]).total_seconds() > 60:
+            treeline = zones.load_treeline(tl_path)
+            out = zones.zones_out(
+                zones.read_zones(path),
+                now,
+                treeline,
+                zones.treeline_spots(treeline, service.list_locations(conn)),
+                request.app.state.forecast_config.terrain.problem_slope_deg,
+            )
+            body = out.model_dump_json().encode()
+            hit = (key, now, body, gzip.compress(body, 6))
+            _zones_cache["zones"] = hit
+        # Expiry is checked against the clock, so this is only cached for a minute.
+        headers = {"Cache-Control": "public, max-age=60", "Vary": "Accept-Encoding"}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(hit[3], media_type="application/geo+json", headers=headers)
+        return Response(hit[2], media_type="application/geo+json", headers=headers)
 
     @router.get("/avalanche", response_model=dict[str, AvalancheView])
     def avalanche_all(conn: Conn, response: Response) -> dict[str, AvalancheView]:

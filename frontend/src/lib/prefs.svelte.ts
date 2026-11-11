@@ -20,18 +20,21 @@ export type BandName = 'base' | 'mid' | 'summit';
 export type MapWeather = 'radar' | 'totals' | 'off';
 export const MAP_WEATHER: readonly MapWeather[] = ['radar', 'totals', 'off'] as const;
 /** The one terrain overlay on the map. */
-export type MapOverlay = 'none' | 'slope' | 'aspect' | 'bands' | 'sun' | 'wind';
+export type MapOverlay =
+	'none' | 'slope' | 'aspect' | 'bands' | 'sun' | 'wind' | 'problems' | 'concern';
 export const MAP_OVERLAYS: readonly MapOverlay[] = [
 	'none',
 	'slope',
 	'aspect',
 	'bands',
 	'sun',
-	'wind'
+	'wind',
+	'problems',
+	'concern'
 ] as const;
 /** Things drawn on top that can each be on or off. */
-export type MapFeature = 'runs' | 'peaks' | 'contours';
-export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours'] as const;
+export type MapFeature = 'runs' | 'peaks' | 'contours' | 'zones';
+export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours', 'zones'] as const;
 export type MapShade = 'off' | 'light' | 'strong';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -64,7 +67,7 @@ function loadFeatures(): Set<MapFeature> {
 	if (v === null) {
 		// Before: only ski runs could be switched off.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale on change
-		const all = new Set<MapFeature>(MAP_FEATURES);
+		const all = new Set<MapFeature>(['runs', 'peaks', 'contours']);
 		if (read('sw.mapPistes') === 'off') all.delete('runs');
 		return all;
 	}
@@ -94,6 +97,8 @@ class Prefs {
 	mapFeatures = $state<Set<MapFeature>>(loadFeatures());
 	mapShade = $state<MapShade>(load('sw.mapShade', ['off', 'light', 'strong'] as const, 'light'));
 	mapTerrain = $state<'on' | 'off'>(load('sw.mapTerrain', ['on', 'off'] as const, 'off'));
+	/** The concern index's warning has been read and accepted on this device. */
+	concernAck = $state<boolean>(read('sw.concernAck') === '1');
 	mapBase = $state<'topo' | 'satellite'>(
 		load('sw.mapBase', ['topo', 'satellite'] as const, 'topo')
 	);
@@ -163,6 +168,11 @@ class Prefs {
 	setMapBase(base: 'topo' | 'satellite') {
 		this.mapBase = base;
 		save('sw.mapBase', base);
+	}
+
+	acceptConcern() {
+		this.concernAck = true;
+		save('sw.concernAck', '1');
 	}
 
 	setMapTerrain(on: boolean) {

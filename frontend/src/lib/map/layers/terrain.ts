@@ -62,16 +62,22 @@ export function contourTiles(units: UnitSystem): string | undefined {
 
 const vis = (on: boolean) => (on ? 'visible' : 'none');
 
-export function setOverlay(map: MlMap, overlay: MapOverlay) {
+/**
+ * The tile overlay for the chosen layer. `match` is the terrain:// query for the
+ * avalanche-problems layer (see client.ts `matchQuery`); null leaves it clear.
+ */
+export function setOverlay(map: MlMap, overlay: MapOverlay, match: string | null = null) {
 	if (map.getLayer('bands')) map.setLayoutProperty('bands', 'visibility', vis(overlay === 'bands'));
 	const src = map.getSource('overlay') as RasterTileSource | undefined;
 	if (!src || !map.getLayer('overlay')) return;
-	const on = overlay === 'slope' || overlay === 'aspect';
-	if (on) {
-		const want = overlayTiles(overlay);
-		if (JSON.stringify(src.tiles) !== JSON.stringify(want)) src.setTiles(want);
-	}
-	map.setLayoutProperty('overlay', 'visibility', vis(on));
+	const tiles =
+		overlay === 'slope' || overlay === 'aspect'
+			? overlayTiles(overlay)
+			: overlay === 'problems' && match
+				? overlayTiles('match', match)
+				: null;
+	if (tiles && JSON.stringify(src.tiles) !== JSON.stringify(tiles)) src.setTiles(tiles);
+	map.setLayoutProperty('overlay', 'visibility', vis(!!tiles));
 }
 
 /**

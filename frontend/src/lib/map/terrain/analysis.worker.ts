@@ -2,10 +2,20 @@
 // slope and aspect overlays and answers point questions, all off the main thread.
 /// <reference lib="webworker" />
 import { ANALYSIS_ZOOM, hornAt, paint, type MatchParams, type TerrainMode } from './analysis';
-import { DemCache, encodeTerrarium, locate, metresPerPixel, sample, type Pixels } from './dem';
+import {
+	DemCache,
+	encodeTerrarium,
+	locate,
+	metresPerPixel,
+	sample,
+	TILE,
+	type Pixels
+} from './dem';
 import {
 	around,
 	bilinear,
+	into,
+	latOf,
 	mosaic,
 	pad,
 	rectBounds,
@@ -28,6 +38,7 @@ import {
 } from './shade';
 import { sunPosition } from './sun';
 import { FAR_M, paintWind, WIND_ZOOM, windEffect } from './wind';
+import { concernAt, paintConcern } from './concern';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -112,27 +123,130 @@ function centre(g: Grid): { lat: number; lon: number } {
 
 type Area = Extract<WorkerRequest, { bounds: Bounds }>;
 
+/** The wind effect over a view (padded so the upwind search has terrain), kept for reuse. */
+async function windFor(
+	id: number,
+	bounds: Bounds,
+	maxPx: number,
+	sectors: number[]
+): Promise<{ grid: Grid; effect: Float32Array } | null> {
+	const rect = rectFor(pad(bounds, FAR_M), maxPx, WIND_ZOOM);
+	const key = rectKey(rect);
+	if (windView?.key !== key) {
+		const grid = await mosaic(dem, rect, () => !cancelled.has(id));
+		if (!grid) return null;
+		windView = { key, grid, sectors: '', effect: null };
+	}
+	const view = windView;
+	const want = sectors.join();
+	if (!view.effect || view.sectors !== want) {
+		const effect = await windEffect(view.grid, sectors, pause(id));
+		if (!effect) return null;
+		view.effect = effect;
+		view.sectors = want;
+	}
+	return { grid: view.grid, effect: view.effect };
+}
+
+let concernView: { key: string; grid: Grid } | null = null;
+
+/**
+ * Which pixels of a rectangle (world pixels at zoom z, drawn `scale` times finer) lie
+ * inside a zone's polygons: drawn on a canvas, even-odd so holes stay out.
+ */
+function zoneMask(
+	r: { z: number; x0: number; y0: number; width: number; height: number },
+	polys: number[][][][],
+	scale = 1
+): Uint8Array {
+	const c = new OffscreenCanvas(r.width, r.height);
+	const ctx = c.getContext('2d', { willReadFrequently: true })!;
+	ctx.beginPath();
+	for (const poly of polys)
+		for (const ring of poly)
+			ring.forEach(([lon, lat], i) => {
+				const x = (worldX(lon, r.z) - r.x0) * scale;
+				const y = (worldY(lat, r.z) - r.y0) * scale;
+				if (i === 0) ctx.moveTo(x, y);
+				else ctx.lineTo(x, y);
+			});
+	ctx.fillStyle = '#000';
+	ctx.fill('evenodd');
+	const a = ctx.getImageData(0, 0, r.width, r.height).data;
+	const out = new Uint8Array(r.width * r.height);
+	for (let i = 0; i < out.length; i++) out[i] = a[i * 4 + 3] >= 128 ? 1 : 0;
+	return out;
+}
+
+/** Zones the page has told us about, for clipping tiles (the newest few). */
+const zonePolys = new Map<string, number[][][][]>();
+
+/**
+ * The concern index for a view: slope and aspect from the view's own grid, the wind
+ * effect and the day's sun hours only when they count, inside the forecast zone only.
+ */
+async function concern(
+	msg: Extract<WorkerRequest, { type: 'concern' }>
+): Promise<{ rgba: Uint8ClampedArray<ArrayBuffer>; grid: Grid } | null> {
+	const { id, bounds, maxPx, inputs, params } = msg;
+	let grid: Grid | null;
+	let hours: Float32Array | null = null;
+	if (msg.sunDate && inputs.sun) {
+		const shader = await shaderFor(id, bounds, maxPx);
+		if (!shader) return null;
+		grid = shader.fine;
+		const { lat, lon } = centre(grid);
+		hours = await sunHours(shader, msg.sunDate, lat, lon, pause(id));
+		if (!hours) return null;
+	} else {
+		const rect = rectFor(bounds, maxPx, ANALYSIS_ZOOM);
+		const key = rectKey(rect);
+		if (concernView?.key !== key) {
+			const g = await mosaic(dem, rect, () => !cancelled.has(id));
+			if (!g) return null;
+			concernView = { key, grid: g };
+		}
+		grid = concernView.grid;
+	}
+	const wind =
+		inputs.wind && msg.windSectors && msg.windScale > 0
+			? await windFor(id, bounds, maxPx, msg.windSectors)
+			: null;
+	if (cancelled.has(id)) return null;
+	const inside = zoneMask(grid, msg.zone);
+	const { width: W, height: H, data } = grid;
+	const cls = new Int8Array(W * H).fill(-1);
+	for (let r = 1; r < H - 1; r++) {
+		const m = metresPerPixel(latOf(grid.y0 + r + 0.5, grid.z), grid.z);
+		for (let c = 1; c < W - 1; c++) {
+			const i = r * W + c;
+			if (!inside[i] || data[i] === 0) continue;
+			const { slope, aspect } = hornAt(data, W, r, c, m, m);
+			if (slope < params.slope[0][0]) continue;
+			let w: number | null = null;
+			if (wind) {
+				const [px, py] = into(grid, wind.grid, c + 0.5, r + 0.5);
+				w = bilinear(wind.effect, wind.grid.width, wind.grid.height, px, py) * msg.windScale;
+			}
+			const f = concernAt(
+				{ elev: data[i], slope, aspect, wind: w, sunHours: hours ? hours[i] : null },
+				inputs,
+				params
+			);
+			cls[i] = f.cls;
+		}
+	}
+	return { rgba: paintConcern(cls), grid };
+}
+
 async function area(
 	msg: Area
 ): Promise<{ rgba: Uint8ClampedArray<ArrayBuffer>; grid: Grid } | null> {
 	if (msg.type === 'wind') {
-		const rect = rectFor(pad(msg.bounds, FAR_M), msg.maxPx, WIND_ZOOM);
-		const key = rectKey(rect);
-		if (windView?.key !== key) {
-			const grid = await mosaic(dem, rect, () => !cancelled.has(msg.id));
-			if (!grid) return null;
-			windView = { key, grid, sectors: '', effect: null };
-		}
-		const view = windView;
-		const sectors = msg.sectors.join();
-		if (!view.effect || view.sectors !== sectors) {
-			const effect = await windEffect(view.grid, msg.sectors, pause(msg.id));
-			if (!effect) return null;
-			view.effect = effect;
-			view.sectors = sectors;
-		}
-		return { rgba: paintWind(view.effect, msg.scale), grid: view.grid };
+		const w = await windFor(msg.id, msg.bounds, msg.maxPx, msg.sectors);
+		return w && { rgba: paintWind(w.effect, msg.scale), grid: w.grid };
 	}
+	if (msg.type === 'concern') return concern(msg);
 	const shader = await shaderFor(msg.id, msg.bounds, msg.maxPx);
 	if (!shader) return null;
 	const { lat, lon } = centre(shader.fine);
@@ -163,6 +277,9 @@ async function handle(
 			const { grid, elev } = await dem.around(msg.z, msg.x, msg.y);
 			if (elev.sea || cancelled.has(id))
 				return { res: { id, ok: true, empty: true }, transfer: [] };
+			// A tile clipped to a zone the page hasn't described yet stays clear.
+			const polys = msg.zone ? zonePolys.get(msg.zone) : undefined;
+			if (msg.zone && !polys) return { res: { id, ok: true, empty: true }, transfer: [] };
 			const rgba = paint(
 				msg.mode as TerrainMode,
 				grid,
@@ -172,6 +289,19 @@ async function handle(
 				msg.match as MatchParams | undefined
 			);
 			if (!rgba) return { res: { id, ok: true, empty: true }, transfer: [] };
+			if (polys) {
+				const k = elev.size / TILE;
+				const inside = zoneMask(
+					{ z: msg.z, x0: msg.x * TILE, y0: msg.y * TILE, width: elev.size, height: elev.size },
+					polys,
+					k
+				);
+				let any = false;
+				for (let i = 0; i < inside.length; i++)
+					if (!inside[i]) rgba[i * 4 + 3] = 0;
+					else if (rgba[i * 4 + 3]) any = true;
+				if (!any) return { res: { id, ok: true, empty: true }, transfer: [] };
+			}
 			const bmp = await bitmap(rgba, elev.size);
 			return { res: { id, ok: true, bitmap: bmp }, transfer: [bmp] };
 		}
@@ -179,7 +309,8 @@ async function handle(
 			return { res: { id, ok: true, point: await point(msg.lat, msg.lon) }, transfer: [] };
 		case 'shade':
 		case 'sunhours':
-		case 'wind': {
+		case 'wind':
+		case 'concern': {
 			const done = await area(msg);
 			if (!done || cancelled.has(id)) return { res: { id, ok: true, empty: true }, transfer: [] };
 			const bmp = await createImageBitmap(
@@ -212,9 +343,15 @@ async function handle(
 			);
 			return { res: { id, ok: true, wind }, transfer: [] };
 		}
+		case 'zone':
+			zonePolys.delete(msg.zone);
+			zonePolys.set(msg.zone, msg.polys);
+			while (zonePolys.size > 6) zonePolys.delete(zonePolys.keys().next().value!);
+			return { res: { id, ok: true }, transfer: [] };
 		case 'init':
 			sunView = null;
 			windView = null;
+			concernView = null;
 			dem = new DemCache({
 				decode,
 				maxTiles: msg.maxTiles,

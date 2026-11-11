@@ -70,6 +70,42 @@ class MapConfig(BaseModel):
         return v
 
 
+class TerrainConfig(BaseModel):
+    """The map's avalanche terrain layers (docs/MAP-PLAN.md, B7.2 and B7.3)."""
+
+    # Terrain matching a listed problem: the lowest slope that counts, by default.
+    problem_slope_deg: Literal[25, 30, 35] = 30
+    # The experimental concern index: score = (base + wind + sun) × slope × match.
+    # Slope factor from each angle up to the next: [degrees, factor]; 0 below the first.
+    concern_slope: list[tuple[float, float]] = [(25, 0.5), (30, 1.0), (46, 0.7), (56, 0.3)]
+    concern_match_listed: float = 1.0  # aspect and band in a listed problem
+    concern_match_other: float = 0.6  # not in any listed problem
+    concern_match_none: float = 0.8  # the bulletin lists no problems
+    concern_wind_loaded: float = 0.5  # where the wind effect says loaded…
+    concern_wind_scoured: float = -0.25  # …and where it says scoured
+    concern_wind_effect: float = Field(0.2, gt=0, le=1)  # effect beyond this counts
+    concern_wind_snow_cm: float = 20  # new snow (last 48 h) that brings in wind loading
+    concern_sun: float = 0.5  # sunny E–S–W slopes on a wet-snow day
+    concern_sun_hours: float = 3  # at least this much direct sun that day
+    # Score thresholds for the elevated, high and very high classes.
+    concern_classes: tuple[float, float, float] = (1.5, 2.5, 3.5)
+
+    @field_validator("concern_slope")
+    @classmethod
+    def _rising(cls, v: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        angles = [a for a, _ in v]
+        if not v or angles != sorted(angles) or any(not 0 <= f <= 1 for _, f in v):
+            raise ValueError("concern_slope: rising angles, factors from 0 to 1")
+        return v
+
+    @field_validator("concern_classes")
+    @classmethod
+    def _classes(cls, v: tuple[float, float, float]) -> tuple[float, float, float]:
+        if not v[0] < v[1] < v[2]:
+            raise ValueError("concern_classes must rise")
+        return v
+
+
 class ForecastConfig(BaseModel):
     models: ModelSets
     ensembles: list[str]
@@ -92,6 +128,7 @@ class ForecastConfig(BaseModel):
     backcountry: BackcountryConfig = BackcountryConfig()
     flags: FlagConfig = FlagConfig()
     map: MapConfig = MapConfig()
+    terrain: TerrainConfig = TerrainConfig()
     # Verification: the snow-to-water ratio for the observed-SWE depth estimate.
     verify_swe_ratio: float = 10
 

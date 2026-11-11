@@ -138,6 +138,7 @@ def test_map_wind_has_every_window(client: TestClient) -> None:
         assert {"past48", "next24", "next72"} <= {r["window"] for r in loc["roses"]}
         assert -90 < loc["lat"] < 90 and loc["generated_at"]
         assert all(len(r["sectors"]) == 8 for r in loc["roses"])
+        assert {f["type"] for f in loc["flags"]} <= {"rapid_warming", "rain_on_snow"}
 
 
 def test_overview_cache_follows_new_runs(

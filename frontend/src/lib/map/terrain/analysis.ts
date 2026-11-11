@@ -38,16 +38,44 @@ export const ASPECT_COLORS: Record<Sector, string> = {
 };
 /** Below this, ground is too flat for its aspect to mean much. */
 export const FLAT_DEG = 5;
-export const MATCH_COLOR = '#e2402b';
+/** Teal: nothing like a danger-scale colour, so it can't read as a rating. */
+export const MATCH_COLOR = '#0fa3b1';
+
+/** One way terrain can match: any of these aspects within any of these elevation ranges. */
+export interface MatchRule {
+	aspects: Sector[];
+	/** [lowest, highest] metres; an empty list means every elevation. */
+	ranges: [number, number][];
+}
 
 export interface MatchParams {
 	/** Lowest slope that counts, degrees. */
 	slopeMin: number;
-	/** Aspects that count. */
-	aspects: Sector[];
-	/** Elevation range that counts, metres. */
-	minM?: number;
-	maxM?: number;
+	/** A pixel matches if any rule does (one rule per avalanche problem). */
+	rules: MatchRule[];
+}
+
+/** Aspect bit masks, one per rule, for the painting loop. */
+function ruleMasks(match: MatchParams) {
+	return match.rules.map((r) => ({
+		mask: r.aspects.reduce((m, s) => m | (1 << SECTORS.indexOf(s)), 0),
+		ranges: r.ranges
+	}));
+}
+
+/** Whether an aspect (compass degrees) and elevation meet any rule. */
+export function matches(
+	rules: { mask: number; ranges: [number, number][] }[],
+	aspect: number,
+	elev: number
+): boolean {
+	const bit = 1 << (Math.round(aspect / 45) % 8);
+	for (const r of rules) {
+		if (!(r.mask & bit)) continue;
+		if (!r.ranges.length) return true;
+		for (const [lo, hi] of r.ranges) if (elev >= lo && elev <= hi) return true;
+	}
+	return false;
 }
 
 function rgb(hex: string): [number, number, number] {
@@ -111,8 +139,7 @@ export function paint(
 	const slopeRgb = SLOPE_CLASSES.map((s) => rgb(s.color));
 	const aspectRgb = SECTORS.map((s) => rgb(ASPECT_COLORS[s]));
 	const matchRgb = rgb(MATCH_COLOR);
-	let mask = 0;
-	if (match) for (const s of match.aspects) mask |= 1 << SECTORS.indexOf(s);
+	const rules = match ? ruleMasks(match) : [];
 	let any = false;
 	for (let r = 0; r < size; r++) {
 		const lat = tileLat(y + (r + 0.5) / size, z);
@@ -126,10 +153,7 @@ export function paint(
 			} else if (mode === 'aspect') {
 				if (slope >= FLAT_DEG) col = aspectRgb[Math.round(aspect / 45) % 8];
 			} else if (match && slope >= match.slopeMin) {
-				const e = grid[(r + 1) * stride + c + 1];
-				const inBand =
-					(match.minM == null || e >= match.minM) && (match.maxM == null || e <= match.maxM);
-				if (inBand && mask & (1 << (Math.round(aspect / 45) % 8))) col = matchRgb;
+				if (matches(rules, aspect, grid[(r + 1) * stride + c + 1])) col = matchRgb;
 			}
 			if (col) {
 				const j = (r * size + c) * 4;

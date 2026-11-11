@@ -18,6 +18,22 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Avalanche danger zones on the map.** Every forecast zone in the West from
+  avalanche.org's centers and Avalanche Canada, in the official danger colours for
+  today's highest rating (grey when expired or unrated), exactly as published; tap one
+  for its three-band pyramid, problems and a link to the center.
+- **Avalanche problems on the map.** The terrain today's listed problems describe
+  (their aspects and elevation bands, steeper than 25, 30 or 35°) for the zone in the
+  middle of the map, using approximate treeline bands from `config/treeline.yaml`,
+  which the owner can override near a location.
+- **Experimental concern index**, behind `HAZARD_INDEX` (owner only by default): the
+  app's own estimate from the bulletin's rating for each band, slope angle, the listed
+  problems, likely wind loading and sun, in four classes in a non-danger palette, with
+  a one-time acknowledgement and a fixed caption. The Inspector shows every factor.
+- The map's Inspector names the avalanche zone, the spot's elevation band and today's
+  rating for it.
+- `GET /api/avalanche/zones.geojson` and `GET /api/map/concern`; `snowwatch avalanche`
+  also writes the zones.
 - **Sun & shade on the map.** Terrain shadows for any date and time of day (with the
   hills lit from where the sun really is), or the day's hours of direct sun. Tap the
   map for when the sun first and last reaches a spot.

@@ -2,7 +2,9 @@
   Terrain facts for a tapped spot: elevation, slope and the way it faces, with the
   detail of the data behind them; when direct sun first and last reaches it on the day
   in question; and the likely wind effect there when a location's wind is in range.
-  More facts (forecast snow, the avalanche rating) join it in later milestones.
+  With the avalanche zones loaded: the forecast zone, the elevation band the spot is in
+  and today's published rating for that band, and, while the concern index is on, each
+  of its factors there. Forecast snow joins it in a later milestone.
 -->
 <script lang="ts">
 	import type { UnitSystem } from '../units';
@@ -12,6 +14,9 @@
 	import { metresPerPixel } from './terrain/dem';
 	import type { SunFacts } from './terrain/shade';
 	import { windWord } from './terrain/wind';
+	import { dangerWord } from '../conditions';
+	import { BAND_WORDS, DANGER_COLORS, type AvyHere } from './avalanche';
+	import { CONCERN_CLASSES, type ConcernFactors } from './terrain/concern';
 
 	interface Props {
 		lat: number;
@@ -23,10 +28,28 @@
 		sun?: SunFacts | null;
 		/** Wind effect at the spot (−1 stripped to 1 loaded) and the stretch of forecast it's for. */
 		wind?: { value: number; window: string } | null;
+		/** Null while the zones load, or where there is no zone. */
+		avy?: AvyHere | null;
+		/** The concern index's factors here, while that layer is on. */
+		concern?: ConcernFactors | null;
+		onzone?: () => void;
 		onclose: () => void;
 	}
 
-	let { lat, lon, facts, error, units, sun = null, wind = null, onclose }: Props = $props();
+	let {
+		lat,
+		lon,
+		facts,
+		error,
+		units,
+		sun = null,
+		wind = null,
+		avy = null,
+		concern = null,
+		onzone,
+		onclose
+	}: Props = $props();
+	const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 
 	const SECTOR_WORDS: Record<string, string> = {
 		N: 'north',
@@ -126,7 +149,7 @@
 				</dd>
 			</div>
 		</dl>
-		{#if sun || wind}
+		{#if sun || wind || avy}
 			<ul class="more">
 				{#if sun}
 					<li>
@@ -148,11 +171,53 @@
 						<span class="faint">{wind.window.toLowerCase()}</span>
 					</li>
 				{/if}
+				{#if avy}
+					<li>
+						<span class="k">Avalanche</span>
+						{#if avy.level}
+							<span
+								><i style:background={DANGER_COLORS[avy.level]} aria-hidden="true"></i>
+								{BAND_WORDS[avy.band]}
+								{avy.level} · {dangerWord(avy.level)}</span
+							>
+						{:else}
+							<span>{BAND_WORDS[avy.band]} · {avy.status ?? 'no rating'}</span>
+						{/if}
+						<button class="link" onclick={() => onzone?.()}>{avy.zone} ›</button>
+					</li>
+				{/if}
+				{#if concern && concern.base != null}
+					<li>
+						<span class="k">Concern</span>
+						{#if concern.cls >= 0}
+							<span
+								><i style:background={CONCERN_CLASSES[concern.cls].color} aria-hidden="true"></i>
+								{CONCERN_CLASSES[concern.cls].label}</span
+							>
+						{:else}
+							<span class="faint">not drawn (under 25°)</span>
+						{/if}
+						<span class="faint num"
+							>({concern.base} danger {sign(concern.wind)} wind {sign(concern.sun)} sun) × {concern.slope}
+							slope × {concern.match}
+							{concern.problem ? `(${concern.problem})` : 'match'} = {concern.score.toFixed(
+								1
+							)}</span
+						>
+					</li>
+				{/if}
 			</ul>
 		{/if}
 		<p class="faint small">
 			Elevation grid {grid}{facts.fallback ? ' (backup source)' : ''}; slope over {slopeGrid}.
 			{#if sun || wind}Sun and wind from terrain shape alone: estimates.{/if}
+			{#if avy}
+				Band from treeline taken as {fmtElevation(avy.treeline.band[0], units)}–{fmtElevation(
+					avy.treeline.band[1],
+					units
+				)}{avy.treeline.own ? ` (your numbers for ${avy.treeline.name})` : ' (approximate)'}.
+			{/if}
+			{#if concern}Concern index: experimental, not a forecast.{/if}
 		</p>
 	{/if}
 	<p class="faint small coords">{coords}</p>
@@ -243,6 +308,16 @@
 	}
 	.small {
 		font-size: 0.72rem;
+	}
+	.link {
+		border: 0;
+		background: transparent;
+		color: var(--accent);
+		font: inherit;
+		font-size: 0.78rem;
+		font-weight: 600;
+		padding: 0;
+		cursor: pointer;
 	}
 	.coords {
 		font-variant-numeric: tabular-nums;

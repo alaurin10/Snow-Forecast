@@ -71,9 +71,11 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
 | `TILES_MAX_MB` | `2000` | Disk cap for the map tile cache |
 | `PUSH_MAX_SUBSCRIPTIONS` | `500` | Most devices with alerts on |
+| `HAZARD_INDEX` | `owner` | Who sees the map's experimental avalanche concern index: `off`, `owner` (signed in) or `public` |
 
 Forecast models, thresholds and the schedule are in
-[`config/forecast.yaml`](config/forecast.yaml); the starting locations are in
+[`config/forecast.yaml`](config/forecast.yaml); the approximate treeline bands the map's
+avalanche layers use are in [`config/treeline.yaml`](config/treeline.yaml); the starting locations are in
 [`config/seed-locations.yaml`](config/seed-locations.yaml).
 
 ## Development

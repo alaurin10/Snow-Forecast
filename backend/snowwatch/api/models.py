@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, Field
 
 from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
 from snowwatch.api.auth import Me
 from snowwatch.avalanche import AvalancheView
+from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import DayOut, Flag, RoseOut, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.models import Location
@@ -97,6 +100,8 @@ class MapWindLocation(BaseModel):
     lon: float
     generated_at: str
     roses: list[RoseOut]
+    # Its rapid-warming and rain-on-snow flags (the concern index's wet-snow inputs).
+    flags: list[Flag] = []
 
 
 class MapWindOut(BaseModel):
@@ -105,6 +110,25 @@ class MapWindOut(BaseModel):
     min_snow_cm: float  # less new snow than this: nothing to move
     min_wind_kmh: float  # lighter than this: little drifting
     locations: list[MapWindLocation]
+
+
+class ConcernOut(BaseModel):
+    """The experimental terrain concern index's settings (config `terrain:`), served only
+    to whoever HAZARD_INDEX allows. The browser works the index out from these."""
+
+    mode: str  # owner or public
+    caption: str
+    slope: list[Annotated[list[float], Field(min_length=2, max_length=2)]]  # [from °, factor]
+    match_listed: float
+    match_other: float
+    match_none: float
+    wind_loaded: float
+    wind_scoured: float
+    wind_effect: float
+    wind_snow_cm: float
+    sun: float
+    sun_hours: float
+    classes: Annotated[list[float], Field(min_length=3, max_length=3)]
 
 
 class PlanDate(BaseModel):
@@ -197,6 +221,8 @@ class ApiTypes(BaseModel):
     locations: list[LocationSummary]
     overview: list[OverviewRow]
     map_wind: MapWindOut
+    map_concern: ConcernOut
+    avalanche_zones: ZonesOut
     trend: TrendOut
     runs: list[RunOut]
     me: Me

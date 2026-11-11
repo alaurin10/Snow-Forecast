@@ -4,15 +4,16 @@
 import type { AddProtocolAction } from 'maplibre-gl';
 import type { MatchParams, Sector, TerrainMode } from './analysis';
 import type { Bounds } from './grid';
-import type { PointFacts, WorkerRequest, WorkerResponse } from './messages';
+import type { ConcernJob, PointFacts, WorkerRequest, WorkerResponse } from './messages';
 import type { SunFacts } from './shade';
 import type { Ymd } from './sun';
 
-/** A whole-view picture: shade at a time, sun hours in a day, or the wind effect. */
+/** A whole-view picture: shade at a time, sun hours in a day, the wind effect, or the concern index. */
 export type AreaJob =
 	| { type: 'shade'; time: number }
 	| { type: 'sunhours'; date: Ymd }
-	| { type: 'wind'; sectors: number[]; scale: number };
+	| { type: 'wind'; sectors: number[]; scale: number }
+	| ({ type: 'concern' } & ConcernJob);
 
 type Pending = { resolve: (r: WorkerResponse & { ok: true }) => void; reject: (e: Error) => void };
 type Body = WorkerRequest extends infer R
@@ -100,6 +101,11 @@ export class TerrainClient {
 		};
 	}
 
+	/** Tell the worker a zone's polygons, so tiles that name it are drawn only inside it. */
+	setZone(zone: string, polys: number[][][][]) {
+		void this.ask({ type: 'zone', zone, polys });
+	}
+
 	/** First and last direct sun at a spot on a date. */
 	async sunPoint(lat: number, lon: number, date: Ymd): Promise<SunFacts> {
 		return (await this.ask({ type: 'sunpoint', lat, lon, date })).sun!;
@@ -136,25 +142,39 @@ async function blank(): Promise<ImageBitmap> {
 	return createImageBitmap(new ImageData(1, 1));
 }
 
-/** Overlay parameters in a terrain:// URL's query. */
-export function matchQuery(m: MatchParams): string {
-	const q = new URLSearchParams({ s: String(m.slopeMin), a: m.aspects.join(',') });
-	if (m.minM != null) q.set('lo', String(Math.round(m.minM)));
-	if (m.maxM != null) q.set('hi', String(Math.round(m.maxM)));
+/**
+ * Overlay parameters in a terrain:// URL's query: `s=30&r=N.NE:0-1500,1900-9000;S:`,
+ * one rule per `;`, its aspects before the colon and its elevation ranges after.
+ */
+export function matchQuery(m: MatchParams, zone?: string): string {
+	const rules = m.rules
+		.map(
+			(r) =>
+				`${r.aspects.join('.')}:${r.ranges.map(([lo, hi]) => `${Math.round(lo)}_${Math.round(hi)}`).join(',')}`
+		)
+		.join(';');
+	const q = new URLSearchParams({ s: String(m.slopeMin), r: rules });
+	if (zone) q.set('zone', zone);
 	return q.toString();
 }
 
 export function parseMatch(query: string): MatchParams | undefined {
 	if (!query) return undefined;
 	const q = new URLSearchParams(query);
-	const lo = q.get('lo');
-	const hi = q.get('hi');
-	return {
-		slopeMin: Number(q.get('s') ?? 30),
-		aspects: (q.get('a') ?? '').split(',').filter(Boolean) as Sector[],
-		minM: lo == null ? undefined : Number(lo),
-		maxM: hi == null ? undefined : Number(hi)
-	};
+	const rules = (q.get('r') ?? '')
+		.split(';')
+		.filter(Boolean)
+		.map((part) => {
+			const [a = '', r = ''] = part.split(':');
+			return {
+				aspects: a.split('.').filter(Boolean) as Sector[],
+				ranges: r
+					.split(',')
+					.filter(Boolean)
+					.map((x) => x.split('_').map(Number) as [number, number])
+			};
+		});
+	return { slopeMin: Number(q.get('s') ?? 30), rules };
 }
 
 /** Register dem:// and terrain:// with MapLibre (once per page). */
@@ -175,7 +195,11 @@ export function registerProtocols(ml: {
 		const slash = path.indexOf('/');
 		const mode = path.slice(0, slash) as TerrainMode;
 		const { z, x, y } = parse(path.slice(slash + 1));
-		const r = await c.ask({ type: 'tile', mode, z, x, y, match: parseMatch(query) }, abort.signal);
+		const zone = new URLSearchParams(query).get('zone') ?? undefined;
+		const r = await c.ask(
+			{ type: 'tile', mode, z, x, y, match: parseMatch(query), zone },
+			abort.signal
+		);
 		return { data: r.bitmap ?? (await blank()) };
 	});
 	return true;

@@ -21,7 +21,7 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache |
 | `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/` |
+| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
 Python 3.12 slim stage runs it, as uid 1000, read-only, with no capabilities).
@@ -43,16 +43,18 @@ backend/snowwatch/
               render.py (frames, index, pruning) totals.py (snow totals to 10 days)
               sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
-  avalanche.py precip.py (re-exports maps/) tiles.py osm.py lookups.py push.py verify.py
+  avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
+  precip.py (re-exports maps/) tiles.py osm.py lookups.py push.py verify.py
 frontend/src/
   routes/     overview, location/[id], map, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
-              TerrainControls, Legend, Inspector; terrain/ decodes elevation and
-              works out slope, aspect, sun and shade, and the wind effect in a Web
-              Worker, served to MapLibre as dem:// and terrain:// and as one picture
-              for the view)
+              TerrainControls, AvalancheControls, Legend, Inspector, ZoneSheet;
+              avalanche.ts (zones, treeline, problems); terrain/ decodes elevation
+              and works out slope, aspect, sun and shade, the wind effect and the
+              concern index in a Web Worker, served to MapLibre as dem:// and
+              terrain:// and as one picture for the view)
   service-worker.ts
 ```
 
@@ -96,12 +98,26 @@ older than `STALE_AFTER_H` (12 h).
   scorecard shows which has been closer.
 - **Bands**: everything is computed at base, mid and summit at each band's own
   coordinates; freezing level comes from the model or from the upper-air levels.
-- **Backcountry** (no safety judgement anywhere): avalanche danger exactly as
-  published and hidden once expired, ridge-height wind, a snow-loading rose,
-  warming, rain on snow, refreeze, cloud above treeline, daylight. The map's Sun &
-  shade and Wind effect layers are estimates from the shape of the terrain (and, for
-  wind, the nearest location's loading rose), labelled as such; they describe sun and
-  likely drifting, not stability.
+- **Backcountry** (no safety judgement, with one bounded exception below): avalanche
+  danger exactly as published and hidden once expired, ridge-height wind, a
+  snow-loading rose, warming, rain on snow, refreeze, cloud above treeline, daylight.
+  The map's Sun & shade and Wind effect layers are estimates from the shape of the
+  terrain (and, for wind, the nearest location's loading rose), labelled as such; they
+  describe sun and likely drifting, not stability. Its danger zones are the centers'
+  ratings as published, in their colours; its Avalanche problems layer only redraws
+  what a bulletin lists (aspects and elevation bands) on the terrain, with treeline
+  numbers that are labelled approximate.
+- **The one exception: the map's concern index.** An experimental, app-computed
+  estimate per slope: `(published danger for the band + wind + sun) × slope × match`
+  (`frontend/src/lib/map/terrain/concern.ts`, numbers in `config/forecast.yaml` →
+  `terrain:`), drawn in four relative classes in a palette unlike the danger scale's,
+  only inside the zone whose bulletin it uses, and only while that bulletin has a
+  current rating for today. It is off unless `HAZARD_INDEX` allows the viewer
+  (`owner` by default: the signed-in owner only, until the centers' display terms have
+  been re-read for a derived product); the server withholds its settings otherwise.
+  The viewer accepts a warning once per device, and it always carries the caption
+  "Experimental estimate from the bulletin and terrain shape. Not a forecast. Doesn't
+  show runouts or slopes above you." The Inspector shows every factor for a spot.
 - **Ski-day rating** for resorts: Powder, Great, Good, Fair or Poor, with the
   reasons, from new snow, snow quality, rain, summit gusts, cloud and temperature.
 - **Flags**: powder day, storm incoming, model outlier, low confidence, rain on
@@ -142,6 +158,9 @@ and recorded by name. Nightly (`store/retention.py`):
   third parties limited to Mapterhorn and AWS elevation tiles, and https images), `nosniff`,
   frame denial, a referrer policy, a permissions policy, and HSTS in production.
 - **Links** shown to visitors must be http(s); bad upstream links are dropped.
+- **The concern index** (`HAZARD_INDEX`): `GET /api/map/concern` answers 404 when it
+  is off and 403 to anyone but the signed-in owner in `owner` mode, so the map has
+  nothing to work it out with.
 - **Privacy**: no analytics; the owner's contact email goes only to NWS, which
   asks for it; viewers' settings and positions stay in their browsers.
 

@@ -5,8 +5,10 @@
   With `radar`, the map fills the window and becomes the full Map page: one weather
   layer (radar, nowcast and forecast on one timeline, see ../radar.ts, or snow totals),
   one terrain overlay (slope, aspect, elevation bands, sun and shade, or the likely wind
-  effect, all computed in the browser, see ../map/terrain/), hill shading, contours, ski
-  runs and peaks, chosen in the Layers sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
+  effect, all computed in the browser, see ../map/terrain/; or the avalanche layers:
+  terrain matching today's listed problems and, for whoever HAZARD_INDEX allows, the
+  experimental concern index), avalanche danger zones as published, hill shading,
+  contours, ski runs and peaks, chosen in the Layers sheet. Tap the map for the terrain there. It's a MapLibre map: tilt and turn it, and
   switch on 3D terrain.
 -->
 <script lang="ts">
@@ -17,8 +19,8 @@
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
-	import { getMapWind } from '../api';
-	import type { MapWindOut } from '../types.gen';
+	import { getAvalancheZones, getConcern, getMapWind } from '../api';
+	import type { ConcernOut, MapWindOut, ZoneFeature, ZonesOut } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
 	import { viewport } from '../viewport.svelte';
 	import {
@@ -48,6 +50,8 @@
 		peakText,
 		PEAK_LAYERS,
 		ANALYSIS_OPACITY,
+		CONCERN_MIN_ZOOM,
+		OVERLAY_MIN_ZOOM,
 		PRECIP_BEFORE,
 		PRECIP_OPACITY,
 		sky,
@@ -76,6 +80,24 @@
 	import LayersSheet from '../map/LayersSheet.svelte';
 	import Legend from '../map/Legend.svelte';
 	import Inspector from '../map/Inspector.svelte';
+	import AvalancheControls from '../map/AvalancheControls.svelte';
+	import ZoneSheet from '../map/ZoneSheet.svelte';
+	import ConcernAck from '../map/ConcernAck.svelte';
+	import {
+		avyHere,
+		concernParams,
+		concernSetup,
+		polygons,
+		problemRule,
+		todayRatings,
+		treelineAt,
+		ymd,
+		zoneAt,
+		zonesGeojson
+	} from '../map/avalanche';
+	import { addZones, setZones } from '../map/layers/avalanche';
+	import { matchQuery } from '../map/terrain/client';
+	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -111,7 +133,19 @@
 	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
 	/** Contours show on satellite: the topo maps draw their own. */
 	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && satellite && !offline);
-	const overlayMode = $derived(radar ? prefs.mapOverlay : 'none');
+	/** The concern index's settings; null until loaded, or when this viewer may not see it. */
+	let concernCfg = $state.raw<ConcernOut | null>(null);
+	/** The concern index is chosen but its warning hasn't been accepted on this device. */
+	const askAck = $derived(
+		radar && prefs.mapOverlay === 'concern' && !!concernCfg && !prefs.concernAck
+	);
+	const overlayMode = $derived(
+		!radar || (prefs.mapOverlay === 'concern' && (!concernCfg || !prefs.concernAck))
+			? 'none'
+			: prefs.mapOverlay
+	);
+	const zonesOn = $derived(radar && prefs.mapFeatures.has('zones'));
+	const avyOverlay = $derived(overlayMode === 'problems' || overlayMode === 'concern');
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
 	const totalsMode = $derived(radar && prefs.mapWeather === 'totals');
@@ -120,6 +154,7 @@
 
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
 		panel = panel === p ? 'none' : p;
+		zoneOpen = null;
 	}
 
 	// ---- Theme ----------------------------------------------------------------
@@ -195,7 +230,11 @@
 	// ---- Terrain layers ------------------------------------------------------------
 	$effect(() => {
 		const o = overlayMode;
-		if (ready && map && radar) setOverlay(map, o);
+		const q = matchQ;
+		if (!ready || !map || !radar) return;
+		// The worker needs the zone's outline before it draws tiles clipped to it.
+		if (q && centreZone) terrainClient()?.setZone(centreZone.id, polygons(centreZone.geometry));
+		setOverlay(map, o, q);
 	});
 	$effect(() => {
 		const s = prefs.mapShade;
@@ -252,7 +291,12 @@
 	const sunPos = $derived(sunTime ? sunPosition(sunTime, centre.lat, centre.lon) : null);
 	const sunOn = $derived(overlayMode === 'sun');
 	const windOn = $derived(overlayMode === 'wind');
-	const areaTooFar = $derived((sunOn && zoom < SUN_MIN_ZOOM) || (windOn && zoom < WIND_MIN_ZOOM));
+	const concernOn = $derived(overlayMode === 'concern');
+	const areaTooFar = $derived(
+		(sunOn && zoom < SUN_MIN_ZOOM) ||
+			(windOn && zoom < WIND_MIN_ZOOM) ||
+			(concernOn && zoom < CONCERN_MIN_ZOOM)
+	);
 	/** Hill shading lit from where the sun is, while the shade is showing. */
 	const sunLight = $derived(
 		sunOn && sunMode === 'shade' && sunPos && sunPos.altitude > 0 && !areaTooFar ? sunPos : null
@@ -261,7 +305,7 @@
 
 	// The locations' wind, fetched when the layer is first switched on.
 	$effect(() => {
-		if (!windOn || windLoaded) return;
+		if (!(windOn || concernOn) || windLoaded) return;
 		getMapWind()
 			.then((d) => (windData = d))
 			.catch((e) => console.error('wind', e))
@@ -285,10 +329,106 @@
 		} else if (mode === 'wind' && !areaTooFar && wind?.rose && wind.scale > 0) {
 			job = { type: 'wind', sectors: $state.snapshot(wind.rose.sectors), scale: wind.scale };
 			opacity = ANALYSIS_OPACITY.wind;
+		} else if (mode === 'concern' && !areaTooFar && concernCfg && centreZone) {
+			const setup = concern;
+			if (setup?.inputs)
+				job = {
+					type: 'concern',
+					inputs: $state.snapshot(setup.inputs),
+					params: concernParams(concernCfg),
+					windSectors: setup.windSectors,
+					windScale: setup.windScale,
+					sunDate: setup.inputs.sun ? ymd(centreZone.properties.today) : null,
+					zone: polygons(centreZone.geometry)
+				};
+			opacity = ANALYSIS_OPACITY.concern;
 		}
 		if (!ready || !map || !runner) return;
 		if (job) runner.request(job, viewBounds(map), AREA_PX, opacity);
 		else runner.request(null);
+	});
+
+	// ---- Avalanche: zones as published, problems as terrain, the concern index -----------
+	let zonesData = $state.raw<ZonesOut | null>(null);
+	let zonesState = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+	/** The zone whose bulletin is open. */
+	let zoneOpen = $state.raw<ZoneFeature | null>(null);
+	let problemPick = $state<number | 'all'>('all');
+	let problemSlope = $state(30);
+
+	async function loadZones() {
+		if (zonesState === 'loading') return;
+		const first = !zonesData;
+		zonesState = 'loading';
+		try {
+			const d = await getAvalancheZones();
+			if (first) problemSlope = d.problem_slope_deg ?? 30;
+			zonesData = d;
+			zonesState = 'ready';
+		} catch (e) {
+			console.error('avalanche zones', e);
+			// A refresh that fails keeps what's shown (the API applied expiry when it was sent).
+			zonesState = zonesData ? 'ready' : 'failed';
+		}
+	}
+	// Fetched the first time something needs them; refreshed every 5 minutes after that.
+	$effect(() => {
+		if ((zonesOn || avyOverlay || probe) && zonesState === 'idle') void loadZones();
+	});
+	$effect(() => {
+		if (!radar) return;
+		void getConcern()
+			.then((c) => (concernCfg = c))
+			.catch((e) => console.error('concern', e));
+	});
+
+	const centreZone = $derived(
+		zonesData ? zoneAt(zonesData.features, centre.lat, centre.lon) : null
+	);
+	const centreTreeline = $derived(
+		zonesData ? treelineAt(zonesData, centreZone, centre.lat, centre.lon) : null
+	);
+	/** The problems layer's terrain:// query, or null when there's nothing to match. */
+	const matchQ = $derived.by(() => {
+		if (overlayMode !== 'problems' || !centreZone || !centreTreeline) return null;
+		const v = centreZone.properties.view;
+		const probs = todayRatings(v, centreZone.properties.today) ? (v.doc?.problems ?? []) : [];
+		if (!probs.length) return null;
+		const chosen =
+			typeof problemPick === 'number' && probs[problemPick] ? [probs[problemPick]] : probs;
+		return matchQuery(
+			{ slopeMin: problemSlope, rules: chosen.map((p) => problemRule(p, centreTreeline.band)) },
+			centreZone.id
+		);
+	});
+	/** What the concern index uses for the zone in the middle of the map. */
+	const concern = $derived(
+		concernOn && concernCfg && centreTreeline
+			? concernSetup(
+					centreZone,
+					centreTreeline,
+					windSource(windData, centre.lat, centre.lon, 'past48'),
+					concernCfg.wind_snow_cm
+				)
+			: null
+	);
+
+	$effect(() => {
+		const d = zonesData;
+		if (!ready || !map || !d) return;
+		addZones(
+			map,
+			zonesGeojson(d.features),
+			map.getLayer('overlay') ? 'overlay' : PRECIP_BEFORE,
+			PRECIP_BEFORE
+		);
+	});
+	$effect(() => {
+		const d = zonesData;
+		const on = zonesOn;
+		const focus = avyOverlay ? (centreZone?.id ?? null) : null;
+		const dk = dark;
+		if (ready && map && d) setZones(map, on, focus, dk);
 	});
 
 	// ---- Inspector: tap the map for the terrain there --------------------------------
@@ -299,6 +439,56 @@
 	let probeWind = $state<{ value: number; window: string } | null>(null);
 	let probeMarker: Marker | null = null;
 	let probeToken = 0;
+
+	const probeZone = $derived(
+		probe && zonesData ? zoneAt(zonesData.features, probe.lat, probe.lon) : null
+	);
+	const probeAvy = $derived(
+		probe && facts && !facts.sea && zonesData && probeZone
+			? avyHere(zonesData, probeZone, probe.lat, probe.lon, facts.elevation)
+			: null
+	);
+	let probeConcern = $state<ConcernFactors | null>(null);
+	// The concern index's factors at the tapped spot, with its own zone, wind and sun.
+	$effect(() => {
+		const p = probe;
+		const f = facts;
+		probeConcern = null;
+		const c = terrainClient();
+		if (!p || !f || f.sea || !concernOn || !concernCfg || !zonesData || !probeZone || !c) return;
+		const setup = concernSetup(
+			probeZone,
+			treelineAt(zonesData, probeZone, p.lat, p.lon),
+			windSource(windData, p.lat, p.lon, 'past48'),
+			concernCfg.wind_snow_cm
+		);
+		const inputs = setup.inputs;
+		if (!inputs) return;
+		const params = concernParams(concernCfg);
+		let gone = false;
+		const sectors = setup.windSectors;
+		Promise.all([
+			inputs.wind && sectors ? c.windPoint(p.lat, p.lon, sectors) : Promise.resolve(null),
+			inputs.sun ? c.sunPoint(p.lat, p.lon, ymd(probeZone.properties.today)) : Promise.resolve(null)
+		]).then(
+			([w, s]) => {
+				if (gone) return;
+				probeConcern = concernAt(
+					{
+						elev: f.elevation,
+						slope: f.slope,
+						aspect: f.aspect,
+						wind: w == null ? null : w * setup.windScale,
+						sunHours: s ? s.hours : null
+					},
+					inputs,
+					params
+				);
+			},
+			() => {}
+		);
+		return () => (gone = true);
+	});
 
 	async function inspect(lat: number, lon: number) {
 		const c = terrainClient();
@@ -593,6 +783,7 @@
 		if (!radar) return;
 		const ids = [
 			setInterval(refresh, 5 * 60 * 1000),
+			setInterval(() => zonesState === 'ready' && void loadZones(), 5 * 60 * 1000),
 			setInterval(() => (now = Date.now()), 60 * 1000)
 		];
 		return () => ids.forEach(clearInterval);
@@ -675,13 +866,21 @@
 			});
 			// A tap on the map itself (not a marker or a popup) asks what the terrain is there.
 			map.on('click', (e) => {
-				if (!radar || !analysis) return;
+				if (!radar) return;
 				if (popups.some((p) => p.isOpen())) {
 					for (const p of popups) p.remove();
 					return;
 				}
-				if (panel !== 'none') {
+				if (panel !== 'none' || zoneOpen) {
 					panel = 'none';
+					zoneOpen = null;
+					return;
+				}
+				if (!analysis) {
+					// No terrain worker (old browsers): a tap on a zone opens its bulletin.
+					const z =
+						zonesOn && zonesData ? zoneAt(zonesData.features, e.lngLat.lat, e.lngLat.lng) : null;
+					if (z) zoneOpen = z;
 					return;
 				}
 				void inspect(e.lngLat.lat, e.lngLat.lng);
@@ -826,7 +1025,12 @@
 
 <svelte:window
 	onkeydown={(e) =>
-		e.key === 'Escape' && (panel !== 'none' ? (panel = 'none') : probe && closeInspector())}
+		e.key === 'Escape' &&
+		(zoneOpen
+			? (zoneOpen = null)
+			: panel !== 'none'
+				? (panel = 'none')
+				: probe && closeInspector())}
 />
 
 <div
@@ -912,7 +1116,13 @@
 		</div>
 
 		{#if panel === 'layers'}
-			<LayersSheet {analysis} contours={contoursReady} {offline} onclose={() => (panel = 'none')} />
+			<LayersSheet
+				{analysis}
+				contours={contoursReady}
+				{offline}
+				concern={!!concernCfg}
+				onclose={() => (panel = 'none')}
+			/>
 		{/if}
 
 		{#if panel === 'offline'}
@@ -921,6 +1131,18 @@
 					.filter((r) => r.lat != null && r.lon != null)
 					.map((r) => ({ id: r.id, name: r.name, lat: r.lat!, lon: r.lon! }))}
 				onclose={() => (panel = 'none')}
+			/>
+		{/if}
+
+		{#if zoneOpen}
+			<ZoneSheet zone={zoneOpen} onclose={() => (zoneOpen = null)} />
+		{/if}
+
+		{#if askAck && concernCfg}
+			<ConcernAck
+				caption={concernCfg.caption}
+				onaccept={() => prefs.acceptConcern()}
+				oncancel={() => prefs.setMapOverlay('none')}
 			/>
 		{/if}
 
@@ -954,6 +1176,9 @@
 					{units}
 					sun={probeSun}
 					wind={probeWind}
+					avy={probeAvy}
+					concern={probeConcern}
+					onzone={() => (zoneOpen = probeZone)}
 					onclose={closeInspector}
 				/>
 			{/if}
@@ -996,11 +1221,36 @@
 					location's summit, weighted by the snow that wind could move. Both are estimates from the
 					shape of the ground, not observations, and say nothing about how stable the snow is.
 				</p>
+				<p class="faint">
+					Avalanche danger zones and ratings exactly as published by avalanche.org's centers and
+					Avalanche Canada (expired ones grey). Avalanche problems shows the terrain a bulletin's
+					problems describe, using approximate treeline numbers. Neither rates any slope.
+					{#if concernCfg}The concern index is this app's own experimental arithmetic on the
+						bulletin and terrain, not a forecast.{/if}
+				</p>
 				<button class="close" onclick={() => (panel = 'none')}>Close</button>
 			</div>
 		{/if}
 
 		<div class="dock">
+			{#if avyOverlay && analysis}
+				<AvalancheControls
+					overlay={overlayMode === 'concern' ? 'concern' : 'problems'}
+					{units}
+					{zonesState}
+					zone={centreZone}
+					treeline={centreTreeline}
+					tooFar={overlayMode === 'concern' ? zoom < CONCERN_MIN_ZOOM : zoom < OVERLAY_MIN_ZOOM}
+					state={areaState}
+					bind:pick={problemPick}
+					bind:slopeMin={problemSlope}
+					concernWhy={concern?.why ?? null}
+					windNote={concern?.windNote ?? ''}
+					sunNote={concern?.sunNote ?? ''}
+					caption={concernCfg?.caption ?? ''}
+					onzone={() => (zoneOpen = centreZone)}
+				/>
+			{/if}
 			{#if (sunOn || windOn) && analysis}
 				<TerrainControls
 					overlay={sunOn ? 'sun' : 'wind'}
