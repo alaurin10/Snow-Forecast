@@ -9,8 +9,9 @@ Tiles live under data/tiles/<layer>/<z>/<x>/<y>. The cache has a size cap
 (TILES_MAX_MB): once full it still serves tiles but stops storing new ones, and the
 nightly job drops tiles nobody has asked for in a while, then the least recently
 used ones until it is back under the cap. At most a few upstream fetches run at
-once. Elevation tiles for 3D go straight from the browser to AWS (fast, and
-large), so they aren't proxied.
+once. Elevation tiles go straight from the browser to Mapterhorn (fast, and large),
+so they aren't proxied. Recent satellite imagery (Sentinel-2 and NASA GIBS) is proxied
+the same way, under data/tiles/s2/ and data/tiles/gibs/.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -158,13 +160,18 @@ class TileCache:
         if path is None:
             return None
         up = UPSTREAMS[layer]
-        key = f"{layer}/{z}/{x}/{y}"
+        url = up.urls[(x + y) % len(up.urls)].format(z=z, x=x, y=y)
+        data = self.through(path, url, up.fix_edges)
+        return None if data is None else (data, up.media_type)
+
+    def through(self, path: Path, url: str, fix_edges: bool = False) -> bytes | None:
+        """A file from the cache at `path`, else fetched from `url` (an image) and kept."""
+        key = str(path.relative_to(self.root))
         # One upstream fetch per tile even when several requests arrive together.
         with self._lock(key):
             if path.exists():
                 os.utime(path)  # remember it was used, for pruning
-                return path.read_bytes(), up.media_type
-            url = up.urls[(x + y) % len(up.urls)].format(z=z, x=x, y=y)
+                return path.read_bytes()
             with self._upstream:
                 try:
                     r = self.client.get(url)
@@ -177,13 +184,108 @@ class TileCache:
             ):
                 return None
             data = r.content
-            if up.fix_edges:
+            if fix_edges:
                 with contextlib.suppress(OSError):  # keep the tile as it came
                     data = repair_edges(data)
             self._store(path, data)
         with self._guard:
             self._locks.pop(key, None)
-        return data, up.media_type
+        return data
+
+
+# ---- Recent satellite (docs/MAP-PLAN.md, B6) ----------------------------------------
+# Sentinel-2 tiles from Microsoft Planetary Computer, only for the items in the
+# satellite index (snowwatch/maps/sat.py), and NASA GIBS's daily VIIRS and HLS mosaics.
+
+PC_TILES = "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad"
+# Natural colour from the bands rather than the scene's ready-made picture, which turns
+# all snow flat white; and snow vs cloud (SWIR, near infrared, red): snow cyan, cloud
+# white. L2A values are reflectance x 10,000 plus 1,000.
+S2_MODES = {
+    "natural": "assets=B04&assets=B03&assets=B02&rescale=1000,12000&color_formula=Gamma+RGB+1.8",
+    "snow": "assets=B11&assets=B8A&assets=B04&rescale=1000,9000&color_formula=Gamma+RGB+1.3",
+}
+# 512 px tiles: zoom 14 is ~5 m a pixel here, finer than Sentinel-2's 10 m.
+S2_ZOOMS = (8, 14)
+
+
+@dataclass(frozen=True)
+class GibsLayer:
+    matrix: str
+    ext: str
+    max_zoom: int
+    media_type: str
+
+
+GIBS_URL = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best"
+GIBS_LAYERS = {
+    "VIIRS_NOAA20_CorrectedReflectance_TrueColor": GibsLayer(
+        "GoogleMapsCompatible_Level9", "jpeg", 9, "image/jpeg"
+    ),
+    "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1": GibsLayer(
+        "GoogleMapsCompatible_Level9", "jpeg", 9, "image/jpeg"
+    ),
+    "HLS_S30_Nadir_BRDF_Adjusted_Reflectance": GibsLayer(
+        "GoogleMapsCompatible_Level12", "png", 12, "image/png"
+    ),
+}
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _xy_ok(z: int, x: int, y: int) -> bool:
+    n: int = 2**z
+    return 0 <= x < n and 0 <= y < n
+
+
+def s2_path(
+    cache: TileCache, mode: str, item: str, z: int, x: int, y: int, allowed: set[str]
+) -> Path | None:
+    """Where a Sentinel-2 tile is cached; None unless it's a tile the proxy may fetch."""
+    if mode not in S2_MODES or item not in allowed or not (S2_ZOOMS[0] <= z <= S2_ZOOMS[1]):
+        return None
+    if not _xy_ok(z, x, y):
+        return None
+    return cache.root / "s2" / mode / item / str(z) / str(x) / str(y)
+
+
+def s2_tile(
+    cache: TileCache, mode: str, item: str, z: int, x: int, y: int, allowed: set[str]
+) -> bytes | None:
+    """A Sentinel-2 tile (WebP, transparent outside the scene) of an item in the index."""
+    path = s2_path(cache, mode, item, z, x, y, allowed)
+    if path is None:
+        return None
+    url = f"{PC_TILES}/{z}/{x}/{y}@2x.webp?collection=sentinel-2-l2a&item={item}&{S2_MODES[mode]}"
+    return cache.through(path, url)
+
+
+def gibs_path(
+    cache: TileCache, layer: str, day: str, z: int, x: int, y: int, today: date | None = None
+) -> Path | None:
+    """Where a GIBS tile is cached; None unless it's a layer, day and tile the proxy serves."""
+    g = GIBS_LAYERS.get(layer)
+    if g is None or not DAY.fullmatch(day) or not (0 <= z <= g.max_zoom) or not _xy_ok(z, x, y):
+        return None
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        return None
+    today = today or datetime.now(UTC).date()
+    if not (date(2015, 1, 1) <= d <= today + timedelta(days=1)):
+        return None
+    return cache.root / "gibs" / layer / day / str(z) / str(x) / str(y)
+
+
+def gibs_tile(
+    cache: TileCache, layer: str, day: str, z: int, x: int, y: int, today: date | None = None
+) -> tuple[bytes, str] | None:
+    """A tile of one of GIBS's daily layers for one day (not in the future)."""
+    path = gibs_path(cache, layer, day, z, x, y, today)
+    if path is None:
+        return None
+    g = GIBS_LAYERS[layer]
+    data = cache.through(path, f"{GIBS_URL}/{layer}/default/{day}/{g.matrix}/{z}/{y}/{x}.{g.ext}")
+    return None if data is None else (data, g.media_type)
 
 
 GLYPHS = "https://demotiles.maplibre.org/font/{stack}/{range}.pbf"

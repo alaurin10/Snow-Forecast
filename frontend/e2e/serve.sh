@@ -13,4 +13,8 @@ uv run --frozen snowwatch rebuild --from tests/fixtures/live-20261104 >/dev/null
 # avalanche layers load and say there's no zone here.
 mkdir -p "$data/avalanche"
 echo '{"type":"FeatureCollection","generated_at":null,"features":[]}' >"$data/avalanche/zones.geojson"
+# A satellite index with no scenes and no VIIRS day, so the Recent satellite base loads
+# without asking the network for tiles.
+mkdir -p "$data/sat"
+echo '{"generated_at":null,"viirs_date":null,"hls_date":null,"locations":[]}' >"$data/sat/index.json"
 exec uv run --frozen uvicorn --factory snowwatch.api.app:production_app --port 8019

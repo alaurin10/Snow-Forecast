@@ -14,6 +14,7 @@ import type {
 	StatusOut,
 	VerificationOut,
 	ZonesOut,
+	SatOut,
 	ResolveIn,
 	ResolveOut,
 	RunOut,
@@ -113,6 +114,8 @@ export function getAvalanche(): Promise<Record<string, AvalancheView>> {
 
 /** Every avalanche forecast zone in the map's box, with expiry applied (cache: a minute). */
 export const getAvalancheZones = () => get<ZonesOut>('/api/avalanche/zones.geojson');
+/** Recent satellite: daily VIIRS and HLS days, and clear Sentinel-2 scenes per location. */
+export const getSat = () => get<SatOut>('/api/sat');
 
 /** The concern index's settings, or null when the server has it off (HAZARD_INDEX). */
 export async function getConcern(): Promise<ConcernOut | null> {

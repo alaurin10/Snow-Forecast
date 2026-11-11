@@ -27,9 +27,10 @@ from snowwatch.api.push_api import make_push_router
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
+from snowwatch.maps.sat import SatOut, allowed_items, read_index
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
-from snowwatch.tiles import TileCache, glyphs
+from snowwatch.tiles import TileCache, gibs_path, gibs_tile, glyphs, s2_path, s2_tile
 
 log = logging.getLogger("snowwatch.api")
 access = logging.getLogger("snowwatch.access")
@@ -235,6 +236,66 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not cache.cached(layer, z, x, y):
             tile_misses.check(request)
         got = cache.get(layer, z, x, y)
+        if got is None:
+            raise HTTPException(404)
+        data, media_type = got
+        return Response(
+            data, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"}
+        )
+
+    # The satellite index, re-read when the worker rewrites it: (mtime, index, item ids).
+    sat_cache: dict[str, tuple[float, SatOut | None, set[str]]] = {}
+
+    def sat_index() -> tuple[SatOut | None, set[str]]:
+        path = settings.sat_dir / "index.json"
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None, set()
+        hit = sat_cache.get("index")
+        if hit is None or hit[0] != mtime:
+            index = read_index(path)
+            hit = (mtime, index, allowed_items(index))
+            sat_cache["index"] = hit
+        return hit[1], hit[2]
+
+    @app.get("/api/sat", response_model=SatOut)
+    def sat() -> SatOut:
+        """Recent satellite imagery: the clear Sentinel-2 scenes near each location and
+        the newest daily VIIRS and HLS days (see snowwatch/maps/sat.py)."""
+        index, _ = sat_index()
+        if index is None:
+            raise HTTPException(503, "satellite scenes not looked for yet")
+        return index
+
+    @app.get("/api/tiles/s2/{mode}/{item}/{z}/{x}/{y}.webp")
+    def s2(mode: str, item: str, z: int, x: int, y: int, request: Request) -> Response:
+        """Sentinel-2 tiles, only for scenes in the satellite index, cached here."""
+        cache = tiles()
+        _, allowed = sat_index()
+        path = s2_path(cache, mode, item, z, x, y, allowed)
+        if path is None:
+            raise HTTPException(404)
+        if not path.exists():
+            tile_misses.check(request)
+        data = s2_tile(cache, mode, item, z, x, y, allowed)
+        if data is None:
+            raise HTTPException(404)
+        # A scene never changes.
+        return Response(
+            data, media_type="image/webp", headers={"Cache-Control": "public, max-age=2592000"}
+        )
+
+    @app.get("/api/tiles/gibs/{layer}/{day}/{z}/{x}/{y}")
+    def gibs(layer: str, day: str, z: int, x: int, y: int, request: Request) -> Response:
+        """NASA GIBS daily imagery (VIIRS, HLS) for one day, cached here."""
+        cache = tiles()
+        path = gibs_path(cache, layer, day, z, x, y)
+        if path is None:
+            raise HTTPException(404)
+        if not path.exists():
+            tile_misses.check(request)
+        got = gibs_tile(cache, layer, day, z, x, y)
         if got is None:
             raise HTTPException(404)
         data, media_type = got

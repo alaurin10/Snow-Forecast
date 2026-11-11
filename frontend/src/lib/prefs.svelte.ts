@@ -36,6 +36,11 @@ export const MAP_OVERLAYS: readonly MapOverlay[] = [
 export type MapFeature = 'runs' | 'peaks' | 'contours' | 'zones';
 export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours', 'zones'] as const;
 export type MapShade = 'off' | 'light' | 'strong';
+/** The base map: Esri/OpenTopoMap topo, Esri's undated imagery, or recent satellite views. */
+export type MapBase = 'topo' | 'satellite' | 'recent';
+export const MAP_BASES: readonly MapBase[] = ['topo', 'satellite', 'recent'] as const;
+/** Recent satellite in natural colour, or snow vs cloud (snow cyan, cloud white). */
+export type SatBands = 'natural' | 'snow';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
 	try {
@@ -99,9 +104,8 @@ class Prefs {
 	mapTerrain = $state<'on' | 'off'>(load('sw.mapTerrain', ['on', 'off'] as const, 'off'));
 	/** The concern index's warning has been read and accepted on this device. */
 	concernAck = $state<boolean>(read('sw.concernAck') === '1');
-	mapBase = $state<'topo' | 'satellite'>(
-		load('sw.mapBase', ['topo', 'satellite'] as const, 'topo')
-	);
+	mapBase = $state<MapBase>(load('sw.mapBase', MAP_BASES, 'topo'));
+	satBands = $state<SatBands>(load('sw.satBands', ['natural', 'snow'] as const, 'natural'));
 
 	/** Overview order on phones: the order set on the Manage page, or most snow first. */
 	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
@@ -165,9 +169,14 @@ class Prefs {
 		save('sw.mapShade', s);
 	}
 
-	setMapBase(base: 'topo' | 'satellite') {
+	setMapBase(base: MapBase) {
 		this.mapBase = base;
 		save('sw.mapBase', base);
+	}
+
+	setSatBands(b: SatBands) {
+		this.satBands = b;
+		save('sw.satBands', b);
 	}
 
 	acceptConcern() {

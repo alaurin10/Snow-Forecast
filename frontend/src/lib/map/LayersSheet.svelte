@@ -4,7 +4,13 @@
   readable and its memory bounded.
 -->
 <script lang="ts">
-	import { prefs, type MapFeature, type MapOverlay, type MapWeather } from '../prefs.svelte';
+	import {
+		prefs,
+		type MapBase,
+		type MapFeature,
+		type MapOverlay,
+		type MapWeather
+	} from '../prefs.svelte';
 
 	interface Props {
 		/** Slope and aspect need the terrain worker (missing on old browsers). */
@@ -19,6 +25,19 @@
 
 	let { analysis, contours, offline, concern = false, onclose }: Props = $props();
 
+	const BASES: { id: MapBase; label: string; title: string }[] = [
+		{ id: 'topo', label: 'Topo', title: 'Topographic map' },
+		{
+			id: 'satellite',
+			label: 'Satellite',
+			title: 'Detailed imagery, of no particular date (Esri)'
+		},
+		{
+			id: 'recent',
+			label: 'Recent satellite',
+			title: 'This week’s imagery: Sentinel-2 near saved locations, daily VIIRS elsewhere'
+		}
+	];
 	const WEATHER: { id: MapWeather; label: string }[] = [
 		{ id: 'radar', label: 'Radar & forecast' },
 		{ id: 'totals', label: 'Snow total' },
@@ -53,16 +72,22 @@
 	<section>
 		<h4>Base map</h4>
 		<div class="seg" role="group" aria-label="Base map">
-			<button aria-pressed={prefs.mapBase === 'topo'} onclick={() => prefs.setMapBase('topo')}
-				>Topo</button
-			>
-			<button
-				aria-pressed={prefs.mapBase === 'satellite'}
-				onclick={() => prefs.setMapBase('satellite')}
-				disabled={offline}
-				title={offline ? 'Satellite needs a connection' : undefined}>Satellite</button
-			>
+			{#each BASES as b (b.id)}
+				<button
+					aria-pressed={prefs.mapBase === b.id}
+					onclick={() => prefs.setMapBase(b.id)}
+					disabled={b.id !== 'topo' && offline}
+					title={b.id !== 'topo' && offline ? 'Satellite needs a connection' : b.title}
+					>{b.label}</button
+				>
+			{/each}
 		</div>
+		{#if prefs.mapBase === 'recent'}
+			<p class="faint">
+				Daily 375 m views everywhere; near saved locations, the newest 10 m Sentinel-2 view that
+				sees the ground, a few days old at most in clear weather.
+			</p>
+		{/if}
 	</section>
 
 	<section>

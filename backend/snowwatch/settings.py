@@ -112,6 +112,11 @@ class Settings(BaseSettings):
         return self.data_dir / "avalanche" / "zones.geojson"
 
     @property
+    def sat_dir(self) -> Path:
+        """Recent satellite scenes for the map (see snowwatch/maps/sat.py)."""
+        return self.data_dir / "sat"
+
+    @property
     def tiles_dir(self) -> Path:
         """Cached map tiles (see snowwatch/tiles.py)."""
         return self.data_dir / "tiles"

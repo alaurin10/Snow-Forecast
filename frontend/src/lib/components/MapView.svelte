@@ -19,8 +19,8 @@
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
-	import { getAvalancheZones, getConcern, getMapWind } from '../api';
-	import type { ConcernOut, MapWindOut, ZoneFeature, ZonesOut } from '../types.gen';
+	import { getAvalancheZones, getConcern, getMapWind, getSat } from '../api';
+	import type { ConcernOut, MapWindOut, SatOut, ZoneFeature, ZonesOut } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
 	import { viewport } from '../viewport.svelte';
 	import {
@@ -96,6 +96,9 @@
 		zonesGeojson
 	} from '../map/avalanche';
 	import { addZones, setZones } from '../map/layers/avalanche';
+	import { nearestSpot, recentSpec, type RecentSpec } from '../map/sat';
+	import { setRecent, setRecentTheme } from '../map/layers/sat';
+	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
 
@@ -129,10 +132,14 @@
 
 	const terrainOn = $derived(radar && prefs.mapTerrain === 'on');
 	const satellite = $derived(radar && prefs.mapBase === 'satellite');
+	/** Recent satellite: daily VIIRS, and Sentinel-2 scenes near the locations (../map/sat.ts). */
+	const recent = $derived(radar && prefs.mapBase === 'recent');
+	/** Either kind of imagery: place names and contours go over it. */
+	const imagery = $derived(satellite || recent);
 	const runsOn = $derived(radar && prefs.mapFeatures.has('runs'));
 	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
-	/** Contours show on satellite: the topo maps draw their own. */
-	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && satellite && !offline);
+	/** Contours show on imagery: the topo maps draw their own. */
+	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && imagery && !offline);
 	/** The concern index's settings; null until loaded, or when the server has it off. */
 	let concernCfg = $state.raw<ConcernOut | null>(null);
 	/** The concern index is chosen but its warning hasn't been accepted on this device. */
@@ -177,22 +184,24 @@
 			map.setPaintProperty(id, 'raster-brightness-max', p['raster-brightness-max']);
 			map.setPaintProperty(id, 'raster-saturation', p['raster-saturation']);
 		}
+		setRecentTheme(map, d);
 		const s = sky(d);
 		if (s) map.setSky(s);
 	});
 
 	$effect(() => {
 		// Offline, only OpenTopoMap is saved (Esri's terms don't allow storing its tiles),
-		// so it shows at every zoom and satellite waits for a connection.
+		// so it shows at every zoom and satellite (of either kind) waits for a connection.
 		const off = offline;
 		const sat = satellite && !off;
+		const img = imagery && !off;
 		if (!ready || !map) return;
-		map.setLayoutProperty('esri', 'visibility', sat || off ? 'none' : 'visible');
-		map.setLayoutProperty('otm', 'visibility', sat ? 'none' : 'visible');
+		map.setLayoutProperty('esri', 'visibility', img || off ? 'none' : 'visible');
+		map.setLayoutProperty('otm', 'visibility', img ? 'none' : 'visible');
 		map.setLayerZoomRange('otm', off ? 0 : DETAIL_ZOOM - 0.5, 24);
 		map.setPaintProperty('otm', 'raster-opacity', off ? 1 : OTM_OPACITY);
-		for (const id of ['sat', 'satlabels'])
-			map.setLayoutProperty(id, 'visibility', sat ? 'visible' : 'none');
+		map.setLayoutProperty('sat', 'visibility', sat ? 'visible' : 'none');
+		map.setLayoutProperty('satlabels', 'visibility', img ? 'visible' : 'none');
 	});
 
 	$effect(() => {
@@ -239,7 +248,7 @@
 	$effect(() => {
 		const s = prefs.mapShade;
 		const d = dark;
-		const b = satellite ? 'satellite' : 'topo';
+		const b = prefs.mapBase === 'topo' || !radar ? 'topo' : prefs.mapBase;
 		const sun = sunLight;
 		if (ready && map && radar) setShade(map, s, d, b, sun);
 	});
@@ -346,6 +355,53 @@
 		if (!ready || !map || !runner) return;
 		if (job) runner.request(job, viewBounds(map), AREA_PX, opacity);
 		else runner.request(null);
+	});
+
+	// ---- Recent satellite ----------------------------------------------------------
+	let satData = $state.raw<SatOut | null>(null);
+	let satState = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+	/** Which of the nearest location's scenes is shown (0: the newest). */
+	let sceneIndex = $state(0);
+	async function loadSat() {
+		if (satState === 'loading') return;
+		satState = 'loading';
+		try {
+			satData = await getSat();
+			satState = 'ready';
+		} catch (e) {
+			console.error('recent satellite', e);
+			satState = satData ? 'ready' : 'failed';
+		}
+	}
+	// Fetched when the base is first switched to it; new scenes arrive every few hours.
+	$effect(() => {
+		if (recent && !offline && satState === 'idle') void loadSat();
+	});
+	$effect(() => {
+		if (!recent) return;
+		const id = setInterval(() => satState !== 'loading' && void loadSat(), 30 * 60 * 1000);
+		return () => clearInterval(id);
+	});
+	const satSpot = $derived(nearestSpot(satData, centre.lat, centre.lon)?.spot ?? null);
+	// Another location's scenes: start from its newest.
+	let sceneSpot = '';
+	$effect(() => {
+		const id = satSpot?.id ?? '';
+		if (id !== sceneSpot) {
+			sceneSpot = id;
+			sceneIndex = 0;
+		}
+	});
+	const satScene = $derived(
+		satSpot?.scenes.length ? satSpot.scenes[Math.min(sceneIndex, satSpot.scenes.length - 1)] : null
+	);
+	const NO_RECENT: RecentSpec = { viirs: null, hls: null, s2: [] };
+	$effect(() => {
+		const spec = recent && !offline ? recentSpec(satData, satScene, prefs.satBands) : NO_RECENT;
+		const d = dark;
+		if (!ready || !map) return;
+		// Over the other bases, under the hill shading and everything else.
+		setRecent(map, spec, d, 'shade');
 	});
 
 	// ---- Avalanche: zones as published, problems as terrain, the concern index -----------
@@ -1218,6 +1274,12 @@
 					spot.
 				</p>
 				<p class="faint">
+					Recent satellite: NOAA-20 VIIRS daily mosaic everywhere (375 m), and near each saved
+					location the newest Sentinel-2 views (10 m, plus 30 m HLS from the same pass) that see the
+					ground there, judged by the scene's own cloud mask. Contains modified Copernicus Sentinel
+					data. Satellite (undated) is Esri's detailed mosaic.
+				</p>
+				<p class="faint">
 					Sun & shade: the sun's position by NOAA's formulas, and shadows cast by terrain up to 15
 					km away. Wind effect: how sheltered each slope is from the forecast wind at the nearest
 					location's summit, weighted by the snow that wind could move. Both are estimates from the
@@ -1235,6 +1297,18 @@
 		{/if}
 
 		<div class="dock">
+			{#if recent && !offline}
+				<SatControls
+					data={satData}
+					loadState={satState}
+					spot={satSpot}
+					bind:index={sceneIndex}
+					bands={prefs.satBands}
+					{zoom}
+					{now}
+					onbands={(b) => prefs.setSatBands(b)}
+				/>
+			{/if}
 			{#if avyOverlay && analysis}
 				<AvalancheControls
 					overlay={overlayMode === 'concern' ? 'concern' : 'problems'}

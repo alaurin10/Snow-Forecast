@@ -3206,6 +3206,194 @@
       "title": "RunOut",
       "type": "object"
     },
+    "SatItem": {
+      "description": "One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.",
+      "properties": {
+        "bbox": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "bbox"
+      ],
+      "title": "SatItem",
+      "type": "object"
+    },
+    "SatLocation": {
+      "properties": {
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/SatScene"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "lat",
+        "lon",
+        "scenes"
+      ],
+      "title": "SatLocation",
+      "type": "object"
+    },
+    "SatOut": {
+      "description": "The map's recent satellite imagery: daily VIIRS, and clear Sentinel-2 scenes per\nlocation (newest first).",
+      "properties": {
+        "attribution": {
+          "default": [
+            "Contains modified Copernicus Sentinel data",
+            "Microsoft Planetary Computer",
+            "NASA GIBS (VIIRS, HLS)"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "days": {
+          "default": 30,
+          "type": "integer"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hls_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "locations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SatLocation"
+          },
+          "type": "array"
+        },
+        "min_clear_pct": {
+          "default": 70,
+          "type": "integer"
+        },
+        "viirs_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SatOut",
+      "type": "object"
+    },
+    "SatScene": {
+      "description": "One Sentinel-2 pass that sees the ground at a location.",
+      "properties": {
+        "clear_pct": {
+          "type": "integer"
+        },
+        "hls": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SatItem"
+          },
+          "type": "array"
+        },
+        "nodata_pct": {
+          "type": "integer"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "snow_pct": {
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "time",
+        "platform",
+        "clear_pct",
+        "snow_pct",
+        "nodata_pct",
+        "items"
+      ],
+      "title": "SatScene",
+      "type": "object"
+    },
     "SaveOut": {
       "properties": {
         "job_id": {
@@ -4491,6 +4679,9 @@
       },
       "type": "array"
     },
+    "sat": {
+      "$ref": "#/$defs/SatOut"
+    },
     "save": {
       "$ref": "#/$defs/SaveOut"
     },
@@ -4514,6 +4705,7 @@
     "map_wind",
     "map_concern",
     "avalanche_zones",
+    "sat",
     "trend",
     "runs",
     "me",

@@ -45,6 +45,7 @@ class Worker:
         # The map's pictures are separate files: they don't wait for runs. Each map job
         # skips a turn if its previous one is still going.
         self.map_locks = {name: threading.Lock() for name in ("radar", "forecast", "totals")}
+        self.sat_lock = threading.Lock()
         self._ping = ping
         conn = connect(settings.database)
         applied = migrate(conn)
@@ -273,6 +274,41 @@ class Worker:
         except Exception:
             log.exception("ski map data failed")
 
+    def satellite(self) -> None:
+        """The newest clear Sentinel-2 scenes near each location, for the map's recent
+        satellite base. Failures are only logged."""
+        from snowwatch.maps import sat
+
+        if not self.sat_lock.acquire(blocking=False):
+            return
+        try:
+            mc = self.cfg.map
+            locs = list_locations(connect(self.settings.database))
+            headers = {"User-Agent": self.settings.user_agent}
+            with httpx.Client(headers=headers, follow_redirects=True, timeout=40) as client:
+                res = sat.refresh(
+                    self.settings.sat_dir,
+                    client,
+                    locs,
+                    days=mc.sat_days,
+                    min_clear=mc.sat_min_clear,
+                    max_nodata=mc.sat_max_nodata,
+                    keep=mc.sat_keep,
+                )
+            log.info(
+                "satellite: %d clear scenes for %d locations (%d passes judged), %d errors",
+                res.scenes,
+                res.locations,
+                res.checked,
+                len(res.errors),
+            )
+            for err in res.errors:
+                log.warning("satellite: %s", err)
+        except Exception:
+            log.exception("satellite scenes failed")
+        finally:
+            self.sat_lock.release()
+
     def weekly(self) -> None:
         with self.lock:
             vacuum(connect(self.settings.database))
@@ -349,6 +385,13 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             next_run_time=datetime.now(UTC),
             **opts,
         )
+    sched.add_job(
+        worker.satellite,
+        IntervalTrigger(hours=mc.sat_hours),
+        id="satellite",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
     h, m = _hm(cfg.backup_utc)
     sched.add_job(worker.nightly, CronTrigger(hour=h, minute=m, timezone=UTC), id="nightly", **opts)
     sched.add_job(

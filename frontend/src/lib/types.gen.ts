@@ -23,6 +23,7 @@ export interface ApiTypes {
 	resolve_in: ResolveIn;
 	resolve_out: ResolveOut;
 	runs: RunOut[];
+	sat: SatOut;
 	save: SaveOut;
 	snapshot: Snapshot;
 	status: StatusOut;
@@ -587,6 +588,65 @@ export interface RunOut {
 	kind: string;
 	started_at: string;
 	status: string;
+}
+/**
+ * The map's recent satellite imagery: daily VIIRS, and clear Sentinel-2 scenes per
+ * location (newest first).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatOut".
+ */
+export interface SatOut {
+	attribution?: string[];
+	days?: number;
+	generated_at?: string | null;
+	hls_date?: string | null;
+	locations?: SatLocation[];
+	min_clear_pct?: number;
+	viirs_date?: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatLocation".
+ */
+export interface SatLocation {
+	checked_at?: string | null;
+	error?: string | null;
+	id: string;
+	lat: number;
+	lon: number;
+	name: string;
+	scenes: SatScene[];
+}
+/**
+ * One Sentinel-2 pass that sees the ground at a location.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatScene".
+ */
+export interface SatScene {
+	clear_pct: number;
+	hls?: boolean;
+	id: string;
+	items: SatItem[];
+	nodata_pct: number;
+	platform: string;
+	snow_pct: number;
+	time: string;
+}
+/**
+ * One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SatItem".
+ */
+export interface SatItem {
+	/**
+	 * @minItems 4
+	 * @maxItems 4
+	 */
+	bbox: [number, number, number, number];
+	id: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
