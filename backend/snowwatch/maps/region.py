@@ -13,7 +13,7 @@ import numpy as np
 WORLD = 20037508.342789244  # half the Web Mercator world, metres
 WIDTH = 1400  # frame width in pixels when the box follows the locations
 MAX_HEIGHT = 2400
-TILE_ZOOM = 7  # RainViewer's free tiles stop at 7; IEM's HRRR is ~3 km, so 7 is plenty
+TILE_ZOOM = 7  # RainViewer's free tiles stop at 7
 
 # The fixed western North America box: south, west, north, east (config: map.region).
 WEST = (31.0, -134.0, 57.0, -102.0)

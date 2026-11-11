@@ -22,7 +22,6 @@ from snowwatch.precip import (
     Renderer,
     encode,
     hex_rgb,
-    hrrr_recolor,
     parse_times,
     radar_recolor,
     rain_rate,
@@ -30,8 +29,6 @@ from snowwatch.precip import (
     snap,
     snow_rate,
     stitch,
-    wpc_layer,
-    wpc_ts,
 )
 from snowwatch.settings import Settings
 
@@ -54,30 +51,10 @@ def test_radar_colours_become_ours() -> None:
     assert radar_recolor(0xC7, 0xFF, 0xFF) is None  # 0 dBZ snow: too light to show
 
 
-def test_hrrr_colour_families() -> None:
-    assert hrrr_recolor(*hex_rgb("#d6efd0")) == rain[0]
-    assert hrrr_recolor(*hex_rgb("#00441b")) == rain[2]
-    assert hrrr_recolor(*hex_rgb("#ffe81a")) == rain[3]
-    assert hrrr_recolor(*hex_rgb("#ffa000")) == rain[5]
-    assert hrrr_recolor(*hex_rgb("#81c0d5")) == snow[0]
-    assert hrrr_recolor(*hex_rgb("#003f7f")) == snow[4]
-    assert hrrr_recolor(*hex_rgb("#dedded")) == mix[0]
-    assert hrrr_recolor(*hex_rgb("#fc8767")) == mix[1]
-    assert hrrr_recolor(128, 128, 128) is None
-
-
 def test_time_dimension() -> None:
     ts = parse_times("2026-11-06T19:00:00Z/2026-11-06T22:00:00Z/PT1H")
     assert len(ts) == 4 and ts[1] - ts[0] == 3600
     assert len(parse_times("2026-11-06T19:00:00Z, junk, 2026-11-06T18:00:00Z")) == 2
-
-
-def test_wpc_blocks() -> None:
-    base = wpc_ts("2026-11-06 18:00:00")
-    assert wpc_layer(base + 3600, base) == 13
-    assert wpc_layer(base + 6 * 3600, base) == 13
-    assert wpc_layer(base + 7 * 3600, base) == 14
-    assert wpc_layer(base, base) is None
 
 
 def test_region_covers_locations_with_room() -> None:
@@ -114,37 +91,17 @@ def png(color: tuple[int, int, int] | None, w: int, h: int) -> bytes:
 
 
 class FakeNet(precip.Net):
-    """Answers like the real sources, with flat colours, and counts image requests."""
+    """Answers like the real sources, with flat fields, and counts what was fetched."""
 
     def __init__(self, now: int) -> None:
         self.now = now
         self.images = 0
+        self.grids = 0
 
     def json(self, url: str, params: dict[str, str] | None = None) -> Any:
         if "rainviewer" in url:
             past = [{"time": self.now - 600 * i, "path": f"/v2/radar/{i}"} for i in (2, 1, 0)]
             return {"host": "https://tiles.example", "radar": {"past": past}}
-        if "refp_" in url:
-            minute = int(url.rsplit("_", 1)[1].split(".")[0])
-            if minute > 6 * 60:
-                return None
-            init = self.now - self.now % 3600
-            valid = init + minute * 60
-            return {
-                "model_init_utc": precip.ts_iso(init),
-                "model_forecast_utc": precip.ts_iso(valid),
-            }
-        if url.endswith("/13/query"):
-            start = precip.ts_iso(self.now - self.now % 3600).replace("T", " ").rstrip("Z")
-            return {"features": [{"attributes": {"start_time": start, "issue_time": "x"}}]}
-        if "/query" in url:
-            ring = [[-125, 40], [-115, 40], [-115, 45], [-125, 45], [-125, 40]]
-            props = {"qpf": 0.3}
-            return {
-                "features": [
-                    {"properties": props, "geometry": {"type": "Polygon", "coordinates": [ring]}}
-                ]
-            }
         return None
 
     def get(self, url: str, params: dict[str, str] | None = None, tries: int = 3) -> Any:
@@ -158,27 +115,59 @@ class FakeNet(precip.Net):
                 '<Dimension name="reference_time" default="RUN1">x</Dimension>'
             )
             return type("R", (), {"text": text})()
+        if "GetCoverage" in url:
+            # GeoMet's numbers: HRDPS snows 0.6 mm an hour everywhere (its domain comes
+            # from the picture below); RDPS, which fills in elsewhere, is dry.
+            self.grids += 1
+            import urllib.parse
+
+            layer = urllib.parse.parse_qs(url.split("?", 1)[1])["coverageId"][0]
+            value = 0.6 if layer == "HRDPS.CONTINENTAL.DIAG_SN_PT1H" else 0.0
+            body = float_tiff(np.full((40, 60), value, np.float32), -126.0, 51.0, 0.25)
+            return type("R", (), {"content": body, "headers": {"content-type": "image/tiff"}})()
         return None
 
     def image(
         self, url: str, params: dict[str, str] | None = None, tries: int = 3
     ) -> np.ndarray | None:
         self.images += 1
-        if params:  # GeoMet: domain covers the top half; snow everywhere it covers
+        if params:  # GeoMet: HRDPS's domain covers the top half
+            assert params["layers"] == precip.DOMAIN_LAYER
             w, h = int(params["width"]), int(params["height"])
             out = np.zeros((h, w, 4), np.uint8)
-            color = (0, 0, 0) if params["layers"] == precip.DOMAIN_LAYER else snow[1]
-            if "SN_PT1H" in params["layers"] or params["layers"] == precip.DOMAIN_LAYER:
-                out[: h // 2] = (*color, 255)
+            out[: h // 2] = (0, 0, 0, 255)
             return out
         tile = np.zeros((256, 256, 4), np.uint8)
         tile[...] = (0x00, 0x77, 0xAA, 255) if "tiles.example" in url else (0x73, 0xC4, 0x76, 255)
         return tile
 
 
-def test_render_writes_index_and_reuses_frames(tmp_path: Path) -> None:
+def precip_rain_t() -> int:
+    from snowwatch.maps.palette import RAIN_T
+
+    return RAIN_T
+
+
+def fake_hrrr(monkeypatch: Any, now: int) -> None:
+    """HRRR reaches the first 6 hours, raining everywhere; no NBM run."""
+    from snowwatch.maps.sources import hrrr, nbm
+
+    init = now - now % 3600
+    slots = {init + h * 3600: (init, h) for h in range(1, 7)}
+    monkeypatch.setattr(hrrr, "slots", lambda net, now: slots)
+
+    def fields(net: Any, run: int, f: int, region: Region, *dirs: Any) -> Any:
+        shape = (region.height, region.width)
+        return np.full(shape, 0.6, np.float32), np.full(shape, precip_rain_t(), np.uint8)
+
+    monkeypatch.setattr(hrrr, "fields", fields)
+    monkeypatch.setattr(nbm, "latest_run", lambda net, now, cycles: None)
+
+
+def test_render_writes_index_and_reuses_frames(tmp_path: Path, monkeypatch: Any) -> None:
     now = 1_800_000_000
     net = FakeNet(now)
+    fake_hrrr(monkeypatch, now)
     region = Region(
         *[precip.merc_x(-125), precip.merc_y(42)], precip.merc_x(-115), precip.merc_y(50), 120, 100
     )
@@ -191,23 +180,30 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path) -> None:
     assert len(past) == 3 and index["now"] == now
     assert {f["kind"] for f in past} == {"radar"} and past[0]["src"]["north"] == "rainviewer"
     assert len(future) == 12 and {f["kind"] for f in future} == {"forecast"}
-    assert {f["south"] for f in future} >= {"hrrr", "wpc"}  # HRRR to 6 h, WPC after
-    assert {f["src"]["south"] for f in future} >= {"hrrr-iem", "wpc"}
+    assert {f["south"] for f in future} == {"hrrr", ""}  # HRRR to 6 h, nothing after…
+    assert {f["src"]["south"] for f in future} == {"hrrr", "rdps"}  # …so RDPS fills in
+    assert future[0]["src"] == {"north": "hrdps", "south": "hrrr"}
     assert index["version"] == 2 and "Radar: RainViewer" in index["attribution"]
     for f in frames:
         assert (out / f["file"]).exists()
     on_disk = json.loads((out / "index.json").read_text())
     assert on_disk["bounds"] == region.bounds
 
-    # A forecast frame: snow from HRDPS on top, HRRR rain below, cut out under the domain.
+    # A forecast frame: HRDPS's snow well inside its domain, HRRR's rain well outside it,
+    # and the same amount (0.6 mm/h) all the way across the join.
     first = np.asarray(Image.open(out / future[0]["file"]).convert("RGBA"))
     assert tuple(first[10, 10][:3]) == snow[1]
     assert tuple(first[90, 10][:3]) == rain[1]
+    column = [tuple(px[:3]) for px in first[:, 10]]
+    assert set(column) == {snow[1], rain[1]} and first[:, 10, 3].min() == 255
+    # Beyond HRRR's reach, RDPS (dry here) fills in outside HRDPS's domain.
+    late = np.asarray(Image.open(out / future[-1]["file"]).convert("RGBA"))
+    assert tuple(late[10, 10][:3]) == snow[1] and late[90, 10, 3] == 0
 
-    # Nothing changed: nothing redrawn.
-    before = net.images
+    # Nothing changed: nothing fetched or redrawn.
+    before = (net.images, net.grids)
     again = Renderer(out, net, now=lambda: now).run(region)
-    assert net.images == before
+    assert (net.images, net.grids) == before
     assert [f["file"] for f in again["frames"]] == [f["file"] for f in frames]
 
 
@@ -281,7 +277,12 @@ def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
                 )
                 return type("R", (), {"text": text})()
             if "GetCoverage" in url:
-                t = precip.iso_ts(url.split("TIME=")[1].replace("%3A", ":"))
+                import urllib.parse
+
+                q = urllib.parse.parse_qs(url.split("?", 1)[1])
+                if not q["coverageId"][0].endswith("_SN"):
+                    return None  # no temperatures: 10:1
+                t = precip.iso_ts(q["TIME"][0])
                 # 1 mm water an hour since the run began, over the whole box.
                 grid = np.full((40, 60), float((t - (now - 6 * 3600)) / 3600), np.float32)
                 body = float_tiff(grid, -126.0, 51.0, 0.25)
@@ -289,12 +290,13 @@ def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
             return None
 
     net = TotalsNet()
-    g = wcs_grid(net, "X", precip.ts_iso(now), region)
+    g = wcs_grid(net, "HRDPS.CONTINENTAL_SN", precip.ts_iso(now), region)
     assert g is not None and g.dlon == 0.25 and g.lon0 == -126.0 and g.data.shape == (40, 60)
 
     r = Renderer(tmp_path, net, now=lambda: now + 600)
     totals = r._snow_totals(region, now + 600)
     assert [t.hours for t in totals] == [12, 24, 30]  # the run ends 30 h out
+    assert [t.window for t in totals] == [12, 24, 48]
     assert all(t.start == now for t in totals)
     img = np.asarray(Image.open(tmp_path / totals[1].file).convert("RGBA"))
     # 24 mm of water ≈ 24 cm of snow: the 22.86 cm step.

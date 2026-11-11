@@ -26,7 +26,6 @@ from snowwatch.maps.palette import (
     RGB,
     SNOW,
     TOTAL,
-    UNTYPED,
     encode,
     hex_rgb,
     over,
@@ -49,14 +48,12 @@ from snowwatch.maps.region import (
 from snowwatch.maps.render import (
     DOMAIN_LAYER,
     HOUR,
-    HRDPS_LAYERS,
     SN_TOTAL_LAYER,
     TOTAL_HOURS,
     FrameOut,
     Renderer,
     TotalOut,
 )
-from snowwatch.maps.sources.iem import IEM, hrrr_recolor, hrrr_slots
 from snowwatch.maps.sources.rainviewer import (
     RAINVIEWER_INDEX,
     RadarFrame,
@@ -65,14 +62,11 @@ from snowwatch.maps.sources.rainviewer import (
     rain_rate,
     snow_rate,
 )
-from snowwatch.maps.sources.wpc import WPC, Wpc, wpc_draw, wpc_info, wpc_layer, wpc_ts
 
 __all__ = [
     "DOMAIN_LAYER",
     "GEOMET",
     "HOUR",
-    "HRDPS_LAYERS",
-    "IEM",
     "MIX",
     "PALETTE",
     "RAIN",
@@ -83,10 +77,8 @@ __all__ = [
     "TILE_ZOOM",
     "TOTAL",
     "TOTAL_HOURS",
-    "UNTYPED",
     "WIDTH",
     "WORLD",
-    "WPC",
     "FrameOut",
     "Grid",
     "Net",
@@ -94,13 +86,10 @@ __all__ = [
     "Region",
     "Renderer",
     "TotalOut",
-    "Wpc",
     "capabilities_dims",
     "encode",
     "geomet_map",
     "hex_rgb",
-    "hrrr_recolor",
-    "hrrr_slots",
     "iso_ts",
     "merc_lat",
     "merc_x",
@@ -121,8 +110,4 @@ __all__ = [
     "stitch",
     "ts_iso",
     "wcs_grid",
-    "wpc_draw",
-    "wpc_info",
-    "wpc_layer",
-    "wpc_ts",
 ]

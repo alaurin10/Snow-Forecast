@@ -21,19 +21,13 @@
 		{
 			name: 'National Weather Service (NOAA)',
 			href: 'https://www.weather.gov/',
-			what: 'Watches and warnings, forecast offices; HRRR and WPC precipitation on the map',
+			what: 'Watches and warnings, forecast offices; HRRR and National Blend of Models forecasts on the map (NOAA Open Data Dissemination)',
 			terms: 'US public domain'
-		},
-		{
-			name: 'Iowa Environmental Mesonet, Iowa State University',
-			href: 'https://mesonet.agron.iastate.edu/',
-			what: 'HRRR forecast tiles for the map',
-			terms: 'Free use with credit'
 		},
 		{
 			name: 'Environment and Climate Change Canada',
 			href: 'https://eccc-msc.github.io/open-data/',
-			what: 'Radar, the radar nowcast, HRDPS precipitation and snow totals on the map',
+			what: 'Radar, the radar nowcast, HRDPS, RDPS and GDPS forecasts and snow totals on the map',
 			terms: 'Open Government Licence – Canada'
 		},
 		{

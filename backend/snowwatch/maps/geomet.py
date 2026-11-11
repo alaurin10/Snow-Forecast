@@ -6,22 +6,26 @@ send, and answers WCS with the raw numbers. Free, no key, Open Government Licenc
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import io
 import logging
-import math
+import os
 import re
 import time
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
 import numpy as np
 from PIL import Image, TiffImagePlugin
 
-from snowwatch.maps.region import WORLD, Region
+from snowwatch.maps.files import write_atomic
+from snowwatch.maps.region import Region
 
 log = logging.getLogger("snowwatch.precip")
 
@@ -199,27 +203,60 @@ class Grid:
     dlat: float
 
 
-def wcs_grid(net: Net, layer: str, time_: str, region: Region, margin: float = 0.5) -> Grid | None:
-    """GeoMet WCS: the raw numbers (not a picture) over the region, as a float grid."""
+def wcs_grid(
+    net: Net,
+    layer: str,
+    time_: str,
+    region: Region,
+    margin: float = 0.5,
+    ref: str | None = None,
+    cache_dir: Path | None = None,
+) -> Grid | None:
+    """GeoMet WCS: the raw numbers (not a picture) over the region, as a float grid.
+
+    `ref` pins the model run (an ISO time); without it GeoMet answers from its newest.
+    With `cache_dir` and a pinned run, the answer is kept on disk: a run's numbers never
+    change, and the same grid is wanted again when another input of a frame changes.
+    GeoMet deflates the GeoTIFF on request (a quarter of the size, same values)."""
     (south, west), (north, east) = region.bounds
-    q = urllib.parse.urlencode(
-        [
-            ("service", "WCS"),
-            ("version", "2.0.1"),
-            ("request", "GetCoverage"),
-            ("coverageId", layer),
-            ("format", "image/tiff"),
-            ("subsettingCrs", "EPSG:4326"),
-            ("subset", f"lat({south - margin},{north + margin})"),
-            ("subset", f"long({west - margin},{east + margin})"),
-            ("TIME", time_),
-        ]
-    )
+    params = [
+        ("service", "WCS"),
+        ("version", "2.0.1"),
+        ("request", "GetCoverage"),
+        ("coverageId", layer),
+        ("format", "image/tiff"),
+        ("geotiff:compression", "Deflate"),
+        ("subsettingCrs", "EPSG:4326"),
+        ("subset", f"lat({south - margin},{north + margin})"),
+        ("subset", f"long({west - margin},{east + margin})"),
+        ("TIME", time_),
+    ]
+    if ref:
+        params.append(("DIM_REFERENCE_TIME", ref))
+    q = urllib.parse.urlencode(params)
+    path = None
+    if cache_dir is not None and ref:
+        path = cache_dir / f"{hashlib.sha1(q.encode()).hexdigest()[:20]}.tif"
+        try:
+            grid = _read_grid(path.read_bytes())
+        except OSError:
+            grid = None
+        if grid is not None:
+            with contextlib.suppress(OSError):
+                os.utime(path)  # still in use: pruning goes by last use
+            return grid
     r = net.get(f"{GEOMET}?{q}")
     if r is None or "tiff" not in r.headers.get("content-type", ""):
         return None
+    grid = _read_grid(r.content)
+    if grid is not None and path is not None:
+        write_atomic(path, r.content)
+    return grid
+
+
+def _read_grid(body: bytes) -> Grid | None:
     try:
-        im = Image.open(io.BytesIO(r.content))
+        im = Image.open(io.BytesIO(body))
         if not isinstance(im, TiffImagePlugin.TiffImageFile):
             return None
         data = np.asarray(im, dtype=np.float32)
@@ -230,20 +267,51 @@ def wcs_grid(net: Net, layer: str, time_: str, region: Region, margin: float = 0
     return Grid(data, float(tie[3]), float(tie[4]), float(scale[0]), float(scale[1]))
 
 
-def on_region(grid: Grid, region: Region) -> np.ndarray:
-    """Sample a lat/lon grid onto the region's Web Mercator pixels (NaN where it has none)."""
-    xs = region.x0 + (np.arange(region.width) + 0.5) * (region.x1 - region.x0) / region.width
-    ys = region.y1 - (np.arange(region.height) + 0.5) * (region.y1 - region.y0) / region.height
-    lons = xs * 180 / WORLD
-    lats = np.degrees(2 * np.arctan(np.exp(ys * math.pi / WORLD)) - math.pi / 2)
-    ci = np.floor((lons - grid.lon0) / grid.dlon).astype(int)
-    ri = np.floor((grid.lat0 - lats) / grid.dlat).astype(int)
+def prune_wcs_cache(cache_dir: Path, max_age_s: float = 86400) -> int:
+    """Drop cached grids not used for `max_age_s` (their runs have been replaced)."""
+    cutoff = time.time() - max_age_s
+    removed = 0
+    for p in cache_dir.glob("*.tif"):
+        with contextlib.suppress(OSError):
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+    return removed
+
+
+def on_region(
+    grid: Grid,
+    region: Region,
+    valid: tuple[float, float] = (0, 5000),
+    smooth: bool = False,
+) -> np.ndarray:
+    """Sample a lat/lon grid onto the region's Web Mercator pixels (NaN where it has none).
+
+    Values outside `valid` are the model's "no data" outside its domain. `smooth`
+    interpolates between the four nearest cells instead of taking the nearest one, so a
+    coarse model (10–15 km cells against 1.5 km pixels) doesn't come out as blocks."""
+    lons, lats = region.lonlats()
     h, w = grid.data.shape
+    fx = (lons - grid.lon0) / grid.dlon
+    fy = (grid.lat0 - lats) / grid.dlat
+    cv = (fx >= 0) & (fx < w)
+    rv = (fy >= 0) & (fy < h)
     out = np.full((region.height, region.width), np.nan, np.float32)
-    cv = (ci >= 0) & (ci < w)
-    rv = (ri >= 0) & (ri < h)
-    sub = grid.data[np.ix_(ri[rv], ci[cv])]
-    out[np.ix_(rv, cv)] = sub
-    # Values far out of range are the model's "no data" outside its domain.
-    out[(out < 0) | (out > 5000)] = np.nan
+    data = grid.data
+    if not smooth:
+        ci, ri = np.floor(fx[cv]).astype(int), np.floor(fy[rv]).astype(int)
+        out[np.ix_(rv, cv)] = data[np.ix_(ri, ci)]
+        out[(out < valid[0]) | (out > valid[1])] = np.nan
+        return out
+    data = np.where((data < valid[0]) | (data > valid[1]), np.nan, data).astype(np.float32)
+    # Cell centres sit half a cell in from the grid's edge; clamp there.
+    x = np.clip(fx[cv] - 0.5, 0, w - 1)
+    y = np.clip(fy[rv] - 0.5, 0, h - 1)
+    c0, r0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    c1, r1 = np.minimum(c0 + 1, w - 1), np.minimum(r0 + 1, h - 1)
+    tx = (x - c0).astype(np.float32)[None, :]
+    ty = (y - r0).astype(np.float32)[:, None]
+    top = data[np.ix_(r0, c0)] * (1 - tx) + data[np.ix_(r0, c1)] * tx
+    bottom = data[np.ix_(r1, c0)] * (1 - tx) + data[np.ix_(r1, c1)] * tx
+    out[np.ix_(rv, cv)] = top * (1 - ty) + bottom * ty
     return out

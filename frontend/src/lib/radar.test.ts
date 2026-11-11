@@ -6,8 +6,9 @@ import {
 	RAMPS,
 	rampTop,
 	toTimeline,
-	untypedColor,
-	untypedTop,
+	totalLabel,
+	totalName,
+	totalSources,
 	type Frame,
 	type PrecipIndex
 } from './radar';
@@ -19,7 +20,13 @@ const f = (t: number, past: boolean, south: Frame['south'] = ''): Frame => ({
 	south,
 	kind: past ? 'radar' : 'forecast',
 	span_h: past ? 0 : 1,
-	src: past ? { north: 'radar-eccc', south: 'radar-eccc' } : { north: 'hrdps', south: 'hrrr-iem' }
+	src: past ? { north: 'radar-eccc', south: 'radar-eccc' } : { north: 'hrdps', south: south }
+});
+/** A 3- or 6-hour frame beyond two days. */
+const ext = (t: number, span: number, north = 'gdps', south = 'nbm'): Frame => ({
+	...f(t, false, south),
+	span_h: span,
+	src: { north, south }
 });
 const nc = (t: number): Frame => ({
 	t,
@@ -57,6 +64,22 @@ describe('toTimeline', () => {
 		expect(tl.nowcastEnd).toBe(3);
 		expect(tl.width).toBe(1700);
 		expect(tl.attribution).toHaveLength(1);
+		expect(tl.extendedFrom).toBe(-1);
+	});
+	it('finds where the 3- and 6-hour frames start', () => {
+		const tl = toTimeline({ ...ix, frames: [...ix.frames, ext(99 * 3600, 6), ext(80 * 3600, 3)] });
+		expect(tl.frames.map((x) => x.span_h).slice(-3)).toEqual([1, 3, 6]);
+		expect(tl.extendedFrom).toBe(5);
+	});
+	it('reads totals with and without a window', () => {
+		const tl = toTimeline({
+			...ix,
+			totals: [
+				{ hours: 236, window: 240, start: 0, end: 1, file: 't236.png' },
+				{ hours: 12, start: 0, end: 1, file: 't12.png' }
+			]
+		});
+		expect(tl.totals.map((t) => t.window)).toEqual([12, 240]);
 	});
 	it('has no "now" without radar', () => {
 		const tl = toTimeline({ ...ix, frames: [f(3600, false)] });
@@ -106,6 +129,12 @@ describe('frameLabel', () => {
 		const noon = new Date(2026, 10, 7, 12).getTime() / 1000;
 		expect(frameLabel(f(noon, false), 0).when).toBe('Sat 11 AM–12 PM');
 	});
+	it('labels a 6-hour frame as an average, days ahead', () => {
+		const end = new Date(2026, 10, 13, 10).getTime() / 1000; // Fri 10 AM local
+		const lab = frameLabel(ext(end, 6), (end - 6 * 3600 - 72 * 3600) * 1000);
+		expect(lab.when).toBe('Fri 4–10 AM');
+		expect(lab.rel).toBe('6-hour average · in 3 days');
+	});
 });
 
 describe('frameSource', () => {
@@ -113,8 +142,20 @@ describe('frameSource', () => {
 		expect(frameSource(f(1, true))).toMatch(/Environment Canada/);
 		expect(frameSource({ ...f(1, true), src: { north: 'rainviewer' } })).toMatch(/RainViewer/);
 		expect(frameSource(nc(1))).toMatch(/^Nowcast/);
-		expect(frameSource(f(1, false))).toMatch(/HRRR/);
-		expect(frameSource(f(1, false, 'wpc'))).toMatch(/no type/);
+		expect(frameSource(f(1, false, 'hrrr'))).toMatch(
+			/HRDPS model where it reaches .*, NOAA HRRR beyond, blended where they meet/
+		);
+		expect(frameSource(f(1, false, 'nbm'))).toMatch(/National Blend/);
+		expect(frameSource(f(1, false, ''))).toBe('Forecast: Canadian HRDPS model where it reaches.');
+		expect(
+			frameSource({ ...f(1, false, 'hrrr'), src: { north: 'hrdps', south: 'hrrr', fill: 'rdps' } })
+		).toMatch(/NOAA HRRR and Canadian RDPS beyond/);
+		expect(frameSource(ext(1, 6))).toMatch(
+			/6-hour average: Canadian GDPS model in Canada, .* in the US, blended across the border/
+		);
+		expect(frameSource(ext(1, 3, 'rdps', 'rdps'))).toBe(
+			'Forecast, 3-hour average: Canadian RDPS model.'
+		);
 	});
 });
 
@@ -124,13 +165,25 @@ describe('legend', () => {
 		expect(rampTop(RAMPS.snow, 'imperial')).toBe('1.2+ in/h');
 		expect(rampTop(RAMPS.rain, 'metric')).toBe('10+ mm/h');
 		expect(rampTop(RAMPS.rain, 'imperial')).toBe('0.4+ in/h');
-		expect(untypedTop('imperial')).toBe('1+ in / 6 h');
-		expect(untypedTop('metric')).toBe('25.4+ mm / 6 h');
 	});
-	it('shades 6-hour totals by amount', () => {
-		expect(untypedColor(0.05)).toBeNull();
-		expect(untypedColor(0.1)).toBe('#e6d3b3');
-		expect(untypedColor(3)).toBe('#8f612c');
+});
+
+describe('snow totals', () => {
+	it('names each window', () => {
+		expect(totalLabel({ window: 12 })).toBe('12 h');
+		expect(totalLabel({ window: 48 })).toBe('48 h');
+		expect(totalLabel({ window: 72 })).toBe('3 days');
+		expect(totalLabel({ window: 240 })).toBe('10 days');
+		expect(totalName({ window: 24 })).toBe('Next 24 hours');
+		expect(totalName({ window: 168 })).toBe('Next 7 days');
+	});
+	it('names the models and their runs', () => {
+		const run = new Date(2026, 10, 10, 4).getTime() / 1000; // Tue 4 AM local
+		const t = { hours: 24, window: 24, start: 0, end: 1, file: 'x' };
+		expect(totalSources({ ...t, runs: { hrdps: run, rdps: run, nbm: run } })).toBe(
+			'Canada: HRDPS (Tue 4 AM), RDPS (Tue 4 AM). US: NOAA National Blend (Tue 4 AM).'
+		);
+		expect(totalSources({ ...t, source: 'hrdps' })).toBe('Canada: HRDPS.');
 	});
 });
 

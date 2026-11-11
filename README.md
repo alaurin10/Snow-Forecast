@@ -131,7 +131,7 @@ Run from `backend/` with `uv run snowwatch …`, or on a server with
 Snow Watch's code is under the [MIT licence](LICENSE). The data it shows comes from
 Open-Meteo (CC BY 4.0), NOAA/NWS, NRCS SNOTEL, the BC River Forecast Centre (Open
 Government Licence – British Columbia), Environment and Climate Change Canada (Open
-Government Licence – Canada), Iowa State's Mesonet, RainViewer, avalanche.org,
+Government Licence – Canada), RainViewer, avalanche.org,
 Avalanche Canada, OpenStreetMap contributors and OpenSkiMap (ODbL), OpenTopoMap
 (CC-BY-SA), Esri, and Mapzen terrain tiles on AWS. Each keeps its own terms; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Some, such as Open-Meteo's free

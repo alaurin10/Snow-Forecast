@@ -20,8 +20,8 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 | Piece | What it does |
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache |
-| `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames every 30 min, snow totals hourly), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `tiles/`, `osm/` |
+| `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
+| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/` |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
 Python 3.12 slim stage runs it, as uid 1000, read-only, with no capabilities).
@@ -39,7 +39,9 @@ backend/snowwatch/
   store/      db.py migrations/*.sql repo.py backup.py retention.py
   maps/       the map's weather pictures: region.py (the box) geomet.py (Environment
               Canada's WMS/WCS) grib.py (NOAA GRIB2 by byte range) palette.py
-              render.py (frames, index, pruning) sources/ (radar_eccc, rainviewer, …)
+              blend.py (joins sources as numbers, with no visible seams)
+              render.py (frames, index, pruning) totals.py (snow totals to 10 days)
+              sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
   avalanche.py precip.py (re-exports maps/) tiles.py osm.py lookups.py push.py verify.py
 frontend/src/
