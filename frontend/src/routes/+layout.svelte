@@ -20,6 +20,7 @@
 	import { session } from '../lib/session.svelte';
 	import { appUpdate } from '../lib/update.svelte';
 	import { viewport } from '../lib/viewport.svelte';
+	import { railUi } from '../lib/railui.svelte';
 	import { sections, SECTION_NAMES } from '../lib/sections.svelte';
 	import { skyState } from '../lib/skystate.svelte';
 	import { skyOf } from '../lib/sky';
@@ -109,6 +110,9 @@
 		{ href: '/settings', label: 'Settings', icon: ICONS.settings }
 	] as const;
 	const railNav = [tabs[0], tabs[2], tabs[1], tabs[3]];
+	/** Desktop map page: the map fills the window and the rail floats over it, foldable. */
+	const overMap = $derived(viewport.desktop && page.route.id === '/map');
+	const folded = $derived(overMap && railUi.folded);
 	const active = (href: string) =>
 		href === '/' ? path === '/' || path.startsWith('/location') : path.startsWith(href);
 	const staleHours = $derived(
@@ -159,19 +163,48 @@
 
 <Sky />
 
-<div class="app" class:withrail={viewport.desktop}>
-	{#if viewport.desktop}
-		<aside class="rail glass" aria-label="Navigation">
-			<a class="brand" href={resolve('/')}>
-				<span class="mark" aria-hidden="true">
-					<svg viewBox="0 0 24 24" width="18" height="18"
-						><path
-							d="M12 2v20M4.9 6.5l14.2 11M19.1 6.5L4.9 17.5M9.5 3.5L12 6l2.5-2.5M9.5 20.5L12 18l2.5 2.5"
-						/></svg
+<div class="app" class:withrail={viewport.desktop} class:overmap={overMap}>
+	{#if folded}
+		<button
+			class="railfold glass"
+			onclick={() => railUi.setFolded(false)}
+			aria-expanded="false"
+			aria-controls="rail"
+			aria-label="Show navigation"
+			title="Show navigation and locations"
+		>
+			<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
+				><path d="M4 6h16M4 12h16M4 18h16" /></svg
+			>
+		</button>
+	{:else if viewport.desktop}
+		<aside class="rail glass" id="rail" aria-label="Navigation">
+			<div class="brandrow">
+				<a class="brand" href={resolve('/')}>
+					<span class="mark" aria-hidden="true">
+						<svg viewBox="0 0 24 24" width="18" height="18"
+							><path
+								d="M12 2v20M4.9 6.5l14.2 11M19.1 6.5L4.9 17.5M9.5 3.5L12 6l2.5-2.5M9.5 20.5L12 18l2.5 2.5"
+							/></svg
+						>
+					</span>
+					Snow Watch
+				</a>
+				{#if overMap}
+					<button
+						class="fold"
+						onclick={() => railUi.setFolded(true)}
+						aria-expanded="true"
+						aria-controls="rail"
+						aria-label="Hide navigation"
+						title="Hide navigation: more room for the map"
 					>
-				</span>
-				Snow Watch
-			</a>
+						<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+							><path d="M15 6l-6 6 6 6" /></svg
+						>
+					</button>
+				{/if}
+			</div>
 			<nav class="railnav" aria-label="Main">
 				{#each railNav as t (t.href)}
 					<a
@@ -318,6 +351,83 @@
 		flex-direction: column;
 		gap: 4px;
 		scrollbar-width: thin;
+	}
+	.brandrow {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 6px;
+	}
+	.fold {
+		width: 32px;
+		height: 32px;
+		margin: 2px 2px 0 0;
+		display: grid;
+		place-items: center;
+		border: 0;
+		border-radius: 11px;
+		background: transparent;
+		color: var(--text-2);
+		cursor: pointer;
+	}
+	.fold:hover {
+		background: var(--hover);
+		color: var(--text);
+	}
+	.fold svg,
+	.railfold svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	/* The desktop map page: the map takes the whole window (see MapView) and the rail
+	   floats over its left side, or folds to this button. */
+	.app.withrail.overmap {
+		display: block;
+		max-width: none;
+		padding: 0;
+	}
+	.overmap .rail {
+		position: fixed;
+		top: 14px;
+		left: 14px;
+		z-index: 20;
+		width: 248px;
+		box-shadow: var(--glass-shadow);
+		/* Denser than over the sky: a busy map shows through otherwise. */
+		background: color-mix(in srgb, var(--surface) 90%, transparent);
+	}
+	.overmap .col {
+		max-width: none;
+	}
+	.railfold {
+		position: fixed;
+		top: 14px;
+		left: 14px;
+		z-index: 20;
+		width: 44px;
+		height: 44px;
+		display: grid;
+		place-items: center;
+		border-radius: 14px;
+		color: var(--text);
+		cursor: pointer;
+		background: color-mix(in srgb, var(--surface) 90%, transparent);
+	}
+	.railfold:hover {
+		background-color: var(--hover);
+	}
+	/* Notices float over the map, centred in the space beside the rail. */
+	.overmap .banner {
+		position: fixed;
+		top: 14px;
+		left: calc(272px + (100vw - 272px) / 2);
+		transform: translateX(-50%);
+		z-index: 25;
+		width: auto;
+		max-width: min(560px, calc(100vw - 300px));
 	}
 	.brand {
 		display: flex;

@@ -61,7 +61,7 @@
 	.sheet {
 		position: absolute;
 		top: 56px;
-		left: 60px;
+		left: calc(var(--map-inset, 0px) + 60px);
 		right: 10px;
 		max-width: 340px;
 		z-index: 1003;
