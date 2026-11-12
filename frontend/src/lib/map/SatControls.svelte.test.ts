@@ -32,7 +32,7 @@ describe('SatControls', () => {
 	it('says when a location has no clear view, or none is near', () => {
 		render(SatControls, { ...props, spot: data.locations![2] });
 		expect(
-			screen.getByText(/No clear Sentinel-2 view of Sunshine in the last 30 days/)
+			screen.getByText(/No clear Sentinel-2 view of Sunshine in the last 60 days/)
 		).toBeTruthy();
 		cleanup();
 		render(SatControls, { ...props, spot: null, zoom: 7 });

@@ -8,7 +8,6 @@ import {
 	nearestSpot,
 	recentSpec,
 	satViews,
-	sceneDay,
 	sceneLabel,
 	stitchedSpan
 } from './sat';
@@ -34,7 +33,6 @@ describe('picking and labelling scenes', () => {
 		const s = scene({ time: new Date(2026, 10, 4, 12).toISOString() });
 		expect(sceneLabel(s, now)).toBe('Sentinel-2C · 4 Nov · 6 days ago · 92% clear');
 		expect(dayLabel('2026-11-10')).toBe('10 Nov');
-		expect(sceneDay(scene())).toBe('2026-11-04');
 	});
 });
 
@@ -47,65 +45,56 @@ describe('the stitched view', () => {
 		expect(stitchedSpan(composite)).toBe('21 Oct – 4 Nov');
 	});
 
-	it('stacks the passes oldest first, cloud cut out, older ones only over their part', () => {
-		const spec = recentSpec(data, { kind: 'stitched', composite }, 'natural');
-		expect(spec.hls).toBeNull();
-		expect(spec.s2.map((s) => s.id)).toEqual([
-			's2c-natural-S2B_MSIL2A_20261021T191429_R056_T10TFT_20261021T211203',
-			// The older pass's other tile lies entirely outside the part it fills: no layer.
-			's2c-natural-S2A_MSIL2A_20261104T190821_R013_T10TFT_20261104T221403'
-		]);
-		expect(spec.s2[0].tiles[0]).toBe(
-			'/api/tiles/s2c/natural/S2B_MSIL2A_20261021T191429_R056_T10TFT_20261021T211203/{z}/{x}/{y}.webp?r=3'
-		);
-		// The older one is clipped to its part; the newest reaches as far as its tile.
-		expect(spec.s2[0].bounds).toEqual([-121.45, 47.3, -121.3, 47.5]);
-		expect(spec.s2[1].bounds).toEqual([-122.3, 46.9, -120.9, 47.9]);
-	});
-
-	it('marks where the passes meet, with their dates', () => {
+	it('draws a line where two passes meet, and dates each part, the newest marked', () => {
 		const fc = datesGeojson(composite);
+		expect(fc.features.map((f) => f.properties)).toEqual([
+			{ kind: 'line' },
+			{ kind: 'part', label: '4 Nov', newest: true },
+			{ kind: 'part', label: '21 Oct', newest: false }
+		]);
 		expect(fc.features[0].geometry).toEqual({
 			type: 'MultiLineString',
-			coordinates: composite.boundaries
+			coordinates: composite.lines
 		});
-		expect(fc.features.slice(1).map((f) => f.properties?.label)).toEqual(['4 Nov', '21 Oct']);
-		expect(recentSpec(data, { kind: 'stitched', composite }, 'natural').dates).toEqual(fc);
+		expect(fc.features[1].geometry).toEqual({
+			type: 'MultiPolygon',
+			coordinates: composite.parts[0].polygons
+		});
 	});
 });
 
 describe('what the base draws', () => {
-	it('has daily VIIRS, HLS from the same pass and every Sentinel-2 tile of it', () => {
-		const spec = recentSpec(data, { kind: 'scene', scene: scene() }, 'natural');
+	const snoq = data.locations!.find((l) => l.id === 'snoqualmie')!;
+
+	it('one layer of finished tiles for the view, over the area, and the daily mosaic', () => {
+		const spec = recentSpec(data, snoq, { kind: 'stitched', composite }, 'natural');
 		expect(spec.viirs?.tiles[0]).toBe(
 			'/api/tiles/gibs/VIIRS_NOAA20_CorrectedReflectance_TrueColor/2026-11-10/{z}/{x}/{y}'
 		);
-		expect(spec.hls?.tiles[0]).toContain('/HLS_S30_Nadir_BRDF_Adjusted_Reflectance/2026-11-04/');
-		expect(spec.s2.map((s) => s.tiles[0])).toEqual([
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UEA_20261104T221403/{z}/{x}/{y}.webp?r=3',
-			'/api/tiles/s2/natural/S2C_MSIL2A_20261104T182601_R127_T10UDA_20261104T221403/{z}/{x}/{y}.webp?r=3'
-		]);
-		expect(spec.s2[0].bounds).toEqual([-123, 49.5, -121.5, 50.5]);
-		expect(spec.s2[0].tileSize).toBe(512);
-		expect(spec.s2[0].attribution).toContain('Copernicus Sentinel');
+		expect(spec.view).toMatchObject({
+			id: 'view-fedcba9876543210-natural',
+			tiles: ['/api/sat/tiles/fedcba9876543210/natural/{z}/{x}/{y}.webp'],
+			tileSize: 512,
+			minzoom: 9,
+			maxzoom: 13,
+			bounds: snoq.box
+		});
+		expect(spec.view?.attribution).toContain('Copernicus Sentinel');
+		expect(spec.dates).toEqual(datesGeojson(composite));
 	});
 
-	it('swaps to the snow-vs-cloud bands, without HLS (GIBS has no such view of it)', () => {
-		const spec = recentSpec(data, { kind: 'scene', scene: scene() }, 'snow');
+	it('a whole scene has no outlines, and the snow bands swap both layers', () => {
+		const spec = recentSpec(data, snoq, { kind: 'scene', scene: snoq.scenes![0] }, 'snow');
+		expect(spec.view?.tiles[0]).toBe('/api/sat/tiles/cccccccccccccccc/snow/{z}/{x}/{y}.webp');
 		expect(spec.viirs?.tiles[0]).toContain('BandsM11-I2-I1');
-		expect(spec.hls).toBeNull();
-		expect(spec.s2[0].tiles[0]).toContain('/api/tiles/s2/snow/');
+		expect(spec.dates).toBeNull();
 	});
 
-	it('draws only the daily mosaic with no scene, and nothing without the index', () => {
-		expect(recentSpec(data, null, 'natural')).toMatchObject({ hls: null, s2: [] });
-		expect(
-			recentSpec(data, { kind: 'scene', scene: scene({ hls: false }) }, 'natural').hls
-		).toBeNull();
-		expect(recentSpec(null, null, 'natural')).toEqual({
+	it('only the daily mosaic with no view, and nothing without the index', () => {
+		expect(recentSpec(data, null, null, 'natural')).toMatchObject({ view: null, dates: null });
+		expect(recentSpec(null, null, null, 'natural')).toEqual({
 			viirs: null,
-			hls: null,
-			s2: [],
+			view: null,
 			dates: null
 		});
 	});

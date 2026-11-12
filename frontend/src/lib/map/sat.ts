@@ -1,36 +1,30 @@
-// Recent satellite base map (docs/MAP-PLAN.md, B6). Three tiers, finest on top:
-// NASA GIBS's daily VIIRS mosaic everywhere (375 m, the newest day with imagery), HLS at
-// 30 m from the same Sentinel-2 pass as the scene shown, and that scene itself at 10 m.
-// Sentinel-2 is picked by the server per location. The default view is stitched: each
-// part of the ~24 km round the location from the newest pass that saw the ground there,
-// cloud cut out by the tile proxy, older passes underneath, with dashed lines and dates
-// where one meets another. The viewer can also step through whole clear scenes.
+// Recent satellite base map (docs/MAP-PLAN.md, B6). NASA GIBS's daily VIIRS mosaic
+// (375 m, the newest day with imagery) everywhere, and over the 24 km round the location
+// nearest the middle of the map one Sentinel-2 view at 10 m, drawn and cut into tiles by
+// the server (backend/snowwatch/maps/satrender.py), so the map loads one layer of
+// finished tiles. The first view is stitched: each part from the newest pass that saw
+// the ground there, outlined and dated on the map. The others are whole clear scenes.
 import type { SatComposite, SatLocation, SatOut, SatScene } from '../types.gen';
 import type { SatBands } from '../prefs.svelte';
 import { distanceKm } from './windsource';
 
-/** A location's scene is shown while the map's middle is this close to it. */
+/** A location's views are shown while the map's middle is this close to it. */
 export const SAT_RANGE_KM = 60;
-/** VIIRS tiles stop at zoom 9, HLS at 12; Sentinel-2 is fetched to 14 (512 px tiles). */
+/** VIIRS tiles stop at zoom 9; the views' tiles are cut for zooms 9 to 13. */
 export const VIIRS_MAX_ZOOM = 9;
-export const HLS_MIN_ZOOM = 8;
-export const HLS_MAX_ZOOM = 12;
-export const S2_MIN_ZOOM = 10;
-export const S2_MAX_ZOOM = 14;
-/** Keep in step with S2_RENDER in backend/snowwatch/tiles.py: a new value refetches tiles. */
-export const S2_RENDER = 3;
+export const S2_MIN_ZOOM = 9;
+export const S2_MAX_ZOOM = 13;
 
 export const VIIRS_LAYERS: Record<SatBands, string> = {
 	natural: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
 	// Shortwave infrared, near infrared, red: the same idea as Sentinel-2's snow view.
 	snow: 'VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1'
 };
-export const HLS_LAYER = 'HLS_S30_Nadir_BRDF_Adjusted_Reflectance';
 
 export const SAT_ATTRIBUTION =
 	'Contains modified <a href="https://dataspace.copernicus.eu/">Copernicus Sentinel</a> data, via <a href="https://planetarycomputer.microsoft.com/">Microsoft Planetary Computer</a>';
 export const GIBS_ATTRIBUTION =
-	'Imagery: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> (VIIRS, HLS)';
+	'Imagery: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> (VIIRS)';
 
 export function nearestSpot(
 	data: SatOut | null,
@@ -83,10 +77,7 @@ export function sceneLabel(scene: SatScene, now: number): string {
 	].join(' · ');
 }
 
-/** The UTC day of a scene, which is the day GIBS files its HLS under. */
-export const sceneDay = (scene: SatScene) => scene.time.slice(0, 10);
-
-/** What the Sentinel-2 tier shows: the stitched newest-clear view, or one whole scene. */
+/** What the Sentinel-2 layer shows: the stitched newest-clear view, or one whole scene. */
 export type SatView =
 	{ kind: 'stitched'; composite: SatComposite } | { kind: 'scene'; scene: SatScene };
 
@@ -95,7 +86,7 @@ export function satViews(spot: SatLocation | null): SatView[] {
 	if (!spot) return [];
 	const out: SatView[] = [];
 	if (spot.composite?.layers.length) out.push({ kind: 'stitched', composite: spot.composite });
-	for (const scene of spot.scenes) out.push({ kind: 'scene', scene });
+	for (const scene of spot.scenes ?? []) out.push({ kind: 'scene', scene });
 	return out;
 }
 
@@ -107,35 +98,26 @@ export function stitchedSpan(c: SatComposite): string {
 	return a === b ? a : `${a} – ${b}`;
 }
 
-function overlap(
-	a: [number, number, number, number],
-	b: [number, number, number, number]
-): [number, number, number, number] | null {
-	const w = Math.max(a[0], b[0]);
-	const s = Math.max(a[1], b[1]);
-	const e = Math.min(a[2], b[2]);
-	const n = Math.min(a[3], b[3]);
-	return w < e && s < n ? [w, s, e, n] : null;
-}
-
-/** Dashed lines where one pass's part meets another's, and each part's date. */
+/** A stitched view's dashed lines where two passes' parts meet, and each part as a
+ * dated area (the map writes its date wherever the part is on screen). */
 export function datesGeojson(c: SatComposite): GeoJSON.FeatureCollection {
+	const newest = c.layers[0]?.time;
 	return {
 		type: 'FeatureCollection',
 		features: [
-			...(c.boundaries.length
+			...((c.lines ?? []).length
 				? [
 						{
 							type: 'Feature' as const,
 							properties: { kind: 'line' },
-							geometry: { type: 'MultiLineString' as const, coordinates: c.boundaries }
+							geometry: { type: 'MultiLineString' as const, coordinates: c.lines ?? [] }
 						}
 					]
 				: []),
-			...c.labels.map((l) => ({
+			...c.parts.map((p) => ({
 				type: 'Feature' as const,
-				properties: { kind: 'date', label: shortDate(l.time) },
-				geometry: { type: 'Point' as const, coordinates: [l.lon, l.lat] }
+				properties: { kind: 'part', label: shortDate(p.time), newest: p.time === newest },
+				geometry: { type: 'MultiPolygon' as const, coordinates: p.polygons }
 			}))
 		]
 	};
@@ -151,19 +133,23 @@ export interface RecentSource {
 	attribution: string;
 }
 
-/** What the Recent satellite base draws, bottom to top. */
+/** What the Recent satellite base draws. */
 export interface RecentSpec {
 	viirs: RecentSource | null;
-	hls: RecentSource | null;
-	/** Bottom to top. */
-	s2: RecentSource[];
-	/** The stitched view's dividing lines and dates. */
+	/** The Sentinel-2 view over the location's area. */
+	view: RecentSource | null;
+	/** The stitched view's parts, outlined and dated. */
 	dates: GeoJSON.FeatureCollection | null;
 }
 
 const gibs = (layer: string, day: string) => [`/api/tiles/gibs/${layer}/${day}/{z}/{x}/{y}`];
 
-export function recentSpec(data: SatOut | null, view: SatView | null, bands: SatBands): RecentSpec {
+export function recentSpec(
+	data: SatOut | null,
+	spot: SatLocation | null,
+	view: SatView | null,
+	bands: SatBands
+): RecentSpec {
 	const viirs: RecentSource | null = data?.viirs_date
 		? {
 				id: `viirs-${bands}-${data.viirs_date}`,
@@ -174,51 +160,23 @@ export function recentSpec(data: SatOut | null, view: SatView | null, bands: Sat
 				attribution: GIBS_ATTRIBUTION
 			}
 		: null;
-	if (view?.kind === 'stitched') {
-		const layers = view.composite.layers;
-		// Oldest at the bottom. The newest pass is drawn wherever it reaches, beyond the
-		// worked-out area too; older ones only over the part they fill, which saves tiles.
-		const s2 = [...layers].reverse().flatMap((layer) =>
-			layer.items.flatMap((it) => {
-				const bounds = layer === layers[0] ? it.bbox : overlap(it.bbox, layer.bbox);
-				return bounds
-					? [
-							{
-								id: `s2c-${bands}-${it.id}`,
-								tiles: [`/api/tiles/s2c/${bands}/${it.id}/{z}/{x}/{y}.webp?r=${S2_RENDER}`],
-								tileSize: 512,
-								minzoom: S2_MIN_ZOOM - 1,
-								maxzoom: S2_MAX_ZOOM,
-								bounds,
-								attribution: SAT_ATTRIBUTION
-							}
-						]
-					: [];
-			})
-		);
-		return { viirs, hls: null, s2, dates: datesGeojson(view.composite) };
-	}
-	const scene = view?.kind === 'scene' ? view.scene : null;
-	// GIBS has no snow-vs-cloud view of HLS: in that view the daily VIIRS one shows instead.
-	const hls: RecentSource | null =
-		scene?.hls && bands === 'natural'
+	const name = view?.kind === 'stitched' ? view.composite.view : view?.scene.view;
+	const [minzoom, maxzoom] = data?.zooms ?? [S2_MIN_ZOOM, S2_MAX_ZOOM];
+	const s2: RecentSource | null =
+		name && spot?.box
 			? {
-					id: `hls-${sceneDay(scene)}`,
-					tiles: gibs(HLS_LAYER, sceneDay(scene)),
-					tileSize: 256,
-					minzoom: HLS_MIN_ZOOM,
-					maxzoom: HLS_MAX_ZOOM,
-					attribution: GIBS_ATTRIBUTION
+					id: `view-${name}-${bands}`,
+					tiles: [`/api/sat/tiles/${name}/${bands}/{z}/{x}/{y}.webp`],
+					tileSize: 512,
+					minzoom,
+					maxzoom,
+					bounds: spot.box,
+					attribution: SAT_ATTRIBUTION
 				}
 			: null;
-	const s2 = (scene?.items ?? []).map((it) => ({
-		id: `s2-${bands}-${it.id}`,
-		tiles: [`/api/tiles/s2/${bands}/${it.id}/{z}/{x}/{y}.webp?r=${S2_RENDER}`],
-		tileSize: 512,
-		minzoom: S2_MIN_ZOOM - 1,
-		maxzoom: S2_MAX_ZOOM,
-		bounds: it.bbox,
-		attribution: SAT_ATTRIBUTION
-	}));
-	return { viirs, hls, s2, dates: null };
+	return {
+		viirs,
+		view: s2,
+		dates: view?.kind === 'stitched' ? datesGeojson(view.composite) : null
+	};
 }

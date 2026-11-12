@@ -1,23 +1,26 @@
 """Recent satellite imagery for the map (docs/MAP-PLAN.md, B6).
 
-Every six hours the worker looks, for each location, for the newest Sentinel-2 views
-(Microsoft Planetary Computer) that actually see the ground there. A scene's own cloud
-percentage covers a 110 km tile and says little about one valley (a "0 % cloud" scene
-had no data at all at a test location), so each candidate is judged by its scene
-classification layer (SCL) over a small square round the location: at least
-`min_clear` of the pixels with data must be free of cloud and cloud shadow, and at most
-`max_nodata` may have no data. The newest `keep` that pass go into
-`data/sat/index.json`, which the API serves at /api/sat and which also lists the only
-Sentinel-2 items the tile proxy will fetch (see snowwatch/tiles.py).
+Every six hours the worker looks at the Sentinel-2 passes (Microsoft Planetary
+Computer) over the 24 x 24 km round each location and makes two kinds of view, drawn
+and cut into map tiles by `satrender`:
 
-A Sentinel-2 pass is cut into 110 km MGRS tiles, each its own STAC item; a "scene" here
-is one pass (a datatake): every item of it that covers the square. Its SCL crops are
-merged, so a location on a tile edge still counts as covered.
+- **Stitched** (shown first): the newest clear view. Every pass of the last `days` is
+  read once as a 96 x 96 grid of 250 m cells (no data, clear, cloud or its shadow,
+  snow) from its scene classification (SCL). `stitch` gives each cell to the newest
+  pass that saw it clearly, ignoring scraps (see its notes); the newest whole scene
+  fills what is left. The parts' outlines and dates go in the index for the map.
+- **Scenes**: the newest whole passes of the last `scene_days` that cover the whole
+  area (at most `max_nodata` without data) and see most of it (`min_clear` free of
+  cloud). Coherent pictures, with no joins in the area.
 
-The index also names the newest day of NASA GIBS's daily VIIRS mosaic that has imagery
-over the map (today's is black until the afternoon pass is processed) and the newest
-day of HLS (30 m Sentinel-2, about six days behind). Judged scenes are remembered in
-`data/sat/checked.json`, so each refresh only reads the SCL of new passes.
+A scene's own cloud percentage covers a 110 km tile and says little about one valley,
+hence the grids. A pass is cut into 110 km MGRS tiles, each its own STAC item; a "pass"
+here is the datatake, with every item of it over the area, merged.
+
+The index (`data/sat/index.json`, served at /api/sat) also names the newest day of
+NASA GIBS's daily VIIRS mosaic with imagery here (today's is black until the afternoon
+pass is processed), drawn under everything. Judged passes are remembered in
+`data/sat/checked.json` and `grids/`, so each refresh only reads new passes.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from snowwatch.maps import satrender
 from snowwatch.models import Location
 
 log = logging.getLogger("snowwatch.sat")
@@ -50,18 +54,15 @@ COLLECTION = "sentinel-2-l2a"
 GIBS = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best"
 VIIRS = "VIIRS_NOAA20_CorrectedReflectance_TrueColor"
 VIIRS_SNOW = "VIIRS_NOAA20_CorrectedReflectance_BandsM11-I2-I1"
-HLS = "HLS_S30_Nadir_BRDF_Adjusted_Reflectance"
 
-# The square judged round each location for whole scenes: 8 x 8 km.
-CROP_KM = 4.0
-# The area stitched round each location from the newest clear pixels: 24 x 24 km at
-# 96 x 96 cells (250 m each). One SCL crop per tile serves both: the 8 km square is
-# its middle 32 x 32 cells.
+# The area round each location: 24 x 24 km on the ground, as a 96 x 96 grid of 250 m
+# cells, in Web Mercator like the map and the pictures. INNER is its middle 8 km.
 AREA_KM = 12.0
 AREA_PX = 96
 INNER = slice(AREA_PX // 2 - 16, AREA_PX // 2 + 16)
-# Cells of a pass's grid: no data, clear ground, cloud or cloud shadow, clear snow.
-G_NODATA, G_CLEAR, G_CLOUD, G_SNOW = 0, 1, 2, 3
+# Cells of a pass's grid: no data, clear ground, cloud or cloud shadow, clear snow, and
+# thin haze (see HAZE_BLUE): not clear, but without cloud's margin.
+G_NODATA, G_CLEAR, G_CLOUD, G_SNOW, G_HAZE = 0, 1, 2, 3, 4
 # Stitching. A pass's clear cells lose a cell's margin next to its cloud (SCL misses
 # thin cloud edges), and specks under MIN_PIECE cells are dropped (cloud-edge errors
 # more often than ground). A pass is a layer only if what it adds is at least MIN_SHARE
@@ -72,81 +73,104 @@ MIN_PIECE = 12
 MIN_SHARE = 0.02
 MIN_INNER = 0.05
 FULL_SHARE = 0.98
-MAX_LAYERS = 8
-# A date label for a part at least this share of the area (at most two per pass).
-LABEL_SHARE = 0.02
+MAX_LAYERS = 6
+# A mostly cloudy pass's "clear" gaps are often haze the mask missed: a pass must see at
+# least this share of the area it covers clearly to be used at all.
+MIN_PASS_CLEAR = 0.15
+# Then the parts are made compact: each cell goes to the commonest pass among the
+# REGION_R cells round it that saw it clearly (ties to the newer), REGION_PASSES times,
+# and pieces under MIN_REGION of the area join a neighbouring pass that saw them.
+REGION_R = 2
+REGION_PASSES = 3
+MIN_REGION = 0.015
+# A part is dated on the map if it is at least this share of the area.
+PART_SHARE = 0.01
 # SCL classes: 0 no data, 3 cloud shadow, 8 and 9 cloud, 10 thin cirrus, 11 snow.
 NO_DATA = 0
 CLOUDY = (3, 8, 9, 10)
 SNOW = 11
-# New passes judged per location per refresh (each is one to four small requests);
+# SCL misses some bright cloud (on 4 Nov 2026 a long band over Snoqualmie was "clear").
+# Cloud is bright in blue and in shortwave infrared; snow is bright in blue only, bare
+# rock not that bright in blue. So B02 over 0.30 and B11 over 0.25 also count as cloud
+# (L2A values: reflectance x 10,000 + 1,000). On a snowy limestone scene at Sunshine it
+# flagged an extra 0.5% of the area, in specks.
+BRIGHT_BLUE = 4000
+BRIGHT_SWIR = 3500
+# Thin haze SCL calls clear (Revelstoke, 30 Oct 2026: a grey veil over the valley)
+# lifts blue reflectance above what the same ground shows on its clearest day. A clear
+# cell is haze if its blue is HAZE_BLUE (0.08) above the lowest blue any pass of the
+# window saw there, it isn't snow (NDSI under HAZE_NDSI), and its shortwave infrared
+# hasn't dropped by HAZE_SWIR_DROP from that clearest day's (snow absorbs SWIR, so
+# partial new snow, which also lifts blue, lowers it; haze doesn't). Needs two passes
+# that saw the cell. On the six seed areas it flagged 1-5% of crisp passes.
+HAZE_BLUE = 800
+HAZE_NDSI = 0.4
+HAZE_SWIR_DROP = 200
+OFFSET = 1000  # L2A values are reflectance x 10,000 plus this
+# New passes judged per location per refresh (each is one or two small requests);
 # the rest wait for the next refresh.
-MAX_CHECKS = 24
-# How long a judged pass is remembered (longer than the search window).
-CHECKED_DAYS = 45
+MAX_CHECKS = 40
+# How much longer than the scene window a judged pass is remembered.
+CHECKED_EXTRA_DAYS = 15
 
 ITEM_ID = re.compile(r"S2[A-D]_MSIL2A_\d{8}T\d{6}_R\d{3}_T\d{2}[A-Z]{3}_\d{8}T\d{6}")
 ATTRIBUTION = [
     "Contains modified Copernicus Sentinel data",
     "Microsoft Planetary Computer",
-    "NASA GIBS (VIIRS, HLS)",
+    "NASA GIBS (VIIRS)",
 ]
 
 Quad = Annotated[list[float], Field(min_length=4, max_length=4)]
+Pair = Annotated[list[float], Field(min_length=2, max_length=2)]
+Box = tuple[float, float, float, float]  # Web Mercator x0, y0, x1, y1
 
 
 class SatItem(BaseModel):
-    """One Sentinel-2 tile of a pass: its id for the tile proxy and its outline."""
+    """One Sentinel-2 tile of a pass."""
 
     id: str
     bbox: Quad  # west, south, east, north
 
 
 class SatScene(BaseModel):
-    """One Sentinel-2 pass that sees the ground at a location."""
+    """One pass that covers the whole area and sees most of it: a coherent picture."""
 
     id: str  # the pass (datatake), e.g. S2C_MSIL2A_20261110T182601_R127
     time: datetime
     platform: str  # Sentinel-2A, -2B or -2C
-    clear_pct: int  # of the square round the location with data: no cloud or shadow
-    snow_pct: int  # of the same: snow
-    nodata_pct: int  # of the whole square
-    items: list[SatItem]
-    # GIBS has HLS (30 m, from this same pass) for its date: wider than the items.
-    hls: bool = False
-
-
-Pair = Annotated[list[float], Field(min_length=2, max_length=2)]
+    clear_pct: int  # of the area: no cloud or shadow
+    snow_pct: int  # of the area seen clearly: snow
+    nodata_pct: int  # of the area: outside the pass
+    view: str  # its tiles: /api/sat/tiles/<view>/<mode>/<z>/<x>/<y>.webp
 
 
 class SatLayer(BaseModel):
-    """One pass in a stitched view: its clear pixels, over every older layer."""
+    """One pass in a stitched view."""
 
     id: str
     time: datetime
     platform: str
-    share_pct: int  # of the stitched area this pass supplies
-    items: list[SatItem]
-    bbox: Quad  # west, south, east, north of the part it supplies (with a margin)
+    share_pct: int  # of the area this pass supplies
 
 
-class SatLabel(BaseModel):
-    lon: float
-    lat: float
+class SatPart(BaseModel):
+    """Where one pass supplies a stitched view, for the map's outlines and dates."""
+
     time: datetime
+    share_pct: int
+    polygons: list[list[list[Pair]]]  # polygons, each its outer ring then holes; lon/lat
 
 
 class SatComposite(BaseModel):
-    """The newest clear view round a location, stitched from passes: each cell from the
-    newest pass that saw the ground there, cloud cut out (see `stitch`)."""
+    """The newest clear view of the area, stitched from passes (see `stitch`)."""
 
-    layers: list[SatLayer]  # newest first; the map draws them oldest at the bottom
+    view: str  # its tiles, as for a scene
+    layers: list[SatLayer]  # newest first
+    parts: list[SatPart]
+    lines: list[list[Pair]] = []  # where two passes' parts meet, lon/lat
     filled_pct: int  # of the area some pass saw clearly
     at_location: datetime | None  # when the cell under the location was seen
     latest_pass: datetime | None  # the newest pass looked at, clear or not
-    box: Quad  # the area worked out: west, south, east, north
-    boundaries: list[list[Pair]]  # where one pass's part meets another's, lon/lat lines
-    labels: list[SatLabel]  # where to write each part's date
 
 
 class SatLocation(BaseModel):
@@ -154,23 +178,58 @@ class SatLocation(BaseModel):
     name: str
     lat: float
     lon: float
-    scenes: list[SatScene]  # newest first
+    box: Quad | None = None  # west, south, east, north of the drawn area
+    scenes: list[SatScene] = []  # newest first
     composite: SatComposite | None = None
     checked_at: datetime | None = None
     error: str | None = None
 
 
 class SatOut(BaseModel):
-    """The map's recent satellite imagery: daily VIIRS, and clear Sentinel-2 scenes per
-    location (newest first)."""
+    """The map's recent satellite imagery: daily VIIRS everywhere, and per location a
+    stitched newest-clear view and the newest whole clear scenes."""
 
     generated_at: datetime | None = None
     viirs_date: str | None = None  # the newest day of daily VIIRS with imagery here
-    hls_date: str | None = None  # the newest day of HLS on GIBS
-    days: int = 30  # how far back scenes are looked for
-    min_clear_pct: int = 70
+    days: int = 30  # how far back stitched views look
+    scene_days: int = 60  # how far back whole scenes are looked for
+    min_clear_pct: int = 85  # a whole scene sees at least this much of the area
+    zooms: list[int] = [9, 13]  # of the views' tiles
     locations: list[SatLocation] = []
     attribution: list[str] = ATTRIBUTION
+
+
+# --- the area ----------------------------------------------------------------------
+
+R_EARTH = 6378137.0
+
+
+def merc(lat: float, lon: float) -> tuple[float, float]:
+    return (
+        math.radians(lon) * R_EARTH,
+        math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * R_EARTH,
+    )
+
+
+def unmerc(x: float, y: float) -> tuple[float, float]:
+    """Latitude and longitude of a Web Mercator point."""
+    return (
+        math.degrees(2 * math.atan(math.exp(y / R_EARTH)) - math.pi / 2),
+        math.degrees(x / R_EARTH),
+    )
+
+
+def area_box(lat: float, lon: float, km: float = AREA_KM) -> Box:
+    """The square of +-`km` on the ground round a point, in Web Mercator metres."""
+    x, y = merc(lat, lon)
+    h = km * 1000 / math.cos(math.radians(lat))
+    return (round(x - h, 2), round(y - h, 2), round(x + h, 2), round(y + h, 2))
+
+
+def box_lonlat(box: Box) -> list[float]:
+    s, w = unmerc(box[0], box[1])
+    n, e = unmerc(box[2], box[3])
+    return [round(w, 6), round(s, 6), round(e, 6), round(n, 6)]
 
 
 # --- judging a pass ---------------------------------------------------------------
@@ -178,65 +237,82 @@ class SatOut(BaseModel):
 
 @dataclass(frozen=True)
 class Look:
-    clear: float  # share of pixels with data that are free of cloud and shadow
-    nodata: float  # share of all pixels without data
-    snow: float  # share of pixels with data that are snow
+    clear: float  # share of cells with data that are free of cloud and shadow
+    nodata: float  # share of all cells without data
+    snow: float  # share of cells with data that are snow
 
 
-def merge_crops(crops: Iterable[np.ndarray]) -> np.ndarray:
-    """One SCL square from several tiles' crops: each pixel from the first that has data.
-
-    A crop is Planetary Computer's `.npy` answer: (2, h, w), the SCL class then a mask
-    (0 where the tile has no data)."""
-    out: np.ndarray | None = None
-    for a in crops:
-        scl = np.where(a[1] > 0, a[0], NO_DATA).astype(np.uint8)
-        out = scl if out is None else np.where(out == NO_DATA, scl, out)
-    if out is None:
-        raise ValueError("no crops")
-    return out
-
-
-def classify(scl: np.ndarray) -> np.ndarray:
-    """SCL classes to grid cells: no data, clear, cloud (or its shadow), snow."""
+def classify(
+    scl: np.ndarray, blue: np.ndarray | None = None, swir: np.ndarray | None = None
+) -> np.ndarray:
+    """Grid cells from SCL classes (and, given, blue and shortwave infrared, for the
+    bright cloud SCL misses): no data, clear, cloud (or its shadow), snow."""
     g = np.full(scl.shape, G_CLEAR, np.uint8)
-    g[np.isin(scl, CLOUDY)] = G_CLOUD
     g[scl == SNOW] = G_SNOW
+    cloud = np.isin(scl, CLOUDY)
+    if blue is not None and swir is not None:
+        cloud |= (blue > BRIGHT_BLUE) & (swir > BRIGHT_SWIR)
+    g[cloud] = G_CLOUD
     g[scl == NO_DATA] = G_NODATA
     return g
 
 
+def merge_grids(grids: Iterable[np.ndarray]) -> np.ndarray:
+    """One grid from several tiles' grids of a pass: each cell from the first with data.
+    A grid is cells (2-D) or cells then band values (3-D, cells first)."""
+    out: np.ndarray | None = None
+    for g in grids:
+        if out is None:
+            out = g.copy()
+        else:
+            gap = (out[0] if out.ndim == 3 else out) == G_NODATA
+            out = np.where(gap, g, out)
+    if out is None:
+        raise ValueError("no grids")
+    return out
+
+
+def dehaze(stack: Sequence[np.ndarray]) -> list[np.ndarray]:
+    """Cells of each pass (from its grid with band values, see `item_grid`), with the
+    thin haze SCL called clear marked as haze (see HAZE_BLUE)."""
+    if not stack:
+        return []
+    cells = [g[0].copy() for g in stack]
+    blue = np.stack(
+        [np.where(c == G_CLEAR, g[1], np.inf) for c, g in zip(cells, stack, strict=True)]
+    )
+    lowest = blue.min(axis=0)
+    clearest = blue.argmin(axis=0)
+    swir_then = np.take_along_axis(
+        np.stack([g[3] for g in stack]).astype(np.float32), clearest[None], axis=0
+    )[0]
+    seen = np.isfinite(blue).sum(axis=0) >= 2
+    for c, g in zip(cells, stack, strict=True):
+        green = g[2].astype(np.float32) - OFFSET
+        swir = g[3].astype(np.float32) - OFFSET
+        ndsi = (green - swir) / np.maximum(green + swir, 1)
+        haze = (
+            (c == G_CLEAR)
+            & seen
+            & (g[1] > lowest + HAZE_BLUE)
+            & (ndsi < HAZE_NDSI)
+            & (g[3] >= swir_then - HAZE_SWIR_DROP)
+        )
+        c[haze] = G_HAZE
+    return cells
+
+
 def judge_grid(g: np.ndarray) -> Look:
-    """A Look from grid cells (the same rule as `judge`)."""
+    """How much of a grid (or part of one) a pass saw, and saw clearly."""
     valid = g != G_NODATA
     n = int(valid.sum())
     if n == 0:
         return Look(clear=0.0, nodata=1.0, snow=0.0)
     return Look(
-        clear=1 - int((g == G_CLOUD).sum()) / n,
+        clear=1 - int(((g == G_CLOUD) | (g == G_HAZE)).sum()) / n,
         nodata=1 - n / g.size,
         snow=int((g == G_SNOW).sum()) / n,
     )
-
-
-def judge(scl: np.ndarray) -> Look:
-    valid = scl != NO_DATA
-    n = int(valid.sum())
-    if n == 0:
-        return Look(clear=0.0, nodata=1.0, snow=0.0)
-    cloudy = int(np.isin(scl, CLOUDY).sum())
-    return Look(
-        clear=1 - cloudy / n,
-        nodata=1 - n / scl.size,
-        snow=int((scl == SNOW).sum()) / n,
-    )
-
-
-def crop_box(lat: float, lon: float, km: float = CROP_KM) -> tuple[float, float, float, float]:
-    """West, south, east, north of the square round a point."""
-    dlat = km / 111.32
-    dlon = km / (111.32 * max(0.1, math.cos(math.radians(lat))))
-    return (round(lon - dlon, 5), round(lat - dlat, 5), round(lon + dlon, 5), round(lat + dlat, 5))
 
 
 # --- passes -----------------------------------------------------------------------
@@ -289,15 +365,13 @@ def _platform(item_id: str) -> str:
     return f"Sentinel-2{item_id[2]}"
 
 
-def search(
-    client: httpx.Client, lat: float, lon: float, start: datetime, end: datetime
-) -> list[Pass]:
-    w, s, e, n = crop_box(lat, lon)
+def search(client: httpx.Client, box: Box, start: datetime, end: datetime) -> list[Pass]:
+    w, s, e, n = box_lonlat(box)
     body = {
         "collections": [COLLECTION],
         "bbox": [w, s, e, n],
         "datetime": f"{start:%Y-%m-%dT%H:%M:%SZ}/{end:%Y-%m-%dT%H:%M:%SZ}",
-        "limit": 200,
+        "limit": 300,
         "sortby": [{"field": "datetime", "direction": "desc"}],
         "fields": {
             "include": ["id", "bbox", "properties.datetime", "properties.platform"],
@@ -309,107 +383,184 @@ def search(
     return group_passes(r.json().get("features") or [])
 
 
-def scl_crop(client: httpx.Client, item: str, lat: float, lon: float) -> np.ndarray | None:
-    """The SCL of the area round a point from one item (row 0 north, equal steps of
-    longitude and latitude), or None where the item doesn't reach."""
-    w, s, e, n = crop_box(lat, lon, AREA_KM)
-    url = f"{PC_DATA}/item/bbox/{w},{s},{e},{n}/{AREA_PX}x{AREA_PX}.npy"
-    r = client.get(
-        url, params={"collection": COLLECTION, "item": item, "assets": "SCL"}, timeout=40
-    )
+def item_grid(client: httpx.Client, item: str, box: Box) -> np.ndarray | None:
+    """One item's grid of the area, row 0 north, in Web Mercator: its cells (from SCL,
+    blue and shortwave infrared) then its blue, green and SWIR values, as a (4, n, n)
+    array; None where the item doesn't reach."""
+    x0, y0, x1, y1 = box
+    url = f"{PC_DATA}/item/bbox/{x0:.2f},{y0:.2f},{x1:.2f},{y1:.2f}/{AREA_PX}x{AREA_PX}.npy"
+    params = {
+        "collection": COLLECTION,
+        "item": item,
+        "assets": ["SCL", "B02", "B03", "B11"],
+        "coord_crs": "epsg:3857",
+        "dst_crs": "epsg:3857",
+    }
+    r = client.get(url, params=params, timeout=40)
     if r.status_code == 404:
         return None
     r.raise_for_status()
     a: np.ndarray = np.load(io.BytesIO(r.content), allow_pickle=False)
-    if a.ndim != 3 or a.shape[0] != 2:
-        raise ValueError(f"unexpected SCL crop shape {a.shape}")
-    return a
+    if a.shape != (5, AREA_PX, AREA_PX):
+        raise ValueError(f"unexpected grid shape {a.shape}")
+    scl = np.where(a[4] > 0, a[0], NO_DATA)  # the last band is the mask
+    cells = classify(scl, a[1], a[3]).astype(np.uint16)
+    return np.stack([cells, a[1], a[2], a[3]]).astype(np.uint16)
 
 
-def read_pass(client: httpx.Client, p: Pass, lat: float, lon: float) -> np.ndarray:
-    """A pass's grid over the area round a point, reading as few of its tiles as it
-    takes to cover it."""
-    crops: list[np.ndarray] = []
+def read_pass(client: httpx.Client, p: Pass, box: Box) -> np.ndarray:
+    """A pass's grid over the area, reading as few of its tiles as it takes."""
+    grids: list[np.ndarray] = []
     for it in p.items:
-        a = scl_crop(client, it.id, lat, lon)
-        if a is None:
+        g = item_grid(client, it.id, box)
+        if g is None:
             continue
-        crops.append(a)
-        if not (merge_crops(crops) == NO_DATA).any():
+        grids.append(g)
+        if not (merge_grids(grids)[0] == G_NODATA).any():
             break
-    if not crops:
-        return np.zeros((AREA_PX, AREA_PX), np.uint8)
-    return classify(merge_crops(crops))
+    if not grids:
+        return np.zeros((4, AREA_PX, AREA_PX), np.uint16)
+    return merge_grids(grids)
 
 
 # --- stitching --------------------------------------------------------------------
 
 
+@dataclass
+class Plan:
+    """Which pass supplies each cell of a stitched view (-1: none)."""
+
+    layers: list[Pass]
+    owner: np.ndarray
+    latest: datetime | None = None
+
+    def filled(self) -> float:
+        return float((self.owner >= 0).mean())
+
+
 def stitch(
     grids: Sequence[tuple[Pass, np.ndarray]],
-    box: tuple[float, float, float, float],
+    fallback: Sequence[tuple[Pass, np.ndarray]] = (),
     latest: datetime | None = None,
-) -> SatComposite:
-    """The newest clear view of an area from passes' grids (given newest first).
+) -> Plan:
+    """The newest clear view of the area from passes' grids (given newest first).
 
     Newest first, each pass takes the cells it saw clearly (ground or snow) that no
-    newer pass did. A pass adding less than MIN_SHARE of the area is left out; it stops
-    once FULL_SHARE is filled or at MAX_LAYERS. So a sliver of new clear ground (a pass
-    whose swath ends a few km away, or a gap in today's cloud) is shown, with older
-    clear passes around it, rather than the whole view waiting for a pass that is clear
-    everywhere."""
+    newer pass did, less those touching its cloud and without specks. A pass adding
+    less than MIN_SHARE of the area (or MIN_INNER near the location) is left out; it
+    stops once FULL_SHARE is filled or at MAX_LAYERS. So a sliver of new clear ground
+    (a pass whose swath ends a few km away, or a gap in today's cloud) is shown, with
+    older clear passes round it, rather than the whole view waiting for a pass that is
+    clear everywhere. `fallback` (the newest whole scene, if it is older than `grids`
+    reach) then fills what is left, so the view has few holes."""
     owner = np.full((AREA_PX, AREA_PX), -1, np.int16)
-    layers: list[tuple[Pass, np.ndarray]] = []
-    for p, g in grids:
-        new = drop_specks(clear_cells(g) & (owner < 0), MIN_PIECE)
+    layers: list[Pass] = []
+    oks: list[np.ndarray] = []
+    seen_ids: set[str] = set()
+    for p, g in [*grids, *fallback]:
+        if p.id in seen_ids:
+            continue
+        seen_ids.add(p.id)
+        if judge_grid(g).clear < MIN_PASS_CLEAR:
+            continue
+        ok = clear_cells(g)
+        new = drop_specks(ok & (owner < 0), MIN_PIECE)
         if new.mean() < MIN_SHARE and new[INNER, INNER].mean() < MIN_INNER:
             continue
         owner[new] = len(layers)
-        layers.append((p, new))
+        layers.append(p)
+        oks.append(ok)
         if (owner >= 0).mean() >= FULL_SHARE or len(layers) >= MAX_LAYERS:
             break
-    w, s, e, n = box
-    dx, dy = (e - w) / AREA_PX, (n - s) / AREA_PX
+    owner = regionalize(owner, oks)
+    # Passes left with nothing after that are dropped, the rest renumbered.
+    used = [i for i in range(len(layers)) if (owner == i).any()]
+    remap = np.full(len(layers) + 1, -1, np.int16)
+    for new_i, old_i in enumerate(used):
+        remap[old_i] = new_i
+    owner = np.where(owner >= 0, remap[owner], -1).astype(np.int16)
+    return Plan([layers[i] for i in used], owner, latest)
 
-    def lon(c: float) -> float:
-        return round(w + c * dx, 5)
 
-    def lat(r: float) -> float:
-        return round(n - r * dy, 5)
+def box_count(m: np.ndarray, r: int) -> np.ndarray:
+    """How many True cells are in the (2r+1)-square round each cell."""
+    h, w = m.shape
+    a = np.pad(m.astype(np.int32), r)
+    cs = np.cumsum(np.pad(a, ((0, 0), (1, 0))), axis=1)
+    rows = cs[:, 2 * r + 1 :] - cs[:, :w]
+    cs = np.cumsum(np.pad(rows, ((1, 0), (0, 0))), axis=0)
+    out: np.ndarray = cs[2 * r + 1 :, :] - cs[:h, :]
+    return out
 
-    out_layers = []
-    for p, part in layers:
-        rows, cols = np.nonzero(part)
-        out_layers.append(
+
+def regionalize(owner: np.ndarray, oks: Sequence[np.ndarray]) -> np.ndarray:
+    """Make the parts compact (see REGION_R): fewer, rounder parts, a little less new."""
+    if not oks:
+        return owner
+    out = owner.copy()
+    for _ in range(REGION_PASSES):
+        counts = np.stack(
+            [np.where(ok, box_count(out == i, REGION_R), -1) for i, ok in enumerate(oks)]
+        )
+        best = counts.argmax(axis=0)  # ties to the lower index: the newer pass
+        top = counts.max(axis=0)
+        out = np.where(top > 0, best, out).astype(np.int16)
+    # Small pieces join the neighbouring pass they touch most that saw them.
+    for i in range(len(oks)):
+        for piece in pieces(out == i):
+            if len(piece) >= MIN_REGION * out.size:
+                continue
+            rows, cols = (np.array(v) for v in zip(*piece, strict=True))
+            mask = np.zeros_like(out, dtype=bool)
+            mask[rows, cols] = True
+            ring = grow(mask) & ~mask
+            near = out[ring]
+            near = near[(near >= 0) & (near != i)]
+            for j in np.bincount(near).argsort()[::-1] if near.size else []:
+                if np.bincount(near)[j] == 0:
+                    break
+                if oks[j][rows, cols].mean() >= 0.8:
+                    take = oks[j][rows, cols]
+                    out[rows[take], cols[take]] = j
+                    break
+    return out
+
+
+def composite_out(plan: Plan, view: str, box: Box) -> SatComposite:
+    """The index's description of a stitched view: its passes, and each part's outline
+    and date for the map."""
+    x0, _, x1, y1 = box
+    cell = (x1 - x0) / AREA_PX
+
+    def lonlat(pt: tuple[float, float]) -> list[float]:
+        lat, lon = unmerc(x0 + pt[0] * cell, y1 - pt[1] * cell)
+        return [round(lon, 5), round(lat, 5)]  # ~1 m
+
+    shown = outlined(plan.owner)
+    parts = []
+    layers = []
+    for i, p in enumerate(plan.layers):
+        share = float((plan.owner == i).mean())
+        layers.append(
             SatLayer(
-                id=p.id,
-                time=p.time,
-                platform=p.platform,
-                share_pct=max(1, round(part.mean() * 100)),
-                items=p.items,
-                # A cell's margin round the part, so its edge isn't cut short.
-                bbox=[
-                    lon(max(0, cols.min() - 1)),
-                    lat(min(AREA_PX, rows.max() + 2)),
-                    lon(min(AREA_PX, cols.max() + 2)),
-                    lat(max(0, rows.min() - 1)),
-                ],
+                id=p.id, time=p.time, platform=p.platform, share_pct=max(1, round(share * 100))
             )
         )
-    mid = owner[AREA_PX // 2, AREA_PX // 2]
-    labels = [
-        SatLabel(lon=lon(c + 0.5), lat=lat(r + 0.5), time=layers[i][0].time)
-        for i, (_, part) in enumerate(layers)
-        for r, c in label_points(part)
-    ]
+        if (shown == i).mean() < PART_SHARE:
+            continue
+        polys = [[[lonlat(pt) for pt in ring] for ring in poly] for poly in polygons(shown == i)]
+        if polys:
+            parts.append(SatPart(time=p.time, share_pct=max(1, round(share * 100)), polygons=polys))
+    mid = int(plan.owner[AREA_PX // 2, AREA_PX // 2])
+    lines = [[lonlat(pt) for pt in simplify_line(smooth_line(line))] for line in boundaries(shown)]
     return SatComposite(
-        layers=out_layers,
-        filled_pct=round((owner >= 0).mean() * 100),
-        at_location=layers[mid][0].time if mid >= 0 else None,
-        latest_pass=latest,
-        box=[w, s, e, n],
-        boundaries=[[[lon(c), lat(r)] for r, c in line] for line in boundaries(outlined(owner))],
-        labels=labels,
+        view=view,
+        layers=layers,
+        parts=parts,
+        lines=[ln for ln in lines if len(ln) >= 2],
+        filled_pct=round(plan.filled() * 100),
+        at_location=plan.layers[mid].time if mid >= 0 else None,
+        latest_pass=plan.latest,
     )
 
 
@@ -463,37 +614,36 @@ def drop_specks(m: np.ndarray, min_cells: int) -> np.ndarray:
 
 
 def outlined(owner: np.ndarray) -> np.ndarray:
-    """The owner grid as the dividing lines see it: pieces under half a label's size are
-    left out (as if unowned), so small patches don't each get a dashed box round them.
+    """The owner grid as the outlines see it: pieces under PART_SHARE of the area are
+    left out (as if unowned), so small patches don't each get a dashed box and a date.
     The imagery still shows them."""
     out = owner.copy()
     for i in range(int(owner.max()) + 1):
         for piece in pieces(owner == i):
-            if len(piece) < LABEL_SHARE * owner.size / 2:
+            if len(piece) < PART_SHARE * owner.size:
                 rows, cols = zip(*piece, strict=True)
                 out[list(rows), list(cols)] = -1
     return out
 
 
 def boundaries(owner: np.ndarray) -> list[list[tuple[int, int]]]:
-    """Lines (as (row, col) grid corners) along every cell edge between two different
-    passes' parts, chained into as few polylines as they make. Edges next to cells no
-    pass saw clearly aren't drawn: the coarse daily mosaic shows there already."""
+    """Lines (as (x, y) grid corners) along every cell edge between two different
+    passes' parts, chained into as few polylines as they make. Edges at the area's edge
+    or next to cells no pass saw aren't drawn."""
     segs: list[tuple[tuple[int, int], tuple[int, int]]] = []
     a, b = owner[:, :-1], owner[:, 1:]
     for r, c in zip(*np.nonzero((a != b) & (a >= 0) & (b >= 0)), strict=True):
-        segs.append(((int(r), int(c) + 1), (int(r) + 1, int(c) + 1)))
+        segs.append(((int(c) + 1, int(r)), (int(c) + 1, int(r) + 1)))
     a, b = owner[:-1, :], owner[1:, :]
     for r, c in zip(*np.nonzero((a != b) & (a >= 0) & (b >= 0)), strict=True):
-        segs.append(((int(r) + 1, int(c)), (int(r) + 1, int(c) + 1)))
+        segs.append(((int(c), int(r) + 1), (int(c) + 1, int(r) + 1)))
     return chain(segs)
 
 
 def chain(
     segs: list[tuple[tuple[int, int], tuple[int, int]]],
 ) -> list[list[tuple[int, int]]]:
-    """Join segments that share ends into polylines, dropping the middle point of each
-    straight run."""
+    """Join segments that share ends into polylines (closed ones end where they start)."""
     ends: dict[tuple[int, int], list[int]] = {}
     for i, (p, q) in enumerate(segs):
         ends.setdefault(p, []).append(i)
@@ -520,70 +670,186 @@ def chain(
         walk(line)
         line.reverse()
         walk(line)
-        straight = [line[0]]
-        for k in range(1, len(line) - 1):
-            (r0, c0), (r1, c1), (r2, c2) = straight[-1], line[k], line[k + 1]
-            if (r1 - r0) * (c2 - c1) != (c1 - c0) * (r2 - r1):
-                straight.append(line[k])
-        straight.append(line[-1])
-        out.append(straight)
+        out.append(line)
     return out
 
 
-def _runs(values: list[int]) -> list[tuple[int, int]]:
-    """Consecutive runs in a list of integers, as (first, last)."""
-    out: list[tuple[int, int]] = []
-    for v in sorted(values):
-        if out and v == out[-1][1] + 1:
-            out[-1] = (out[-1][0], v)
-        else:
-            out.append((v, v))
-    return out
+def smooth_line(line: Sequence[tuple[float, float]], times: int = 2) -> list[tuple[float, float]]:
+    """Round off a line's grid stairs as `smooth` does a ring; ends stay put, and a
+    closed line (ending where it starts) is smoothed as a ring."""
+    pts = [(float(x), float(y)) for x, y in line]
+    if len(pts) > 3 and pts[0] == pts[-1]:
+        ring = smooth(pts[:-1], times)
+        return [*ring, ring[0]]
+    for _ in range(times):
+        out = [pts[0]]
+        for i in range(len(pts) - 1):
+            (ax, ay), (bx, by) = pts[i], pts[i + 1]
+            out += [
+                (0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by),
+                (0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by),
+            ]
+        out.append(pts[-1])
+        pts = out
+    return pts
 
 
-def label_points(part: np.ndarray) -> list[tuple[int, int]]:
-    """Where to write a part's date: the deepest cell of each of its (at most two)
-    largest connected pieces of at least LABEL_SHARE of the area."""
-    big = [pc for pc in pieces(part) if len(pc) >= LABEL_SHARE * part.size]
-    out = []
-    for piece in sorted(big, key=len, reverse=True)[:2]:
-        cells = set(piece)
-        # Distance from the piece's edge, by rings inward; the last ring is the deepest.
-        ring = [
-            (r, c)
-            for r, c in piece
-            if any(n not in cells for n in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)))
-        ]
-        done = set(ring)
-        while True:
-            nxt = []
-            for r, c in ring:
-                for n in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
-                    if n in cells and n not in done:
-                        done.add(n)
-                        nxt.append(n)
+def simplify_line(
+    line: Sequence[tuple[float, float]], tol: float = 0.4
+) -> list[tuple[float, float]]:
+    pts = list(line)
+    return pts if len(pts) < 4 else _dp(pts, tol)
+
+
+def rings(mask: np.ndarray) -> list[list[tuple[int, int]]]:
+    """The boundary rings of a mask's cells, as grid corners (x = column, y = row).
+
+    Each region's outer ring and each hole's ring are closed lists of corners (first
+    not repeated). Outer rings have a positive signed area, holes a negative one. Where
+    two cells touch only at a corner they stay in separate rings."""
+    m = np.pad(mask, 1)
+    edges: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+    def add(a: tuple[int, int], b: tuple[int, int]) -> None:
+        edges.setdefault(a, []).append(b)
+
+    # Round each cell clockwise on screen (y down), only where the neighbour is outside.
+    for r, c in zip(*np.nonzero(mask), strict=True):
+        r, c = int(r), int(c)
+        if not m[r, c + 1]:  # above
+            add((c, r), (c + 1, r))
+        if not m[r + 1, c + 2]:  # right
+            add((c + 1, r), (c + 1, r + 1))
+        if not m[r + 2, c + 1]:  # below
+            add((c + 1, r + 1), (c, r + 1))
+        if not m[r + 1, c]:  # left
+            add((c, r + 1), (c, r))
+    out: list[list[tuple[int, int]]] = []
+    while edges:
+        start = next(iter(edges))
+        ring = [start]
+        prev = start
+        cur = edges[start].pop()
+        if not edges[start]:
+            del edges[start]
+        while cur != start:
+            ring.append(cur)
+            nxt = edges[cur]
+            if len(nxt) > 1:
+                # Two ways on (cells meeting at a corner): turn right, keeping the cell
+                # on the right, so the two cells' rings don't cross.
+                dx, dy = cur[0] - prev[0], cur[1] - prev[1]
+                right = (cur[0] - dy, cur[1] + dx)
+                pick = right if right in nxt else nxt[0]
+            else:
+                pick = nxt[0]
+            nxt.remove(pick)
             if not nxt:
-                break
-            ring = nxt
-        out.append(min(ring))
+                del edges[cur]
+            prev, cur = cur, pick
+        out.append(_straight(ring))
     return out
+
+
+def _straight(ring: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """A ring without the corners in the middle of straight runs."""
+    n = len(ring)
+    keep = []
+    for i in range(n):
+        a, b, c = ring[i - 1], ring[i], ring[(i + 1) % n]
+        if (b[0] - a[0]) * (c[1] - b[1]) != (b[1] - a[1]) * (c[0] - b[0]):
+            keep.append(b)
+    return keep
+
+
+def signed_area(ring: Sequence[tuple[float, float]]) -> float:
+    return 0.5 * sum(
+        ring[i][0] * ring[(i + 1) % len(ring)][1] - ring[(i + 1) % len(ring)][0] * ring[i][1]
+        for i in range(len(ring))
+    )
+
+
+def _inside(pt: tuple[float, float], ring: Sequence[tuple[float, float]]) -> bool:
+    x, y = pt
+    inside = False
+    for i in range(len(ring)):
+        (x1, y1), (x2, y2) = ring[i - 1], ring[i]
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
+def smooth(ring: Sequence[tuple[float, float]], times: int = 2) -> list[tuple[float, float]]:
+    """Round off a closed ring's grid stairs (Chaikin's corner cutting)."""
+    pts = [(float(x), float(y)) for x, y in ring]
+    for _ in range(times):
+        out = []
+        for i in range(len(pts)):
+            (ax, ay), (bx, by) = pts[i], pts[(i + 1) % len(pts)]
+            out += [
+                (0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by),
+                (0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by),
+            ]
+        pts = out
+    return pts
+
+
+def simplify(ring: Sequence[tuple[float, float]], tol: float = 0.4) -> list[tuple[float, float]]:
+    """A closed ring with fewer points, none moved more than `tol` (Douglas-Peucker)."""
+    pts = list(ring)
+    if len(pts) < 8:
+        return pts
+    # Split at the point farthest from the first, and simplify both halves as lines.
+    far = max(
+        range(len(pts)), key=lambda i: (pts[i][0] - pts[0][0]) ** 2 + (pts[i][1] - pts[0][1]) ** 2
+    )
+    a = _dp(pts[: far + 1], tol)
+    b = _dp([*pts[far:], pts[0]], tol)
+    return a[:-1] + b[:-1]
+
+
+def _dp(pts: list[tuple[float, float]], tol: float) -> list[tuple[float, float]]:
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        i, j = stack.pop()
+        (x1, y1), (x2, y2) = pts[i], pts[j]
+        dx, dy = x2 - x1, y2 - y1
+        norm = math.hypot(dx, dy) or 1.0
+        best, at = 0.0, -1
+        for k in range(i + 1, j):
+            d = abs(dy * (pts[k][0] - x1) - dx * (pts[k][1] - y1)) / norm
+            if d > best:
+                best, at = d, k
+        if best > tol and at > 0:
+            keep[at] = True
+            stack += [(i, at), (at, j)]
+    return [p for p, k in zip(pts, keep, strict=True) if k]
+
+
+def polygons(mask: np.ndarray, min_hole: int = MIN_PIECE) -> list[list[list[tuple[float, float]]]]:
+    """A mask's regions as polygons (outer ring, then its holes), smoothed, in grid
+    corner coordinates. Holes smaller than `min_hole` cells are dropped."""
+    outer: list[tuple[list[tuple[int, int]], float]] = []
+    holes: list[tuple[list[tuple[int, int]], float]] = []
+    for ring in rings(mask):
+        a = signed_area(ring)
+        (outer if a > 0 else holes).append((ring, abs(a)))
+    polys: list[list[list[tuple[float, float]]]] = [[simplify(smooth(r))] for r, _ in outer]
+    for ring, a in holes:
+        if a < min_hole:
+            continue
+        # The middle of the hole's first edge is inside the polygon that has it.
+        p = ((ring[0][0] + ring[1][0]) / 2, (ring[0][1] + ring[1][1]) / 2)
+        homes = [i for i, (r, _) in enumerate(outer) if _inside(p, r)]
+        if homes:
+            best = min(homes, key=lambda i: outer[i][1])
+            polys[best].append(simplify(smooth(ring)))
+    return polys
 
 
 # --- GIBS -------------------------------------------------------------------------
-
-
-def latest_day(client: httpx.Client, layer: str, matrix: str) -> str | None:
-    """The newest day GIBS has for a layer (its WMTS time domain)."""
-    today = datetime.now(UTC).date()
-    url = (
-        f"{GIBS}/1.0.0/{layer}/default/{matrix}/all/"
-        f"{today - timedelta(days=60)}--{today + timedelta(days=1)}.xml"
-    )
-    r = client.get(url, timeout=30)
-    r.raise_for_status()
-    m = re.findall(r"<Domain>([^<]*)</Domain>", r.text)
-    days = re.findall(r"\d{4}-\d{2}-\d{2}", m[-1]) if m else []
-    return max(days) if days else None
 
 
 def tile_xy(lat: float, lon: float, z: int) -> tuple[int, int]:
@@ -625,6 +891,7 @@ class SatResult:
     locations: int = 0
     scenes: int = 0
     checked: int = 0
+    fetched: int = 0  # pictures fetched to draw views
     errors: list[str] = field(default_factory=list)
 
 
@@ -652,7 +919,7 @@ def _read_checked(path: Path) -> dict[str, dict[str, list[float]]]:
 
 def _spot_key(loc_id: str, lat: float, lon: float) -> str:
     # A location that moves is judged afresh; so is every pass when the grid changes.
-    return f"{loc_id}@{lat:.3f},{lon:.3f}#{AREA_PX}"
+    return f"{loc_id}@{lat:.3f},{lon:.3f}#{AREA_PX}mc"
 
 
 def _grid_path(sat_dir: Path, key: str, pid: str) -> Path:
@@ -664,18 +931,7 @@ def _load_grid(path: Path) -> np.ndarray | None:
         g: np.ndarray = np.load(path, allow_pickle=False)
     except (OSError, ValueError):
         return None
-    return g if g.shape == (AREA_PX, AREA_PX) else None
-
-
-def allowed_items(index: SatOut | None) -> set[str]:
-    """The Sentinel-2 items the tile proxy may fetch: those in the index."""
-    if index is None:
-        return set()
-    ids = {it.id for loc in index.locations for sc in loc.scenes for it in sc.items}
-    for loc in index.locations:
-        for layer in loc.composite.layers if loc.composite else []:
-            ids.update(it.id for it in layer.items)
-    return ids
+    return g if g.shape == (4, AREA_PX, AREA_PX) else None
 
 
 def refresh(
@@ -684,30 +940,27 @@ def refresh(
     locations: Sequence[Location],
     *,
     days: int = 30,
-    min_clear: float = 0.7,
-    max_nodata: float = 0.1,
+    scene_days: int = 60,
+    min_clear: float = 0.85,
+    max_nodata: float = 0.03,
     keep: int = 3,
     now: datetime | None = None,
+    renderer: satrender.Renderer | None = None,
 ) -> SatResult:
-    """Find each location's newest clear scenes and write the index. A location whose
-    search fails keeps the scenes it had."""
+    """Judge new passes, choose and draw each location's views, and write the index. A
+    location that fails keeps the views it had."""
     now = now or datetime.now(UTC)
-    start = now - timedelta(days=days)
     out = SatResult()
     index_path = sat_dir / "index.json"
     checked_path = sat_dir / "checked.json"
     old = read_index(index_path)
     old_by_id = {loc.id: loc for loc in old.locations} if old else {}
     checked = _read_checked(checked_path)
-    cutoff = (now - timedelta(days=CHECKED_DAYS)).timestamp()
+    cutoff = (now - timedelta(days=scene_days + CHECKED_EXTRA_DAYS)).timestamp()
+    draw = renderer or satrender.Renderer(sat_dir, client)
     spots: list[SatLocation] = []
     keep_keys: set[str] = set()
-
-    try:
-        hls_date = latest_day(client, HLS, "GoogleMapsCompatible_Level12")
-    except (httpx.HTTPError, ValueError) as e:
-        out.errors.append(f"HLS dates: {e}")
-        hls_date = old.hls_date if old else None
+    used_crops: dict[str, set[str]] = {}
 
     for loc in locations:
         mid = loc.band("mid")
@@ -715,33 +968,44 @@ def refresh(
         key = _spot_key(loc.id, lat, lon)
         keep_keys.add(key)
         seen = checked.setdefault(key, {})
-        spot = SatLocation(id=loc.id, name=loc.name, lat=lat, lon=lon, scenes=[], checked_at=now)
+        box = area_box(lat, lon)
+        spot = SatLocation(
+            id=loc.id, name=loc.name, lat=lat, lon=lon, box=box_lonlat(box), checked_at=now
+        )
         try:
-            passes = search(client, lat, lon, start, now)
+            passes = search(client, box, now - timedelta(days=scene_days), now)
             fresh = 0
             grids: list[tuple[Pass, np.ndarray]] = []
             for p in passes:
                 gpath = _grid_path(sat_dir, key, p.id)
-                got = seen.get(p.id)
-                grid = _load_grid(gpath) if got is not None else None
+                grid = _load_grid(gpath) if p.id in seen else None
                 if grid is None:
                     if fresh >= MAX_CHECKS:
                         continue
                     fresh += 1
                     out.checked += 1
-                    grid = read_pass(client, p, lat, lon)
+                    grid = read_pass(client, p, box)
                     gpath.parent.mkdir(parents=True, exist_ok=True)
                     np.save(gpath, grid)
-                    look = judge_grid(grid[INNER, INNER])
-                    got = [look.clear, look.nodata, look.snow, p.time.timestamp()]
-                    seen[p.id] = got
-                assert got is not None
+                    seen[p.id] = [p.time.timestamp()]
                 grids.append((p, grid))
-                look = Look(clear=got[0], nodata=got[1], snow=got[2])
-                if len(spot.scenes) >= keep:
-                    continue
-                if look.clear < min_clear or look.nodata > max_nodata:
-                    continue
+            grids = list(zip([p for p, _ in grids], dehaze([g for _, g in grids]), strict=True))
+            # Whole scenes: cover the area, and see most of it.
+            whole = []
+            for p, g in grids:
+                look = judge_grid(g)
+                if look.nodata <= max_nodata and look.clear >= min_clear:
+                    whole.append((p, g, look))
+                if len(whole) >= keep:
+                    break
+            recent = [(p, g) for p, g in grids if p.time >= now - timedelta(days=days)]
+            plan = stitch(
+                recent,
+                fallback=[(p, g) for p, g, _ in whole[:1]],
+                latest=passes[0].time if passes else None,
+            )
+            crops = used_crops.setdefault(key_dir(key), set())
+            for p, _, look in whole:
                 spot.scenes.append(
                     SatScene(
                         id=p.id,
@@ -750,34 +1014,41 @@ def refresh(
                         clear_pct=round(look.clear * 100),
                         snow_pct=round(look.snow * 100),
                         nodata_pct=round(look.nodata * 100),
-                        items=p.items,
-                        hls=hls_date is not None and p.time.date().isoformat() <= hls_date,
+                        view=draw.scene(key_dir(key), p, box),
                     )
                 )
-            spot.composite = stitch(
-                grids,
-                crop_box(lat, lon, AREA_KM),
-                latest=passes[0].time if passes else None,
-            )
-        except (httpx.HTTPError, ValueError) as e:
+                crops.add(p.id)
+            if plan.layers:
+                view = draw.stitched(key_dir(key), plan.layers, plan.owner, box)
+                spot.composite = composite_out(plan, view, box)
+                crops.update(p.id for p in plan.layers)
+        except (httpx.HTTPError, ValueError, OSError) as e:
             msg = f"{loc.id}: {type(e).__name__}: {e}"
             out.errors.append(msg)
-            log.warning("satellite scenes for %s failed: %s", loc.id, e)
+            log.warning("satellite views for %s failed: %s", loc.id, e)
             prev = old_by_id.get(loc.id)
             spot.scenes = list(prev.scenes) if prev else []
             spot.composite = prev.composite if prev else None
+            spot.box = prev.box if prev else spot.box
             spot.checked_at = prev.checked_at if prev else None
-            spot.error = "Couldn't look for new scenes; showing the last ones found."
+            spot.error = "Couldn't look for new imagery; showing the last found."
+            crops = used_crops.setdefault(key_dir(key), set())
+            crops.update(sc.id for sc in spot.scenes)
+            if spot.composite:
+                crops.update(x.id for x in spot.composite.layers)
         spots.append(spot)
         out.scenes += len(spot.scenes)
 
-    # Forget passes older than the search window could return, and moved locations.
+    # Forget passes older than the scene window could return, and moved locations.
     checked = {
-        k: {pid: v for pid, v in by.items() if len(v) > 3 and v[3] >= cutoff}
+        k: {pid: v for pid, v in by.items() if v and v[-1] >= cutoff}
         for k, by in checked.items()
         if k in keep_keys
     }
     _prune_grids(sat_dir, checked)
+    views = {sc.view for s in spots for sc in s.scenes}
+    views |= {s.composite.view for s in spots if s.composite}
+    draw.prune(views, used_crops)
     lat0 = sum(s.lat for s in spots) / len(spots) if spots else 45.0
     lon0 = sum(s.lon for s in spots) / len(spots) if spots else -118.0
     viirs = viirs_day(client, lat0, lon0, now.date())
@@ -788,15 +1059,23 @@ def refresh(
     index = SatOut(
         generated_at=now,
         viirs_date=viirs,
-        hls_date=hls_date,
         days=days,
+        scene_days=scene_days,
         min_clear_pct=round(min_clear * 100),
+        zooms=[satrender.ZOOMS[0], satrender.ZOOMS[-1]],
         locations=spots,
     )
     _write(index_path, index.model_dump_json())
     _write(checked_path, json.dumps(checked, separators=(",", ":")))
     out.locations = len(spots)
+    out.fetched = draw.fetched
     return out
+
+
+def key_dir(key: str) -> str:
+    """Where a location's pass pictures are kept: its key without the grid version (the
+    pictures depend only on the area), as a directory name."""
+    return re.sub(r"[^A-Za-z0-9_.,@-]", "_", key.split("#")[0])
 
 
 def _prune_grids(sat_dir: Path, checked: dict[str, dict[str, list[float]]]) -> None:

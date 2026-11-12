@@ -399,9 +399,10 @@
 		const views = satViews(satSpot);
 		return views.length ? views[Math.min(sceneIndex, views.length - 1)] : null;
 	});
-	const NO_RECENT: RecentSpec = { viirs: null, hls: null, s2: [], dates: null };
+	const NO_RECENT: RecentSpec = { viirs: null, view: null, dates: null };
 	$effect(() => {
-		const spec = recent && !offline ? recentSpec(satData, satView, prefs.satBands) : NO_RECENT;
+		const spec =
+			recent && !offline ? recentSpec(satData, satSpot, satView, prefs.satBands) : NO_RECENT;
 		if (!ready || !map) return;
 		// Over the other bases, under the hill shading and everything else.
 		setRecent(map, spec, 'shade');
@@ -1278,9 +1279,10 @@
 					spot.
 				</p>
 				<p class="faint">
-					Recent satellite: NOAA-20 VIIRS daily mosaic everywhere (375 m), and near each saved
-					location the newest Sentinel-2 views (10 m, plus 30 m HLS from the same pass) that see the
-					ground there, judged by the scene's own cloud mask. Contains modified Copernicus Sentinel
+					Recent satellite: NOAA-20's daily VIIRS mosaic everywhere (375 m), and Sentinel-2 at 10 m
+					over the 24 km round each saved location. First the newest clear view, stitched: each
+					outlined part is from the newest pass that saw the ground there, dated on the map. Then
+					the newest whole scenes that see the area clearly. Contains modified Copernicus Sentinel
 					data. Satellite (undated) is Esri's detailed mosaic.
 				</p>
 				<p class="faint">

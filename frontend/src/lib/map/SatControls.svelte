@@ -41,11 +41,11 @@
 		[
 			bands === 'snow' ? 'Snow shows cyan, cloud white.' : '',
 			stitched
-				? 'Each part is the newest Sentinel-2 pass (10 m) that saw the ground there, with cloud cut out; dashed lines and dates mark where one pass meets an older one.'
+				? 'Each outlined part is the newest Sentinel-2 pass (10 m) that saw the ground there; small cloud gaps are filled from the next newest.'
 				: scene
-					? `Sentinel-2 10 m${scene.hls && bands === 'natural' ? ' and HLS 30 m' : ''} from one pass. Clear: at least ${data?.min_clear_pct ?? 70}% of an 8 km square round the location free of cloud.`
+					? `One Sentinel-2 pass (10 m) over the whole 24 km area, at least ${data?.min_clear_pct ?? 85}% of it clear.`
 					: '',
-			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${stitched ? ' where no pass was clear' : ''}.`
+			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${spot ? ' beyond the area and where no pass was clear' : ''}.`
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -91,7 +91,7 @@
 				<span class="faint"
 					>· {spot.name}: {stitched.at_location
 						? `seen ${shortDate(stitched.at_location)}, ${ago(stitched.at_location, now)}`
-						: `no clear view in ${data.days ?? 30} days`}{zoomIn}</span
+						: 'its own spot is in a gap, under cloud in every pass'}{zoomIn}</span
 				>
 			</p>
 		{:else if spot && scene}
@@ -103,7 +103,7 @@
 			</p>
 		{:else if spot}
 			<p class="note">
-				No clear Sentinel-2 view of {spot.name} in the last {data.days ?? 30} days{viirs
+				No clear Sentinel-2 view of {spot.name} in the last {data.scene_days ?? 60} days{viirs
 					? `; showing the daily mosaic from ${viirs}`
 					: ''}.
 			</p>

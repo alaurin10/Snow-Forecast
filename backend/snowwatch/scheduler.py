@@ -291,15 +291,18 @@ class Worker:
                     client,
                     locs,
                     days=mc.sat_days,
+                    scene_days=mc.sat_scene_days,
                     min_clear=mc.sat_min_clear,
                     max_nodata=mc.sat_max_nodata,
                     keep=mc.sat_keep,
                 )
             log.info(
-                "satellite: %d clear scenes for %d locations (%d passes judged), %d errors",
+                "satellite: %d whole scenes for %d locations (%d passes judged, %d pictures "
+                "fetched), %d errors",
                 res.scenes,
                 res.locations,
                 res.checked,
+                res.fetched,
                 len(res.errors),
             )
             for err in res.errors:
