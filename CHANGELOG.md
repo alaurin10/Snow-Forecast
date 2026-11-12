@@ -18,6 +18,26 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Measure on the map.** A new tool measures a line tapped out on the map: distance,
+  climb and descent, its average and steepest grade, the steepest ground it crosses, and
+  an elevation profile coloured like the slope overlay (drag along it to find the spot on
+  the map). Tap a ski run or route and choose Profile for the same numbers; or open a
+  GPX track, which is read on the device and never uploaded.
+- **More on the map from OpenStreetMap:** huts and shelters, trailheads, passes,
+  glaciers, cliffs, and ski routes made of many ways (so tours like the Spearhead
+  Traverse have their names). Tapping one names it in the Inspector. The file is now
+  served gzipped.
+- **Snow stations on the map.** Every SNOTEL station and BC snow pillow in the map's box,
+  coloured by snow depth and labelled with the last 24 hours' new snow; tap one for its
+  numbers and a week's sparkline. Refreshed hourly (`map.stations_minutes`,
+  `snowwatch map stations`).
+- **Field reports on the map.** Avalanche Canada's Mountain Information Network reports
+  from the last two weeks, as rings coloured by what they report; tap one for a link to
+  the full report. Reporters' names aren't kept. Refreshed hourly (`map.obs_minutes`,
+  `map.obs_days`, `snowwatch map obs`).
+- **ATES terrain ratings.** The owner can add Avalanche Terrain Exposure Scale files
+  (KMZ from Avalanche Canada's trip planner, KML or GeoJSON) on the Manage page or in
+  `data/overlays/`; the map then offers them as a layer, as published.
 - **Snow totals adjusted to the terrain.** Zoomed in (from zoom 8), the map's Snow total
   is drawn on the terrain: the model's precipitation falls as snow above the model's
   snow level (with a 300 m rain/snow mix band) and as rain below it, so ridges get the
