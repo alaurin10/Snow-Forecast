@@ -399,7 +399,7 @@ New `frontend/src/lib/map/terrain/`:
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes"; B7.3 is open to every visitor) |
 | 6 | Recent satellite | B6 (done, see "Milestone 6 notes") |
 | 7 | More weather layers | A5, A6 (done, see "Milestone 7 notes") |
-| 8 | Terrain-adjusted totals | A4 |
+| 8 | Terrain-adjusted totals | A4 (done, see "Milestone 8 notes") |
 | 9 | Tools and features | B8 measure/GPX, B9, B7.4, B7.5 |
 | 10 | Stretch | A7, B10, RRFS source |
 
@@ -828,9 +828,74 @@ What shipped, and where it differs from the plan above:
   level for the whole view; observed snowfall stops at the border (Canada has no such
   analysis); SNODAS's glacier cells hold implausible depths (tens of metres).
 
+## Milestone 8 notes (done 12 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **Backend**: `maps/bins.py` (the arithmetic), `maps/terrain_totals.py` (the walks),
+  `maps/tiles_render.py` (the tiles). Built by the existing `totals` job for every window
+  it redraws, in the same walks as the plain totals; nothing new to schedule. Each window's
+  grid is `data/maps/totals/bins-<id>.npy` (float16, half the pictures' resolution, ~3 km,
+  19 bands from 0 to 4,500 m every 250 m, 32 MB) with a `.json` of its box; the index's
+  totals gain `tiles` (`/api/snowtiles/<id>/{z}/{x}/{y}.png`) and `tiles_id`. A total
+  drawn before this is redrawn once to get its grid. If the grids fail, the plain totals
+  still publish (`tiles: null`). Probe results in `docs/SOURCES.md`.
+- **Formula as planned** (`S[k] += water × ratio × phase(z_k − snow level) / 10`, phase
+  across ±150 m), with three decisions the plan left open:
+  - **Ratio**: the model's own (NBM `SNOWLR` in the US; `slr_bands` from the 2 m
+    temperature in Canada, as the plain totals). That ratio is for the air at the model's
+    ground, which in a storm with rain in the valleys is warm, so a ratio wetter than
+    average is raised on ground well above the snow level: unchanged up to where a
+    6.5 °C/km cooling from +1 °C at the snow level reaches the wettest band's lower bound
+    (~240 m above it), then gradually to the average band's ratio (11:1) by the next bound
+    (~670 m above). Never lowered, never raised past 11:1. NBM's `SNOWLR` is 0 where
+    nothing falls; 10:1 is used where a model gives no ratio.
+  - **A floor on the water**: never less than the model's own snow needs at its ratio.
+    NBM blends `ASNOW` separately from `APCP`, and beyond 48 h `ASNOW` was larger than
+    `APCP × SNOWLR` in 18–42% of snowy cells, so the top bands came out below NBM's own
+    total there. With the floor, the top band is at least the plain total in every snowy
+    cell on both sides (checked over all seven windows on 12 Nov 2026). Canada's snow
+    water never exceeds its precipitation, so the floor doesn't change anything there.
+  - **No snow level, no adjustment**: where a period has no snow level, every band takes
+    the model's own snow for the cell.
+- **Snow level differs from the plan**: GDPS-WEonG's snow level stops at 144 h, so Canada
+  takes, per pixel, the first of HRDPS-WEonG (well inside its domain), RDPS-WEonG,
+  GDPS-WEonG and NBM `SNOWLVL` that has a value. NBM covers BC and Alberta except a strip
+  along 56–57°N west of 118°W. Each Canadian step uses the mean of the level half way and
+  at its end; each NBM block the mean at its start and end.
+- **The border**: the two sides are joined band by band with the plain totals' weights.
+- **Tiles**: drawn by the api on demand, 512 px for zoom 5–11, one Mapterhorn tile per snow
+  tile (fetched through the tile cache into `data/tiles/dem/`; 404 over sea = sea level;
+  other failures answer 503 without caching), bilinear between cells and linear between
+  bands, on the totals' colours. Drawn tiles are kept in `data/maps/snowtiles/<id>/` and
+  dropped with their grid, 15 minutes after it leaves the index. Uncached tiles count
+  against the tile cache's miss limit.
+- **Frontend**: `lib/map/layers/snowtiles.ts`. In Snow total, from zoom 8 a raster source
+  of the picked window's tiles replaces the picture (the picture's layer is limited to
+  zoom < 8 while tiles exist). The window caption reads "… · adjusted to terrain", with
+  the plan's caption as its tooltip and in the About panel. The Inspector's Snow line
+  is for the spot's own elevation, with the model's cell numbers beside it, and a
+  "By height" line gives three days' snow at four round heights around the spot (every
+  500 m, or 1,500 ft). `/api/map/point` gives each window's snow at every band (A6's
+  "per elevation").
+- **Measured** 12 Nov 2026 over the West box, all seven windows: totals job cold 223 s
+  (peak 965 MB, including building NBM's grid map, which the forecast job normally has on
+  disk); with the downloads cached 118 s, peak 580 MB (the plain totals alone peak at
+  ~390 MB). The first version peaked at 926 MB, from joining and saving whole float32
+  grids in memory; joining band by band into float16 and streaming saves to disk fixed
+  that. New downloads per NBM run ~90 MB (`SNOWLR` every 6 h, `SNOWLVL` beyond 84 h,
+  6-hour `APCP` to 48 h). Disk: 7 × 32 MB of grids, plus drawn tiles.
+- Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–7).
+- Known limits: precipitation itself isn't adjusted for terrain (no orographic boost or
+  rain shadow below the models' scale); one snow level per ~3 km cell and per period
+  (half-hourly swings and inversions aren't seen); the ratio's rise with height assumes a
+  typical cooling rate; lakes above the snow level show snow (it's what falls there);
+  zoomed in, the tiles stretch zoom 11 (~25 m a pixel); the snow by elevation is for snow
+  falling, not settling, drifting or melting.
+
 ## Files
 
-- New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,tiles_render,layers,point,sat}.py`,
+- New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,
   `backend/snowwatch/maps/sources/{radar_eccc,rainviewer,hrrr,nbm,rdps_gdps,rrfs,snodas,nohrsc,gibs}.py`,
   `config/treeline.yaml`, `frontend/src/lib/map/**`, `docs/MAP-PLAN.md`.
 - Changed: `backend/snowwatch/precip.py` (re-exports), `tiles.py` (new upstreams),

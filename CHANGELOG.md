@@ -18,6 +18,13 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Snow totals adjusted to the terrain.** Zoomed in (from zoom 8), the map's Snow total
+  is drawn on the terrain: the model's precipitation falls as snow above the model's
+  snow level (with a 300 m rain/snow mix band) and as rain below it, so ridges get the
+  snow and valleys under the snow level don't. Tapping the map gives the snow at the
+  spot's own height, and three days' worth at a few heights around it. The worker keeps
+  each window's snow every 250 m of elevation (`data/maps/totals/bins-*.npy`, ~32 MB a
+  window) and the api paints tiles from it on demand (`/api/snowtiles/…`).
 - **More weather on the map.** Snow level (every 250 m) and wind (gusts near the ground,
   or the wind at ridge level) every 3 hours for about 3½ days, from Canada's HRDPS and
   RDPS and NOAA's National Blend, blended across the border; snow on the ground (SNODAS
