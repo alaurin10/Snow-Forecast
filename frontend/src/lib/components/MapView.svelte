@@ -19,12 +19,26 @@
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
-	import { getAvalancheZones, getConcern, getMapPoint, getMapWind, getSat } from '../api';
+	import {
+		getAtes,
+		getAvalancheZones,
+		getConcern,
+		getMapPoint,
+		getMapWind,
+		getReports,
+		getSat,
+		getStations
+	} from '../api';
 	import type {
+		AtesOut,
 		ConcernOut,
+		MapStation,
 		MapWindOut,
+		ObsOut,
+		ObsProps,
 		PointOut,
 		SatOut,
+		StationsOut,
 		ZoneFeature,
 		ZonesOut
 	} from '../types.gen';
@@ -50,13 +64,17 @@
 		basePaint,
 		DETAIL_ZOOM,
 		EXAGGERATION,
+		GLACIER_LAYERS,
 		halo,
 		mapStyle,
 		OTM_OPACITY,
 		peakColor,
 		peakLabel,
 		peakText,
+		placeLabel,
 		PEAK_LAYERS,
+		PLACE_LAYERS,
+		SKI_DATA,
 		ANALYSIS_OPACITY,
 		CONCERN_MIN_ZOOM,
 		OVERLAY_MIN_ZOOM,
@@ -116,6 +134,21 @@
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
+	import Measure from '../map/Measure.svelte';
+	import StationSheet from '../map/StationSheet.svelte';
+	import ReportSheet from '../map/ReportSheet.svelte';
+	import { plainLine, setMeasure } from '../map/layers/measure';
+	import {
+		lineBounds,
+		parseGpx,
+		sampleLine,
+		segmentsGeojson,
+		type LngLat,
+		type Sample
+	} from '../map/measure';
+	import { atesGeojson, reportsGeojson, stationsGeojson } from '../map/features';
+	import { setAtes, setReports, setStations, TAP_LAYERS } from '../map/layers/features';
+	import { HERE_LAYERS, hereItems, skiLines, type HereItem, type SkiLines } from '../map/here';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -153,6 +186,10 @@
 	const imagery = $derived(satellite || recent);
 	const runsOn = $derived(radar && prefs.mapFeatures.has('runs'));
 	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
+	const placesOn = $derived(radar && prefs.mapFeatures.has('places'));
+	const glaciersOn = $derived(radar && prefs.mapFeatures.has('glaciers'));
+	const stationsOn = $derived(radar && prefs.mapFeatures.has('stations'));
+	const reportsOn = $derived(radar && prefs.mapFeatures.has('obs'));
 	/** Contours show on imagery: the topo maps draw their own. */
 	const contoursOn = $derived(radar && prefs.mapFeatures.has('contours') && imagery && !offline);
 	/** The concern index's settings; null until loaded, or when the server has it off. */
@@ -176,7 +213,13 @@
 
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
 		panel = panel === p ? 'none' : p;
+		closeSheets();
+	}
+	/** The sheets a tap on the map opens: a zone's bulletin, a station, a field report. */
+	function closeSheets() {
 		zoneOpen = null;
+		stationOpen = null;
+		reportOpen = null;
 	}
 
 	// ---- Theme ----------------------------------------------------------------
@@ -232,10 +275,17 @@
 	$effect(() => {
 		const runs = runsOn;
 		const peaks = peaksOn;
+		const places = placesOn;
+		const glaciers = glaciersOn;
 		if (!ready || !map) return;
-		for (const id of SKI_LAYERS) map.setLayoutProperty(id, 'visibility', runs ? 'visible' : 'none');
-		for (const id of PEAK_LAYERS)
-			map.setLayoutProperty(id, 'visibility', peaks ? 'visible' : 'none');
+		const show = (ids: string[], on: boolean) => {
+			for (const id of ids)
+				if (map!.getLayer(id)) map!.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+		};
+		show(SKI_LAYERS, runs);
+		show(PEAK_LAYERS, peaks);
+		show(PLACE_LAYERS, places);
+		show(GLACIER_LAYERS, glaciers);
 	});
 
 	// Peak heights and contours in the viewer's units; label colours with the theme.
@@ -249,6 +299,11 @@
 		map.setPaintProperty('peak-labels', 'text-color', peakText(d));
 		map.setPaintProperty('peaks', 'circle-color', peakColor(d));
 		if (radar) setTerrainUnits(map, u);
+		if (map.getLayer('place-labels')) {
+			map.setLayoutProperty('place-labels', 'text-field', placeLabel(u));
+			map.setPaintProperty('place-labels', 'text-halo-color', halo(d));
+			map.setPaintProperty('place-labels', 'text-color', peakText(d));
+		}
 	});
 
 	// ---- Terrain layers ------------------------------------------------------------
@@ -524,6 +579,224 @@
 		if (ready && map && d) setZones(map, on, focus, dk);
 	});
 
+	// ---- Snow stations, field reports and ATES ratings -----------------------------------
+	let stationsData = $state.raw<StationsOut | null>(null);
+	let reportsData = $state.raw<ObsOut | null>(null);
+	let atesData = $state.raw<AtesOut | null>(null);
+	/** Fetched once each, when first needed; null data after a load means none on the server. */
+	let loaded = $state({ stations: false, reports: false, ates: false });
+	let stationOpen = $state.raw<MapStation | null>(null);
+	let reportOpen = $state.raw<ObsProps | null>(null);
+	const atesOn = $derived(radar && prefs.mapFeatures.has('ates') && !!atesData);
+
+	async function loadFeature(which: 'stations' | 'reports' | 'ates') {
+		try {
+			if (which === 'stations') stationsData = await getStations();
+			else if (which === 'reports') reportsData = await getReports();
+			else atesData = await getAtes();
+		} catch (e) {
+			console.error(which, e);
+		} finally {
+			loaded = { ...loaded, [which]: true };
+		}
+	}
+	$effect(() => {
+		if (offline) return;
+		if (stationsOn && !untrack(() => loaded.stations)) void loadFeature('stations');
+		if (reportsOn && !untrack(() => loaded.reports)) void loadFeature('reports');
+		// Whether the server has ATES files is known once the Layers sheet has been opened.
+		if (
+			radar &&
+			(panel === 'layers' || prefs.mapFeatures.has('ates')) &&
+			!untrack(() => loaded.ates)
+		)
+			void loadFeature('ates');
+	});
+	// Stations report hourly; new field reports come in through the day.
+	$effect(() => {
+		if (!radar) return;
+		const id = setInterval(
+			() => {
+				if (stationsOn) void loadFeature('stations');
+				if (reportsOn) void loadFeature('reports');
+			},
+			30 * 60 * 1000
+		);
+		return () => clearInterval(id);
+	});
+	$effect(() => {
+		const d = stationsData;
+		const on = stationsOn;
+		const u = units;
+		const h = halo(dark);
+		if (ready && map && (d || map.getSource('stations')))
+			setStations(map, d ? stationsGeojson(d, u) : null, on, h);
+	});
+	$effect(() => {
+		const d = reportsData;
+		const on = reportsOn;
+		if (ready && map && (d || map.getSource('reports')))
+			setReports(map, d ? reportsGeojson(d) : null, on);
+	});
+	$effect(() => {
+		const d = atesData;
+		const on = atesOn;
+		// Under the place names, runs and the weather.
+		if (ready && map && (d || map.getSource('ates')))
+			setAtes(map, d ? atesGeojson(d) : null, on, PRECIP_BEFORE);
+	});
+
+	// ---- Measure: a line tapped out, a run or route, or a GPX track ----------------------
+	let measuring = $state(false);
+	/** Taps on the map add points (rather than a run or track being shown). */
+	let measureEdit = $state(false);
+	let measurePts = $state.raw<LngLat[]>([]);
+	let measureTitle = $state('Measure');
+	let measureNote = $state('');
+	let measureSamples = $state.raw<Sample[] | null>(null);
+	let measureState = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+	let measureError = $state<string | null>(null);
+	let gpxError = $state<string | null>(null);
+	let measureHover = $state<number | null>(null);
+	/** Every run's and route's whole line, fetched the first time one is profiled. */
+	let skiIndex: SkiLines | null = null;
+
+	// The terrain under the line, again whenever it changes (the last request is called off).
+	$effect(() => {
+		const pts = measurePts;
+		const on = measuring;
+		measureSamples = null;
+		measureHover = null;
+		measureError = null;
+		if (!on || pts.length < 2) {
+			measureState = 'idle';
+			return;
+		}
+		const c = terrainClient();
+		if (!c) {
+			measureState = 'failed';
+			measureError = 'Measuring needs a newer browser.';
+			return;
+		}
+		const ctl = new AbortController();
+		measureState = 'loading';
+		sampleLine(pts, (q, z, sig) => c.profile(q, z, sig), ctl.signal).then(
+			(got) => {
+				if (ctl.signal.aborted) return;
+				measureSamples = got;
+				measureState = 'ready';
+			},
+			(e) => {
+				if (ctl.signal.aborted) return;
+				measureState = 'failed';
+				measureError = offline
+					? 'No saved terrain along this line. Save the area for offline use first.'
+					: `Couldn’t measure the terrain along this line (${e instanceof Error ? e.message : e}).`;
+			}
+		);
+		return () => ctl.abort();
+	});
+	$effect(() => {
+		const on = measuring;
+		const pts = measurePts;
+		const s = measureSamples;
+		const hv = measureHover;
+		const edit = measureEdit;
+		if (!ready || !map) return;
+		if (!on) return setMeasure(map, null);
+		setMeasure(map, {
+			line: s ? segmentsGeojson(s) : plainLine(pts),
+			points: edit ? pts : [],
+			hover: hv != null && s?.[hv] ? [s[hv].lon, s[hv].lat] : null
+		});
+	});
+
+	function startMeasure() {
+		panel = 'none';
+		closeSheets();
+		closeInspector();
+		measuring = true;
+		measureEdit = true;
+		measurePts = [];
+		measureTitle = 'Measure';
+		measureNote = '';
+		gpxError = null;
+	}
+	function stopMeasure() {
+		measuring = false;
+		measureEdit = false;
+		measurePts = [];
+		gpxError = null;
+	}
+	/** Show a whole line (a run, a route, a track) with its numbers and profile. */
+	function showLine(title: string, note: string, pts: LngLat[], fit: boolean) {
+		measuring = true;
+		measureEdit = false;
+		measureTitle = title;
+		measureNote = note;
+		measurePts = pts;
+		gpxError = null;
+		if (fit && map) {
+			const [w, s_, e, n] = lineBounds(pts);
+			map.fitBounds(
+				[
+					[w, s_],
+					[e, n]
+				],
+				// Clear of the panel at the foot of the map.
+				{
+					padding: {
+						top: 70,
+						bottom: Math.round(map.getContainer().clientHeight * 0.55),
+						left: 70,
+						right: 50
+					},
+					maxZoom: 15
+				}
+			);
+		}
+	}
+	async function openGpx(file: File) {
+		try {
+			if (file.size > 30_000_000) throw new Error('This file is too big for a GPX track.');
+			const t = parseGpx(await file.text());
+			closeInspector();
+			showLine(
+				t.name || file.name.replace(/\.gpx$/i, ''),
+				'GPX · read on this device',
+				t.points,
+				true
+			);
+		} catch (e) {
+			measuring = true;
+			gpxError = e instanceof Error ? e.message : String(e);
+		}
+	}
+	/** The Inspector's Profile button on a run or route. */
+	async function profileRun(item: HereItem) {
+		let line = item.line;
+		if (item.osm) {
+			try {
+				if (!skiIndex) {
+					const r = await fetch(SKI_DATA);
+					if (r.ok) skiIndex = skiLines(await r.json());
+				}
+				line = skiIndex?.get(item.osm) ?? line;
+			} catch (e) {
+				console.error('ski map', e);
+			}
+		}
+		if (!line || line.length < 2) return;
+		// The whole run turned out to be an outline (the tap only saw part of it).
+		const [a, b] = [line[0], line[line.length - 1]];
+		if (item.kind !== 'Route' && line.length > 3 && a[0] === b[0] && a[1] === b[1]) {
+			showLine(item.name, `${item.kind} · OpenStreetMap`, [], false);
+			gpxError = 'This run is mapped as its outline, so it has no profile.';
+			return;
+		}
+		showLine(item.name, `${item.kind} · OpenStreetMap`, line, false);
+	}
+
 	// ---- Inspector: tap the map for the terrain there --------------------------------
 	let probe = $state<{ lat: number; lon: number } | null>(null);
 	let facts = $state<PointFacts | null>(null);
@@ -535,6 +808,8 @@
 	let probePointState = $state<'loading' | 'ready' | 'failed'>('loading');
 	let probeMarker: Marker | null = null;
 	let probeToken = 0;
+	/** Map features where the map was tapped: a run, a hut, a glacier, an ATES rating. */
+	let probeHere = $state.raw<HereItem[]>([]);
 
 	const probeZone = $derived(
 		probe && zonesData ? zoneAt(zonesData.features, probe.lat, probe.lon) : null
@@ -659,6 +934,7 @@
 		probeSun = null;
 		probeWind = null;
 		probePoint = null;
+		probeHere = [];
 		probeMarker?.remove();
 	}
 
@@ -998,6 +1274,8 @@
 					base: prefs.mapBase,
 					runs: prefs.mapFeatures.has('runs'),
 					peaks: prefs.mapFeatures.has('peaks'),
+					places: prefs.mapFeatures.has('places'),
+					glaciers: prefs.mapFeatures.has('glaciers'),
 					contours: contoursOn,
 					shade: prefs.mapShade,
 					overlay: overlayMode,
@@ -1054,9 +1332,33 @@
 					for (const p of popups) p.remove();
 					return;
 				}
-				if (panel !== 'none' || zoneOpen) {
+				if (panel !== 'none' || zoneOpen || stationOpen || reportOpen) {
 					panel = 'none';
-					zoneOpen = null;
+					closeSheets();
+					return;
+				}
+				if (measuring && measureEdit) {
+					measurePts = [...measurePts, [e.lngLat.lng, e.lngLat.lat]];
+					return;
+				}
+				const near = (px: number): [[number, number], [number, number]] => [
+					[e.point.x - px, e.point.y - px],
+					[e.point.x + px, e.point.y + px]
+				];
+				// A station or a field report opens its own sheet.
+				const tapLayers = TAP_LAYERS.filter((id) => map!.getLayer(id));
+				const tapped = tapLayers.length
+					? map!.queryRenderedFeatures(near(8), { layers: tapLayers })[0]
+					: undefined;
+				const i = Number(tapped?.properties?.i);
+				if (tapped?.layer.id === 'stations' && stationsData?.stations[i]) {
+					closeInspector();
+					stationOpen = stationsData.stations[i];
+					return;
+				}
+				if (tapped?.layer.id === 'reports' && reportsData?.features[i]) {
+					closeInspector();
+					reportOpen = reportsData.features[i].properties;
 					return;
 				}
 				if (!analysis) {
@@ -1067,6 +1369,18 @@
 					return;
 				}
 				void inspect(e.lngLat.lat, e.lngLat.lng);
+				const hereLayers = HERE_LAYERS.filter((id) => map!.getLayer(id));
+				probeHere = hereLayers.length
+					? hereItems(
+							map!.queryRenderedFeatures(near(5), { layers: hereLayers }).map((f) => ({
+								layer: f.layer.id,
+								properties: f.properties ?? {},
+								geometry: f.geometry as { type: string; coordinates?: unknown }
+							})),
+							units,
+							skiIndex
+						)
+					: [];
 			});
 			map.on('load', () => {
 				if (cancelled) return;
@@ -1219,11 +1533,13 @@
 		e.key === 'Escape' &&
 		(askAck
 			? prefs.setMapOverlay('none')
-			: zoneOpen
-				? (zoneOpen = null)
+			: zoneOpen || stationOpen || reportOpen
+				? closeSheets()
 				: panel !== 'none'
 					? (panel = 'none')
-					: probe && closeInspector())}
+					: probe
+						? closeInspector()
+						: measuring && stopMeasure())}
 />
 
 <div
@@ -1284,6 +1600,20 @@
 			</button>
 			<button
 				class="tool"
+				class:active={measuring}
+				aria-pressed={measuring}
+				onclick={() => (measuring ? stopMeasure() : startMeasure())}
+				title={measuring
+					? 'Stop measuring'
+					: 'Measure a line: distance, climb and its profile. Or open a GPX track.'}
+				aria-label="Measure"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><path d="M3.5 16.5l13-13 4 4-13 13zM7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2" /></svg
+				>
+			</button>
+			<button
+				class="tool"
 				class:active={panel === 'offline'}
 				aria-expanded={panel === 'offline'}
 				onclick={() => togglePanel('offline')}
@@ -1314,6 +1644,7 @@
 				contours={contoursReady}
 				{offline}
 				concern={!!concernCfg}
+				ates={!!atesData}
 				onclose={() => (panel = 'none')}
 			/>
 		{/if}
@@ -1329,6 +1660,12 @@
 
 		{#if zoneOpen}
 			<ZoneSheet zone={zoneOpen} onclose={() => (zoneOpen = null)} />
+		{/if}
+		{#if stationOpen}
+			<StationSheet station={stationOpen} {units} onclose={() => (stationOpen = null)} />
+		{/if}
+		{#if reportOpen}
+			<ReportSheet report={reportOpen} onclose={() => (reportOpen = null)} />
 		{/if}
 
 		{#if askAck && concernCfg}
@@ -1373,6 +1710,8 @@
 					concern={probeConcern}
 					point={probePoint}
 					pointState={probePointState}
+					here={probeHere}
+					online={(h) => void profileRun(h)}
 					onzone={() => (zoneOpen = probeZone)}
 					onclose={closeInspector}
 				/>
@@ -1445,6 +1784,17 @@
 					shape of the ground, not observations, and say nothing about how stable the snow is.
 				</p>
 				<p class="faint">
+					Huts, trailheads, passes, glaciers, cliffs and ski routes from OpenStreetMap, as mapped by
+					volunteers. Snow stations: NRCS SNOTEL and BC River Forecast Centre snow pillows, depth
+					now and its change over 24 hours (the dot's colour is the depth; a label is new snow).
+					Field reports: Avalanche Canada's Mountain Information Network, the last two weeks, as
+					people sent them (US centers' observations need a key: see each center's site).
+					{#if atesData}ATES ratings: from files this site's owner downloaded from Avalanche
+						Canada's trip planner, as published there.{/if}
+					Measure: tap out a line, tap a run or route and choose Profile, or open a GPX track (it stays
+					on this device).
+				</p>
+				<p class="faint">
 					Avalanche danger zones and ratings exactly as published by avalanche.org's centers and
 					Avalanche Canada (expired ones grey). Avalanche problems shows the terrain a bulletin's
 					problems describe, using approximate treeline numbers. Neither rates any slope.
@@ -1456,6 +1806,23 @@
 		{/if}
 
 		<div class="dock">
+			{#if measuring}
+				<Measure
+					title={measureTitle}
+					note={measureNote}
+					{units}
+					editing={measureEdit}
+					points={measurePts.length}
+					samples={measureSamples}
+					status={gpxError ? 'failed' : measureState}
+					error={gpxError ?? measureError}
+					onundo={() => (measurePts = measurePts.slice(0, -1))}
+					onclear={() => (measurePts = [])}
+					ongpx={(f) => void openGpx(f)}
+					onhover={(i) => (measureHover = i)}
+					onclose={stopMeasure}
+				/>
+			{/if}
 			{#if recent && !offline}
 				<SatControls
 					data={satData}

@@ -21,10 +21,12 @@
 		offline: boolean;
 		/** The server offers the experimental concern index (HAZARD_INDEX isn't off). */
 		concern?: boolean;
+		/** The owner has supplied ATES ratings. */
+		ates?: boolean;
 		onclose: () => void;
 	}
 
-	let { analysis, contours, offline, concern = false, onclose }: Props = $props();
+	let { analysis, contours, offline, concern = false, ates = false, onclose }: Props = $props();
 
 	const BASES: { id: MapBase; label: string; title: string }[] = [
 		{ id: 'topo', label: 'Topo', title: 'Topographic map' },
@@ -56,9 +58,16 @@
 			: [])
 	]);
 	const FEATURES = $derived<{ id: MapFeature; label: string; hint?: string; off?: boolean }[]>([
-		{ id: 'runs', label: 'Ski runs', hint: 'From zoom 11' },
+		{ id: 'runs', label: 'Ski runs and routes', hint: 'From zoom 11' },
 		{ id: 'peaks', label: 'Peaks' },
+		{ id: 'places', label: 'Huts, trailheads, passes', hint: 'From zoom 10' },
+		{ id: 'glaciers', label: 'Glaciers and cliffs' },
+		{ id: 'stations', label: 'Snow stations', hint: 'Depth and new snow, hourly' },
 		{ id: 'zones', label: 'Avalanche danger zones', hint: 'Today, as published' },
+		{ id: 'obs', label: 'Field reports', hint: 'Canada (MIN), last 2 weeks' },
+		...(ates
+			? [{ id: 'ates' as const, label: 'ATES terrain ratings', hint: 'From Avalanche Canada' }]
+			: []),
 		{
 			id: 'contours',
 			label: 'Contours',

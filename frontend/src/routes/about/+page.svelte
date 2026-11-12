@@ -39,13 +39,13 @@
 		{
 			name: 'NRCS SNOTEL (USDA)',
 			href: 'https://www.nrcs.usda.gov/wps/portal/wcc/home/',
-			what: 'Snow depth and snow water at US stations',
+			what: 'Snow depth and snow water at US stations, and the map’s snow stations',
 			terms: 'US public domain'
 		},
 		{
 			name: 'BC River Forecast Centre',
 			href: 'https://www2.gov.bc.ca/gov/content/environment/air-land-water/water/drought-flooding-dikes-dams/river-forecast-centre',
-			what: 'Automated snow pillows in British Columbia',
+			what: 'Automated snow pillows in British Columbia, on the forecasts and the map',
 			terms: 'Open Government Licence – British Columbia'
 		},
 		{
@@ -57,13 +57,13 @@
 		{
 			name: 'Avalanche Canada',
 			href: 'https://avalanche.ca/',
-			what: 'Canadian avalanche danger ratings, shown as published',
+			what: 'Canadian avalanche danger ratings, shown as published; field reports from the Mountain Information Network; ATES ratings the site’s owner adds from its trip planner',
 			terms: 'Avalanche Canada’s terms'
 		},
 		{
 			name: 'OpenStreetMap and OpenSkiMap',
 			href: 'https://www.openstreetmap.org/copyright',
-			what: 'Ski runs, lifts, peaks and the ski-area list',
+			what: 'Ski runs and routes, lifts, peaks, huts, trailheads, passes, glaciers and cliffs, and the ski-area list',
 			terms: '© OpenStreetMap contributors, ODbL'
 		},
 		{

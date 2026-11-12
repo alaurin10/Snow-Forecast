@@ -23,6 +23,7 @@
 	import MapPicker, { type PinBand, type Pins } from '../../lib/manage/MapPicker.svelte';
 	import LocationForm from '../../lib/manage/LocationForm.svelte';
 	import OwnerLogin from '../../lib/manage/OwnerLogin.svelte';
+	import AtesFiles from '../../lib/manage/AtesFiles.svelte';
 	import type {
 		BudgetOut,
 		CatalogItem,
@@ -470,6 +471,7 @@
 			</li>
 		{/each}
 	</ul>
+	<AtesFiles />
 {/if}
 
 <style>

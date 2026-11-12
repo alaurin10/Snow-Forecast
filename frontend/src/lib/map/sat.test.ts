@@ -107,6 +107,8 @@ describe('what the base draws', () => {
 			base: 'recent',
 			runs: true,
 			peaks: true,
+			places: true,
+			glaciers: true,
 			contours: true,
 			shade: 'light',
 			overlay: 'none',

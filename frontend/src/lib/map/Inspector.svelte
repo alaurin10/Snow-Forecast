@@ -23,6 +23,7 @@
 	import { RAMPS, type PrecipKind } from '../radar';
 	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
 	import { elevationLadder, snowAtElevation, TERRAIN_NOTE } from './layers/snowtiles';
+	import type { HereItem } from './here';
 
 	interface Props {
 		lat: number;
@@ -41,6 +42,9 @@
 		/** What the map's weather says here; null while it loads or if it couldn't be had. */
 		point?: PointOut | null;
 		pointState?: 'loading' | 'ready' | 'failed';
+		/** Map features at the spot: a run or route (with its profile), a hut, a glacier, ATES. */
+		here?: HereItem[];
+		online?: (item: HereItem) => void;
 		onzone?: () => void;
 		onclose: () => void;
 	}
@@ -57,6 +61,8 @@
 		concern = null,
 		point = null,
 		pointState = 'ready',
+		here = [],
+		online,
 		onzone,
 		onclose
 	}: Props = $props();
@@ -290,6 +296,22 @@
 			{/if}
 			{#if concern}Concern index: experimental, not a forecast.{/if}
 		</p>
+	{/if}
+	{#if here.length}
+		<ul class="more here" aria-label="On the map here">
+			{#each here as h, i (i)}
+				<li>
+					<span class="k">{h.kind}</span>
+					<span
+						>{#if h.color}<i style:background={h.color} aria-hidden="true"></i>{/if}{h.name}</span
+					>
+					{#if h.detail}<span class="faint">{h.detail}</span>{/if}
+					{#if h.line}
+						<button class="link" onclick={() => online?.(h)}>Profile ›</button>
+					{/if}
+				</li>
+			{/each}
+		</ul>
 	{/if}
 	<section class="wx" aria-label="Weather here">
 		{#if pointState === 'loading'}
