@@ -161,6 +161,7 @@ def test_osm_to_geojson_keeps_runs_lifts_and_peaks() -> None:
         "type": "downhill",
         "difficulty": "advanced",
         "name": "Upper International",
+        "osm": "w1",
     }
     assert props[1]["name"] == "Slot Couloir" and props[1]["type"] == "skitour"
     assert props[3] == {"kind": "peak", "name": "Snoqualmie Mountain", "ele": 2014}
@@ -458,6 +459,7 @@ def test_osm_to_geojson_keeps_mountain_features() -> None:
     assert route["geometry"]["type"] == "MultiLineString"
     assert len(route["geometry"]["coordinates"]) == 2
     assert route["properties"]["type"] == "skitour"
+    assert route["properties"]["osm"] == "r11"
 
 
 def test_osm_rings_and_simplify() -> None:

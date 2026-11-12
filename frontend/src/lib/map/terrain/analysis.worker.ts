@@ -88,6 +88,36 @@ async function point(lat: number, lon: number): Promise<PointFacts> {
 	};
 }
 
+/**
+ * Elevation and ground slope along a line. Elevation from tiles at `z` (chosen by the
+ * page from the spacing of the points), slope on the overlays' grid (zoom 12 at most):
+ * finer slope is noise at the scale that matters for avalanches.
+ */
+async function profile(
+	id: number,
+	points: [number, number][],
+	z: number
+): Promise<{ elev: number[]; slope: number[] } | null> {
+	const elev: number[] = [];
+	const slope: number[] = [];
+	const sz = Math.min(z, ANALYSIS_ZOOM);
+	for (let i = 0; i < points.length; i++) {
+		if (i % 50 === 0 && cancelled.has(id)) return null;
+		const [lon, lat] = points[i];
+		const at = locate(lat, lon, z);
+		const e = await dem.elev(z, at.x, at.y);
+		elev.push(e.sea ? 0 : sample(e.data, e.size, at.px, at.py));
+		const sa = locate(lat, lon, sz);
+		const { grid, elev: tile } = await dem.around(sz, sa.x, sa.y);
+		const size = tile.size;
+		const r = Math.min(size - 1, Math.floor(sa.py));
+		const c = Math.min(size - 1, Math.floor(sa.px));
+		const m = metresPerPixel(lat, sz, size);
+		slope.push(tile.sea ? 0 : hornAt(grid, size + 2, r + 1, c + 1, m, m).slope);
+	}
+	return { elev, slope };
+}
+
 // ---- Whole-view layers: shade, sun hours, wind effect -------------------------------
 // The grids of the last view are kept, so moving the time slider or changing the wind
 // window only repeats the arithmetic, not the downloads.
@@ -342,6 +372,13 @@ async function handle(
 				worldY(msg.lat, g.z) - g.y0
 			);
 			return { res: { id, ok: true, wind }, transfer: [] };
+		}
+		case 'profile': {
+			const p = await profile(id, msg.points, msg.z);
+			return {
+				res: p ? { id, ok: true, profile: p } : { id, ok: true, empty: true },
+				transfer: []
+			};
 		}
 		case 'zone':
 			zonePolys.delete(msg.zone);

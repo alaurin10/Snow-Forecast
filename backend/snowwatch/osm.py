@@ -258,6 +258,8 @@ def _relation(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None
                 "type": tags.get("piste:type") or ("skitour" if tags["route"] == "ski" else ""),
                 "difficulty": tags.get("piste:difficulty", ""),
                 "name": tags.get("piste:name") or tags.get("name") or "",
+                # So the map can find the whole line again (what it draws is cut into tiles).
+                "osm": f"r{el.get('id', 0)}",
             },
         }
     return None
@@ -320,6 +322,7 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
                 "type": ptype,
                 "difficulty": tags.get("piste:difficulty", ""),
                 "name": name,
+                "osm": f"w{el.get('id', 0)}",
             }
         elif "aerialway" in tags and tags["aerialway"] not in ("station", "pylon", "goods"):
             props = {"kind": "lift", "type": tags["aerialway"], "name": name}
