@@ -17,8 +17,27 @@ export const THEME_FAMILIES: readonly ThemeFamily[] = [
 export type Motion = 'full' | 'subtle' | 'off';
 export type BandName = 'base' | 'mid' | 'summit';
 /** The one weather layer on the map. */
-export type MapWeather = 'radar' | 'totals' | 'off';
-export const MAP_WEATHER: readonly MapWeather[] = ['radar', 'totals', 'off'] as const;
+export type MapWeather =
+	| 'radar'
+	| 'totals'
+	| 'snowlevel'
+	| 'wind'
+	| 'depth'
+	| 'snowfall'
+	| 'clouds'
+	| 'off';
+export const MAP_WEATHER: readonly MapWeather[] = [
+	'radar',
+	'totals',
+	'snowlevel',
+	'wind',
+	'depth',
+	'snowfall',
+	'clouds',
+	'off'
+] as const;
+/** The wind layer: gusts near the ground, or the free-air wind at ridge level (700 hPa). */
+export type MapWind = 'gust' | 'ridge';
 /** The one terrain overlay on the map. */
 export type MapOverlay =
 	'none' | 'slope' | 'aspect' | 'bands' | 'sun' | 'wind' | 'problems' | 'concern';
@@ -98,6 +117,7 @@ class Prefs {
 	showTimeline = $state<'on' | 'off'>(load('sw.showTimeline', ['on', 'off'] as const, 'on'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapWeather = $state<MapWeather>(loadWeather());
+	mapWind = $state<MapWind>(load('sw.mapWind', ['gust', 'ridge'] as const, 'gust'));
 	mapOverlay = $state<MapOverlay>(load('sw.mapOverlay', MAP_OVERLAYS, 'none'));
 	mapFeatures = $state<Set<MapFeature>>(loadFeatures());
 	mapShade = $state<MapShade>(load('sw.mapShade', ['off', 'light', 'strong'] as const, 'light'));
@@ -148,6 +168,11 @@ class Prefs {
 	setMapWeather(w: MapWeather) {
 		this.mapWeather = w;
 		save('sw.mapWeather', w);
+	}
+
+	setMapWind(w: MapWind) {
+		this.mapWind = w;
+		save('sw.mapWind', w);
 	}
 
 	setMapOverlay(o: MapOverlay) {

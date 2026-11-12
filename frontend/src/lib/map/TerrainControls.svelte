@@ -31,6 +31,8 @@
 		wind: WindSource | null;
 		/** The locations' wind has been fetched. */
 		windLoaded: boolean;
+		/** Away from every location: the map's own forecast here has been asked for. */
+		pointTried?: boolean;
 	}
 
 	let {
@@ -46,7 +48,8 @@
 		position,
 		windWindow = $bindable(),
 		wind,
-		windLoaded
+		windLoaded,
+		pointTried = true
 	}: Props = $props();
 
 	const STEP = 15 * 60000;
@@ -148,7 +151,12 @@
 				<p class="note">Loading the wind…</p>
 			{:else if !wind}
 				<p class="note">
-					No saved location within {range} of here. The wind comes from a location's forecast.
+					No saved location within {range} of here{#if !pointTried}; checking the map's forecast…{:else}, and the map's forecast has no ridge wind here{/if}.
+				</p>
+			{:else if !wind.rose && wind.model}
+				<p class="note">
+					Away from saved locations only the next 24 and 72 hours are known (from the map's
+					forecast).
 				</p>
 			{:else if !wind.rose}
 				<p class="note">
@@ -162,7 +170,11 @@
 						>{#if wind.rose.wind_from}{wind.rose.wind_from} wind {speed(wind.rose.mean_kmh, units)},
 							{snow(wind.rose.snow_cm, units)} of new snow{:else}{wind.rose.label}: nothing to show{/if}</strong
 					>
-					<span class="faint">· {wind.location.name} summit forecast, {away} away</span>
+					{#if wind.model}
+						<span class="faint">· the map's forecast here (ridge-level wind, model snow)</span>
+					{:else}
+						<span class="faint">· {wind.location.name} summit forecast, {away} away</span>
+					{/if}
 				</p>
 			{/if}
 		</div>

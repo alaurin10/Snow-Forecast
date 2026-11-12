@@ -110,6 +110,23 @@ export interface Total {
 	runs?: Record<string, number>;
 }
 
+/**
+ * A picture of one of the other weather layers (snow level, gusts, ridge wind, snow on the
+ * ground, observed snowfall, clouds), drawn by the server like the frames.
+ */
+export interface LayerFrame {
+	/** Unix seconds: the valid time; for observed snowfall the window's end. */
+	t: number;
+	file: string;
+	kind: 'forecast' | 'observed';
+	/** Observed snowfall: the window's length in hours. */
+	hours: number;
+	/** The sources used: Canada's (`north`) and the US's (`south`). */
+	src: { north?: string; south?: string };
+	/** Each source → its run start or analysis time (Unix seconds). */
+	runs: Record<string, number>;
+}
+
 /** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`. */
 export interface PrecipIndex {
 	version?: number;
@@ -123,6 +140,8 @@ export interface PrecipIndex {
 	totals?: (Omit<Total, 'window'> & { window?: number })[];
 	/** Credit lines for the sources in use. */
 	attribution?: string[];
+	/** The other weather layers by name (from milestone 7 of the map). */
+	layers?: Record<string, { frames?: Partial<LayerFrame>[] }>;
 }
 
 export interface Timeline {
@@ -139,6 +158,8 @@ export interface Timeline {
 	extendedFrom: number;
 	totals: Total[];
 	attribution: string[];
+	/** The other weather layers by name, each in time order (snowfall by window). */
+	layers: Record<string, LayerFrame[]>;
 }
 
 const ORDER: Record<FrameKind, number> = { radar: 0, nowcast: 1, forecast: 2 };
@@ -178,6 +199,20 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 			window: typeof t.window === 'number' && t.window > 0 ? t.window : t.hours
 		}))
 		.sort((a, b) => a.window - b.window);
+	const layers: Record<string, LayerFrame[]> = {};
+	for (const [name, layer] of Object.entries(ix.layers ?? {})) {
+		layers[name] = (layer?.frames ?? [])
+			.filter((f) => typeof f?.t === 'number' && typeof f?.file === 'string')
+			.map((f) => ({
+				t: f.t!,
+				file: f.file!,
+				kind: f.kind === 'observed' ? ('observed' as const) : ('forecast' as const),
+				hours: typeof f.hours === 'number' ? f.hours : 0,
+				src: f.src ?? {},
+				runs: f.runs ?? {}
+			}))
+			.sort((a, b) => a.hours - b.hours || a.t - b.t);
+	}
 	return {
 		frames,
 		bounds: ix.bounds,
@@ -187,7 +222,8 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		nowcastEnd,
 		extendedFrom,
 		totals,
-		attribution: Array.isArray(ix.attribution) ? ix.attribution : []
+		attribution: Array.isArray(ix.attribution) ? ix.attribution : [],
+		layers
 	};
 }
 

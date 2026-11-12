@@ -35,7 +35,7 @@ from snowwatch.maps.geomet import (
     wcs_grid,
 )
 from snowwatch.maps.palette import DEPTH, SNOWLEVEL, TOTAL, WIND
-from snowwatch.maps.region import Region, stitch
+from snowwatch.maps.region import Region, spread, stitch
 from snowwatch.maps.sources import gibs, nohrsc, snodas
 from snowwatch.maps.sources.nbm import Nbm
 
@@ -45,6 +45,9 @@ if TYPE_CHECKING:
 log = logging.getLogger("snowwatch.precip")
 
 HOUR = 3600
+# Part of every snow level and gust picture's key: change it when how they're drawn changes,
+# so pictures already on disk are redrawn.
+DRAWING = 2
 STEP_H = 3  # snow level and wind frames are 3-hourly
 MS_TO_KMH = 3.6
 
@@ -88,6 +91,9 @@ GUST = Field(
     MS_TO_KMH,
     WIND,
 )
+# Coded snow-level cells take a real value from up to this many cells away (HRDPS 2.5 km:
+# ~15 km; RDPS 10 km: ~60 km): wide enough to cover a mountain range.
+CODE_FILL_CELLS = 6
 RIDGE_SPEED = "RDPS_10km_WindSpeed_700mb"  # m/s
 RIDGE_DIR = "RDPS_10km_WindDir_700mb"  # degrees, where the wind blows from
 CALDAS = "CaLDAS-NSRPS_2.5km_SnowDepth"  # metres
@@ -128,8 +134,22 @@ def grid(
     if g is None:
         return None
     if codes_to is not None:
-        g = Grid(np.where(g.data < 0, codes_to, g.data), g.lon0, g.lat0, g.dlon, g.dlat)
+        g = Grid(fill_codes(g.data, CODE_FILL_CELLS, codes_to), g.lon0, g.lat0, g.dlon, g.dlat)
     return on_region(g, region, valid, smooth=smooth)
+
+
+def fill_codes(values: np.ndarray, passes: int, rest: float) -> np.ndarray:
+    """GeoMet's snow level holds -1 or -2 where snow reaches the ground ("partially
+    melted" or not at all): the snow level is somewhere below the ground there, not at sea
+    level. On a mountain range standing above the snow level around it, the best guess is
+    that surrounding level, so coded cells take their nearest real value within `passes`
+    cells; wider areas (a cold air mass), beyond that reach, take `rest` (0 m: snow to
+    the valleys)."""
+    out = np.where(values < 0, -1.0, values).astype(np.float32)
+    if (out == -1).any():
+        out = spread(out, passes, empty=-1.0)
+        out[out == -1] = rest
+    return out
 
 
 def draw(r: Renderer, region: Region) -> dict[str, list[LayerFrame]]:
@@ -196,7 +216,7 @@ def model_field(
             use_n = us is not None and 1 <= lead <= 192
             key = "|".join(
                 [
-                    spec.name,
+                    f"{spec.name}@{DRAWING}",
                     str(t),
                     f"h:{hr.ref}" if use_h and hr else "-",
                     f"r:{rd.ref}" if use_r and rd else "-",
