@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -319,3 +320,161 @@ def test_tile_misses_are_rate_limited(settings: Settings, monkeypatch: Any) -> N
     client = TestClient(create_app(settings))
     codes = [client.get(f"/api/tiles/otm/10/{i}/0.png").status_code for i in range(310)]
     assert codes.count(200) == 300 and codes[-1] == 429
+
+
+def test_osm_to_geojson_keeps_mountain_features() -> None:
+    from snowwatch.osm import to_geojson
+
+    def g(*pts: tuple[float, float]) -> list[dict[str, float]]:
+        return [{"lat": la, "lon": lo} for la, lo in pts]
+
+    els = [
+        {
+            "type": "node",
+            "id": 1,
+            "lat": 50.1,
+            "lon": -122.9,
+            "tags": {"tourism": "alpine_hut", "name": "Himmelsbach Hut", "ele": "1880"},
+        },
+        # A hut mapped as a building: its middle.
+        {
+            "type": "way",
+            "id": 2,
+            "tags": {"tourism": "wilderness_hut", "name": "Cabin"},
+            "geometry": g((50.0, -123.0), (50.0, -122.998), (50.002, -122.998), (50.0, -123.0)),
+        },
+        {
+            "type": "node",
+            "id": 3,
+            "lat": 50.2,
+            "lon": -122.8,
+            "tags": {"amenity": "shelter", "shelter_type": "picnic_shelter", "name": "Picnic"},
+        },
+        {"type": "node", "id": 4, "lat": 50.2, "lon": -122.8, "tags": {"amenity": "shelter"}},
+        {
+            "type": "node",
+            "id": 5,
+            "lat": 50.21,
+            "lon": -122.81,
+            "tags": {"amenity": "shelter", "shelter_type": "basic_hut"},
+        },
+        {
+            "type": "node",
+            "id": 6,
+            "lat": 50.3,
+            "lon": -122.7,
+            "tags": {"highway": "trailhead", "name": "Rainbow Lake trailhead"},
+        },
+        {
+            "type": "node",
+            "id": 7,
+            "lat": 50.4,
+            "lon": -122.6,
+            "tags": {"mountain_pass": "yes", "name": "Singing Pass", "ele": "1650 m"},
+        },
+        {
+            "type": "way",
+            "id": 8,
+            "tags": {"natural": "cliff"},
+            "geometry": g((50.0, -122.0), (50.00001, -121.9995), (50.0, -121.999)),
+        },
+        {
+            "type": "way",
+            "id": 9,
+            "tags": {"natural": "glacier", "name": "Small Glacier"},
+            "geometry": g((50.0, -122.0), (50.0, -121.99), (50.01, -121.99), (50.0, -122.0)),
+        },
+        # A glacier in pieces: two outer ways that join into one ring, and a hole.
+        {
+            "type": "relation",
+            "id": 10,
+            "tags": {"natural": "glacier", "name": "Big Glacier"},
+            "members": [
+                {"type": "way", "role": "outer", "geometry": g((50.0, -121.0), (50.0, -120.9))},
+                {
+                    "type": "way",
+                    "role": "outer",
+                    "geometry": g((50.1, -120.9), (50.1, -121.0), (50.0, -121.0)),
+                },
+                {"type": "way", "role": "outer", "geometry": g((50.0, -120.9), (50.1, -120.9))},
+                {
+                    "type": "way",
+                    "role": "inner",
+                    "geometry": g(
+                        (50.04, -120.96), (50.04, -120.94), (50.06, -120.94), (50.04, -120.96)
+                    ),
+                },
+            ],
+        },
+        {
+            "type": "relation",
+            "id": 11,
+            "tags": {"route": "ski", "name": "Spearhead Traverse"},
+            "members": [
+                {"type": "way", "role": "", "geometry": g((50.0, -122.9), (50.01, -122.89))},
+                {"type": "way", "role": "", "geometry": g((50.01, -122.89), (50.02, -122.88))},
+                {"type": "node", "role": "", "lat": 50.0, "lon": -122.9},
+            ],
+        },
+        # A glacier whose outline the query cut off: nothing to draw.
+        {
+            "type": "relation",
+            "id": 12,
+            "tags": {"natural": "glacier"},
+            "members": [{"type": "way", "role": "outer", "geometry": g((1, 1), (1, 2))}],
+        },
+    ]
+    fc = to_geojson(els)
+    by = [(f["properties"]["kind"], f["properties"].get("name")) for f in fc["features"]]
+    assert by == [
+        ("hut", "Himmelsbach Hut"),
+        ("hut", "Cabin"),
+        ("hut", ""),
+        ("trailhead", "Rainbow Lake trailhead"),
+        ("pass", "Singing Pass"),
+        ("cliff", ""),
+        ("glacier", "Small Glacier"),
+        ("glacier", "Big Glacier"),
+        ("route", "Spearhead Traverse"),
+    ]
+    f = fc["features"]
+    assert f[0]["properties"] == {
+        "kind": "hut",
+        "type": "alpine_hut",
+        "name": "Himmelsbach Hut",
+        "ele": 1880,
+    }
+    assert f[1]["geometry"]["coordinates"] == pytest.approx([-122.998667, 50.000667])
+    assert f[2]["properties"]["type"] == "shelter"
+    assert f[4]["properties"]["ele"] == 1650
+    # The cliff's middle point is within a metre of the line: simplified away.
+    assert len(f[5]["geometry"]["coordinates"]) == 2
+    big = f[7]["geometry"]
+    assert big["type"] == "MultiPolygon" and len(big["coordinates"]) == 1
+    outer, hole = big["coordinates"][0]
+    assert outer[0] == outer[-1] and len(outer) == 5
+    assert hole[0] == [-120.96, 50.04]
+    route = f[8]
+    assert route["geometry"]["type"] == "MultiLineString"
+    assert len(route["geometry"]["coordinates"]) == 2
+    assert route["properties"]["type"] == "skitour"
+
+
+def test_osm_rings_and_simplify() -> None:
+    from snowwatch.osm import rings, simplify
+
+    # Ways in any order and direction close into one ring.
+    r = rings([[[0, 0], [1, 0]], [[1, 1], [1, 0]], [[0, 1], [1, 1]], [[0, 0], [0, 1]]])
+    assert len(r) == 1 and r[0][0] == r[0][-1] and len(r[0]) == 5
+    assert rings([[[0, 0], [1, 0]]]) == []
+    line = [[0.0, 50.0], [0.001, 50.0], [0.002, 50.0], [0.003, 50.001]]
+    assert simplify(line) == [[0.0, 50.0], [0.002, 50.0], [0.003, 50.001]]
+
+
+def test_osm_query_asks_for_the_new_features() -> None:
+    from snowwatch.osm import query
+
+    q = query([(50.0, -123.0, 50.3, -122.7)])
+    assert '"tourism"~"^(alpine_hut|wilderness_hut)$"' in q
+    assert 'relation["route"~"^(ski|piste)$"]' in q
+    assert q.count("out tags geom;") == 1 and q.endswith("out geom;")
