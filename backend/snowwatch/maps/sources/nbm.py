@@ -98,6 +98,17 @@ class Nbm:
         )
         return [grib.on_region(m, self.region, self.grids_dir) for m in raw]
 
+    def field(self, fhour: int, var: str, level: str) -> np.ndarray | None:
+        """A value at one forecast hour (such as `SNOWLVL` at `0 m above mean sea level`,
+        or `GUST` at `10 m above ground`) on the region, or None if the file lacks it."""
+        raw = grib.fetch_messages(
+            self.net,
+            file_url(self.run, fhour),
+            [rf":{var}:{level}:{fhour} hour fcst:"],
+            self.cache_dir,
+        )
+        return grib.on_region(raw[0], self.region, self.grids_dir)
+
     def precip(self, end: int, hours: int) -> tuple[np.ndarray, np.ndarray] | None:
         """Water (mm) over the period and its type codes, or None if NBM hasn't it.
 

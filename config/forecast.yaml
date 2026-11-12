@@ -87,6 +87,7 @@ map:
   radar_minutes: 6       # radar and nowcast (a new scan every 6 minutes)
   forecast_minutes: 30   # forecast frames (hourly to 48 h, then 3- and 6-hourly to 10 days)
   totals_minutes: 60     # snow totals (12 h to 10 days)
+  layers_minutes: 30     # snow level, wind, snow on the ground, observed snowfall, clouds
   # NOAA NBM runs (UTC) for the US beyond 48 h and US snow totals. Only 00/06/12/18
   # reach 10 days; each new run costs ~60-80 MB of downloads.
   nbm_cycles: [0, 12]

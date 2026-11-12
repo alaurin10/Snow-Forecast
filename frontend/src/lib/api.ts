@@ -11,6 +11,7 @@ import type {
 	Me,
 	MetaOut,
 	OverviewRow,
+	PointOut,
 	StatusOut,
 	VerificationOut,
 	ZonesOut,
@@ -116,6 +117,9 @@ export function getAvalanche(): Promise<Record<string, AvalancheView>> {
 export const getAvalancheZones = () => get<ZonesOut>('/api/avalanche/zones.geojson');
 /** Recent satellite: daily VIIRS and HLS days, and clear Sentinel-2 scenes per location. */
 export const getSat = () => get<SatOut>('/api/sat');
+/** What the map's weather says at a point (totals, the timeline, snow level, wind …). */
+export const getMapPoint = (lat: number, lon: number) =>
+	get<PointOut>(`/api/map/point?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
 
 /** The concern index's settings, or null when the server has it off (HAZARD_INDEX). */
 export async function getConcern(): Promise<ConcernOut | null> {

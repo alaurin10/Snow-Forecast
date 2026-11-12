@@ -18,6 +18,18 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **More weather on the map.** Snow level (every 250 m) and wind (gusts near the ground,
+  or the wind at ridge level) every 3 hours for about 3½ days, from Canada's HRDPS and
+  RDPS and NOAA's National Blend, blended across the border; snow on the ground (SNODAS
+  in the US, CaLDAS in Canada); snow that fell in the last 24, 48 and 72 hours (NOHRSC,
+  the US only); and the last three hours of GOES-West clouds. One weather layer at a
+  time, from the controls or the Layers sheet. Zoomed in on Snow level, the rain/snow
+  line is draped on the terrain. Drawn by a new `layers` job every 30 minutes
+  (`map.layers_minutes`, `snowwatch map layers`).
+- **Tap the map for the weather there.** The Inspector adds forecast snow for 24 hours,
+  3 and 7 days, the next two days hour by hour, the snow level, the wind, snow on the
+  ground and snow that fell, from `GET /api/map/point`. Away from saved locations the
+  Wind effect layer now uses the map's own forecast for the next 24 and 72 hours.
 - **Recent satellite base map.** Sentinel-2 at 10 m over the 24 km round each location:
   first the newest clear view, stitched from the newest passes that saw each part, with
   dashed lines and dates where they meet; then the newest whole scenes that cover the

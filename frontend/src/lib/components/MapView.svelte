@@ -19,9 +19,18 @@
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
 	import { snowNum, type UnitSystem } from '../units';
-	import { getAvalancheZones, getConcern, getMapWind, getSat } from '../api';
-	import type { ConcernOut, MapWindOut, SatOut, ZoneFeature, ZonesOut } from '../types.gen';
-	import { prefs } from '../prefs.svelte';
+	import { getAvalancheZones, getConcern, getMapPoint, getMapWind, getSat } from '../api';
+	import type {
+		ConcernOut,
+		MapWindOut,
+		PointOut,
+		SatOut,
+		ZoneFeature,
+		ZonesOut
+	} from '../types.gen';
+	import { prefs, type MapWeather } from '../prefs.svelte';
+	import { untrack } from 'svelte';
+	import { layerLabel, layerSource, WEATHER_WORDS, weatherView } from '../map/weather';
 	import { viewport } from '../viewport.svelte';
 	import {
 		frameLabel,
@@ -31,7 +40,6 @@
 		RADAR_GAPS,
 		RAMPS,
 		rampTop,
-		totalSources,
 		type Frame,
 		type Timeline
 	} from '../radar';
@@ -53,18 +61,23 @@
 		CONCERN_MIN_ZOOM,
 		OVERLAY_MIN_ZOOM,
 		PRECIP_BEFORE,
-		PRECIP_OPACITY,
 		sky,
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
-		TOTAL_OPACITY,
+		weatherOpacity,
 		WIND_MIN_ZOOM
 	} from '../map/style';
 	import { AnalysisLayer, AreaRunner, viewBounds, type AreaState } from '../map/layers/analysis';
 	import type { AreaJob } from '../map/terrain/client';
 	import type { SunFacts } from '../map/terrain/shade';
 	import { sunDay, sunPosition, type Ymd } from '../map/terrain/sun';
-	import { WIND_WINDOWS, windSource, type WindWindow } from '../map/windsource';
+	import {
+		distanceKm,
+		POINT_RANGE_KM,
+		WIND_WINDOWS,
+		windSource,
+		type WindWindow
+	} from '../map/windsource';
 	import TerrainControls from '../map/TerrainControls.svelte';
 	import {
 		contourTiles,
@@ -98,6 +111,7 @@
 	import { addZones, setZones } from '../map/layers/avalanche';
 	import { nearestSpot, recentSpec, satViews, type RecentSpec } from '../map/sat';
 	import { setRecent, setRecentDates } from '../map/layers/sat';
+	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
@@ -155,9 +169,9 @@
 	const avyOverlay = $derived(overlayMode === 'problems' || overlayMode === 'concern');
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
-	const totalsMode = $derived(radar && prefs.mapWeather === 'totals');
-	/** Snow totals are smooth fields: they stay on further in than the hourly frames. */
-	const tooClose = $derived(zoom >= (totalsMode ? 15 : 13));
+	const weather = $derived<MapWeather>(radar ? prefs.mapWeather : 'off');
+	/** Smooth fields (totals, snow level, wind, snow on the ground) stay on further in. */
+	const tooClose = $derived(zoom >= (weather === 'radar' || weather === 'clouds' ? 13 : 15));
 
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
 		panel = panel === p ? 'none' : p;
@@ -312,7 +326,24 @@
 	const sunLight = $derived(
 		sunOn && sunMode === 'shade' && sunPos && sunPos.altitude > 0 && !areaTooFar ? sunPos : null
 	);
-	const wind = $derived(windSource(windData, centre.lat, centre.lon, windWindow));
+	/** The map's own forecast at the centre: the wind-effect layer's wind away from locations. */
+	let centrePoint = $state.raw<PointOut | null>(null);
+	let pointTried = $state(false);
+	$effect(() => {
+		const c = centre;
+		if (!windOn || !windLoaded || areaTooFar) return;
+		if (untrack(() => windSource(windData, c.lat, c.lon, 'next24'))) return;
+		const have = untrack(() => centrePoint);
+		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < POINT_RANGE_KM / 2) return;
+		pointTried = false;
+		let gone = false;
+		getMapPoint(c.lat, c.lon)
+			.then((p) => !gone && (centrePoint = p))
+			.catch((e) => console.error('point', e))
+			.finally(() => !gone && (pointTried = true));
+		return () => (gone = true);
+	});
+	const wind = $derived(windSource(windData, centre.lat, centre.lon, windWindow, centrePoint));
 
 	// The locations' wind, fetched when the layer is first switched on.
 	$effect(() => {
@@ -498,6 +529,9 @@
 	let factsError = $state<string | null>(null);
 	let probeSun = $state<SunFacts | null>(null);
 	let probeWind = $state<{ value: number; window: string } | null>(null);
+	/** What the map's weather says at the tapped spot (/api/map/point). */
+	let probePoint = $state.raw<PointOut | null>(null);
+	let probePointState = $state<'loading' | 'ready' | 'failed'>('loading');
 	let probeMarker: Marker | null = null;
 	let probeToken = 0;
 
@@ -560,6 +594,19 @@
 		factsError = null;
 		probeSun = null;
 		probeWind = null;
+		probePoint = null;
+		probePointState = 'loading';
+		// The weather there comes from the server, the terrain from this device: each joins
+		// the sheet when it's ready.
+		const pointP = offline ? Promise.reject(new Error('offline')) : getMapPoint(lat, lon);
+		pointP.then(
+			(p) => {
+				if (token !== probeToken) return;
+				probePoint = p;
+				probePointState = 'ready';
+			},
+			() => token === probeToken && (probePointState = 'failed')
+		);
 		if (!probeMarker) {
 			const dot = document.createElement('div');
 			dot.className = 'probe';
@@ -577,7 +624,16 @@
 				(s) => token === probeToken && (probeSun = s),
 				() => {}
 			);
-			const w = windSource(windData, lat, lon, windWindow);
+			// The nearest location's wind, else the map's forecast at the spot itself.
+			const w =
+				windSource(windData, lat, lon, windWindow) ??
+				(windOn
+					? await pointP.then(
+							(p) => windSource(windData, lat, lon, windWindow, p),
+							() => null
+						)
+					: null);
+			if (token !== probeToken) return;
 			if (windOn && w?.rose && w.scale > 0) {
 				const { scale } = w;
 				const label = WIND_WINDOWS.find((x) => x.id === windWindow)!.label;
@@ -601,6 +657,7 @@
 		factsError = null;
 		probeSun = null;
 		probeWind = null;
+		probePoint = null;
 		probeMarker?.remove();
 	}
 
@@ -644,86 +701,89 @@
 		return () => window.removeEventListener('resize', measure);
 	});
 
-	// ---- Weather timeline ------------------------------------------------------------
-	// The server draws every frame; here we download them all once and swap them.
-	const on = $derived(radar && prefs.mapWeather !== 'off');
+	// ---- Weather layer ----------------------------------------------------------------
+	// The server draws every picture; here we download them once and swap them.
+	const on = $derived(weather !== 'off');
 	let timeline = $state<Timeline | null>(null);
-	/** Why precipitation isn't showing, in words; null when it is. */
+	/** Why the weather isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
 	let frame = $state(0);
-	// Radar loops play by themselves, unless the device asks for less motion.
+	// Loops play by themselves, unless the device asks for less motion.
 	let playing = $state(
 		typeof matchMedia === 'undefined' || !matchMedia('(prefers-reduced-motion: reduce)').matches
 	);
 	let now = $state(Date.now());
-	/** The frame on screen (file name), which lags `frame` for the moment it takes to decode. */
+	/** The picture on screen (file name), which lags the wanted one while it decodes. */
 	let shown = $state<string | null>(null);
 	/** Frames downloaded so far. */
 	let ready_ = $state<Set<string>>(new Set());
 
-	const frames = $derived(timeline?.frames ?? []);
+	/** What the chosen layer shows: a loop of frames, or pictures picked by window. */
+	const view = $derived(weatherView(timeline, weather, prefs.mapWind));
+	const looping = $derived(view.mode === 'loop');
+	const frames = $derived(view.frames);
 	const count = $derived(frames.length);
-	const current = $derived<Frame | undefined>(frames[Math.min(frame, count - 1)]);
-	const label = $derived(current ? frameLabel(current, now) : null);
-	const waiting = $derived(!!current && shown !== current.file);
+	const current = $derived<Frame | undefined>(
+		looping ? frames[Math.min(frame, count - 1)] : undefined
+	);
+	const label = $derived(
+		current ? (weather === 'radar' ? frameLabel(current, now) : layerLabel(current, now)) : null
+	);
+	/** Each window-type layer's chosen window, in hours. */
+	let picked = $state<Record<string, number>>({ totals: 24, snowfall: 24, depth: 0 });
+	const pick = $derived(
+		view.mode === 'pick'
+			? (view.picks.find((p) => p.id === picked[weather]) ??
+					view.picks[Math.min(1, view.picks.length - 1)])
+			: undefined
+	);
+	const waiting = $derived(
+		(!!current && shown !== current.file) || (!!pick && shown !== pick.file)
+	);
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
-	/** Which snow total is shown: its window in hours. */
-	let totalWindow = $state(24);
-	const totals = $derived(timeline?.totals ?? []);
-	const total = $derived(
-		totals.find((t) => t.window === totalWindow) ?? totals[Math.min(1, totals.length - 1)]
-	);
 	$effect(() => {
-		const tot = totalsMode;
+		const o = weatherOpacity(weather);
 		if (ready && map?.getLayer(PrecipLayer.ID))
-			map.setPaintProperty(PrecipLayer.ID, 'raster-opacity', tot ? TOTAL_OPACITY : PRECIP_OPACITY);
+			map.setPaintProperty(PrecipLayer.ID, 'raster-opacity', o);
 	});
 
-	/** Put the wanted frame on screen; the old one stays until the new one is decoded. */
+	/** Put the wanted picture on screen; the old one stays until the new one is decoded. */
 	let showToken = 0;
 	async function show() {
 		if (!map || !timeline) return;
-		if (on && totalsMode && total) {
-			const t = total;
-			const token = ++showToken;
-			const bmp = await store.bitmap(t);
-			if (token !== showToken || !overlay) return;
-			overlay.draw(t.file, bmp);
-			shown = t.file;
-			return;
-		}
-		if (!on || !current || totalsMode) {
+		const want = pick ?? current;
+		if (!on || !want) {
 			++showToken;
 			overlay?.draw(null, null);
 			shown = null;
 			return;
 		}
-		const f = current;
 		const token = ++showToken;
-		const bmp = await store.bitmap(f);
+		const bmp = await store.bitmap(want);
 		if (token !== showToken || !overlay) return;
-		overlay.draw(f.file, bmp);
-		shown = f.file;
+		overlay.draw(want.file, bmp);
+		shown = want.file;
 		// Have the next one decoded before it's asked for.
-		const next = frames[(frame + 1) % count];
+		const next = looping ? frames[(frame + 1) % count] : undefined;
 		if (next) void store.bitmap(next);
 	}
 
 	/**
-	 * Download the frames, nearest to the one on screen first. Frames beyond ~48 h wait
-	 * until the slider reaches them or the page has sat idle 5 seconds, so the first paint
-	 * stays a couple of MB.
+	 * Download the loop's frames, nearest to the one on screen first. Radar frames beyond
+	 * ~48 h wait until the slider reaches them or the page has sat idle 5 seconds, so the
+	 * first paint stays a couple of MB.
 	 */
 	let fetchRun = 0;
 	let extendedWanted = $state(false);
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	async function fetchAll() {
 		const run = ++fetchRun;
-		if (!timeline) return;
-		const from = timeline.extendedFrom;
-		const order = frames
+		if (!timeline || !looping) return;
+		const from = view.extendedFrom;
+		const list = frames;
+		const order = list
 			.map((f, i) => ({ f, i, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
 			.filter((x) => extendedWanted || from < 0 || x.i < from)
 			.sort((a, b) => a.d - b.d)
@@ -743,28 +803,46 @@
 	}
 	// The slider entered the extended stretch: fetch it now.
 	$effect(() => {
-		const from = timeline?.extendedFrom ?? -1;
-		if (from >= 0 && frame >= from && !totalsMode) extendedWanted = true;
+		const from = view.extendedFrom;
+		if (from >= 0 && frame >= from && looping) extendedWanted = true;
 	});
 	$effect(() => {
-		if (extendedWanted && ready) void fetchAll();
+		if (extendedWanted && ready) void untrack(fetchAll);
 	});
 	$effect(() => () => clearTimeout(idleTimer));
+	// Another loop (or a new index): note what's already downloaded, fetch the rest.
+	$effect(() => {
+		const list = frames;
+		if (!ready) return;
+		ready_ = new Set(list.filter((f) => store.has(f)).map((f) => f.file));
+		void untrack(fetchAll);
+	});
+	// Another layer: start it at "now" (or its first frame).
+	let lastLayer = '';
+	$effect(() => {
+		const key = `${weather}|${prefs.mapWind}`;
+		if (key === lastLayer) return;
+		lastLayer = key;
+		frame = Math.max(
+			0,
+			untrack(() => view.now)
+		);
+	});
 
 	async function refresh() {
 		try {
 			const before = current?.t;
-			const atNow = !timeline || frame === timeline.now;
+			const atNow = !timeline || frame === Math.max(0, view.now);
 			const tl = await loadTimeline();
 			loadError = null;
 			// The pictures' box only changes when locations do.
 			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
+			const next = weatherView(tl, weather, prefs.mapWind);
 			timeline = tl;
-			store.keepOnly([...tl.frames, ...tl.totals]);
-			ready_ = new Set(tl.frames.filter((f) => store.has(f)).map((f) => f.file));
+			store.keepOnly([...tl.frames, ...tl.totals, ...Object.values(tl.layers).flat()]);
 			// Keep the viewer's place if that time still exists; otherwise go to "now".
-			const same = tl.frames.findIndex((f) => f.t === before);
-			frame = atNow || same < 0 ? Math.max(0, tl.now) : same;
+			const same = next.frames.findIndex((f) => f.t === before);
+			frame = atNow || same < 0 ? Math.max(0, next.now) : same;
 			if (map && (!overlay || !sameBox)) {
 				overlay?.remove();
 				// Over the base map, under the satellite labels and the ski runs.
@@ -773,17 +851,16 @@
 					tl.bounds,
 					tl.width,
 					tl.height,
-					totalsMode ? TOTAL_OPACITY : PRECIP_OPACITY,
+					weatherOpacity(weather),
 					PRECIP_BEFORE
 				);
 			}
 			void show();
-			void fetchAll();
 		} catch (e) {
 			loadError =
 				e instanceof PrecipError
 					? e.message
-					: `Precipitation couldn't be shown (${e instanceof Error ? e.message : e}).`;
+					: `The weather couldn't be shown (${e instanceof Error ? e.message : e}).`;
 			console.error('precipitation', e);
 		}
 	}
@@ -798,16 +875,15 @@
 	$effect(() => {
 		void frame;
 		void on;
-		void count;
-		void totalsMode;
-		void total;
+		void current;
+		void pick;
 		if (ready) void show();
 	});
 
 	// Play: step when the next frame is on hand (or after a short wait), quicker through
-	// the radar, and hold a moment on "now" and on the last frame.
+	// observations, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || !on || totalsMode || count < 2) return;
+		if (!ready || !playing || !looping || count < 2) return;
 		let hold = 0;
 		let waits = 0;
 		let loops = 0;
@@ -822,15 +898,41 @@
 			// A few loops, then rest on "now": endless playback keeps the phone busy.
 			if (next === 0 && ++loops >= 3) {
 				playing = false;
-				frame = Math.max(0, timeline?.now ?? 0);
+				frame = Math.max(0, view.now);
 				return;
 			}
 			frame = next;
 			if (next === count - 1) hold = 4;
-			else if (next === timeline?.now) hold = 3;
+			else if (next === view.now) hold = 3;
 		};
 		id = setTimeout(tick, 600);
 		return () => clearTimeout(id);
+	});
+
+	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
+	/** The map's forecast at the centre, for the snow level the drape uses. */
+	let levelPoint = $state.raw<PointOut | null>(null);
+	const lineOn = $derived(weather === 'snowlevel' && zoom >= SNOWLINE_ZOOM - 0.5 && !offline);
+	$effect(() => {
+		const c = centre;
+		if (!lineOn) return;
+		const have = untrack(() => levelPoint);
+		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < 3) return;
+		let gone = false;
+		getMapPoint(c.lat, c.lon)
+			.then((p) => !gone && (levelPoint = p))
+			.catch((e) => console.error('point', e));
+		return () => (gone = true);
+	});
+	/** The snow level at the map's centre for the frame on the slider. */
+	const centreLevel = $derived.by(() => {
+		if (!lineOn || !levelPoint || !current) return null;
+		const t = current.t;
+		return levelPoint.snow_level.find((x) => x.t === t)?.value ?? null;
+	});
+	$effect(() => {
+		const level = centreLevel;
+		if (ready && map && radar) setSnowLine(map, level, PrecipLayer.ID);
 	});
 
 	// Stop playing when the app goes to the background.
@@ -1080,7 +1182,15 @@
 	}
 
 	const unit = $derived(units === 'imperial' ? 'in' : 'cm');
-	const source = $derived(current ? frameSource(current) : '');
+	const source = $derived(
+		weather === 'radar'
+			? current
+				? frameSource(current)
+				: ''
+			: looping
+				? layerSource(weather, prefs.mapWind, current)
+				: (pick?.sources ?? '')
+	);
 	const radarShown = $derived(!!current && current.kind !== 'forecast');
 </script>
 
@@ -1215,7 +1325,7 @@
 			{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline || (on && tooClose)}
 				<p class="note glass" role="status">
 					{#if on && tooClose && !offline && locState !== 'locating' && locState !== 'denied' && locState !== 'unavailable'}
-						Zoom out to see {totalsMode ? 'snow totals' : 'precipitation'}.
+						Zoom out to see {WEATHER_WORDS[weather]}.
 					{/if}
 					{#if offline}
 						Offline: showing saved maps.
@@ -1241,6 +1351,8 @@
 					wind={probeWind}
 					avy={probeAvy}
 					concern={probeConcern}
+					point={probePoint}
+					pointState={probePointState}
 					onzone={() => (zoneOpen = probeZone)}
 					onclose={closeInspector}
 				/>
@@ -1256,7 +1368,7 @@
 				<p class="item">
 					<span class="pin ring" aria-hidden="true"></span> Ring: avalanche danger, when rated.
 				</p>
-				{#if on}
+				{#if weather === 'radar'}
 					<p>{radarShown ? `${source} ${RADAR_GAPS}` : source}</p>
 					<p>
 						Darkest shades: snow {rampTop(RAMPS.snow, units)}, rain {rampTop(RAMPS.rain, units)}.
@@ -1265,12 +1377,28 @@
 						Snow per hour assumes about 10 parts snow to 1 part water. Beyond about two days the
 						frames are 3- and 6-hour averages, and forecasts get rougher the further out they go.
 					</p>
-					<p class="faint">
+				{:else if weather === 'totals'}
+					<p>
 						Snow total: Canadian models in Canada (HRDPS, then RDPS, then GDPS), with the snow ratio
 						from the forecast temperature; NOAA's National Blend of Models in the US; blended across
 						the border.
-						{#if totalsMode && total}{totalSources(total)}{/if}
 					</p>
+					{#if source}<p class="faint">{source}</p>{/if}
+				{:else if on && source}
+					<p>{source}</p>
+					{#if weather === 'snowfall'}
+						<p class="faint">
+							Snow that fell, analysed from observers' reports and radar. There is no such analysis
+							for Canada.
+						</p>
+					{:else if weather === 'depth'}
+						<p class="faint">
+							Snow on the ground as modelled daily from observations: 1 km in the US, 2.5 km in
+							Canada, so a single slope can differ a lot.
+						</p>
+					{:else if weather !== 'clouds'}
+						<p class="faint">Every 3 hours to about 3½ days. Tap the map for the numbers there.</p>
+					{/if}
 				{/if}
 				<p class="faint">
 					Terrain: elevation from Mapterhorn (US lidar to 1 m, Canadian lidar to 2 m, 10–30 m
@@ -1348,20 +1476,22 @@
 					bind:windWindow
 					{wind}
 					{windLoaded}
+					{pointTried}
 				/>
 			{/if}
 			{#if on}
 				<TimelineControls
-					{timeline}
+					{view}
+					{weather}
 					{units}
-					{totalsMode}
 					bind:frame
 					bind:playing
-					bind:totalWindow
-					{total}
+					bind:pickId={() => pick?.id ?? 0, (v) => (picked = { ...picked, [weather]: v })}
+					{pick}
 					{current}
 					{label}
 					{waiting}
+					snowLine={centreLevel}
 					ready={ready_}
 					{loadError}
 				/>

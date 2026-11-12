@@ -2,7 +2,8 @@
 // - App files (hashed JS/CSS, icons) are cached at install and served from cache.
 // - /api/* is network-first, falling back to the last good response (up to 2 days
 //   old) when offline. Owner endpoints (/api/me, /api/auth, /api/admin) are never
-//   cached: they depend on who is signed in.
+//   cached: they depend on who is signed in. Nor are the map's tap-for-numbers answers
+//   (/api/map/point): every tap is a new spot.
 // - Map tiles, terrain, label fonts and ski runs saved for offline use (Map → offline
 //   maps; see lib/offlineMaps.ts) are answered from that cache first. Other map tiles
 //   go straight to the network: they are many and big, and the server caches them.
@@ -24,6 +25,8 @@ const API_MAX_AGE_MS = 2 * 24 * 3600 * 1000;
 // Keep in step with OFFLINE_CACHE in lib/offlineMaps.ts.
 const OFFLINE = 'offline-maps-v1';
 const PRIVATE = ['/api/me', '/api/auth/', '/api/admin/', '/api/push/'];
+// A tap on the map asks for its own spot each time: not worth keeping for offline use.
+const UNCACHED = ['/api/map/point'];
 // Elevation tiles: Mapterhorn, and AWS (older saved areas, and the fallback).
 const DEM_HOSTS: Record<string, string> = {
 	'tiles.mapterhorn.com': '/',
@@ -127,7 +130,7 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 		event.respondWith(savedFirst(request));
 	} else if (url.pathname.startsWith('/api/osm/')) {
 		event.respondWith(networkThenSaved(request));
-	} else if (PRIVATE.some((p) => url.pathname.startsWith(p))) {
+	} else if ([...PRIVATE, ...UNCACHED].some((p) => url.pathname.startsWith(p))) {
 		return; // straight to the network, never cached
 	} else if (url.pathname.startsWith('/api/')) {
 		event.respondWith(apiFirst(request));

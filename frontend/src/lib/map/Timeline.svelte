@@ -1,35 +1,36 @@
 <!--
-  The weather layer's controls at the foot of the map: Radar & forecast (a player and a
-  slider from the last three hours of radar, through the nowcast, to ten days out) or
-  Snow total (a window picker), and the colour key for whichever is showing.
+  The weather layer's controls at the foot of the map: which layer (radar & forecast, snow
+  total, snow level, wind, snow on the ground, observed snowfall or clouds); for the loops,
+  a player and a slider (radar from three hours ago, through the nowcast, to ten days out;
+  snow level and wind to three and a half days; clouds over the last three hours); for the
+  others, a window picker; and the colour key for whichever is showing.
 -->
 <script lang="ts">
-	import type { UnitSystem } from '../units';
-	import { prefs } from '../prefs.svelte';
+	import { elevation, type UnitSystem } from '../units';
+	import { prefs, type MapWeather } from '../prefs.svelte';
+	import { RAMPS, rampTop, TOTAL, totalTick, type Frame, type RampStep } from '../radar';
 	import {
-		RAMPS,
-		rampTop,
-		TOTAL,
-		totalLabel,
-		totalName,
-		totalSources,
-		totalSpan,
-		totalTick,
-		type Frame,
-		type Timeline,
-		type Total
-	} from '../radar';
+		DEPTH,
+		depthTick,
+		levelTick,
+		SNOWLEVEL,
+		WEATHER_CHOICES,
+		WIND,
+		windTick,
+		type Pick,
+		type WeatherView
+	} from './weather';
 
 	interface Props {
-		timeline: Timeline | null;
+		view: WeatherView;
+		weather: MapWeather;
 		units: UnitSystem;
-		totalsMode: boolean;
 		/** The frame on the slider. */
 		frame: number;
 		playing: boolean;
-		/** The snow total's window, in hours. */
-		totalWindow: number;
-		total: Total | undefined;
+		/** The picked picture's window, in hours (0 for snow on the ground). */
+		pickId: number;
+		pick: Pick | undefined;
 		current: Frame | undefined;
 		label: { when: string; rel: string } | null;
 		/** The frame on the slider is still being decoded. */
@@ -37,44 +38,45 @@
 		/** Frames downloaded so far (file names). */
 		ready: Set<string>;
 		loadError: string | null;
+		/** The snow level draped on the terrain (zoomed in), metres; null when it isn't. */
+		snowLine?: number | null;
 	}
 
 	let {
-		timeline,
+		view,
+		weather,
 		units,
-		totalsMode,
 		frame = $bindable(),
 		playing = $bindable(),
-		totalWindow = $bindable(),
-		total,
+		pickId = $bindable(),
+		pick,
 		current,
 		label,
 		waiting,
 		ready,
-		loadError
+		loadError,
+		snowLine = null
 	}: Props = $props();
 
-	const unit = $derived(units === 'imperial' ? 'in' : 'cm');
 	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
-	const frames = $derived(timeline?.frames ?? []);
-	const totals = $derived(timeline?.totals ?? []);
+	const frames = $derived(view.frames);
 	const count = $derived(frames.length);
 	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
 	/** The slider's width in pixels, so day names can be kept far enough apart to read. */
 	let trackWidth = $state(300);
 	/** A day name needs about this much room (a three-letter name and its tick mark). */
 	const TICK_PX = 30;
-	// Under the slider: "Now" where the radar ends, then each new day of the forecast.
-	// Beyond two days a day is only a few frames wide, so names that would crowd the one
-	// before are left out.
+	// Under the slider: "Now" where the observations end, then each new day of the
+	// forecast. Beyond two days a day is only a few frames wide, so names that would crowd
+	// the one before are left out.
 	const ticks = $derived.by(() => {
 		const out: { at: number; name: string; now?: boolean }[] = [];
-		const nowAt = timeline?.now ?? -1;
+		const nowAt = view.now;
 		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
 		let prevDay = -1;
 		frames.forEach((f, i) => {
 			if (f.kind !== 'forecast') return;
-			const start = new Date((f.t - (f.span_h || 1) * 3600) * 1000);
+			const start = new Date((f.t - f.span_h * 3600) * 1000);
 			const day = start.getDate();
 			const newDay = prevDay >= 0 && day !== prevDay;
 			prevDay = day;
@@ -86,14 +88,14 @@
 	});
 	// The nowcast's stretch of the slider, between the radar and the forecast.
 	const nowcastBand = $derived.by(() => {
-		const from = timeline?.now ?? -1;
-		const to = timeline?.nowcastEnd ?? -1;
+		const from = view.now;
+		const to = view.nowcastEnd;
 		if (from < 0 || to <= from) return null;
 		return { left: pct(from), width: pct(to) - pct(from) };
 	});
 	// Beyond ~48 h: 3- and 6-hour averages, a coarser stretch of the slider.
 	const extendedBand = $derived.by(() => {
-		const from = timeline?.extendedFrom ?? -1;
+		const from = view.extendedFrom;
 		if (from < 1 || count < 2) return null;
 		const left = (pct(from - 1) + pct(from)) / 2;
 		return { left, width: 100 - left };
@@ -109,37 +111,83 @@
 		});
 		return `linear-gradient(90deg, ${stops.join(', ')})`;
 	});
+	/** The key for the layers drawn in cells: its steps, tick text and unit. */
+	const cells = $derived.by<{
+		steps: RampStep[];
+		tick: (v: number) => string;
+		unit: string;
+	} | null>(() => {
+		const imp = units === 'imperial';
+		if (weather === 'totals' || weather === 'snowfall')
+			return { steps: TOTAL, tick: (v) => totalTick(v, units), unit: imp ? 'in' : 'cm' };
+		if (weather === 'depth')
+			return { steps: DEPTH, tick: (v) => depthTick(v, units), unit: imp ? 'in' : 'cm' };
+		if (weather === 'snowlevel')
+			return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
+		if (weather === 'wind')
+			return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
+		return null;
+	});
+	/** A cell dark enough to need light text (relative luminance under ~0.3). */
+	function darkCell(hex: string): boolean {
+		const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+		return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.42;
+	}
+	/** Said when a layer has nothing to show yet. */
+	const empty = $derived(
+		weather === 'totals'
+			? "Snow totals aren't drawn yet."
+			: weather === 'snowfall'
+				? "Observed snowfall isn't available yet."
+				: weather === 'depth'
+					? "Snow on the ground isn't available yet."
+					: weather === 'radar'
+						? 'Loading…'
+						: "This layer isn't drawn yet."
+	);
+	// Keep the chosen layer's button in view in the scrolling row.
+	let modesEl = $state<HTMLDivElement>();
+	$effect(() => {
+		void weather;
+		modesEl?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({
+			block: 'nearest',
+			inline: 'nearest'
+		});
+	});
 </script>
 
 <section class="controls glass" aria-label="Precipitation">
-	<div class="modes seg" role="group" aria-label="Show">
-		<button aria-pressed={!totalsMode} onclick={() => prefs.setMapWeather('radar')}
-			>Radar & forecast</button
-		>
-		<button aria-pressed={totalsMode} onclick={() => prefs.setMapWeather('totals')}
-			>Snow total</button
-		>
+	<div class="modes seg" role="group" aria-label="Show" bind:this={modesEl}>
+		{#each WEATHER_CHOICES as w (w.id)}
+			<button aria-pressed={weather === w.id} onclick={() => prefs.setMapWeather(w.id)}
+				>{w.label}</button
+			>
+		{/each}
 	</div>
 	<!-- Fixed rows, so the box keeps its size whatever it shows. -->
 	<div class="main">
-		{#if totalsMode}
-			{#if total}
+		{#if view.mode === 'pick'}
+			{#if pick}
 				<div class="totals">
-					<div class="seg" role="group" aria-label="Window">
-						{#each totals as t (t.window)}
-							<button
-								aria-pressed={t.window === total.window}
-								aria-label={totalName(t)}
-								onclick={() => (totalWindow = t.window)}>{totalLabel(t)}</button
-							>
-						{/each}
-					</div>
-					<span class="span faint" title={totalSources(total)}>{totalSpan(total)}</span>
+					{#if view.picks.length > 1}
+						<div class="seg" role="group" aria-label="Window">
+							{#each view.picks as p (p.id)}
+								<button
+									aria-pressed={p.id === pick.id}
+									aria-label={p.name}
+									onclick={() => (pickId = p.id)}>{p.label}</button
+								>
+							{/each}
+						</div>
+					{:else}
+						<strong class="one">{pick.name}</strong>
+					{/if}
+					<span class="span faint" title={pick.sources}>{pick.span}</span>
 				</div>
 			{:else if loadError}
 				<p class="note">{loadError}</p>
 			{:else}
-				<p class="note">Snow totals aren't drawn yet.</p>
+				<p class="note">{empty}</p>
 			{/if}
 		{:else if count && label && current}
 			<div class="player">
@@ -199,21 +247,41 @@
 		{:else if loadError}
 			<p class="note">{loadError}</p>
 		{:else}
-			<p class="note">Loading…</p>
+			<p class="note">{empty}</p>
 		{/if}
 	</div>
 	<div class="foot">
-		{#if totalsMode}
-			{#if total}
-				<div class="key total-key" aria-label="Snow total, {unit}">
-					<span class="name">{unit}</span>
-					<span class="ticks-ramp">
-						{#each TOTAL as s (s.from)}
-							<span class="cell" style:background={s.color}>{totalTick(s.from, units)}</span>
-						{/each}
-					</span>
-				</div>
-			{/if}
+		{#if weather === 'wind'}
+			<div class="seg sub" role="group" aria-label="Wind">
+				<button aria-pressed={prefs.mapWind === 'gust'} onclick={() => prefs.setMapWind('gust')}
+					>Gusts</button
+				>
+				<button
+					aria-pressed={prefs.mapWind === 'ridge'}
+					onclick={() => prefs.setMapWind('ridge')}
+					title="The free-air wind at about 3,000 m">Ridge</button
+				>
+			</div>
+		{/if}
+		{#if snowLine != null}
+			<span class="key line-key">
+				<i class="sw snowy" aria-hidden="true"></i>Snow above {elevation(snowLine + 150, units)}
+				<i class="sw mixy" aria-hidden="true"></i>mix ±{units === 'imperial' ? '500 ft' : '150 m'}
+				<span class="faint">at the map's centre</span>
+			</span>
+		{:else if cells}
+			<div class="key total-key" aria-label="Key, {cells.unit}">
+				<span class="name">{cells.unit}</span>
+				<span class="ticks-ramp">
+					{#each cells.steps as s (s.from)}
+						<span class="cell" class:dark={darkCell(s.color)} style:background={s.color}
+							>{cells.tick(s.from)}</span
+						>
+					{/each}
+				</span>
+			</div>
+		{:else if weather === 'clouds'}
+			<span class="key faint">GOES-West · true colour by day, infrared at night</span>
 		{:else}
 			<div class="key">
 				{#each legendRamps as r (r.kind)}
@@ -252,8 +320,53 @@
 		border-radius: 18px;
 		font-size: 0.85rem;
 	}
+	/* Every weather layer in one row, scrolling sideways on a phone. */
 	.modes {
-		justify-self: start;
+		justify-self: stretch;
+		display: flex;
+		overflow-x: auto;
+		scrollbar-width: none;
+		-webkit-overflow-scrolling: touch;
+		min-width: 0;
+		max-width: 100%;
+	}
+	.modes::-webkit-scrollbar {
+		display: none;
+	}
+	.modes button {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+	.foot .sub {
+		flex: 0 0 auto;
+		margin-right: 6px;
+	}
+	.foot .sub button {
+		font-size: 0.7rem;
+		padding: 1px 7px;
+	}
+	.totals .one {
+		font-size: 0.82rem;
+	}
+	.ticks-ramp .cell.dark {
+		color: #fff;
+	}
+	.line-key {
+		gap: 5px;
+	}
+	.sw {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border-radius: 3px;
+		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.2);
+	}
+	.sw.snowy {
+		background: rgb(240 247 255);
+	}
+	.sw.mixy {
+		background: rgb(244 166 198);
+		margin-left: 4px;
 	}
 	.modes button {
 		font-size: 0.78rem;

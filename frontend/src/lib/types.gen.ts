@@ -15,6 +15,7 @@ export interface ApiTypes {
 	locations: LocationSummary[];
 	lookups: LookupStatus;
 	map_concern: ConcernOut;
+	map_point: PointOut;
 	map_wind: MapWindOut;
 	me: Me;
 	meta: MetaOut;
@@ -314,6 +315,106 @@ export interface ConcernOut {
 	wind_snow_cm: number;
 }
 /**
+ * What the map's weather says at a point (GET /api/map/point).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointOut".
+ */
+export interface PointOut {
+	depth: PointDepth | null;
+	generated: string | null;
+	gust: PointValue[];
+	inside: boolean;
+	lat: number;
+	lon: number;
+	min_snow_cm: number;
+	min_wind_kmh: number;
+	observed: PointObserved[];
+	rates: PointRate[];
+	ridge: PointWind[];
+	roses: RoseOut[];
+	snow_level: PointValue[];
+	totals: PointTotal[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointDepth".
+ */
+export interface PointDepth {
+	cm: number | null;
+	src: {
+		[k: string]: string;
+	};
+	t: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointValue".
+ */
+export interface PointValue {
+	t: number;
+	value: number | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointObserved".
+ */
+export interface PointObserved {
+	cm: number | null;
+	end: number;
+	hours: number;
+}
+/**
+ * One frame of the precipitation timeline at the point.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointRate".
+ */
+export interface PointRate {
+	high: number | null;
+	kind: string;
+	low: number | null;
+	span_h: number;
+	t: number;
+	type: ('snow' | 'mix' | 'rain') | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointWind".
+ */
+export interface PointWind {
+	dir: number | null;
+	kmh: number | null;
+	t: number;
+}
+/**
+ * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "RoseOut".
+ */
+export interface RoseOut {
+	label: string;
+	loading: string[];
+	mean_kmh: number | null;
+	sectors: number[];
+	snow_cm: number;
+	wind_from: string | null;
+	window: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointTotal".
+ */
+export interface PointTotal {
+	cm: number | null;
+	end: number;
+	hours: number;
+	source: string;
+	start: number;
+	window: number;
+}
+/**
  * Wind and new snow per location for the map's wind-effect layer.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -355,21 +456,6 @@ export interface Flag {
 	type: string;
 	value?: number | null;
 	value2?: number | null;
-}
-/**
- * Where wind would drift new snow: snowfall × ridge wind per sector (N first, clockwise).
- *
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "RoseOut".
- */
-export interface RoseOut {
-	label: string;
-	loading: string[];
-	mean_kmh: number | null;
-	sectors: number[];
-	snow_cm: number;
-	wind_from: string | null;
-	window: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

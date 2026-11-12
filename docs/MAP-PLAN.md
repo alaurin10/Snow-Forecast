@@ -398,7 +398,7 @@ New `frontend/src/lib/map/terrain/`:
 | 4 | Sun and wind | B4, B5 (done, see "Milestone 4 notes") |
 | 5 | Avalanche | B7.1, B7.2, then B7.3 behind `HAZARD_INDEX` (done, see "Milestone 5 notes"; B7.3 is open to every visitor) |
 | 6 | Recent satellite | B6 (done, see "Milestone 6 notes") |
-| 7 | More weather layers | A5, A6 |
+| 7 | More weather layers | A5, A6 (done, see "Milestone 7 notes") |
 | 8 | Terrain-adjusted totals | A4 |
 | 9 | Tools and features | B8 measure/GPX, B9, B7.4, B7.5 |
 | 10 | Stretch | A7, B10, RRFS source |
@@ -761,9 +761,76 @@ What shipped, and where it differs from the plan above:
   11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
   few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
 
+## Milestone 7 notes (done 12 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **Backend**: `maps/layers.py` and `maps/sources/{snodas,nohrsc,gibs}.py`, the worker's
+  `layers` job every `map.layers_minutes` (30), `snowwatch map layers`. Six layers in the
+  index's `layers` (each `{frames: [...]}`, a frame with `t`, `file`, `kind`
+  forecast/observed, `hours`, `src`, `runs`), drawn into the frames' folder and grid:
+  `snowlevel`, `gust`, `ridge`, `depth`, `snowfall`, `clouds`. Every picture is redrawn only
+  when its inputs change, and a layer whose source fails keeps its pictures. Probe results in
+  `docs/SOURCES.md`.
+- **Snow level and gusts differ in reach and source**: every 3 h to the end of RDPS's run
+  (~84 h) for both (the plan had wind to 48 h). Canada: HRDPS-WEonG, fading at its domain's
+  edge into RDPS-WEonG; the US: NBM (`SNOWLVL`, `GUST`) for both, not HRRR for the gusts as
+  planned (NBM covers the whole box, is calibrated, and its run is already in use); joined
+  across 48.5–49.5°N as numbers. HRDPS's own `WSPD`/`WGE` aren't used.
+- **"Ridge level"** is RDPS's 700 hPa wind (about 3,000 m), one model for the whole box, with
+  its direction kept for tap-for-numbers. The map's Wind layer switches between Gusts and
+  Ridge (`prefs.mapWind`).
+- **GeoMet's snow-level codes** (-1, -2: snow reaching the ground) take the nearest real
+  value within 6 cells, then 0 m: mapping them straight to 0 m drew purple blobs on every
+  range standing above the snow level. NBM's zeros needed nothing. Bands every 250 m as
+  planned, 0 to 4,000 m+.
+- **Snow on the ground**: SNODAS (masked to the US, 1 km) and CaLDAS (Canada), joined across
+  the border, daily. **Observed snowfall**: NOHRSC 24/48/72 h (US only); its GeoTIFFs are in
+  inches, not the metres its netCDFs say.
+- **Clouds**: GOES-West GeoColor from GIBS, as planned, every half hour over the last 3 h,
+  stitched at zoom 6 and kept as WebP (imagery, not a palette). Its own weather choice, not
+  under the radar frames (one weather layer at a time). The infrared band was considered for a
+  translucent cloud layer, but GIBS publishes no colormap for it.
+- **Speed**: these layers are solid everywhere, so pictures are written straight as palette
+  indices (`palette.index_ramp`, `Renderer._save_ramp`); matching each pixel's colour
+  (`snap`) took seconds a picture (the first full run took 328 s). Measured 12 Nov 2026: a
+  cold run (nothing cached) 82 s, peak 716 MB, most of the excess building NBM's grid map,
+  which the forecast job normally has on disk already (~500 MB otherwise); nothing new,
+  3 s. Pictures: 27 frames each of snow level (1.7 MB), gusts (3.5 MB) and ridge wind
+  (1.9 MB), six cloud frames (1.6 MB); probes ~47 MB on disk in all.
+- **A6 tap-for-numbers**: `GET /api/map/point` (`maps/point.py`, `PointOut`). Rather than
+  decoding every frame on each tap, the worker keeps every 4th pixel of each picture
+  (`data/precip/probe/<file>.npy`, ~6 km: palette indices for precipitation, values for the
+  other layers); frames drawn before this get theirs the next time they're reused. Totals come
+  from their full grids. Answers in ~35 ms, rate limited, never cached by the service
+  worker. Per elevation (A4) waits for milestone 8.
+- **Wind-effect fallback** (deferred from milestone 4): the point answer carries loading roses
+  for the next 24 and 72 hours, built like a location's (ridge wind direction weighted by the
+  snow in each forecast frame, scaled to the window's snow total). Beyond 40 km of every saved
+  location the Wind effect layer asks for the map centre's and says it's using it; "Last
+  48 h" has no such rose (the forecast frames don't go back), and the concern index still
+  needs a location within 40 km.
+- **Frontend**: `lib/map/weather.ts` (each layer as a loop of frames or pictures picked by
+  window, keys, labels, sources); `Timeline.svelte` lists every layer in one scrolling row,
+  with a slider for radar, snow level, wind and clouds and a window picker for snow total,
+  snow depth and observed snow; the Layers sheet lists the same. Smooth fields stay on to
+  zoom 15, radar and clouds fade by 13. The Inspector ("This spot") adds what the map's
+  weather says there: snow for 24 h, 3 and 7 days, the next 48 hours as coloured cells, the
+  snow level (and its 3-day low), the ridge wind and gusts, snow on the ground and snow that
+  fell.
+- **The rain/snow line draped on the terrain** (A5's cheap extra) uses the Snow level layer
+  itself rather than a location's snapshot: from zoom 10 a colour-relief layer tints terrain
+  above the snow level at the map's centre (for the frame on the slider) white, and the
+  ±150 m mix band pink.
+- Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–6); particles for wind.
+- Known limits: probes are ~6 km, so a tap reads the area, not the slope; the snow level's
+  code fill guesses the level under a range from its surroundings; the drape uses one snow
+  level for the whole view; observed snowfall stops at the border (Canada has no such
+  analysis); SNODAS's glacier cells hold implausible depths (tens of metres).
+
 ## Files
 
-- New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,tiles_render,probe,sat}.py`,
+- New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,tiles_render,layers,point,sat}.py`,
   `backend/snowwatch/maps/sources/{radar_eccc,rainviewer,hrrr,nbm,rdps_gdps,rrfs,snodas,nohrsc,gibs}.py`,
   `config/treeline.yaml`, `frontend/src/lib/map/**`, `docs/MAP-PLAN.md`.
 - Changed: `backend/snowwatch/precip.py` (re-exports), `tiles.py` (new upstreams),

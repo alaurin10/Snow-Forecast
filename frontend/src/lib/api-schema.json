@@ -2831,6 +2831,318 @@
       "title": "PlanRow",
       "type": "object"
     },
+    "PointDepth": {
+      "properties": {
+        "cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "src": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "t": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "cm",
+        "src"
+      ],
+      "title": "PointDepth",
+      "type": "object"
+    },
+    "PointObserved": {
+      "properties": {
+        "cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "type": "integer"
+        },
+        "hours": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hours",
+        "end",
+        "cm"
+      ],
+      "title": "PointObserved",
+      "type": "object"
+    },
+    "PointOut": {
+      "description": "What the map's weather says at a point (GET /api/map/point).",
+      "properties": {
+        "depth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PointDepth"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generated": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gust": {
+          "items": {
+            "$ref": "#/$defs/PointValue"
+          },
+          "type": "array"
+        },
+        "inside": {
+          "type": "boolean"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "min_snow_cm": {
+          "type": "number"
+        },
+        "min_wind_kmh": {
+          "type": "number"
+        },
+        "observed": {
+          "items": {
+            "$ref": "#/$defs/PointObserved"
+          },
+          "type": "array"
+        },
+        "rates": {
+          "items": {
+            "$ref": "#/$defs/PointRate"
+          },
+          "type": "array"
+        },
+        "ridge": {
+          "items": {
+            "$ref": "#/$defs/PointWind"
+          },
+          "type": "array"
+        },
+        "roses": {
+          "items": {
+            "$ref": "#/$defs/RoseOut"
+          },
+          "type": "array"
+        },
+        "snow_level": {
+          "items": {
+            "$ref": "#/$defs/PointValue"
+          },
+          "type": "array"
+        },
+        "totals": {
+          "items": {
+            "$ref": "#/$defs/PointTotal"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "lat",
+        "lon",
+        "inside",
+        "generated",
+        "totals",
+        "rates",
+        "snow_level",
+        "gust",
+        "ridge",
+        "depth",
+        "observed",
+        "roses",
+        "min_snow_cm",
+        "min_wind_kmh"
+      ],
+      "title": "PointOut",
+      "type": "object"
+    },
+    "PointRate": {
+      "description": "One frame of the precipitation timeline at the point.",
+      "properties": {
+        "high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "span_h": {
+          "type": "integer"
+        },
+        "t": {
+          "type": "integer"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "snow",
+                "mix",
+                "rain"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "span_h",
+        "type",
+        "low",
+        "high"
+      ],
+      "title": "PointRate",
+      "type": "object"
+    },
+    "PointTotal": {
+      "properties": {
+        "cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "type": "integer"
+        },
+        "hours": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer"
+        },
+        "window": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "window",
+        "hours",
+        "start",
+        "end",
+        "cm",
+        "source"
+      ],
+      "title": "PointTotal",
+      "type": "object"
+    },
+    "PointValue": {
+      "properties": {
+        "t": {
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "value"
+      ],
+      "title": "PointValue",
+      "type": "object"
+    },
+    "PointWind": {
+      "properties": {
+        "dir": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "kmh",
+        "dir"
+      ],
+      "title": "PointWind",
+      "type": "object"
+    },
     "Reason": {
       "description": "Why a day got its rating. The browser words it in the viewer's units.",
       "properties": {
@@ -4782,6 +5094,9 @@
     "map_concern": {
       "$ref": "#/$defs/ConcernOut"
     },
+    "map_point": {
+      "$ref": "#/$defs/PointOut"
+    },
     "map_wind": {
       "$ref": "#/$defs/MapWindOut"
     },
@@ -4839,6 +5154,7 @@
     "map_concern",
     "avalanche_zones",
     "sat",
+    "map_point",
     "trend",
     "runs",
     "me",

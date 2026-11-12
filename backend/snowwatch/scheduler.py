@@ -44,7 +44,9 @@ class Worker:
         self.lock = threading.Lock()
         # The map's pictures are separate files: they don't wait for runs. Each map job
         # skips a turn if its previous one is still going.
-        self.map_locks = {name: threading.Lock() for name in ("radar", "forecast", "totals")}
+        self.map_locks = {
+            name: threading.Lock() for name in ("radar", "forecast", "totals", "layers")
+        }
         self.sat_lock = threading.Lock()
         self._ping = ping
         conn = connect(settings.database)
@@ -228,16 +230,28 @@ class Worker:
                 r = Renderer(
                     self.settings.precip_dir,
                     Net(client),
-                    work_dir=self.settings.data_dir / "maps",
+                    work_dir=self.settings.map_work_dir,
                     nbm_cycles=tuple(self.cfg.map.nbm_cycles),
                     slr_bands=self.cfg.slr_bands,
                 )
-                job = {"radar": r.radar, "forecast": r.forecast, "totals": r.snow_totals}[name]
+                job = {
+                    "radar": r.radar,
+                    "forecast": r.forecast,
+                    "totals": r.snow_totals,
+                    "layers": r.layers,
+                }[name]
                 index = job(region)
             kinds: dict[str, int] = {}
             for f in index.get("frames", []):
                 kinds[f.get("kind", "")] = kinds.get(f.get("kind", ""), 0) + 1
-            log.info("map %s: %s, %d totals", name, kinds, len(index.get("totals", [])))
+            layers = {k: len(v.get("frames", [])) for k, v in (index.get("layers") or {}).items()}
+            log.info(
+                "map %s: %s, %d totals, layers %s",
+                name,
+                kinds,
+                len(index.get("totals", [])),
+                layers,
+            )
         except Exception:
             log.exception("map %s failed", name)
         finally:
@@ -255,11 +269,16 @@ class Worker:
         """Snow totals."""
         self._map_job("totals")
 
+    def weather_layers(self) -> None:
+        """Snow level, wind, snow on the ground, observed snowfall and clouds."""
+        self._map_job("layers")
+
     def precip(self) -> None:
         """All of the map's pictures, one part after another (`snowwatch precip`)."""
         self.radar()
         self.forecast_frames()
         self.totals_fields()
+        self.weather_layers()
 
     def ski_map(self) -> None:
         """Ski runs, lifts and peaks from OpenStreetMap: weekly, or when locations change."""
@@ -380,6 +399,7 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         (worker.radar, mc.radar_minutes, "radar"),
         (worker.forecast_frames, mc.forecast_minutes, "forecast_frames"),
         (worker.totals_fields, mc.totals_minutes, "totals_fields"),
+        (worker.weather_layers, mc.layers_minutes, "weather_layers"),
     ):
         sched.add_job(
             job,

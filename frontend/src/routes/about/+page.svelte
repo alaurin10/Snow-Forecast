@@ -21,13 +21,13 @@
 		{
 			name: 'National Weather Service (NOAA)',
 			href: 'https://www.weather.gov/',
-			what: 'Watches and warnings, forecast offices; HRRR and National Blend of Models forecasts on the map (NOAA Open Data Dissemination)',
+			what: 'Watches and warnings, forecast offices; HRRR and National Blend of Models forecasts, SNODAS snow depth and the National Snowfall Analysis on the map',
 			terms: 'US public domain'
 		},
 		{
 			name: 'Environment and Climate Change Canada',
 			href: 'https://eccc-msc.github.io/open-data/',
-			what: 'Radar, the radar nowcast, HRDPS, RDPS and GDPS forecasts and snow totals on the map',
+			what: 'Radar, the radar nowcast, HRDPS, RDPS and GDPS forecasts, snow totals, snow level, wind and CaLDAS snow depth on the map',
 			terms: 'Open Government Licence – Canada'
 		},
 		{
@@ -87,7 +87,7 @@
 		{
 			name: 'NASA GIBS',
 			href: 'https://earthdata.nasa.gov/gibs',
-			what: 'Daily VIIRS and 30 m HLS satellite imagery',
+			what: 'Daily VIIRS satellite imagery, and GOES-West GeoColor clouds (NOAA, CIRA)',
 			terms: 'NASA open data'
 		},
 		{

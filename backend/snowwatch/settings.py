@@ -127,6 +127,12 @@ class Settings(BaseSettings):
         return self.data_dir / "precip"
 
     @property
+    def map_work_dir(self) -> Path:
+        """The map renderer's working files: model grids, cached downloads, snow totals
+        as numbers (see snowwatch/maps/render.py)."""
+        return self.data_dir / "maps"
+
+    @property
     def user_agent(self) -> str:
         """Sent to every upstream service. No personal details."""
         return f"snowwatch/{__version__} (self-hosted snow forecast)"

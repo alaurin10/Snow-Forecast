@@ -1,10 +1,12 @@
 """The map's frames: drawn into one folder and listed in `index.json` for the browser.
 
-Three jobs share the folder, each on its own schedule (see scheduler.py):
+Four jobs share the folder, each on its own schedule (see scheduler.py):
 
   radar     observed radar and the nowcast, every 6 minutes
   forecast  the forecast frames (hourly to 48 h, then 3- and 6-hourly to 10 days), every 30 minutes
   totals    the snow totals (12 h to 10 days), hourly
+  layers    the other weather layers (snow level, wind, snow on the ground, observed
+            snowfall, clouds; see layers.py), every 30 minutes
 
 Each draws only what changed (frames are keyed by their inputs), then rewrites its own
 part of the index under a file lock and leaves the other parts as they are.
@@ -12,6 +14,9 @@ part of the index under a file lock and leaves the other parts as they are.
 Each picture's file name includes a hash of its pixels, so browsers can cache it for good.
 Files that drop out of the index are kept for a quarter of an hour, so a page that loaded
 the previous index can still fetch them.
+
+Beside each picture, `probe/<file>.npy` keeps every fourth pixel of it as numbers (palette
+indices for precipitation, values for the other layers) for tap-for-numbers (point.py).
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import logging
 import os
@@ -31,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 from snowwatch.config import SlrBand
 from snowwatch.maps import grib, totals
@@ -49,12 +56,14 @@ from snowwatch.maps.geomet import Net, iso_ts, prune_wcs_cache, ts_iso
 from snowwatch.maps.palette import (
     decode_indices,
     encode,
+    index_ramp,
     kinds_of,
     paint_total,
     paint_typed,
     repaint,
     snap,
 )
+from snowwatch.maps.point import PROBE_STEP
 from snowwatch.maps.region import Region, stitch
 from snowwatch.maps.sources import hrrr, nbm, radar_eccc, rainviewer, rdps_gdps
 from snowwatch.maps.sources.nbm import Nbm
@@ -84,6 +93,10 @@ ATTRIBUTION = {
     "gdps": "Forecast: Environment and Climate Change Canada GDPS",
     "hrrr": "Forecast: NOAA HRRR (NOAA Open Data Dissemination)",
     "nbm": "Forecast: NOAA National Blend of Models (NOAA Open Data Dissemination)",
+    "snodas": "Snow on the ground: NOAA NOHRSC SNODAS (US), via NSIDC",
+    "caldas": "Snow on the ground: Environment and Climate Change Canada CaLDAS",
+    "nohrsc": "Observed snowfall: NOAA NOHRSC National Snowfall Analysis (US)",
+    "goes": "Clouds: NOAA GOES-West GeoColor (CIRA), via NASA GIBS",
 }
 
 RADAR_KINDS = {"radar", "nowcast"}
@@ -136,6 +149,34 @@ class TotalOut:
         out = cls(**{k: v for k, v in d.items() if k in names})
         out.window = out.window or out.hours
         return out
+
+
+@dataclass
+class LayerFrame:
+    """One picture of a weather layer other than precipitation (see layers.py)."""
+
+    t: int  # valid time; for observed snowfall the window's end
+    file: str
+    key: str
+    kind: str = "forecast"  # "forecast" | "observed"
+    span_h: int = 0  # 0: a value at an instant
+    hours: int = 0  # observed snowfall: the window's length
+    src: dict[str, str] = field(default_factory=dict)
+    # Each source used → its run start or analysis time (Unix seconds).
+    runs: dict[str, int] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, d: dict[str, Any]) -> LayerFrame:
+        names = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in names})
+
+
+def probe_sample(values: np.ndarray) -> np.ndarray:
+    """Every PROBE_STEP-th pixel each way, from the middle of each block (the last two
+    axes: rows, columns)."""
+    k = PROBE_STEP // 2
+    out: np.ndarray = values[..., k::PROBE_STEP, k::PROBE_STEP]
+    return out
 
 
 def _run_ts(ref: str) -> int:
@@ -200,6 +241,21 @@ class Renderer:
                 continue
         return out
 
+    def _layers_of(self, index: dict[str, Any], region: Region) -> dict[str, list[LayerFrame]]:
+        """The index's other weather layers, if they were drawn over this region."""
+        if index.get("region") != region.key:
+            return {}
+        out: dict[str, list[LayerFrame]] = {}
+        for name, layer in (index.get("layers") or {}).items():
+            frames = []
+            for f in layer.get("frames", []) if isinstance(layer, dict) else []:
+                try:
+                    frames.append(LayerFrame.load(f))
+                except (TypeError, KeyError):
+                    continue
+            out[name] = frames
+        return out
+
     def _totals_of(self, index: dict[str, Any], region: Region) -> list[TotalOut]:
         if index.get("region") != region.key:
             return []
@@ -227,19 +283,20 @@ class Renderer:
         kinds: set[str],
         frames: list[FrameOut] | None = None,
         totals: list[TotalOut] | None = None,
+        layers: dict[str, list[LayerFrame]] | None = None,
     ) -> dict[str, Any]:
-        """Replace the index's frames of these kinds (and the totals, if given)."""
+        """Replace the index's frames of these kinds (and the totals, and the named
+        layers, if given)."""
         with self._locked():
             cur = self._read()
             old_frames = self._frames_of(cur, region)
             old_totals = self._totals_of(cur, region)
             new_frames = [f for f in old_frames if f.kind not in kinds] + (frames or [])
             new_totals = old_totals if totals is None else totals
-            index = self._index(region, new_frames, new_totals)
-            keep = {f["file"] for f in index["frames"]} | {t["file"] for t in index["totals"]}
-            was = {f.get("file") for f in cur.get("frames", [])} | {
-                t.get("file") for t in cur.get("totals", [])
-            }
+            new_layers = {**self._layers_of(cur, region), **(layers or {})}
+            index = self._index(region, new_frames, new_totals, new_layers)
+            keep = _files(index)
+            was = _files(cur)
             # Files leaving the index get a fresh clock: pages may still ask for them.
             for name in was - keep:
                 if isinstance(name, str):
@@ -252,7 +309,11 @@ class Renderer:
         return index
 
     def _index(
-        self, region: Region, frames: list[FrameOut], totals: list[TotalOut]
+        self,
+        region: Region,
+        frames: list[FrameOut],
+        totals: list[TotalOut],
+        layers: dict[str, list[LayerFrame]] | None = None,
     ) -> dict[str, Any]:
         now = max((f.t for f in frames if f.kind == "radar"), default=None)
         if now is not None:
@@ -268,6 +329,11 @@ class Renderer:
             for s in t.runs or [t.source]:
                 if s not in srcs:
                     srcs.append(s)
+        layers = {k: sorted(v, key=lambda f: (f.hours, f.t)) for k, v in (layers or {}).items()}
+        for lf in (f for v in layers.values() for f in v):
+            for s in lf.src.values():
+                if s and s not in srcs:
+                    srcs.append(s)
         return {
             "version": INDEX_VERSION,
             "generated": ts_iso(int(self.now())),
@@ -278,27 +344,86 @@ class Renderer:
             "now": now,
             "frames": [asdict(f) for f in frames],
             "totals": [asdict(t) for t in sorted(totals, key=lambda t: (t.window, t.hours))],
-            # More weather layers arrive with milestone 7 (snow level, wind, …).
-            "layers": {},
+            "layers": {k: {"frames": [asdict(f) for f in v]} for k, v in layers.items()},
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
         }
 
-    def _save(self, img: np.ndarray, region: Region, prefix: str) -> str:
-        data = encode(snap(img, region))
+    def _save(
+        self,
+        img: np.ndarray,
+        region: Region,
+        prefix: str,
+        values: np.ndarray | None = None,
+    ) -> str:
+        """A palette PNG named by its pixels, and its probe: the numbers in `values`
+        (channels first, or one 2-D grid), else the palette indices."""
+        indexed = snap(img, region)
+        data = encode(indexed)
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        self._store(name, data)
+        if values is None:
+            self._write_probe(name, probe_sample(indexed))
+        else:
+            self._write_probe(name, probe_sample(values).astype(np.float16))
+        return name
+
+    def _save_ramp(
+        self,
+        values: np.ndarray,
+        ramp: list[tuple[float, str]],
+        prefix: str,
+        probe: np.ndarray | None = None,
+    ) -> str:
+        """Values painted on one of the palette's ramps, with the values (or `probe`) as
+        the probe. Straight to palette indices: these layers are solid everywhere, where
+        matching each pixel's colour (`snap`) costs seconds."""
+        data = encode(index_ramp(values, ramp))
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        self._store(name, data)
+        keep = values if probe is None else probe
+        self._write_probe(name, probe_sample(keep).astype(np.float16))
+        return name
+
+    def _save_webp(self, img: np.ndarray, prefix: str, quality: int = 72) -> str:
+        """A colour picture (satellite imagery) as WebP, named by its bytes."""
+        buf = io.BytesIO()
+        Image.fromarray(img[..., :3]).save(buf, "WEBP", quality=quality, method=4)
+        data = buf.getvalue()
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.webp"
+        self._store(name, data)
+        return name
+
+    def _store(self, name: str, data: bytes) -> None:
         path = self.dir / name
         if path.exists():
             # Same pixels as an older file: freshen it so pruning leaves it be.
             os.utime(path)
         else:
             write_atomic(path, data)
-        return name
+
+    def _probe_path(self, name: str) -> Path:
+        return self.dir / "probe" / f"{name}.npy"
+
+    def _write_probe(self, name: str, values: np.ndarray) -> None:
+        path = self._probe_path(name)
+        if path.exists():
+            with contextlib.suppress(OSError):
+                os.utime(path)
+            return
+        save_npy(path, np.ascontiguousarray(values))
 
     def _prune(self, keep: set[str]) -> None:
-        """Drop pictures the index doesn't use once they've been out of it a while."""
+        """Drop pictures (and their probes) the index doesn't use once they've been out
+        of it a while."""
         cutoff = time.time() - RETIRE_S
-        for p in [*self.dir.glob("*.png"), *self.dir.glob("*.tmp")]:
-            if p.name in keep:
+        for p in [
+            *self.dir.glob("*.png"),
+            *self.dir.glob("*.webp"),
+            *self.dir.glob("*.tmp"),
+            *self.dir.glob("probe/*.npy"),
+            *self.dir.glob("probe/*.tmp"),
+        ]:
+            if p.name in keep or p.name.removesuffix(".npy") in keep:
                 continue
             with contextlib.suppress(OSError):
                 if p.stat().st_mtime < cutoff:
@@ -306,15 +431,34 @@ class Renderer:
 
     def _reusable(self, prev: dict[str, FrameOut], key: str) -> FrameOut | None:
         f = prev.get(key)
-        return f if f is not None and (self.dir / f.file).exists() else None
+        if f is None or not (self.dir / f.file).exists():
+            return None
+        if not self._probe_path(f.file).exists():
+            # Drawn before probes existed: make its probe from the picture.
+            try:
+                idx = decode_indices((self.dir / f.file).read_bytes())
+            except OSError:
+                idx = None
+            if idx is not None:
+                self._write_probe(f.file, probe_sample(idx))
+        return f
 
     # ---- Everything ----------------------------------------------------------------
 
     def run(self, region: Region) -> dict[str, Any]:
-        """Radar, forecast and totals, one after the other (`snowwatch precip`)."""
+        """Radar, forecast and totals, one after the other (the other layers are their
+        own job: `layers`)."""
         self.radar(region)
         self.forecast(region)
         return self.snow_totals(region)
+
+    def layers(self, region: Region) -> dict[str, Any]:
+        """Snow level, wind, snow on the ground, observed snowfall and clouds (layers.py)."""
+        from snowwatch.maps import layers
+
+        index = self._commit(region, set(), None, None, layers.draw(self, region))
+        self._prune_work()
+        return index
 
     # ---- Radar and nowcast ----------------------------------------------------------
 
@@ -731,3 +875,13 @@ class Renderer:
             name = self._save(paint_total(cm), region, f"t{span}")
             out.append(TotalOut(span, t0, end, name, key, "+".join(runs), None, w, runs))
         return sorted(out, key=lambda t: t.window)
+
+
+def _files(index: dict[str, Any]) -> set[str]:
+    """Every picture an index names: frames, totals and the other layers' frames."""
+    out = {f.get("file") for f in index.get("frames", [])}
+    out |= {t.get("file") for t in index.get("totals", [])}
+    for layer in (index.get("layers") or {}).values():
+        if isinstance(layer, dict):
+            out |= {f.get("file") for f in layer.get("frames", [])}
+    return {n for n in out if isinstance(n, str)}

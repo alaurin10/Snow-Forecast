@@ -45,6 +45,39 @@ export const PRECIP_OPACITY: ExpressionSpecification = [
 	0
 ];
 
+/** Snow level, wind and snow on the ground: smooth fields, under the labels. */
+export const FIELD_OPACITY: ExpressionSpecification = [
+	'interpolate',
+	['linear'],
+	['zoom'],
+	10,
+	0.62,
+	13,
+	0.45,
+	15,
+	0
+];
+/** Satellite imagery of clouds: nearly opaque, gone by the time terrain detail matters. */
+export const CLOUD_OPACITY: ExpressionSpecification = [
+	'interpolate',
+	['linear'],
+	['zoom'],
+	9,
+	0.85,
+	11,
+	0.6,
+	13,
+	0
+];
+
+/** How strongly each weather layer covers the map, by zoom. */
+export function weatherOpacity(w: string): ExpressionSpecification {
+	if (w === 'radar') return PRECIP_OPACITY;
+	if (w === 'clouds') return CLOUD_OPACITY;
+	if (w === 'totals' || w === 'snowfall') return TOTAL_OPACITY;
+	return FIELD_OPACITY;
+}
+
 /** Cross-fade from Esri over half a zoom level. */
 export const OTM_OPACITY: ExpressionSpecification = [
 	'interpolate',

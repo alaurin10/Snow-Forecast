@@ -108,7 +108,7 @@ def region_for(
     return box_region(south, west, north, east, width)
 
 
-def spread(values: np.ndarray, passes: int, empty: int = 0) -> np.ndarray:
+def spread(values: np.ndarray, passes: int, empty: float = 0) -> np.ndarray:
     """Fill empty cells from their neighbours, one pixel further each pass.
 
     A cheap nearest-neighbour fill: after `passes`, every empty cell within that many

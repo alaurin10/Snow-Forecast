@@ -238,7 +238,7 @@ def wcs_grid(
     if cache_dir is not None and ref:
         path = cache_dir / f"{hashlib.sha1(q.encode()).hexdigest()[:20]}.tif"
         try:
-            grid = _read_grid(path.read_bytes())
+            grid = read_grid(path.read_bytes())
         except OSError:
             grid = None
         if grid is not None:
@@ -248,13 +248,13 @@ def wcs_grid(
     r = net.get(f"{GEOMET}?{q}")
     if r is None or "tiff" not in r.headers.get("content-type", ""):
         return None
-    grid = _read_grid(r.content)
+    grid = read_grid(r.content)
     if grid is not None and path is not None:
         write_atomic(path, r.content)
     return grid
 
 
-def _read_grid(body: bytes) -> Grid | None:
+def read_grid(body: bytes) -> Grid | None:
     try:
         im = Image.open(io.BytesIO(body))
         if not isinstance(im, TiffImagePlugin.TiffImageFile):

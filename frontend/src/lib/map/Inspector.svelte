@@ -4,7 +4,9 @@
   in question; and the likely wind effect there when a location's wind is in range.
   With the avalanche zones loaded: the forecast zone, the elevation band the spot is in
   and today's published rating for that band, and, while the concern index is on, each
-  of its factors there. Forecast snow joins it in a later milestone.
+  of its factors there. And what the map's weather says there (from the server): forecast
+  snow for the next day, three days and week, the next two days hour by hour, the snow
+  level, the wind, snow on the ground and snow that fell.
 -->
 <script lang="ts">
 	import type { UnitSystem } from '../units';
@@ -17,6 +19,9 @@
 	import { dangerWord } from '../conditions';
 	import { BAND_WORDS, DANGER_COLORS, type AvyHere } from './avalanche';
 	import { CONCERN_CLASSES, type ConcernFactors } from './terrain/concern';
+	import type { PointOut } from '../types.gen';
+	import { RAMPS, type PrecipKind } from '../radar';
+	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
 
 	interface Props {
 		lat: number;
@@ -32,6 +37,9 @@
 		avy?: AvyHere | null;
 		/** The concern index's factors here, while that layer is on. */
 		concern?: ConcernFactors | null;
+		/** What the map's weather says here; null while it loads or if it couldn't be had. */
+		point?: PointOut | null;
+		pointState?: 'loading' | 'ready' | 'failed';
 		onzone?: () => void;
 		onclose: () => void;
 	}
@@ -46,6 +54,8 @@
 		wind = null,
 		avy = null,
 		concern = null,
+		point = null,
+		pointState = 'ready',
 		onzone,
 		onclose
 	}: Props = $props();
@@ -108,14 +118,54 @@
 				: `${sun.hours.toFixed(1)} h`
 			: ''
 	);
+	/** The weather numbers worth showing at the spot, or null outside the map's box. */
+	const wx = $derived.by(() => {
+		if (!point || !point.inside) return null;
+		const nowS = Date.now() / 1000;
+		const total = (w: number) => point.totals.find((t) => t.window === w)?.cm ?? null;
+		const soon = <T extends { t: number }>(xs: T[]) => xs.find((x) => x.t >= nowS - 1800) ?? null;
+		const level = soon(point.snow_level);
+		const levels = point.snow_level
+			.filter((x) => x.t <= nowS + 72 * 3600 && x.value != null)
+			.map((x) => x.value!);
+		const ridge = soon(point.ridge);
+		const gust = soon(point.gust);
+		// The next 48 hourly forecast frames, each a cell in its colour.
+		const hours = point.rates.filter((r) => r.kind === 'forecast' && r.span_h <= 1).slice(0, 48);
+		const strip = hours.map((r) => ({
+			t: r.t,
+			color: r.type
+				? (RAMPS[r.type as PrecipKind].steps.find((s) => s.from === r.low)?.color ?? 'transparent')
+				: 'transparent'
+		}));
+		const firstWet = hours.find((r) => r.type);
+		return {
+			snow: [total(24), total(72), total(168)] as const,
+			hasTotals: point.totals.length > 0,
+			level: level?.value ?? null,
+			lowest: levels.length ? Math.min(...levels) : null,
+			ridge,
+			gust: gust?.value ?? null,
+			depth: point.depth?.cm ?? null,
+			fell: point.observed.filter((o) => o.cm != null),
+			strip,
+			firstWet: firstWet
+				? `${firstWet.type} from ${new Date((firstWet.t - 3600) * 1000)
+						.toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })
+						.replace(',', '')}`
+				: hours.length
+					? 'Dry for the next two days'
+					: ''
+		};
+	});
 	const coords = $derived(
 		`${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`
 	);
 </script>
 
-<div class="insp glass" role="dialog" aria-label="Terrain here">
+<div class="insp glass" role="dialog" aria-label="This spot">
 	<header>
-		<strong>Terrain here</strong>
+		<strong>This spot</strong>
 		<button class="x" onclick={onclose} aria-label="Close">✕</button>
 	</header>
 	{#if error}
@@ -220,6 +270,82 @@
 			{#if concern}Concern index: experimental, not a forecast.{/if}
 		</p>
 	{/if}
+	<section class="wx" aria-label="Weather here">
+		{#if pointState === 'loading'}
+			<p class="faint small">Loading the weather here…</p>
+		{:else if pointState === 'failed'}
+			<p class="faint small">The weather here couldn't be loaded.</p>
+		{:else if !wx}
+			<p class="faint small">Outside the area the map's weather covers.</p>
+		{:else}
+			<ul class="more">
+				{#if wx.hasTotals}
+					<li>
+						<span class="k">Snow</span>
+						<span class="num"
+							>{fmtSnow(wx.snow[0], units)}
+							<span class="faint">24 h</span> · {fmtSnow(wx.snow[1], units)}
+							<span class="faint">3 days</span> · {fmtSnow(wx.snow[2], units)}
+							<span class="faint">7 days</span></span
+						>
+					</li>
+				{/if}
+				{#if wx.strip.length}
+					<li class="strip-row">
+						<span class="k">Next 48 h</span>
+						<span class="strip" role="img" aria-label={wx.firstWet}>
+							{#each wx.strip as c (c.t)}<b style:background={c.color}></b>{/each}
+						</span>
+						<span class="faint">{wx.firstWet}</span>
+					</li>
+				{/if}
+				{#if wx.level != null}
+					<li>
+						<span class="k">Snow level</span>
+						<span class="num">{fmtElevation(wx.level, units)}</span>
+						{#if wx.lowest != null && wx.lowest < wx.level - 100}
+							<span class="faint num">lowest {fmtElevation(wx.lowest, units)} in 3 days</span>
+						{/if}
+					</li>
+				{/if}
+				{#if wx.ridge?.kmh != null || wx.gust != null}
+					<li>
+						<span class="k">Wind</span>
+						{#if wx.ridge?.kmh != null}
+							<span class="num"
+								>{wx.ridge.dir != null ? `${sectorOf(wx.ridge.dir)} ` : ''}{fmtSpeed(
+									wx.ridge.kmh,
+									units
+								)}
+								<span class="faint">at ridge level</span></span
+							>
+						{/if}
+						{#if wx.gust != null}
+							<span class="faint num">gusts {fmtSpeed(wx.gust, units)} near the ground</span>
+						{/if}
+					</li>
+				{/if}
+				{#if wx.depth != null}
+					<li>
+						<span class="k">On the ground</span>
+						<span class="num">{fmtSnow(wx.depth, units)}</span>
+					</li>
+				{/if}
+				{#if wx.fell.length}
+					<li>
+						<span class="k">Fell</span>
+						<span class="num"
+							>{#each wx.fell as o, i (o.hours)}{i ? ' · ' : ''}{fmtSnow(o.cm, units)}
+								<span class="faint">{o.hours} h</span>{/each}</span
+						>
+					</li>
+				{/if}
+			</ul>
+			<p class="faint small">
+				From the map's weather: models 2.5–15 km across, so numbers for the area, not this slope.
+			</p>
+		{/if}
+	</section>
 	<p class="faint small coords">{coords}</p>
 </div>
 
@@ -321,5 +447,22 @@
 	}
 	.coords {
 		font-variant-numeric: tabular-nums;
+	}
+	.wx {
+		display: grid;
+		gap: 4px;
+		border-top: 1px solid var(--border);
+		padding-top: 6px;
+	}
+	.strip {
+		display: inline-flex;
+		height: 10px;
+		width: 120px;
+		border-radius: 3px;
+		overflow: hidden;
+		box-shadow: inset 0 0 0 1px var(--border);
+	}
+	.strip b {
+		flex: 1;
 	}
 </style>

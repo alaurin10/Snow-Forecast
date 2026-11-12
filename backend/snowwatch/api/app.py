@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from snowwatch import __version__
@@ -28,6 +28,9 @@ from snowwatch.api.push_api import make_push_router
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
+from snowwatch.maps.point import PointOut
+from snowwatch.maps.point import probe as point_probe
+from snowwatch.maps.point import read_index as read_point_index
 from snowwatch.maps.sat import SatOut, read_index
 from snowwatch.settings import Settings, get_settings
 from snowwatch.store.db import connect
@@ -206,16 +209,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
-        """One frame. Names carry a hash of the pixels, so they never change."""
-        if not re.fullmatch(r"[rnft]\d+-[0-9a-f]{12}\.png", name):
+        """One picture: a precipitation frame, a snow total or a frame of another weather
+        layer. Names carry a hash of the pixels, so they never change."""
+        m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp)", name)
+        if not m:
             raise HTTPException(404)
         path = settings.precip_dir / name
         if not path.exists():
             raise HTTPException(404)
         return FileResponse(
             path,
-            media_type="image/png",
+            media_type=f"image/{m.group(1)}",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    # The index as last read for tap-for-numbers: (file time, parsed). The worker
+    # rewrites it every few minutes.
+    point_index: dict[str, tuple[float, dict[str, Any]]] = {}
+    # Each tap reads one cell from ~200 small memory-mapped files: cheap, but bounded.
+    point_taps = RateLimiter(rate=3, burst=40)
+
+    @app.get("/api/map/point", response_model=PointOut)
+    def map_point(
+        request: Request,
+        lat: float = Query(ge=-85, le=85),
+        lon: float = Query(ge=-180, le=180),
+    ) -> PointOut:
+        """What the map's weather says at a point: snow totals, the typed precipitation
+        timeline, snow level, wind, snow on the ground and observed snowfall, with
+        loading roses for the next 24 and 72 hours (see snowwatch/maps/point.py)."""
+        point_taps.check(request)
+        path = settings.precip_dir / "index.json"
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as e:
+            raise HTTPException(503, "the map's pictures aren't drawn yet") from e
+        hit = point_index.get("index")
+        if hit is None or hit[0] != mtime:
+            index = read_point_index(path)
+            if index is None:
+                raise HTTPException(503, "the map's pictures aren't drawn yet")
+            hit = (mtime, index)
+            point_index["index"] = hit
+        bc = app.state.forecast_config.backcountry
+        return point_probe(
+            hit[1],
+            settings.precip_dir,
+            settings.map_work_dir / "totals",
+            lat,
+            lon,
+            time.time(),
+            bc,
         )
 
     tile_cache: TileCache | None = None

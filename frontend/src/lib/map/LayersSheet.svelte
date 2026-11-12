@@ -11,6 +11,7 @@
 		type MapOverlay,
 		type MapWeather
 	} from '../prefs.svelte';
+	import { WEATHER_CHOICES } from './weather';
 
 	interface Props {
 		/** Slope and aspect need the terrain worker (missing on old browsers). */
@@ -39,8 +40,7 @@
 		}
 	];
 	const WEATHER: { id: MapWeather; label: string }[] = [
-		{ id: 'radar', label: 'Radar & forecast' },
-		{ id: 'totals', label: 'Snow total' },
+		...WEATHER_CHOICES,
 		{ id: 'off', label: 'None' }
 	];
 	const OVERLAYS = $derived<{ id: MapOverlay; label: string; worker?: boolean }[]>([
@@ -99,6 +99,11 @@
 				>
 			{/each}
 		</div>
+		<p class="faint">
+			One at a time. Snow level and wind are forecasts to about 3½ days; snow depth and observed
+			snow are the latest analyses (observed snow: the US only); clouds are the last three hours
+			from GOES-West.
+		</p>
 	</section>
 
 	<section>

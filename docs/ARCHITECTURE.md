@@ -41,9 +41,12 @@ backend/snowwatch/
               Canada's WMS/WCS) grib.py (NOAA GRIB2 by byte range) palette.py
               blend.py (joins sources as numbers, with no visible seams)
               render.py (frames, index, pruning) totals.py (snow totals to 10 days)
+              layers.py (snow level, wind, snow on the ground, observed snowfall,
+              clouds) point.py (tap-for-numbers from the pictures' probes)
               sat.py (choosing recent Sentinel-2 views per location, daily VIIRS)
               satrender.py (drawing those views and cutting them into tiles)
-              sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps)
+              sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps, snodas,
+              nohrsc, gibs)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
   precip.py (re-exports maps/) tiles.py osm.py lookups.py push.py verify.py
@@ -155,7 +158,8 @@ and recorded by name. Nightly (`store/retention.py`):
   each time, with a global cap. Owner writes must carry this site's `Origin`.
 - **Public endpoints are bounded**: push subscriptions must point at a browser
   push service, are capped in size and number, and are rate limited; map tile
-  cache misses are rate limited and the cache is capped on disk.
+  cache misses are rate limited and the cache is capped on disk; the map's
+  tap-for-numbers (`/api/map/point`) reads only local files and is rate limited.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
   third parties limited to Mapterhorn and AWS elevation tiles, and https images; satellite
   imagery comes through the server's tile cache, which fetches only Sentinel-2 items in its
