@@ -863,6 +863,26 @@ What shipped, and where it differs from the plan above:
   GDPS-WEonG and NBM `SNOWLVL` that has a value. NBM covers BC and Alberta except a strip
   along 56–57°N west of 118°W. Each Canadian step uses the mean of the level half way and
   at its end; each NBM block the mean at its start and end.
+- **The three decisions were reviewed and kept** (12 Nov 2026, NBM's 12Z run and the
+  totals built from it, against Mapterhorn's mean ground height in each cell):
+  - **Ratio**: the rise with height adds ~3% to the US's snow at the real ground height
+    (the adjusted snow sums to 0.95 of NBM's own with it, 0.92 without). Cells where NBM
+    gives a wet ratio on ground already well above its snow level are 1–9% of snowy
+    cells, with a median ratio near 10:1, so raising them to 11:1 changes little. Its
+    larger effect is on bands above the real ground (the top band is 1.3–2 × the plain
+    total with it, 1.0–1.5 × without).
+  - **Floor**: needed. NBM's `APCP` is often exactly zero under its light long-range
+    snow (the median `APCP` in snowy cells is 0 from day 9), so the share of snowy cells
+    the floor changes grows with lead: 16–32% to 48 h, 60–85% on days 5–9, 95–98% after.
+    Without it the US's adjusted snow at ground height sums to half of NBM's own (0.53),
+    and under a fifth past day 9. With it, no snowy cell's top band is below the plain
+    total in any window, on either side.
+  - **NBM's snow level in Canada past 144 h**: Canada's adjusted snow at ground height is
+    0.88–0.93 of the plain total in the windows that end before the change and 0.89–0.91
+    in the two that cross it, so borrowing doesn't shift the result. NBM's level reads
+    lower than GDPS-WEonG's where both exist (median 96–216 m lower at 24–120 h; within
+    150 m in 24–68% of cells), so the level steps down a little at 144 h. NBM covers 84%
+    of the box north of 49.5°N; the rest gets no adjustment past 144 h.
 - **The border**: the two sides are joined band by band with the plain totals' weights.
 - **Tiles**: drawn by the api on demand, 512 px for zoom 5–11, one Mapterhorn tile per snow
   tile (fetched through the tile cache into `data/tiles/dem/`; 404 over sea = sea level;
@@ -887,7 +907,9 @@ What shipped, and where it differs from the plan above:
   6-hour `APCP` to 48 h). Disk: 7 × 32 MB of grids, plus drawn tiles.
 - Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–7).
 - Known limits: precipitation itself isn't adjusted for terrain (no orographic boost or
-  rain shadow below the models' scale); one snow level per ~3 km cell and per period
+  rain shadow below the models' scale); a cell whose real ground is below the snow level
+  shows no snow where the plain total does (6–14% of Canada's snowy cells, 2–5% of the
+  US's from 48 h; 12 Nov 2026); one snow level per ~3 km cell and per period
   (half-hourly swings and inversions aren't seen); the ratio's rise with height assumes a
   typical cooling rate; lakes above the snow level show snow (it's what falls there);
   zoomed in, the tiles stretch zoom 11 (~25 m a pixel); the snow by elevation is for snow
