@@ -227,11 +227,23 @@ def test_nbm_latest_run_needs_its_last_file() -> None:
 
 
 class FakeNbm(Nbm):
-    """1 mm of water and 1 cm of snow an hour everywhere, in the sums NBM publishes."""
+    """1 mm of water and 1 cm of snow an hour everywhere, in the sums NBM publishes; the
+    snow level at `level` m and NBM's ratio 10:1 at every forecast hour."""
 
-    def __init__(self, run: int, region: Any) -> None:
+    def __init__(self, run: int, region: Any, level: float = 500.0) -> None:
         super().__init__(Net.__new__(Net), run, region)
         self.asked: list[tuple[int, int]] = []
+        self.level = level
+        self.fields: list[tuple[int, str]] = []
+
+    def field(self, fhour: int, var: str, level: str) -> np.ndarray | None:
+        self.fields.append((fhour, var))
+        if fhour < 1 or fhour > nbm.LAST_H:
+            return None
+        value = {"SNOWLVL": self.level, "SNOWLR": 10.0}.get(var)
+        if value is None:
+            return None
+        return np.full((self.region.height, self.region.width), value, np.float32)
 
     def sums(self, end: int, hours: int, vars_: list[str]) -> list[np.ndarray | None]:
         self.asked.append((end, hours))
@@ -319,9 +331,12 @@ class ModelsNet(Net):
     GDPS, which has none (10:1). HRDPS's domain is the whole box unless `domain_rows`
     says how many rows from the top it covers."""
 
-    def __init__(self, gdps: bool = True, domain_rows: int | None = None) -> None:
+    def __init__(
+        self, gdps: bool = True, domain_rows: int | None = None, snow_level: float = 500.0
+    ) -> None:
         self.gdps = gdps
         self.domain_rows = domain_rows
+        self.snow_level = snow_level
         self.coverages: list[str] = []
         self.maps: list[str] = []
 
@@ -357,8 +372,10 @@ class ModelsNet(Net):
         return None
 
     def value(self, cov: str, t: int) -> float | None:
-        if cov.endswith(("_Snow-Accum", "_SN")):  # running snow water since the run began
-            return (t - T0) / H
+        if cov.endswith(("_Snow-Accum", "_SN", "_Precip-Accum", "_PR")):
+            return (t - T0) / H  # running snow water (and all water) since the run began
+        if cov.endswith("SnowLevelHeight"):
+            return self.snow_level
         if cov.endswith(("_TT", "AirTemp_2m")):
             return None if cov.startswith("GDPS") else -1.0
         span = 6 if "6h" in cov else 3 if "3h" in cov else 1

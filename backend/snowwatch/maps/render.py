@@ -28,6 +28,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -40,7 +41,7 @@ import numpy as np
 from PIL import Image
 
 from snowwatch.config import SlrBand
-from snowwatch.maps import grib, totals
+from snowwatch.maps import bins, grib, terrain_totals, totals
 from snowwatch.maps.blend import (
     WET_MM,
     Layer,
@@ -81,6 +82,9 @@ DOMAIN_LAYER = HRDPS.precip  # drawn solid, it shows where HRDPS has data
 SPLIT_SOFT_MM = 0.25
 
 TOTAL_HOURS = totals.WINDOWS
+# Part of every grid by elevation's name: change it when how they're built changes.
+BINS_DRAWING = 1
+TILES_URL = "/api/snowtiles/{id}/{{z}}/{{x}}/{{y}}.png"
 SN_TOTAL_LAYER = HRDPS.accum  # water equivalent (mm) since the run began
 
 # Credit lines for the sources a frame or total came from (`src` values).
@@ -137,11 +141,13 @@ class TotalOut:
     key: str
     # The models used, joined by "+" ("hrdps+rdps+gdps+nbm").
     source: str = "hrdps"
-    # A terrain-adjusted tile URL template, when there is one (milestone 8).
+    # The terrain-adjusted tiles' URL template (`{z}/{x}/{y}`), when there are some.
     tiles: str | None = None
     window: int = 0  # the window asked for, in hours: 12, 24, 48, 72, 120, 168, 240
     # Each model used → when its run began (Unix seconds).
     runs: dict[str, int] = field(default_factory=dict)
+    # Names the grid by elevation behind `tiles` (data/maps/totals/bins-<id>.npy).
+    tiles_id: str = ""
 
     @classmethod
     def load(cls, d: dict[str, Any]) -> TotalOut:
@@ -810,12 +816,14 @@ class Renderer:
         if not self.totals and self._prev_totals:
             return self._read()  # GeoMet didn't answer: keep what we have
         index = self._commit(region, set(), None, self.totals)
+        self._prune_bins({t.tiles_id for t in self.totals if t.tiles_id})
         self._prune_work()
         return index
 
     def _snow_totals(self, region: Region, now: int) -> list[TotalOut]:
         """Snow over the next 12 h to 10 days: Canada's models chained in Canada, NBM in
-        the US, cross-faded across the border (see totals.py)."""
+        the US, cross-faded across the border (see totals.py); and the same by elevation,
+        for the terrain-adjusted map (see bins.py and terrain_totals.py)."""
         hrdps = run_of(self.net, HRDPS, HRDPS.accum)
         if hrdps is None:
             return []
@@ -827,6 +835,7 @@ class Renderer:
             if run is not None:
                 chain.append(run)
         us = self._nbm(region)
+        levels = terrain_totals.level_runs(self.net)
         # Windows end where both sides still have data (or where the one side does).
         last = max(r.end for r in chain)
         if us is not None:
@@ -834,13 +843,14 @@ class Renderer:
         wins = totals.window_ends(t0, last)
         runs_key = "|".join(f"{r.model.name}:{r.ref}" for r in chain)
         runs_key += f"|nbm:{us.run if us else ''}"
+        runs_key += "|" + ",".join(f"{lv.name}:{lv.ref}" for lv in levels)
 
         out: list[TotalOut] = []
         todo: list[tuple[int, int, str]] = []
         for w, end in wins:
             key = f"tb|{w}|{t0}|{end}|{runs_key}|{region.key}"
             had = self._prev_totals.get(key)
-            if had and (self.dir / had.file).exists():
+            if had and (self.dir / had.file).exists() and self._bins_ok(had):
                 out.append(had)
             else:
                 todo.append((w, end, key))
@@ -862,19 +872,128 @@ class Renderer:
         )
         south = totals.south_totals(us, t0, ends)
         used = {k: _run_ts(v) for k, v in north.runs.items()}
+        us_weight: np.ndarray | float = 0.0
+        made: list[TotalOut] = []
         for w, end, key in todo:
             n, s = north.cm.get(end), south.get(end)
             if n is None and s is None:
                 continue
-            cm = totals.join(n, s, self._us_weight(region, s) if s is not None else 0.0)
+            if s is not None:
+                us_weight = self._us_weight(region, s)
+            cm = totals.join(n, s, us_weight if s is not None else 0.0)
             runs = dict(used) if n is not None else {}
             if s is not None and us is not None:
                 runs["nbm"] = us.run
             totals.save_grid(cm, self.totals_dir / f"{w}h.npy")
             span = round((end - t0) / HOUR)
             name = self._save(paint_total(cm), region, f"t{span}")
-            out.append(TotalOut(span, t0, end, name, key, "+".join(runs), None, w, runs))
-        return sorted(out, key=lambda t: t.window)
+            made.append(TotalOut(span, t0, end, name, key, "+".join(runs), None, w, runs))
+        del north, south  # (a picture-sized grid per window each side)
+        if made:
+            try:
+                self._snow_bins(region, t0, made, chain, us, levels, w_hrdps, domain, us_weight)
+            except Exception:
+                log.exception("snow totals by elevation failed; the plain totals stand")
+        return sorted(out + made, key=lambda t: t.window)
+
+    # ---- Snow totals by elevation (the terrain-adjusted map) -------------------------
+
+    def _bins_path(self, tiles_id: str) -> Path:
+        return self.totals_dir / f"bins-{tiles_id}.npy"
+
+    def _bins_ok(self, t: TotalOut) -> bool:
+        """A total from an earlier run can be kept only with its grid by elevation (one
+        drawn before they existed is redrawn once)."""
+        return bool(t.tiles_id) and self._bins_path(t.tiles_id).exists()
+
+    def _snow_bins(
+        self,
+        region: Region,
+        t0: int,
+        made: list[TotalOut],
+        chain: list[Run],
+        us: Nbm | None,
+        levels: list[terrain_totals.LevelRun],
+        w_hrdps: np.ndarray | None,
+        domain: dict[str, np.ndarray] | None,
+        us_weight: np.ndarray | float,
+    ) -> None:
+        """The windows' snow by elevation: the US walk first (each window's grid parked
+        on disk), then Canada's, joining each window as it is reached. Sets each total's
+        `tiles` once its grid is written."""
+        by_end = {t.end: t for t in made}
+        ends = sorted(by_end)
+        parts = self.totals_dir / ".parts"
+        parts.mkdir(parents=True, exist_ok=True)
+        south_parts: dict[int, Path] = {}
+
+        def park(end: int, acc: np.ndarray) -> None:
+            path = parts / f"s-{end}.npy"
+            bins.save(path, acc)
+            south_parts[end] = path
+
+        terrain_totals.south_bins(us, t0, ends, self.slr_bands, park)
+        w_us = bins.half(us_weight) if isinstance(us_weight, np.ndarray) else 0.0
+        meta = {"bounds": region.bounds, "width": region.width, "height": region.height}
+
+        def finish(end: int, acc: np.ndarray | None) -> None:
+            south: np.ndarray | None = None
+            if end in south_parts:
+                with contextlib.suppress(OSError, ValueError):
+                    south = np.load(south_parts[end], mmap_mode="r")
+            if acc is None and south is None:
+                return
+            grid = bins.join(acc, south, w_us if south is not None else 0.0)
+            t = by_end[end]
+            tid = hashlib.sha1(f"{t.key}|bins@{BINS_DRAWING}".encode()).hexdigest()[:16]
+            bins.save(self._bins_path(tid), grid)
+            write_atomic(self.totals_dir / f"bins-{tid}.json", json.dumps(meta).encode())
+            t.tiles = TILES_URL.format(id=tid)
+            t.tiles_id = tid
+
+        done: set[int] = set()
+
+        def reached(end: int, acc: np.ndarray) -> None:
+            finish(end, acc)
+            done.add(end)
+
+        levels_src = terrain_totals.SnowLevels(self.net, region, levels, us, w_hrdps, self.wcs_dir)
+        terrain_totals.north_bins(
+            self.net,
+            region,
+            t0,
+            ends,
+            chain,
+            self.slr_bands,
+            levels_src,
+            reached,
+            self.wcs_dir,
+            domain,
+        )
+        for end in ends:
+            if end not in done:
+                finish(end, None)  # Canada's chain stopped short: the US's alone
+        for p in south_parts.values():
+            with contextlib.suppress(OSError):
+                p.unlink()
+
+    def _prune_bins(self, keep: set[str]) -> None:
+        """Drop grids by elevation (and the tiles drawn from them) that the index no
+        longer uses, once they've been out of it a while."""
+        cutoff = time.time() - RETIRE_S
+        for p in [*self.totals_dir.glob("bins-*.npy"), *self.totals_dir.glob("bins-*.json")]:
+            tid = p.stem.removeprefix("bins-")
+            if tid in keep:
+                continue
+            with contextlib.suppress(OSError):
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
+        tiles = self.totals_dir.parent / "snowtiles"
+        for d in tiles.glob("*") if tiles.exists() else []:
+            if d.name in keep or (self.totals_dir / f"bins-{d.name}.npy").exists():
+                continue
+            with contextlib.suppress(OSError):
+                shutil.rmtree(d)
 
 
 def _files(index: dict[str, Any]) -> set[str]:

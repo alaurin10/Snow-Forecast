@@ -6,8 +6,9 @@ render.py) and the snow totals as numbers (`data/maps/totals/<window>h.npy`, eve
 
 - the precipitation timeline as a typed rate band per frame (palette index → type and the
   band's bounds in mm of water an hour), from radar through the forecast;
-- snow totals per window, snow level, gusts and the ridge-level wind with its direction
-  through the forecast, snow on the ground, and observed snowfall;
+- snow totals per window, and per elevation from the terrain-adjusted grids
+  (`data/maps/totals/bins-<id>.npy`, see bins.py), snow level, gusts and the ridge-level
+  wind with its direction through the forecast, snow on the ground, and observed snowfall;
 - loading roses for the next 24 and 72 hours, as a location's snapshot has them: the
   ridge wind's direction weighted by the snow falling at the time and that wind's speed,
   for the map's wind-effect layer where no saved location is near.
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 
 from snowwatch.analysis.backcountry import BackcountryConfig, loading_rose
 from snowwatch.doc import RoseOut
+from snowwatch.maps import bins
 from snowwatch.maps.palette import RATE_BANDS
 from snowwatch.maps.region import merc_x, merc_y
 
@@ -65,6 +67,9 @@ class PointTotal(BaseModel):
     end: int
     cm: float | None
     source: str
+    # Snow (cm) at each of PointOut.elevations, from the terrain-adjusted grid (None
+    # without one).
+    by_elevation: list[float] | None = None
 
 
 class PointObserved(BaseModel):
@@ -96,6 +101,8 @@ class PointOut(BaseModel):
     roses: list[RoseOut]
     min_snow_cm: float
     min_wind_kmh: float
+    # The elevations (m) PointTotal.by_elevation is given at: every 250 m from 0.
+    elevations: list[int] = []
 
 
 def pixel(index: dict[str, Any], lat: float, lon: float) -> tuple[int, int] | None:
@@ -217,8 +224,11 @@ def probe(
                 end=int(t["end"]),
                 cm=cm,
                 source=str(t.get("source", "")),
+                by_elevation=by_elevation(totals_dir, str(t.get("tiles_id") or ""), lat, lon),
             )
         )
+    if any(t.by_elevation is not None for t in out.totals):
+        out.elevations = [int(z) for z in bins.ELEVS]
 
     layers = index.get("layers") or {}
 
@@ -256,6 +266,29 @@ def probe(
         )
     out.roses = roses(out, now, bc)
     return out
+
+
+def by_elevation(totals_dir: Path, tiles_id: str, lat: float, lon: float) -> list[float] | None:
+    """Snow (cm) at every band's elevation at a point, from a window's grid by elevation."""
+    if not tiles_id:
+        return None
+    grid = bins.load(totals_dir / f"bins-{tiles_id}.npy")
+    if grid is None:
+        return None
+    try:
+        meta = json.loads((totals_dir / f"bins-{tiles_id}.json").read_text())
+        rows, cols = bins.cell_coords(
+            meta["bounds"],
+            int(meta["width"]),
+            int(meta["height"]),
+            np.array([merc_x(lon)]),
+            np.array([merc_y(lat)]),
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    n = len(bins.ELEVS)
+    cm = bins.sample(grid, np.repeat(rows, n), np.repeat(cols, n), bins.ELEVS)
+    return [round(float(v), 1) for v in cm]
 
 
 def roses(p: PointOut, now: float, bc: BackcountryConfig) -> list[RoseOut]:

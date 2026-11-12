@@ -28,6 +28,7 @@ from snowwatch.api.push_api import make_push_router
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import load_forecast_config
 from snowwatch.http import Fetcher
+from snowwatch.maps import tiles_render as snow_tiles
 from snowwatch.maps.point import PointOut
 from snowwatch.maps.point import probe as point_probe
 from snowwatch.maps.point import read_index as read_point_index
@@ -286,6 +287,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data, media_type = got
         return Response(
             data, media_type=media_type, headers={"Cache-Control": "public, max-age=604800"}
+        )
+
+    @app.get("/api/snowtiles/{tiles_id}/{z}/{x}/{y}.png")
+    def snow_tile(tiles_id: str, z: int, x: int, y: int, request: Request) -> Response:
+        """Terrain-adjusted snow totals: a window's snow by elevation painted on the
+        terrain (see snowwatch/maps/tiles_render.py). The id changes with the forecast,
+        so a tile never changes."""
+        work = settings.map_work_dir
+        if not (work / "snowtiles" / tiles_id / str(z) / str(x) / f"{y}.png").exists():
+            tile_misses.check(request)  # drawing one costs a little, and may fetch elevation
+        try:
+            data = snow_tiles.tile(work / "totals", work / "snowtiles", tiles(), tiles_id, z, x, y)
+        except snow_tiles.Unavailable as e:
+            raise HTTPException(
+                503, "elevation tiles unavailable", headers={"Cache-Control": "no-store"}
+            ) from e
+        if data is None:
+            raise HTTPException(404)
+        return Response(
+            data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
     # The satellite index as last read: (file time, JSON, gzipped JSON). The worker
