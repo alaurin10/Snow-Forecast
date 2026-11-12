@@ -42,8 +42,19 @@ describe('prefs', () => {
 	it('saves map features as a list', async () => {
 		const { prefs } = await import('./prefs.svelte');
 		prefs.setMapFeature('contours', false);
-		expect(localStorage.getItem('sw.mapFeatures')).toBe('runs,peaks');
+		expect(localStorage.getItem('sw.mapFeatures')).toBe('runs,peaks,places,glaciers');
 		expect(prefs.mapFeatures.has('contours')).toBe(false);
+	});
+
+	it('switches features added later on once, then remembers the choice', async () => {
+		localStorage.setItem('sw.mapFeatures', 'runs,zones');
+		let { prefs } = await import('./prefs.svelte');
+		expect([...prefs.mapFeatures]).toEqual(['runs', 'zones', 'places', 'glaciers']);
+		prefs.setMapFeature('glaciers', false);
+		vi.resetModules();
+		({ prefs } = await import('./prefs.svelte'));
+		expect(prefs.mapFeatures.has('glaciers')).toBe(false);
+		expect(prefs.mapFeatures.has('places')).toBe(true);
 	});
 
 	it('keeps working when storage is blocked', async () => {

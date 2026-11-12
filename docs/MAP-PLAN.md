@@ -400,7 +400,7 @@ New `frontend/src/lib/map/terrain/`:
 | 6 | Recent satellite | B6 (done, see "Milestone 6 notes") |
 | 7 | More weather layers | A5, A6 (done, see "Milestone 7 notes") |
 | 8 | Terrain-adjusted totals | A4 (done, see "Milestone 8 notes") |
-| 9 | Tools and features | B8 measure/GPX, B9, B7.4, B7.5 |
+| 9 | Tools and features | B8 measure/GPX, B9, B7.4, B7.5 (done, see "Milestone 9 notes") |
 | 10 | Stretch | A7, B10, RRFS source |
 
 ## Handoff
@@ -915,9 +915,71 @@ What shipped, and where it differs from the plan above:
   zoomed in, the tiles stretch zoom 11 (~25 m a pixel); the snow by elevation is for snow
   falling, not settling, drifting or melting.
 
+## Milestone 9 notes (done 12 Nov 2026)
+
+What shipped, and where it differs from the plan above:
+
+- **B8 measure** (`lib/map/measure.ts`, `Measure.svelte`, `Profile.svelte`, `layers/measure.ts`):
+  a ruler button in the tool column. Taps add points (Undo, Clear); the terrain worker's new
+  `profile` message samples the line every 10 m (at most 400 samples, evenly spaced for long
+  tracks) with elevation from tiles of about half that spacing (zoom 10–14) and the ground's
+  slope on the zoom-12 grid, as the slope overlay. The panel gives distance, climb and
+  descent (changes under 2 m, the data's noise, aren't counted), low and high points, the
+  line's average and steepest grade (over at least 50 m) and the steepest ground it
+  crosses; the profile follows the charts' `Frame` (one y scale, marks inside the plot),
+  coloured by slope class like the map's line, and its crosshair marks the same spot on
+  the map. Plan differences: two kinds of steepness, because a traverse's own grade and
+  the slope it crosses are different things and the second matters for avalanches; the
+  panel says the slope is from ~10 m terrain and that the line isn't a judgement of it.
+- **GPX import**: read with the browser's `DOMParser` (every track segment, else a route;
+  thinned to 5,000 points for drawing), never uploaded (`e2e/features.spec.ts` checks no
+  request is sent); the map fits the track above the panel.
+- **B9 OSM additions** (`osm.py`): huts and shelters (nodes or buildings; picnic, bus and
+  field shelters left out), trailheads, passes and named cols, cliffs, glaciers (ways, and
+  multipolygons joined from their member ways, with holes) and `route=ski|piste` relations
+  as multi-lines. Glaciers, cliffs and routes are simplified to ~8 m. The query has a
+  version in the file's key, so files from before are fetched once more. Drawn as
+  Features "Huts, trailheads, passes" and "Glaciers and cliffs" (on by default, and on
+  once for existing browsers) and with "Ski runs and routes". Whistler's box: 2,040
+  features, 1.26 MB, 0.28 MB as served (the endpoint now gzips).
+- **B9 tapped run or tour**: rather than opening on any tap (runs cover resorts), a tap
+  names what it landed on in the Inspector (run, route, hut, pass, glacier, ATES rating),
+  and runs and routes get a "Profile" link that opens the whole line in the Measure panel:
+  length, vertical, steepest pitch and the profile. What MapLibre returns for a tap is cut
+  at tile edges, so runs and routes now carry their OSM id (`osm`) and the page fetches the
+  file once to find the whole line. Runs mapped as their outline (a closed way round a
+  bowl) say they have no profile.
+- **B9 snow stations** (`stations.py`, `GET /api/map/stations`, the worker's hourly
+  `snow_stations` job): every SNOTEL station and BC pillow in the box with depth now, the
+  24-hour change and eight daily depths. SNOTEL in three requests for the whole network
+  (AWDB allows 1,000 station elements a request: one element for all ~900 stations fits,
+  two don't). Dots coloured by depth, labelled with new snow from zoom 7; tap for
+  `StationSheet` (numbers, a week's sparkline, the station page). The plan said "7-day
+  sparkline"; it's eight daily readings (seven days of change).
+- **B7.4 ATES** (`overlays.py`): as planned, files in `data/overlays/`, plus upload and
+  removal on the Manage page (`AtesFiles.svelte`, `PUT/DELETE /api/admin/overlays/{name}`,
+  owner only, read before it's kept). The rating is found in the shape's fields, name,
+  style or description; Avalanche Canada's KMZ couldn't be fetched to check its fields,
+  so anything unrecognised shows as "unrated" (dashed, grey) and the Manage page lists
+  each file's shapes by rating. Drawn in Avalanche Canada's ATES colours under the labels;
+  the option appears only when the server has files. AutoATES not attempted.
+- **B7.5 observations** (`observations.py`, `GET /api/avalanche/observations.geojson`,
+  hourly): the MIN endpoint answered from the sandbox (`/min/en/submissions`, a required
+  `fromdate`, at most 31 days counting both ends); the last 14 days (`map.obs_days`) in
+  the box, without reporters' names. Drawn as rings (so they don't read as stations)
+  coloured by the most telling kind; tap for `ReportSheet` with a link to the full report.
+  US observations: linked out, as planned (the About panel says so).
+- Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–8).
+- Known limits: profiles are as good as the elevation (about 10 m slope; 1–2 m elevation
+  where lidar exists); a run's line is as mapped (often down the middle of a wide run, or
+  its outline); stations are point measurements, often in clearings; field reports are
+  unchecked and sparse early in the season (two in the 30 days to 12 Nov 2026); ATES
+  ratings are only as current as the owner's files.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,
+  `backend/snowwatch/{stations,observations,overlays}.py`,
   `backend/snowwatch/maps/sources/{radar_eccc,rainviewer,hrrr,nbm,rdps_gdps,rrfs,snodas,nohrsc,gibs}.py`,
   `config/treeline.yaml`, `frontend/src/lib/map/**`, `docs/MAP-PLAN.md`.
 - Changed: `backend/snowwatch/precip.py` (re-exports), `tiles.py` (new upstreams),
@@ -959,7 +1021,7 @@ What shipped, and where it differs from the plan above:
 - **Treeline elevations are approximations**, and so is everything built on them.
 - **Display terms**: the concern index is public; avalanche.org's and Avalanche Canada's
   terms for showing a product derived from their ratings haven't been re-read for it.
-- **Not verified from the sandbox**: ECMWF open-data paths, Avalanche Canada MIN
-  endpoint. (`api.avalanche.ca` answered from the sandbox on 11 Nov 2026.)
+- **Not verified from the sandbox**: ECMWF open-data paths. (Avalanche Canada's MIN
+  endpoint answered on 12 Nov 2026; its trip-planner ATES KMZ wasn't fetched.)
 - **Not available for free**: an open ATES feed, US avalanche observations without a key,
   sub-daily high-resolution satellite, and radar coverage in terrain-blocked valleys.

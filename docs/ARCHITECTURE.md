@@ -51,13 +51,18 @@ backend/snowwatch/
               nohrsc, gibs)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
-  precip.py (re-exports maps/) tiles.py osm.py lookups.py push.py verify.py
+  stations.py (every snow station in the map's box) observations.py (Avalanche
+  Canada's field reports) overlays.py (the owner's ATES files)
+  precip.py (re-exports maps/) tiles.py osm.py (runs, huts, glaciers, routes …)
+  lookups.py push.py verify.py
 frontend/src/
   routes/     overview, location/[id], map, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
-              TerrainControls, AvalancheControls, SatControls, sat.ts, Legend, Inspector, ZoneSheet;
+              TerrainControls, AvalancheControls, SatControls, sat.ts, Legend, Inspector, ZoneSheet,
+              Measure and Profile (measure.ts: lines, GPX, stats), StationSheet, ReportSheet,
+              features.ts and here.ts (stations, reports, ATES; what a tap landed on);
               avalanche.ts (zones, treeline, problems); terrain/ decodes elevation
               and works out slope, aspect, sun and shade, the wind effect and the
               concern index in a Web Worker, served to MapLibre as dem:// and

@@ -89,14 +89,28 @@ export const OTM_OPACITY: ExpressionSpecification = [
 	1
 ];
 
-export const SKI_LAYERS = ['run-casing', 'runs', 'lifts', 'run-labels', 'lift-labels'];
+export const SKI_LAYERS = [
+	'run-casing',
+	'runs',
+	'lifts',
+	'routes',
+	'run-labels',
+	'lift-labels',
+	'route-labels'
+];
 export const PEAK_LAYERS = ['peaks', 'peak-labels'];
+/** Huts and shelters, trailheads and passes. */
+export const PLACE_LAYERS = ['places', 'place-labels'];
+export const GLACIER_LAYERS = ['glaciers', 'glacier-lines', 'cliffs', 'glacier-labels'];
 export const CONTOUR_LAYERS = ['contour-lines', 'contour-labels'];
 /** The precipitation overlay goes under this layer (over the base and terrain overlays). */
 export const PRECIP_BEFORE = 'satlabels';
 
 export const ELEVATION_ATTRIBUTION =
 	'Elevation © <a href="https://mapterhorn.com/attribution/">Mapterhorn</a> (USGS 3DEP, NRCan HRDEM, Copernicus and others)';
+
+/** The ski map's features (runs, routes, huts …), as the server serves them. */
+export const SKI_DATA = '/api/osm/ski.geojson';
 
 // Base map and ski-run tiles come through the server, which caches them.
 const tiles = (layer: string) => [`/api/tiles/${layer}/{z}/{x}/{y}.png`];
@@ -109,6 +123,10 @@ export interface StyleOptions {
 	base: MapBase;
 	runs: boolean;
 	peaks: boolean;
+	/** Huts, trailheads and passes. */
+	places: boolean;
+	/** Glaciers and cliffs. */
+	glaciers: boolean;
 	contours: boolean;
 	shade: MapShade;
 	overlay: MapOverlay;
@@ -293,12 +311,13 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			maxzoom: 18,
 			attribution: 'Labels © <a href="https://www.esri.com">Esri</a>'
 		},
-		// Runs, lifts and peaks from OpenStreetMap, fetched weekly by the server.
+		// Runs, lifts, peaks, huts, glaciers and more from OpenStreetMap, fetched weekly by
+		// the server.
 		ski: {
 			type: 'geojson',
-			data: '/api/osm/ski.geojson',
+			data: SKI_DATA,
 			attribution:
-				'Runs, lifts, peaks © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
+				'Runs, lifts, peaks, huts, glaciers © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
 		},
 		...demSources(o.worker)
 	};
@@ -381,7 +400,9 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 		sources.contours = { type: 'vector', tiles: [o.contourTiles], maxzoom: 15 };
 		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
 	}
+	if (full) layers.push(...glacierLayers(o.dark, o.glaciers));
 	layers.push(...skiLayers(o.dark, o.units, full && o.runs, !full || o.peaks));
+	if (full) layers.push(...placeLayers(o.dark, o.units, o.places));
 	return {
 		version: 8,
 		sources,
@@ -561,6 +582,21 @@ export function skiLayers(
 			}
 		},
 		{
+			// Ski routes made of many ways (route=ski|piste), so a tour has its name.
+			id: 'routes',
+			type: 'line',
+			source: 'ski',
+			minzoom: 10,
+			filter: ['==', ['get', 'kind'], 'route'],
+			layout: { visibility: v, 'line-cap': 'round', 'line-join': 'round' },
+			paint: {
+				'line-color': '#7b3fb0',
+				'line-opacity': 0.8,
+				'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.2, 15, 2.6],
+				'line-dasharray': [1, 2]
+			}
+		},
+		{
 			id: 'run-labels',
 			type: 'symbol',
 			source: 'ski',
@@ -600,6 +636,24 @@ export function skiLayers(
 			paint: { 'text-color': '#b0202a', ...LABEL_PAINT }
 		},
 		{
+			id: 'route-labels',
+			type: 'symbol',
+			source: 'ski',
+			minzoom: 12,
+			filter: ['all', ['==', ['get', 'kind'], 'route'], ['!=', ['get', 'name'], '']],
+			layout: {
+				visibility: v,
+				'symbol-placement': 'line',
+				'text-field': ['get', 'name'],
+				'text-font': FONT,
+				'text-size': 11.5,
+				'text-pitch-alignment': 'viewport',
+				'symbol-spacing': 400,
+				'text-offset': [0, -0.9]
+			},
+			paint: { 'text-color': '#6a2f9e', ...LABEL_PAINT }
+		},
+		{
 			id: 'peaks',
 			type: 'circle',
 			source: 'ski',
@@ -632,6 +686,154 @@ export function skiLayers(
 				'text-color': peakText(dark),
 				'text-halo-color': halo(dark),
 				'text-halo-width': 1.6
+			}
+		}
+	];
+}
+
+// ---- Glaciers and cliffs; huts, trailheads and passes --------------------------------
+
+const kindIs = (k: string) => ['==', ['get', 'kind'], k] as unknown as ExpressionSpecification;
+
+export function glacierLayers(dark: boolean, on: boolean): LayerSpecification[] {
+	const v = vis(on);
+	return [
+		{
+			id: 'glaciers',
+			type: 'fill',
+			source: 'ski',
+			minzoom: 8,
+			filter: kindIs('glacier'),
+			layout: { visibility: v },
+			paint: {
+				'fill-color': dark ? '#8fc8ee' : '#d9f0ff',
+				'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, dark ? 0.16 : 0.35]
+			}
+		},
+		{
+			id: 'glacier-lines',
+			type: 'line',
+			source: 'ski',
+			minzoom: 9,
+			filter: kindIs('glacier'),
+			layout: { visibility: v },
+			paint: { 'line-color': '#4f9fd1', 'line-width': 0.9, 'line-dasharray': [3, 1.5] }
+		},
+		{
+			id: 'cliffs',
+			type: 'line',
+			source: 'ski',
+			minzoom: 12,
+			filter: kindIs('cliff'),
+			layout: { visibility: v, 'line-cap': 'round' },
+			paint: {
+				'line-color': dark ? '#d8c3a5' : '#4a3a2c',
+				'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1, 16, 2.4]
+			}
+		},
+		{
+			id: 'glacier-labels',
+			type: 'symbol',
+			source: 'ski',
+			minzoom: 11,
+			filter: ['all', kindIs('glacier'), ['!=', ['get', 'name'], '']],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 11.5,
+				'text-max-width': 8
+			},
+			paint: {
+				'text-color': dark ? '#bfe3fb' : '#2a6f9e',
+				'text-halo-color': halo(dark),
+				'text-halo-width': 1.4
+			}
+		}
+	];
+}
+
+/** Colours of huts, trailheads and passes on the map and in its key. */
+export const PLACE_COLORS = { hut: '#9a4e1c', trailhead: '#2f8f3f', pass: '#6b4fa0' } as const;
+
+export function placeLabel(units: UnitSystem): ExpressionSpecification {
+	const ft = units === 'imperial';
+	return [
+		'case',
+		['all', ['has', 'ele'], ['!=', ['get', 'kind'], 'trailhead']],
+		[
+			'format',
+			['get', 'name'],
+			{},
+			'\n',
+			{},
+			[
+				'concat',
+				[
+					'number-format',
+					['round', ft ? ['*', ['get', 'ele'], 3.28084] : ['get', 'ele']],
+					{ 'max-fraction-digits': 0 }
+				],
+				ft ? ' ft' : ' m'
+			],
+			{ 'font-scale': 0.85 }
+		],
+		['get', 'name']
+	] as ExpressionSpecification;
+}
+
+export function placeLayers(dark: boolean, units: UnitSystem, on: boolean): LayerSpecification[] {
+	const v = vis(on);
+	const filter = [
+		'match',
+		['get', 'kind'],
+		['hut', 'trailhead', 'pass'],
+		true,
+		false
+	] as unknown as ExpressionSpecification;
+	return [
+		{
+			id: 'places',
+			type: 'circle',
+			source: 'ski',
+			minzoom: 10,
+			filter,
+			layout: { visibility: v },
+			paint: {
+				'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 15, 6],
+				'circle-color': [
+					'match',
+					['get', 'kind'],
+					'hut',
+					PLACE_COLORS.hut,
+					'trailhead',
+					PLACE_COLORS.trailhead,
+					PLACE_COLORS.pass
+				],
+				'circle-stroke-width': 1.6,
+				'circle-stroke-color': '#ffffff'
+			}
+		},
+		{
+			id: 'place-labels',
+			type: 'symbol',
+			source: 'ski',
+			minzoom: 11.5,
+			filter: ['all', filter, ['!=', ['get', 'name'], '']],
+			layout: {
+				visibility: v,
+				'text-field': placeLabel(units),
+				'text-font': FONT,
+				'text-size': 11.5,
+				'text-anchor': 'top',
+				'text-offset': [0, 0.6],
+				'text-max-width': 9,
+				'text-optional': true
+			},
+			paint: {
+				'text-color': peakText(dark),
+				'text-halo-color': halo(dark),
+				'text-halo-width': 1.5
 			}
 		}
 	];

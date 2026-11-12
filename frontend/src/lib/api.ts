@@ -1,4 +1,5 @@
 import type {
+	AtesOut,
 	AvalancheView,
 	BudgetOut,
 	ConcernOut,
@@ -10,8 +11,11 @@ import type {
 	MapWindOut,
 	Me,
 	MetaOut,
+	ObsOut,
+	OverlayFile,
 	OverviewRow,
 	PointOut,
+	StationsOut,
 	StatusOut,
 	VerificationOut,
 	ZonesOut,
@@ -121,6 +125,21 @@ export const getSat = () => get<SatOut>('/api/sat');
 export const getMapPoint = (lat: number, lon: number) =>
 	get<PointOut>(`/api/map/point?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`);
 
+/** Every SNOTEL station and BC snow pillow in the map's box (refreshed hourly). */
+export const getStations = () => get<StationsOut>('/api/map/stations');
+/** Avalanche Canada's field reports in the map's box, the last two weeks. */
+export const getReports = () => get<ObsOut>('/api/avalanche/observations.geojson');
+
+/** The ATES ratings the owner supplied, or null when there are none on this server. */
+export async function getAtes(): Promise<AtesOut | null> {
+	try {
+		return await get<AtesOut>('/api/overlays/ates.geojson');
+	} catch (e) {
+		if (e instanceof ApiError && e.status === 404) return null;
+		throw e;
+	}
+}
+
 /** The concern index's settings, or null when the server has it off (HAZARD_INDEX). */
 export async function getConcern(): Promise<ConcernOut | null> {
 	try {
@@ -176,6 +195,16 @@ export const refreshLocation = (id: string) =>
 	send<JobOut>('POST', `/api/admin/locations/${encodeURIComponent(id)}/refresh`);
 export const getJob = (id: number) => get<JobOut>(`/api/admin/jobs/${id}`);
 export const getBudget = () => get<BudgetOut>('/api/admin/budget');
+export const adminOverlays = () => get<OverlayFile[]>('/api/admin/overlays');
+/** Add or replace an ATES file: the request's body is the file itself. */
+export const putOverlay = (file: File) =>
+	get<OverlayFile>(`/api/admin/overlays/${encodeURIComponent(file.name)}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/octet-stream' },
+		body: file
+	});
+export const deleteOverlay = (name: string) =>
+	send<{ ok: boolean }>('DELETE', `/api/admin/overlays/${encodeURIComponent(name)}`);
 
 /** Poll a job until it's done or failed, ~3 minutes pass, or `signal` aborts (the page
  * was left). Returns the job as last seen, which may still be queued or running. */

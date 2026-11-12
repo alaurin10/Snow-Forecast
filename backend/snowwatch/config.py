@@ -73,6 +73,11 @@ class MapConfig(BaseModel):
     sat_min_clear: float = Field(0.85, gt=0, le=1)
     sat_max_nodata: float = Field(0.03, ge=0, lt=1)
     sat_keep: int = Field(3, ge=1, le=10)
+    # Snow stations (SNOTEL and BC snow pillows) and Avalanche Canada's field reports
+    # (Mountain Information Network): how often to fetch, and how far back reports go.
+    stations_minutes: int = Field(60, ge=15)
+    obs_minutes: int = Field(60, ge=15)
+    obs_days: int = Field(14, ge=1, le=30)
 
     @field_validator("region")
     @classmethod

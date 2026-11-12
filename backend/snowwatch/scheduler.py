@@ -293,6 +293,39 @@ class Worker:
         except Exception:
             log.exception("ski map data failed")
 
+    def _map_box(self) -> tuple[float, float, float, float]:
+        return avalanche_zones.map_box(
+            self.cfg.map.region, list_locations(connect(self.settings.database))
+        )
+
+    def snow_stations(self) -> None:
+        """Every SNOTEL station and BC snow pillow in the map's box, for its stations
+        layer. Failures are only logged."""
+        from snowwatch import stations
+
+        try:
+            with self._fetcher() as fetcher:
+                out = stations.refresh(self.settings.stations_path, fetcher, self._map_box())
+            n = {"snotel": 0, "bc": 0}
+            for st in out.stations:
+                n[st.network] += 1
+            log.info("snow stations: %d SNOTEL, %d BC, errors %s", n["snotel"], n["bc"], out.errors)
+        except Exception:
+            log.exception("snow stations failed")
+
+    def observations(self) -> None:
+        """Avalanche Canada's field reports in the map's box. Failures are only logged."""
+        from snowwatch import observations
+
+        try:
+            with self._fetcher() as fetcher:
+                out = observations.refresh(
+                    self.settings.obs_path, fetcher, self._map_box(), self.cfg.map.obs_days
+                )
+            log.info("field reports: %d, errors %s", len(out.features), out.errors)
+        except Exception:
+            log.exception("field reports failed")
+
     def satellite(self) -> None:
         """The newest clear Sentinel-2 scenes near each location, for the map's recent
         satellite base. Failures are only logged."""
@@ -400,6 +433,17 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         (worker.forecast_frames, mc.forecast_minutes, "forecast_frames"),
         (worker.totals_fields, mc.totals_minutes, "totals_fields"),
         (worker.weather_layers, mc.layers_minutes, "weather_layers"),
+    ):
+        sched.add_job(
+            job,
+            IntervalTrigger(minutes=minutes),
+            id=name,
+            next_run_time=datetime.now(UTC),
+            **opts,
+        )
+    for job, minutes, name in (
+        (worker.snow_stations, mc.stations_minutes, "snow_stations"),
+        (worker.observations, mc.obs_minutes, "observations"),
     ):
         sched.add_job(
             job,

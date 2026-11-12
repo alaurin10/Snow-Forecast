@@ -5,6 +5,7 @@
  */
 export interface ApiTypes {
 	admin_locations: Location[];
+	ates: AtesOut;
 	avalanche: {
 		[k: string]: AvalancheView;
 	};
@@ -16,9 +17,12 @@ export interface ApiTypes {
 	lookups: LookupStatus;
 	map_concern: ConcernOut;
 	map_point: PointOut;
+	map_stations: StationsOut;
 	map_wind: MapWindOut;
 	me: Me;
 	meta: MetaOut;
+	observations: ObsOut;
+	overlay_files: OverlayFile[];
 	overview: OverviewRow[];
 	plan: PlanOut;
 	resolve_in: ResolveIn;
@@ -85,6 +89,50 @@ export interface Webcam {
 	image_url?: string | null;
 	name: string;
 	url: string;
+}
+/**
+ * Every ATES file the owner has supplied, as one collection.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AtesOut".
+ */
+export interface AtesOut {
+	features: AtesFeature[];
+	files: OverlayFile[];
+	type?: 'FeatureCollection';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AtesFeature".
+ */
+export interface AtesFeature {
+	geometry: {
+		[k: string]: unknown;
+	};
+	properties: AtesProps;
+	type?: 'Feature';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "AtesProps".
+ */
+export interface AtesProps {
+	file: string;
+	name: string;
+	rating: 'non' | 'simple' | 'challenging' | 'complex' | 'extreme' | 'unrated';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OverlayFile".
+ */
+export interface OverlayFile {
+	bytes: number;
+	error?: string | null;
+	features: number;
+	name: string;
+	ratings: {
+		[k: string]: number;
+	};
 }
 /**
  * What the app may show right now.
@@ -417,6 +465,40 @@ export interface PointTotal {
 	window: number;
 }
 /**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "StationsOut".
+ */
+export interface StationsOut {
+	errors?: string[];
+	generated_at: string;
+	stations: MapStation[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MapStation".
+ */
+export interface MapStation {
+	change24_cm: number | null;
+	daily: StationDay[];
+	depth_cm: number | null;
+	elev_m: number | null;
+	id: string;
+	lat: number;
+	lon: number;
+	name: string;
+	network: 'snotel' | 'bc';
+	obs_time: string | null;
+	url?: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "StationDay".
+ */
+export interface StationDay {
+	date: string;
+	depth_cm: number | null;
+}
+/**
  * Wind and new snow per location for the map's wind-effect layer.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -480,6 +562,43 @@ export interface MetaOut {
 	snowfall_cm_per_mm: number;
 	storm_cm: number;
 	version: string;
+}
+/**
+ * Recent field reports in the map's box.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsOut".
+ */
+export interface ObsOut {
+	days: number;
+	errors?: string[];
+	features: ObsFeature[];
+	generated_at: string | null;
+	type?: 'FeatureCollection';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsFeature".
+ */
+export interface ObsFeature {
+	geometry: {
+		[k: string]: unknown;
+	};
+	properties: ObsProps;
+	type?: 'Feature';
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsProps".
+ */
+export interface ObsProps {
+	id: string;
+	images: number;
+	kinds: string[];
+	region: string;
+	time: string;
+	title: string;
+	url: string | null;
 }
 /**
  * One location on the Overview and Calendar pages (mid band).

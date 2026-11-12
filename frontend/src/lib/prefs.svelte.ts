@@ -45,8 +45,22 @@ export const MAP_OVERLAYS: readonly MapOverlay[] = [
 	'concern'
 ] as const;
 /** Things drawn on top that can each be on or off. */
-export type MapFeature = 'runs' | 'peaks' | 'contours' | 'zones';
-export const MAP_FEATURES: readonly MapFeature[] = ['runs', 'peaks', 'contours', 'zones'] as const;
+export type MapFeature =
+	'runs' | 'peaks' | 'contours' | 'zones' | 'places' | 'glaciers' | 'stations' | 'obs' | 'ates';
+export const MAP_FEATURES: readonly MapFeature[] = [
+	'runs',
+	'peaks',
+	'contours',
+	'zones',
+	'places',
+	'glaciers',
+	'stations',
+	'obs',
+	'ates'
+] as const;
+/** Features added later that are on for everyone once, like the ones before them. */
+const NEW_FEATURES: readonly MapFeature[] = ['places', 'glaciers'];
+const FEATURES_VERSION = '2';
 export type MapShade = 'off' | 'light' | 'strong';
 /** The base map: Esri/OpenTopoMap topo, Esri's undated imagery, or recent satellite views. */
 export type MapBase = 'topo' | 'satellite' | 'recent';
@@ -84,13 +98,21 @@ function loadFeatures(): Set<MapFeature> {
 	if (v === null) {
 		// Before: only ski runs could be switched off.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale on change
-		const all = new Set<MapFeature>(['runs', 'peaks', 'contours']);
+		const all = new Set<MapFeature>(['runs', 'peaks', 'contours', ...NEW_FEATURES]);
 		if (read('sw.mapPistes') === 'off') all.delete('runs');
 		return all;
 	}
-	return new Set(
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- replaced wholesale on change
+	const got = new Set(
 		v.split(',').filter((f): f is MapFeature => (MAP_FEATURES as readonly string[]).includes(f))
 	);
+	// Huts, trailheads, passes, glaciers and cliffs arrived later: on once for everyone.
+	if (read('sw.mapFeaturesV') !== FEATURES_VERSION) {
+		for (const f of NEW_FEATURES) got.add(f);
+		save('sw.mapFeatures', [...got].join(','));
+		save('sw.mapFeaturesV', FEATURES_VERSION);
+	}
+	return got;
 }
 
 function save(key: string, value: string): void {
@@ -180,6 +202,7 @@ class Prefs {
 		else next.delete(f);
 		this.mapFeatures = next;
 		save('sw.mapFeatures', [...next].join(','));
+		save('sw.mapFeaturesV', FEATURES_VERSION);
 	}
 
 	setMapShade(s: MapShade) {

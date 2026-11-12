@@ -1,9 +1,12 @@
-"""Ski runs, lifts and peaks around the locations, from OpenStreetMap, for the Map page.
+"""Ski runs, lifts, peaks and mountain features around the locations, from OpenStreetMap,
+for the Map page.
 
 The worker asks Overpass once a week (or when the locations change) for the runs
-(`piste:type`), lifts (`aerialway`) and named peaks in a box around each location,
-and saves them as one small GeoJSON file. The map draws them as vector lines with
-names that follow the runs and stay upright in 3D, which picture tiles can't do.
+(`piste:type`), lifts (`aerialway`), named peaks, huts and shelters, trailheads, passes,
+cliffs, glaciers and ski-route relations (`route=ski|piste`, so a tour made of many ways
+gets its name) in a box around each location, and saves them as one GeoJSON file. The
+map draws them as vectors, with names that follow the lines and stay upright in 3D,
+which picture tiles can't do.
 
 Coverage is whatever OSM mappers have added: resorts are usually complete; ski-touring
 and backcountry lines (`piste:type=skitour`) are hit and miss.
@@ -13,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -36,6 +40,12 @@ EMPTY_MAX_AGE_S = 6 * 3600
 PAD_LAT = 0.16
 PAD_LON = 0.24
 RUN_TYPES = {"downhill", "skitour", "backcountry", "nordic", "sled", "hike", "snow_park"}
+# Bumped when the query asks for more, so files from before are fetched again.
+QUERY_VERSION = 2
+# Shelters worth showing in the mountains (not picnic or bus shelters), unless named.
+SHELTERS = {"basic_hut", "lean_to", "rock_shelter", "weather_shelter", "emergency"}
+# Glaciers and cliffs are drawn as shapes; detail below ~8 m only adds bytes.
+SIMPLIFY_DEG = 0.00008
 
 
 def boxes(points: Iterable[tuple[float, float]]) -> list[tuple[float, float, float, float]]:
@@ -53,11 +63,206 @@ def boxes(points: Iterable[tuple[float, float]]) -> list[tuple[float, float, flo
 
 
 def query(bxs: list[tuple[float, float, float, float]]) -> str:
+    """Lines and points with their tags and shape; then glaciers and ski routes in full
+    (a relation only carries its members' shapes with the body)."""
     parts = []
+    full = []
     for s, w, n, e in bxs:
         b = f"({s},{w},{n},{e})"
-        parts.append(f'way["piste:type"]{b};way["aerialway"]{b};node["natural"="peak"]["name"]{b};')
-    return f"[out:json][timeout:120];({''.join(parts)});out tags geom;"
+        parts.append(
+            f'way["piste:type"]{b};way["aerialway"]{b};node["natural"="peak"]["name"]{b};'
+            f'nw["tourism"~"^(alpine_hut|wilderness_hut)$"]{b};nw["amenity"="shelter"]{b};'
+            f'node["highway"="trailhead"]{b};node["mountain_pass"="yes"]{b};'
+            f'node["natural"="saddle"]["name"]{b};way["natural"="cliff"]{b};'
+        )
+        full.append(
+            f'way["natural"="glacier"]{b};relation["natural"="glacier"]{b};'
+            f'relation["route"~"^(ski|piste)$"]{b};'
+        )
+    return f"[out:json][timeout:120];({''.join(parts)});out tags geom;({''.join(full)});out geom;"
+
+
+Coord = list[float]
+
+
+def _ele(tags: dict[str, Any]) -> int | None:
+    try:
+        return round(float(str(tags.get("ele", "")).split()[0].replace(",", "")))
+    except (ValueError, IndexError):
+        return None
+
+
+def _coords(geometry: list[dict[str, Any]] | None) -> list[Coord]:
+    return [
+        [round(p["lon"], 6), round(p["lat"], 6)]
+        for p in geometry or []
+        if isinstance(p, dict) and "lat" in p and "lon" in p
+    ]
+
+
+def simplify(line: list[Coord], tol: float = SIMPLIFY_DEG) -> list[Coord]:
+    """Douglas-Peucker in degrees (longitude scaled by latitude), keeping the ends."""
+    if len(line) < 3:
+        return line
+    k = math.cos(math.radians(line[0][1]))
+    keep = [False] * len(line)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(line) - 1)]
+    while stack:
+        a, b = stack.pop()
+        ax, ay = line[a][0] * k, line[a][1]
+        bx, by = line[b][0] * k, line[b][1]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy)
+        worst, at = -1.0, -1
+        for i in range(a + 1, b):
+            px, py = line[i][0] * k, line[i][1]
+            if norm == 0:
+                d = math.hypot(px - ax, py - ay)
+            else:
+                d = abs(dy * (px - ax) - dx * (py - ay)) / norm
+            if d > worst:
+                worst, at = d, i
+        if at >= 0 and worst > tol:
+            keep[at] = True
+            stack.extend(((a, at), (at, b)))
+    return [p for p, k_ in zip(line, keep, strict=True) if k_]
+
+
+def rings(ways: list[list[Coord]]) -> list[list[Coord]]:
+    """Closed rings joined end to end from a multipolygon's member ways. Pieces that
+    never close (members cut off by the query) are dropped."""
+    pool = [w[:] for w in ways if len(w) >= 2]
+    out: list[list[Coord]] = []
+    while pool:
+        cur = pool.pop(0)
+        while cur[0] != cur[-1]:
+            for i, w in enumerate(pool):
+                if w[0] == cur[-1]:
+                    cur.extend(w[1:])
+                elif w[-1] == cur[-1]:
+                    cur.extend(w[-2::-1])
+                elif w[-1] == cur[0]:
+                    cur[:0] = w[:-1]
+                elif w[0] == cur[0]:
+                    cur[:0] = w[:0:-1]
+                else:
+                    continue
+                pool.pop(i)
+                break
+            else:
+                break
+        if cur[0] == cur[-1] and len(cur) >= 4:
+            out.append(cur)
+    return out
+
+
+def _inside(pt: Coord, ring: list[Coord]) -> bool:
+    x, y = pt
+    hit = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            hit = not hit
+        j = i
+    return hit
+
+
+def _closed(ring: list[Coord]) -> list[Coord]:
+    """Simplified, but still a closed ring of at least four points."""
+    s = simplify(ring)
+    return s if len(s) >= 4 else ring
+
+
+def polygons(outer: list[list[Coord]], inner: list[list[Coord]]) -> list[list[list[Coord]]]:
+    """GeoJSON polygons: each outer ring with the inner rings that lie in it."""
+    polys = [[_closed(r)] for r in outer]
+    for r in inner:
+        for poly, o in zip(polys, outer, strict=True):
+            if _inside(r[0], o):
+                poly.append(_closed(r))
+                break
+    return polys
+
+
+def _point(el: dict[str, Any]) -> Coord | None:
+    """A node's position, or the middle of a way (a hut drawn as a building)."""
+    if el.get("type") == "node" and "lat" in el:
+        return [round(el["lon"], 6), round(el["lat"], 6)]
+    pts = _coords(el.get("geometry"))
+    if len(pts) > 1 and pts[0] == pts[-1]:
+        pts = pts[:-1]
+    if not pts:
+        return None
+    return [
+        round(sum(p[0] for p in pts) / len(pts), 6),
+        round(sum(p[1] for p in pts) / len(pts), 6),
+    ]
+
+
+def _place(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None:
+    """Huts, shelters, trailheads and passes, as points."""
+    tourism = tags.get("tourism")
+    if tourism in ("alpine_hut", "wilderness_hut"):
+        kind, typ = "hut", tourism
+    elif tags.get("amenity") == "shelter":
+        st = tags.get("shelter_type", "")
+        if st not in SHELTERS and not tags.get("name"):
+            return None
+        if st in ("picnic_shelter", "public_transport", "field_shelter"):
+            return None
+        kind, typ = "hut", "shelter"
+    elif tags.get("highway") == "trailhead":
+        kind, typ = "trailhead", "trailhead"
+    elif tags.get("mountain_pass") == "yes" or tags.get("natural") == "saddle":
+        kind, typ = "pass", tags.get("natural") or "pass"
+    else:
+        return None
+    at = _point(el)
+    if at is None:
+        return None
+    props: dict[str, Any] = {"kind": kind, "type": typ, "name": tags.get("name", "")}
+    if (ele := _ele(tags)) is not None:
+        props["ele"] = ele
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": at},
+        "properties": props,
+    }
+
+
+def _relation(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None:
+    """A glacier multipolygon or a ski route made of many ways."""
+    members = [m for m in el.get("members") or [] if m.get("type") == "way"]
+    if tags.get("natural") == "glacier":
+        outer = rings([_coords(m.get("geometry")) for m in members if m.get("role") != "inner"])
+        inner = rings([_coords(m.get("geometry")) for m in members if m.get("role") == "inner"])
+        if not outer:
+            return None
+        return {
+            "type": "Feature",
+            "geometry": {"type": "MultiPolygon", "coordinates": polygons(outer, inner)},
+            "properties": {"kind": "glacier", "name": tags.get("name", "")},
+        }
+    if tags.get("route") in ("ski", "piste"):
+        lines = [simplify(c) for m in members if len(c := _coords(m.get("geometry"))) >= 2]
+        if not lines:
+            return None
+        return {
+            "type": "Feature",
+            "geometry": {"type": "MultiLineString", "coordinates": lines},
+            "properties": {
+                "kind": "route",
+                "type": tags.get("piste:type") or ("skitour" if tags["route"] == "ski" else ""),
+                "difficulty": tags.get("piste:difficulty", ""),
+                "name": tags.get("piste:name") or tags.get("name") or "",
+                # So the map can find the whole line again (what it draws is cut into tiles).
+                "osm": f"r{el.get('id', 0)}",
+            },
+        }
+    return None
 
 
 def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
@@ -70,11 +275,15 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
         seen.add(key)
         tags = el.get("tags") or {}
         name = tags.get("piste:name") or tags.get("name") or ""
+        if el.get("type") == "relation":
+            if (rel := _relation(el, tags)) is not None:
+                feats.append(rel)
+            continue
+        if (place := _place(el, tags)) is not None:
+            feats.append(place)
+            continue
         if el.get("type") == "node" and tags.get("natural") == "peak":
-            try:
-                ele = round(float(str(tags.get("ele", "")).split()[0].replace(",", "")))
-            except (ValueError, IndexError):
-                ele = None
+            ele = _ele(tags)
             props: dict[str, Any] = {"kind": "peak", "name": name}
             if ele is not None:
                 props["ele"] = ele
@@ -91,7 +300,20 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
         coords = [[round(p["lon"], 6), round(p["lat"], 6)] for p in el["geometry"]]
         if len(coords) < 2:
             continue
-        if "piste:type" in tags:
+        if tags.get("natural") == "glacier":
+            if coords[0] == coords[-1] and len(coords) >= 4:
+                feats.append(
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Polygon", "coordinates": [_closed(coords)]},
+                        "properties": {"kind": "glacier", "name": tags.get("name", "")},
+                    }
+                )
+            continue
+        if tags.get("natural") == "cliff":
+            props = {"kind": "cliff", "name": tags.get("name", "")}
+            coords = simplify(coords)
+        elif "piste:type" in tags:
             ptype = tags["piste:type"]
             if ptype not in RUN_TYPES:
                 continue
@@ -100,6 +322,7 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
                 "type": ptype,
                 "difficulty": tags.get("piste:difficulty", ""),
                 "name": name,
+                "osm": f"w{el.get('id', 0)}",
             }
         elif "aerialway" in tags and tags["aerialway"] not in ("station", "pylon", "goods"):
             props = {"kind": "lift", "type": tags["aerialway"], "name": name}
@@ -116,7 +339,8 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def fetch_box(client: httpx.Client, box: tuple[float, float, float, float]) -> list[Any] | None:
-    """One location's runs, lifts and peaks, from the first server that answers in full."""
+    """One location's runs, lifts, peaks and features, from the first server that answers
+    in full."""
     q = query([box])
     for url in OVERPASS:
         try:
@@ -152,7 +376,7 @@ def refresh(
     """Fetch again if the file is missing, a week old (six hours if empty), or the locations
     changed. Returns whether it wrote a new file. Keeps the old file if Overpass fails."""
     bxs = boxes(points)
-    key = json.dumps(bxs)
+    key = json.dumps({"v": QUERY_VERSION, "boxes": bxs})
     meta = path.with_suffix(".meta.json")
     now = now or time.time()
     if not force and path.exists() and meta.exists():
@@ -181,5 +405,5 @@ def refresh(
     tmp.write_text(json.dumps(fc, separators=(",", ":")))
     tmp.replace(path)
     meta.write_text(json.dumps({"key": key, "at": now, "features": len(fc["features"])}))
-    log.info("ski map data: %d runs, lifts and peaks", len(fc["features"]))
+    log.info("ski map data: %d runs, lifts, peaks and mountain features", len(fc["features"]))
     return True

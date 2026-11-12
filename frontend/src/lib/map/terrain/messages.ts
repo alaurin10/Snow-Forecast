@@ -66,6 +66,8 @@ export type WorkerRequest =
 	| ({ id: number; type: 'concern'; bounds: Bounds; maxPx: number } & ConcernJob)
 	| { id: number; type: 'sunpoint'; lat: number; lon: number; date: Ymd }
 	| { id: number; type: 'windpoint'; lat: number; lon: number; sectors: number[] }
+	/** Elevation and ground slope at each [lon, lat] along a line, from tiles at `z`. */
+	| { id: number; type: 'profile'; points: [number, number][]; z: number }
 	| { id: number; type: 'cancel'; target: number };
 
 export type WorkerResponse =
@@ -82,4 +84,6 @@ export type WorkerResponse =
 			sun?: SunFacts;
 			/** Wind effect at a spot, −1 (stripped) to 1 (loaded), before scaling. */
 			wind?: number;
+			/** Along a line: metres above sea level and the ground's slope in degrees. */
+			profile?: { elev: number[]; slope: number[] };
 	  };

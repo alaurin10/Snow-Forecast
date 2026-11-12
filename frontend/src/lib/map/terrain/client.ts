@@ -111,6 +111,17 @@ export class TerrainClient {
 		return (await this.ask({ type: 'sunpoint', lat, lon, date })).sun!;
 	}
 
+	/** Elevation and ground slope at each [lon, lat] of a line, from tiles at zoom `z`. */
+	async profile(
+		points: [number, number][],
+		z: number,
+		signal?: AbortSignal
+	): Promise<{ elev: number[]; slope: number[] }> {
+		const r = await this.ask({ type: 'profile', points, z }, signal);
+		if (!r.profile) throw new Error('cancelled');
+		return r.profile;
+	}
+
 	/** Wind effect at a spot, −1 (stripped) to 1 (loaded), before scaling by the transport. */
 	async windPoint(lat: number, lon: number, sectors: number[]): Promise<number> {
 		return (await this.ask({ type: 'windpoint', lat, lon, sectors })).wind!;
