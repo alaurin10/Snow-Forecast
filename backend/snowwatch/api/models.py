@@ -15,6 +15,9 @@ from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.maps.point import PointOut
 from snowwatch.maps.sat import SatOut
 from snowwatch.models import Location
+from snowwatch.observations import ObsOut
+from snowwatch.overlays import AtesOut, OverlayFile
+from snowwatch.stations import StationsOut
 from snowwatch.verify import VerificationOut
 
 
@@ -226,6 +229,10 @@ class ApiTypes(BaseModel):
     avalanche_zones: ZonesOut
     sat: SatOut
     map_point: PointOut
+    map_stations: StationsOut
+    observations: ObsOut
+    ates: AtesOut
+    overlay_files: list[OverlayFile]
     trend: TrendOut
     runs: list[RunOut]
     me: Me

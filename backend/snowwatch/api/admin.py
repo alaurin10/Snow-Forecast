@@ -10,13 +10,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from snowwatch import jobs
+from snowwatch import jobs, overlays
 from snowwatch.api.auth import Owner
 from snowwatch.config import get_forecast_config
 from snowwatch.http import Fetcher
 from snowwatch.locations import service
 from snowwatch.locations.resolve import ResolveIn, ResolveOut, resolve
 from snowwatch.models import Location
+from snowwatch.overlays import OverlayFile
 from snowwatch.settings import Settings
 from snowwatch.sources.openmeteo import daily_weight
 from snowwatch.store.db import connect
@@ -86,6 +87,42 @@ def make_admin_router() -> APIRouter:
     @r.get("/locations", response_model=list[Location])
     def all_locations(_: Owner, conn: RW) -> list[Location]:
         return service.list_locations(conn, include_inactive=True)
+
+    @r.get("/overlays", response_model=list[OverlayFile])
+    def list_overlays(request: Request, _: Owner) -> list[OverlayFile]:
+        """The ATES files on the map, each with its shapes by rating or why it can't be read."""
+        settings: Settings = request.app.state.settings
+        return overlays.build(settings.overlays_dir).files
+
+    @r.put("/overlays/{name}", response_model=OverlayFile)
+    async def put_overlay(name: str, request: Request, _: Owner) -> OverlayFile:
+        """Add or replace an ATES file (the body is the file: KMZ, KML or GeoJSON). It's
+        read first and refused, with the reason, if it holds no usable shapes."""
+        if not overlays.valid_name(name):
+            raise HTTPException(400, "name it like area.kmz, area.kml or area.geojson")
+        data = await request.body()
+        try:
+            got = overlays.read_file(name, data)
+        except overlays.BadOverlay as e:
+            raise HTTPException(400, f"{name}: {e}") from e
+        settings: Settings = request.app.state.settings
+        d = settings.overlays_dir
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / f".{name}.tmp"
+        tmp.write_bytes(data)
+        tmp.replace(d / name)
+        counts: dict[str, int] = {}
+        for f in got:
+            counts[f.properties.rating] = counts.get(f.properties.rating, 0) + 1
+        return OverlayFile(name=name, bytes=len(data), features=len(got), ratings=counts)
+
+    @r.delete("/overlays/{name}")
+    def delete_overlay(name: str, request: Request, _: Owner) -> dict[str, bool]:
+        settings: Settings = request.app.state.settings
+        if not overlays.valid_name(name) or not (settings.overlays_dir / name).is_file():
+            raise HTTPException(404, f"no file {name!r}")
+        (settings.overlays_dir / name).unlink()
+        return {"ok": True}
 
     @r.get("/lookups", response_model=LookupStatus)
     def lookups(_: Owner, conn: RW) -> LookupStatus:

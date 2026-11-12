@@ -74,6 +74,84 @@
       "title": "Alert",
       "type": "object"
     },
+    "AtesFeature": {
+      "properties": {
+        "geometry": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "properties": {
+          "$ref": "#/$defs/AtesProps"
+        },
+        "type": {
+          "const": "Feature",
+          "default": "Feature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "geometry",
+        "properties"
+      ],
+      "title": "AtesFeature",
+      "type": "object"
+    },
+    "AtesOut": {
+      "description": "Every ATES file the owner has supplied, as one collection.",
+      "properties": {
+        "features": {
+          "items": {
+            "$ref": "#/$defs/AtesFeature"
+          },
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/OverlayFile"
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "FeatureCollection",
+          "default": "FeatureCollection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "features",
+        "files"
+      ],
+      "title": "AtesOut",
+      "type": "object"
+    },
+    "AtesProps": {
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rating": {
+          "enum": [
+            "non",
+            "simple",
+            "challenging",
+            "complex",
+            "extreme",
+            "unrated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "rating",
+        "name",
+        "file"
+      ],
+      "title": "AtesProps",
+      "type": "object"
+    },
     "AvalancheDoc": {
       "description": "One location's forecast, normalised from either provider.",
       "properties": {
@@ -2084,6 +2162,100 @@
       "title": "LookupStatus",
       "type": "object"
     },
+    "MapStation": {
+      "properties": {
+        "change24_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "daily": {
+          "items": {
+            "$ref": "#/$defs/StationDay"
+          },
+          "type": "array"
+        },
+        "depth_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elev_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "network": {
+          "enum": [
+            "snotel",
+            "bc"
+          ],
+          "type": "string"
+        },
+        "obs_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "network",
+        "lat",
+        "lon",
+        "elev_m",
+        "obs_time",
+        "depth_cm",
+        "change24_cm",
+        "daily"
+      ],
+      "title": "MapStation",
+      "type": "object"
+    },
     "MapWindLocation": {
       "description": "A location's loading roses, placed at its summit (where the wind is taken).",
       "properties": {
@@ -2205,6 +2377,154 @@
         "snowfall_cm_per_mm"
       ],
       "title": "MetaOut",
+      "type": "object"
+    },
+    "ObsFeature": {
+      "properties": {
+        "geometry": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "properties": {
+          "$ref": "#/$defs/ObsProps"
+        },
+        "type": {
+          "const": "Feature",
+          "default": "Feature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "geometry",
+        "properties"
+      ],
+      "title": "ObsFeature",
+      "type": "object"
+    },
+    "ObsOut": {
+      "description": "Recent field reports in the map's box.",
+      "properties": {
+        "days": {
+          "type": "integer"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "features": {
+          "items": {
+            "$ref": "#/$defs/ObsFeature"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "const": "FeatureCollection",
+          "default": "FeatureCollection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generated_at",
+        "days",
+        "features"
+      ],
+      "title": "ObsOut",
+      "type": "object"
+    },
+    "ObsProps": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "images": {
+          "type": "integer"
+        },
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "time",
+        "region",
+        "kinds",
+        "images",
+        "url"
+      ],
+      "title": "ObsProps",
+      "type": "object"
+    },
+    "OverlayFile": {
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "features": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ratings": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "bytes",
+        "features",
+        "ratings"
+      ],
+      "title": "OverlayFile",
       "type": "object"
     },
     "OverviewPeriod": {
@@ -4336,6 +4656,55 @@
       "title": "SourceRow",
       "type": "object"
     },
+    "StationDay": {
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "depth_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "depth_cm"
+      ],
+      "title": "StationDay",
+      "type": "object"
+    },
+    "StationsOut": {
+      "properties": {
+        "errors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "stations": {
+          "items": {
+            "$ref": "#/$defs/MapStation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "stations"
+      ],
+      "title": "StationsOut",
+      "type": "object"
+    },
     "StatusOut": {
       "description": "The Status page: per-source health, runs, usage and data age.",
       "properties": {
@@ -5082,6 +5451,9 @@
       },
       "type": "array"
     },
+    "ates": {
+      "$ref": "#/$defs/AtesOut"
+    },
     "avalanche": {
       "additionalProperties": {
         "$ref": "#/$defs/AvalancheView"
@@ -5118,6 +5490,9 @@
     "map_point": {
       "$ref": "#/$defs/PointOut"
     },
+    "map_stations": {
+      "$ref": "#/$defs/StationsOut"
+    },
     "map_wind": {
       "$ref": "#/$defs/MapWindOut"
     },
@@ -5126,6 +5501,15 @@
     },
     "meta": {
       "$ref": "#/$defs/MetaOut"
+    },
+    "observations": {
+      "$ref": "#/$defs/ObsOut"
+    },
+    "overlay_files": {
+      "items": {
+        "$ref": "#/$defs/OverlayFile"
+      },
+      "type": "array"
     },
     "overview": {
       "items": {
@@ -5176,6 +5560,10 @@
     "avalanche_zones",
     "sat",
     "map_point",
+    "map_stations",
+    "observations",
+    "ates",
+    "overlay_files",
     "trend",
     "runs",
     "me",

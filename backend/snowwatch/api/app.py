@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from snowwatch import __version__
+from snowwatch import __version__, overlays
 from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.models import MetaOut
@@ -33,7 +33,10 @@ from snowwatch.maps.point import PointOut
 from snowwatch.maps.point import probe as point_probe
 from snowwatch.maps.point import read_index as read_point_index
 from snowwatch.maps.sat import SatOut, read_index
+from snowwatch.observations import ObsOut
+from snowwatch.overlays import AtesOut
 from snowwatch.settings import Settings, get_settings
+from snowwatch.stations import StationsOut
 from snowwatch.store.db import connect
 from snowwatch.tiles import TileCache, gibs_path, gibs_tile, glyphs
 
@@ -383,16 +386,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "public, max-age=2592000"},
         )
 
-    @app.get("/api/osm/ski.geojson")
-    def ski_map() -> FileResponse:
-        """Ski runs, lifts and peaks around the locations (refreshed weekly by the worker)."""
-        if not settings.osm_path.exists():
-            raise HTTPException(503, "ski map data not fetched yet")
-        return FileResponse(
-            settings.osm_path,
-            media_type="application/geo+json",
-            headers={"Cache-Control": "public, max-age=3600"},
+    # Small JSON files the worker rewrites now and then, as last read: (file time, JSON,
+    # gzipped JSON). Glaciers and runs compress to about a quarter.
+    json_files: dict[Path, tuple[float, bytes, bytes]] = {}
+
+    def json_file(
+        path: Path,
+        request: Request,
+        max_age: int,
+        missing: str,
+        media_type: str = "application/geo+json",
+    ) -> Response:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as e:
+            raise HTTPException(503, missing) from e
+        hit = json_files.get(path)
+        if hit is None or hit[0] != mtime:
+            body = path.read_bytes()
+            hit = (mtime, body, gzip.compress(body, 6))
+            json_files[path] = hit
+        headers = {"Cache-Control": f"public, max-age={max_age}", "Vary": "Accept-Encoding"}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(hit[2], media_type=media_type, headers=headers)
+        return Response(hit[1], media_type=media_type, headers=headers)
+
+    @app.get("/api/map/stations", response_model=StationsOut)
+    def map_stations(request: Request) -> Response:
+        """Every SNOTEL station and BC snow pillow in the map's box: depth now, the change
+        over 24 hours and a week of daily depths (hourly, see snowwatch/stations.py)."""
+        return json_file(
+            settings.stations_path,
+            request,
+            600,
+            "snow stations not fetched yet",
+            media_type="application/json",
         )
+
+    @app.get("/api/avalanche/observations.geojson", response_model=ObsOut)
+    def field_reports(request: Request) -> Response:
+        """Avalanche Canada's Mountain Information Network reports in the map's box, the
+        last two weeks (hourly, see snowwatch/observations.py)."""
+        return json_file(settings.obs_path, request, 600, "field reports not fetched yet")
+
+    # The owner's ATES files as last read: (file listing, JSON, gzipped JSON).
+    ates_cache: dict[str, tuple[Any, bytes, bytes]] = {}
+
+    @app.get("/api/overlays/ates.geojson", response_model=AtesOut)
+    def ates(request: Request) -> Response:
+        """ATES terrain ratings from the files the owner put in data/overlays/ (see
+        snowwatch/overlays.py). 404 when there are none, so the map doesn't offer them."""
+        k = overlays.key(settings.overlays_dir)
+        if not k:
+            raise HTTPException(404, "no ATES files on this server")
+        hit = ates_cache.get("ates")
+        if hit is None or hit[0] != k:
+            body = overlays.build(settings.overlays_dir).model_dump_json().encode()
+            hit = (k, body, gzip.compress(body, 6))
+            ates_cache["ates"] = hit
+        headers = {"Cache-Control": "public, max-age=300", "Vary": "Accept-Encoding"}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(hit[2], media_type="application/geo+json", headers=headers)
+        return Response(hit[1], media_type="application/geo+json", headers=headers)
+
+    @app.get("/api/osm/ski.geojson")
+    def ski_map(request: Request) -> Response:
+        """Ski runs, lifts, peaks, huts, trailheads, passes, cliffs, glaciers and ski routes
+        around the locations (refreshed weekly by the worker, see snowwatch/osm.py)."""
+        return json_file(settings.osm_path, request, 3600, "ski map data not fetched yet")
 
     if settings.owner_password and len(settings.owner_password) < MIN_PASSWORD:
         log.error(

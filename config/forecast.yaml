@@ -98,6 +98,10 @@ map:
   sat_min_clear: 0.85    # a whole scene sees at least this share of the area clearly
   sat_max_nodata: 0.03   # and misses at most this much of it (off its swath)
   sat_keep: 3            # whole scenes kept per location (the map steps through them)
+  # Snow stations (SNOTEL and BC snow pillows) and Avalanche Canada field reports.
+  stations_minutes: 60   # depth and 24-hour change at every station in the box
+  obs_minutes: 60        # Mountain Information Network reports
+  obs_days: 14           # how far back reports go (at most 30)
 
 # The map's avalanche terrain layers (see docs/MAP-PLAN.md, B7). Treeline bands are in
 # config/treeline.yaml.

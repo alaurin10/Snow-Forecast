@@ -112,6 +112,21 @@ class Settings(BaseSettings):
         return self.data_dir / "avalanche" / "zones.geojson"
 
     @property
+    def obs_path(self) -> Path:
+        """Recent Mountain Information Network reports (see snowwatch/observations.py)."""
+        return self.data_dir / "avalanche" / "observations.geojson"
+
+    @property
+    def stations_path(self) -> Path:
+        """Every snow station in the map's box (see snowwatch/stations.py)."""
+        return self.data_dir / "stations" / "stations.json"
+
+    @property
+    def overlays_dir(self) -> Path:
+        """ATES ratings the owner supplies, as KMZ, KML or GeoJSON (see snowwatch/overlays.py)."""
+        return self.data_dir / "overlays"
+
+    @property
     def sat_dir(self) -> Path:
         """Recent satellite scenes for the map (see snowwatch/maps/sat.py)."""
         return self.data_dir / "sat"
