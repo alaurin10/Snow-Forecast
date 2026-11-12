@@ -10,8 +10,9 @@ Tiles live under data/tiles/<layer>/<z>/<x>/<y>. The cache has a size cap
 nightly job drops tiles nobody has asked for in a while, then the least recently
 used ones until it is back under the cap. At most a few upstream fetches run at
 once. Elevation tiles go straight from the browser to Mapterhorn (fast, and large),
-so they aren't proxied. NASA GIBS's daily satellite mosaic is proxied the same way, under
-data/tiles/gibs/.
+so they aren't proxied; the server keeps its own copies (data/tiles/dem/) only to draw the
+terrain-adjusted snow totals (maps/tiles_render.py). NASA GIBS's daily satellite mosaic is
+proxied the same way, under data/tiles/gibs/.
 """
 
 from __future__ import annotations
@@ -166,23 +167,31 @@ class TileCache:
 
     def through(self, path: Path, url: str, fix_edges: bool = False) -> bytes | None:
         """A file from the cache at `path`, else fetched from `url` (an image) and kept."""
+        return self.through_status(path, url, fix_edges)[0]
+
+    def through_status(
+        self, path: Path, url: str, fix_edges: bool = False
+    ) -> tuple[bytes | None, int]:
+        """As `through`, with the upstream's HTTP status (200 for a cached file, 0 when
+        the upstream couldn't be reached), so "it has no such tile" (404) can be told
+        apart from "it didn't answer"."""
         key = str(path.relative_to(self.root))
         # One upstream fetch per tile even when several requests arrive together.
         with self._lock(key):
             if path.exists():
                 os.utime(path)  # remember it was used, for pruning
-                return path.read_bytes()
+                return path.read_bytes(), 200
             with self._upstream:
                 try:
                     r = self.client.get(url)
                 except httpx.HTTPError:
-                    return None
+                    return None, 0
             if (
                 r.status_code != 200
                 or not r.headers.get("content-type", "").startswith("image/")
                 or len(r.content) > MAX_TILE_BYTES
             ):
-                return None
+                return None, r.status_code if r.status_code != 200 else 0
             data = r.content
             if fix_edges:
                 with contextlib.suppress(OSError):  # keep the tile as it came
@@ -190,7 +199,7 @@ class TileCache:
             self._store(path, data)
         with self._guard:
             self._locks.pop(key, None)
-        return data
+        return data, 200
 
 
 # ---- Recent satellite: NASA GIBS's daily VIIRS mosaic (docs/MAP-PLAN.md, B6) ------------

@@ -78,6 +78,34 @@ describe('Timeline (weather controls)', () => {
 		expect(screen.getByLabelText('Key, cm')).toBeTruthy();
 	});
 
+	it('says when the snow total is adjusted to terrain', () => {
+		const withTotals = toTimeline({
+			generated: '',
+			bounds: tl.bounds,
+			width: 10,
+			height: 10,
+			frames: [],
+			totals: [
+				{
+					hours: 24,
+					window: 24,
+					start: T,
+					end: T + 24 * H,
+					file: 't24.png',
+					tiles: '/api/snowtiles/0123456789abcdef/{z}/{x}/{y}.png'
+				}
+			]
+		});
+		const view = weatherView(withTotals, 'totals', 'gust');
+		expect(view.picks[0].tiles).toContain('/api/snowtiles/');
+		render(Timeline, { ...base, weather: 'totals', view, pick: view.picks[0] });
+		expect(screen.queryByText(/adjusted to terrain/)).toBeNull();
+		cleanup();
+		render(Timeline, { ...base, weather: 'totals', view, pick: view.picks[0], adjusted: true });
+		const note = screen.getByText(/adjusted to terrain/);
+		expect(note.parentElement?.getAttribute('title')).toMatch(/snow above the model's snow level/);
+	});
+
 	it('plays the snow level forecast, with the drape key when zoomed in', () => {
 		const view = weatherView(tl, 'snowlevel', 'gust');
 		const current = view.frames[0];

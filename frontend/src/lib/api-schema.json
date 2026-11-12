@@ -2901,6 +2901,13 @@
             }
           ]
         },
+        "elevations": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "generated": {
           "anyOf": [
             {
@@ -3049,6 +3056,20 @@
     },
     "PointTotal": {
       "properties": {
+        "by_elevation": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cm": {
           "anyOf": [
             {

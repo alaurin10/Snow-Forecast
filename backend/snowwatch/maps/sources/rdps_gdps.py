@@ -16,7 +16,8 @@ its grids hold 0, not "no data", outside that domain, so the domain comes from a
 WMS picture of one of its layers (`domain_mask`).
 
 For snow totals we read the running snow water since the run began (`…_Snow-Accum`, mm)
-and the 2 m temperature (°C).
+and the 2 m temperature (°C); for snow totals by elevation also all precipitation since
+the run began (`HRDPS.CONTINENTAL_PR`, `…_Precip-Accum`, mm).
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ class Model:
     precip: str  # all types together, over the same period
     accum: str = ""  # snow water since the run began (mm)
     temp: str = ""  # 2 m temperature (°C)
+    total: str = ""  # all precipitation since the run began (mm), for totals by elevation
 
 
 HRDPS = Model(
@@ -67,6 +69,7 @@ HRDPS = Model(
     "HRDPS.CONTINENTAL.DIAG_PR_PT1H",
     "HRDPS.CONTINENTAL_SN",
     "HRDPS.CONTINENTAL_TT",
+    "HRDPS.CONTINENTAL_PR",
 )
 # RDPS hour by hour: fills in wherever the finer models have nothing (it covers everything).
 RDPS_HOURLY = Model(
@@ -88,6 +91,7 @@ RDPS = Model(
     "RDPS_10km_Precip-Accum3h",
     "RDPS_10km_Snow-Accum",
     "RDPS_10km_AirTemp_2m",
+    "RDPS_10km_Precip-Accum",
 )
 GDPS = Model(
     "gdps",
@@ -99,6 +103,7 @@ GDPS = Model(
     "GDPS_15km_Precip-Accum6h",
     "GDPS_15km_Snow-Accum",
     "GDPS_15km_AirTemp_2m",
+    "GDPS_15km_Precip-Accum",
 )
 
 

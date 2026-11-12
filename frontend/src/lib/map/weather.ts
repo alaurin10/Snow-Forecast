@@ -99,6 +99,8 @@ export interface Pick {
 	span: string;
 	/** Where it comes from, in a sentence. */
 	sources: string;
+	/** Snow totals: the terrain-adjusted tiles' URL template, when there are some. */
+	tiles?: string | null;
 }
 
 export interface WeatherView {
@@ -158,7 +160,8 @@ function picks(tl: Timeline, weather: MapWeather): Pick[] {
 			name: totalName(t),
 			file: t.file,
 			span: totalSpan(t),
-			sources: totalSources(t)
+			sources: totalSources(t),
+			tiles: t.tiles ?? null
 		}));
 	}
 	if (weather === 'depth') {

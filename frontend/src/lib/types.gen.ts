@@ -322,6 +322,7 @@ export interface ConcernOut {
  */
 export interface PointOut {
 	depth: PointDepth | null;
+	elevations?: number[];
 	generated: string | null;
 	gust: PointValue[];
 	inside: boolean;
@@ -407,6 +408,7 @@ export interface RoseOut {
  * via the `definition` "PointTotal".
  */
 export interface PointTotal {
+	by_elevation?: number[] | null;
 	cm: number | null;
 	end: number;
 	hours: number;

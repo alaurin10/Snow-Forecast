@@ -28,3 +28,18 @@ def save_npy(path: Path, values: np.ndarray) -> None:
     buf = io.BytesIO()
     np.save(buf, values)
     write_atomic(path, buf.getvalue())
+
+
+def save_npy_file(path: Path, values: np.ndarray) -> None:
+    """As save_npy, streamed to the file rather than built in memory first (for grids of
+    tens of MB)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            np.save(fh, values)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise

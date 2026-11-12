@@ -22,6 +22,7 @@
 	import type { PointOut } from '../types.gen';
 	import { RAMPS, type PrecipKind } from '../radar';
 	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
+	import { elevationLadder, snowAtElevation, TERRAIN_NOTE } from './layers/snowtiles';
 
 	interface Props {
 		lat: number;
@@ -139,8 +140,28 @@
 				: 'transparent'
 		}));
 		const firstWet = hours.find((r) => r.type);
+		// Snow by elevation: at the spot's own height, and three days' worth at a few
+		// heights around it.
+		const elevs = point.elevations ?? [];
+		const spotM = facts ? (facts.sea ? 0 : facts.elevation) : null;
+		const byElev = (w: number) => point.totals.find((t) => t.window === w)?.by_elevation;
+		const at = (w: number, m: number | null) => snowAtElevation(byElev(w), elevs, m);
+		const here = [at(24, spotM), at(72, spotM), at(168, spotM)] as const;
+		const adjusted = here.some((v) => v != null);
+		const ladderWindow = byElev(72) ? 72 : byElev(24) ? 24 : 0;
+		const ladder =
+			spotM != null && ladderWindow && !facts?.sea
+				? elevationLadder(spotM, units === 'imperial').map((m) => ({
+						m,
+						cm: at(ladderWindow, m)
+					}))
+				: [];
 		return {
-			snow: [total(24), total(72), total(168)] as const,
+			snow: adjusted ? here : ([total(24), total(72), total(168)] as const),
+			area: [total(24), total(72), total(168)] as const,
+			adjusted,
+			ladder,
+			ladderLabel: ladderWindow === 72 ? '3 days' : '24 h',
 			hasTotals: point.totals.length > 0,
 			level: level?.value ?? null,
 			lowest: levels.length ? Math.min(...levels) : null,
@@ -288,7 +309,27 @@
 							<span class="faint">3 days</span> · {fmtSnow(wx.snow[2], units)}
 							<span class="faint">7 days</span></span
 						>
+						{#if wx.adjusted}
+							<span class="faint small" title={TERRAIN_NOTE}
+								>at this spot's height, adjusted to terrain. The model's area: {fmtSnow(
+									wx.area[0],
+									units
+								)} · {fmtSnow(wx.area[1], units)} · {fmtSnow(wx.area[2], units)}</span
+							>
+						{/if}
 					</li>
+					{#if wx.ladder.length}
+						<li>
+							<span class="k">By height</span>
+							<span class="num"
+								>{#each wx.ladder as r, i (r.m)}{i ? ' · ' : ''}<span class="faint"
+										>{fmtElevation(r.m, units)}</span
+									>
+									{fmtSnow(r.cm, units)}{/each}
+								<span class="faint">{wx.ladderLabel}</span></span
+							>
+						</li>
+					{/if}
 				{/if}
 				{#if wx.strip.length}
 					<li class="strip-row">
@@ -342,7 +383,13 @@
 				{/if}
 			</ul>
 			<p class="faint small">
-				From the map's weather: models 2.5–15 km across, so numbers for the area, not this slope.
+				{#if wx.adjusted}
+					From the map's weather: models 2.5–15 km across. Snow is worked out for this spot's height
+					(the model's precipitation, as snow above its snow level); the rest is for the area, not
+					this slope.
+				{:else}
+					From the map's weather: models 2.5–15 km across, so numbers for the area, not this slope.
+				{/if}
 			</p>
 		{/if}
 	</section>

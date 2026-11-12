@@ -19,9 +19,9 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 
 | Piece | What it does |
 |---|---|
-| `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache |
-| `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
+| `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
+| `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
+| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
 Python 3.12 slim stage runs it, as uid 1000, read-only, with no capabilities).
@@ -41,6 +41,8 @@ backend/snowwatch/
               Canada's WMS/WCS) grib.py (NOAA GRIB2 by byte range) palette.py
               blend.py (joins sources as numbers, with no visible seams)
               render.py (frames, index, pruning) totals.py (snow totals to 10 days)
+              bins.py terrain_totals.py (snow totals every 250 m of elevation)
+              tiles_render.py (those painted on the terrain as tiles, by the api)
               layers.py (snow level, wind, snow on the ground, observed snowfall,
               clouds) point.py (tap-for-numbers from the pictures' probes)
               sat.py (choosing recent Sentinel-2 views per location, daily VIIRS)
@@ -159,7 +161,10 @@ and recorded by name. Nightly (`store/retention.py`):
 - **Public endpoints are bounded**: push subscriptions must point at a browser
   push service, are capped in size and number, and are rate limited; map tile
   cache misses are rate limited and the cache is capped on disk; the map's
-  tap-for-numbers (`/api/map/point`) reads only local files and is rate limited.
+  tap-for-numbers (`/api/map/point`) reads only local files and is rate limited;
+  terrain-adjusted snow tiles (`/api/snowtiles/…`) are drawn only for grids the worker
+  wrote (16-hex ids), zoom 5–11, from local files and cached Mapterhorn elevation tiles,
+  and count against the tile cache's miss limit when not already drawn.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
   third parties limited to Mapterhorn and AWS elevation tiles, and https images; satellite
   imagery comes through the server's tile cache, which fetches only Sentinel-2 items in its
