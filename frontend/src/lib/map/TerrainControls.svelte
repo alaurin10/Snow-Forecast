@@ -151,7 +151,8 @@
 				<p class="note">Loading the wind…</p>
 			{:else if !wind}
 				<p class="note">
-					No saved location within {range} of here{#if !pointTried}; checking the map's forecast…{:else}, and the map's forecast has no ridge wind here{/if}.
+					No saved location within {range} of here{#if !pointTried}; checking the map's forecast…{:else},
+						and the map's forecast has no ridge wind here{/if}.
 				</p>
 			{:else if !wind.rose && wind.model}
 				<p class="note">

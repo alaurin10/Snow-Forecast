@@ -433,3 +433,17 @@ def test_point_api(tmp_path: Path, settings: Settings) -> None:
     assert got.status_code == 200 and got.headers["content-type"] == "image/webp"
     assert client.get("/api/precip/sl12-0123456789ab.png").status_code == 404  # not on disk
     assert client.get("/api/precip/abc12-0123456789ab.png").status_code == 404  # bad name
+
+
+def test_snow_reaching_the_ground_takes_the_level_around_it() -> None:
+    # A narrow range of coded cells (-1, -2) inside a 1,800 m snow level, and a wide cold
+    # area (the right half) that's coded everywhere.
+    v = np.full((20, 40), 1800.0, np.float32)
+    v[8:12, 5:9] = -2.0
+    v[9, 6] = -1.0
+    v[:, 20:] = -2.0
+    out = layers.fill_codes(v, 6, 0.0)
+    assert (out[8:12, 5:9] == 1800).all()  # the range takes its surroundings' level
+    assert (out[:, 20:26] == 1800).all()  # the cold area's edge, within reach
+    assert (out[:, 27:] == 0).all()  # beyond reach: snow to the valleys
+    assert (layers.fill_codes(np.full((3, 3), -2.0), 6, 0.0) == 0).all()

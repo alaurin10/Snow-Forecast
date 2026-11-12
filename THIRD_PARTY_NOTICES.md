@@ -9,8 +9,8 @@ running a public or commercial installation.
 | Source | Used for | Terms |
 |---|---|---|
 | [Open-Meteo](https://open-meteo.com/) | Forecast models, ensembles, elevation, timezones | Data CC BY 4.0; the free API is for non-commercial use |
-| [NOAA / National Weather Service](https://www.weather.gov/) | Alerts, forecast offices; HRRR and National Blend of Models forecasts for the map (NOAA Open Data Dissemination on AWS) | US public domain |
-| [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | Radar (North American composite, precipitation type, nowcast), HRDPS, RDPS and GDPS forecasts and snow totals for the map | Open Government Licence – Canada |
+| [NOAA / National Weather Service](https://www.weather.gov/) | Alerts, forecast offices; HRRR and National Blend of Models forecasts for the map (NOAA Open Data Dissemination on AWS); NOHRSC's SNODAS snow depth (via NSIDC) and National Snowfall Analysis for the map | US public domain |
+| [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | Radar (North American composite, precipitation type, nowcast), HRDPS, RDPS and GDPS forecasts and snow totals, snow level, wind and CaLDAS snow depth for the map | Open Government Licence – Canada |
 | [RainViewer](https://www.rainviewer.com/) | Backup radar, when Environment Canada's is unavailable | Free API, with credit |
 | [NRCS SNOTEL](https://www.nrcs.usda.gov/wps/portal/wcc/home/) | US snow stations | US public domain |
 | [BC River Forecast Centre](https://www2.gov.bc.ca/gov/content/environment/air-land-water/water/drought-flooding-dikes-dams/river-forecast-centre) | BC snow pillows | Open Government Licence – British Columbia |
@@ -21,7 +21,7 @@ running a public or commercial installation.
 | [OpenTopoMap](https://opentopomap.org/) | Topographic base map (cached by the server) | CC-BY-SA; tile use policy applies |
 | [Esri](https://www.esri.com/) | Topographic and satellite base maps (cached by the server) | Esri terms of use |
 | [Copernicus Sentinel-2](https://dataspace.copernicus.eu/), via [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/) | Recent satellite imagery near each location (cached by the server) | Free and open (Copernicus data policy): "Contains modified Copernicus Sentinel data" |
-| [NASA GIBS](https://earthdata.nasa.gov/gibs) | Daily VIIRS and 30 m HLS satellite imagery (cached by the server) | NASA open data, no restrictions; credit NASA |
+| [NASA GIBS](https://earthdata.nasa.gov/gibs) | Daily VIIRS and 30 m HLS satellite imagery (cached by the server); GOES-West GeoColor cloud imagery (NOAA, CIRA) for the map | NASA open data, no restrictions; credit NASA (and NOAA/CIRA for GeoColor) |
 | [Mapterhorn](https://mapterhorn.com/attribution/) | Elevation: 3D terrain, hill shading, slope, aspect, contours (from USGS 3DEP, NRCan HRDEM, Copernicus GLO-30 and others) | Open data; each source under its own licence, listed by Mapterhorn |
 | [Mapzen terrain tiles on AWS](https://registry.opendata.aws/terrain-tiles/) | Backup elevation | Various open licences, see the registry |
 | [MapLibre demo tiles](https://demotiles.maplibre.org/) | Map label fonts (cached by the server) | See the MapLibre project |

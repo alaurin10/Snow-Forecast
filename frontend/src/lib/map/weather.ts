@@ -143,7 +143,9 @@ export function asFrame(f: LayerFrame): Frame {
 }
 
 const dayHour = (s: number) =>
-	new Date(s * 1000).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' }).replace(',', '');
+	new Date(s * 1000)
+		.toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })
+		.replace(',', '');
 const monthDay = (s: number) =>
 	new Date(s * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
@@ -198,11 +200,7 @@ function depthSources(f: LayerFrame): string {
 }
 
 /** What the controls show for a weather choice. */
-export function weatherView(
-	tl: Timeline | null,
-	weather: MapWeather,
-	wind: MapWind
-): WeatherView {
+export function weatherView(tl: Timeline | null, weather: MapWeather, wind: MapWind): WeatherView {
 	if (!tl || weather === 'off') return NONE;
 	if (weather === 'radar') {
 		return {

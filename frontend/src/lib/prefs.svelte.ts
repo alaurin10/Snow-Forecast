@@ -18,14 +18,7 @@ export type Motion = 'full' | 'subtle' | 'off';
 export type BandName = 'base' | 'mid' | 'summit';
 /** The one weather layer on the map. */
 export type MapWeather =
-	| 'radar'
-	| 'totals'
-	| 'snowlevel'
-	| 'wind'
-	| 'depth'
-	| 'snowfall'
-	| 'clouds'
-	| 'off';
+	'radar' | 'totals' | 'snowlevel' | 'wind' | 'depth' | 'snowfall' | 'clouds' | 'off';
 export const MAP_WEATHER: readonly MapWeather[] = [
 	'radar',
 	'totals',

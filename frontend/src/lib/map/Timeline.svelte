@@ -112,20 +112,22 @@
 		return `linear-gradient(90deg, ${stops.join(', ')})`;
 	});
 	/** The key for the layers drawn in cells: its steps, tick text and unit. */
-	const cells = $derived.by<{ steps: RampStep[]; tick: (v: number) => string; unit: string } | null>(
-		() => {
-			const imp = units === 'imperial';
-			if (weather === 'totals' || weather === 'snowfall')
-				return { steps: TOTAL, tick: (v) => totalTick(v, units), unit: imp ? 'in' : 'cm' };
-			if (weather === 'depth')
-				return { steps: DEPTH, tick: (v) => depthTick(v, units), unit: imp ? 'in' : 'cm' };
-			if (weather === 'snowlevel')
-				return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
-			if (weather === 'wind')
-				return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
-			return null;
-		}
-	);
+	const cells = $derived.by<{
+		steps: RampStep[];
+		tick: (v: number) => string;
+		unit: string;
+	} | null>(() => {
+		const imp = units === 'imperial';
+		if (weather === 'totals' || weather === 'snowfall')
+			return { steps: TOTAL, tick: (v) => totalTick(v, units), unit: imp ? 'in' : 'cm' };
+		if (weather === 'depth')
+			return { steps: DEPTH, tick: (v) => depthTick(v, units), unit: imp ? 'in' : 'cm' };
+		if (weather === 'snowlevel')
+			return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
+		if (weather === 'wind')
+			return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
+		return null;
+	});
 	/** A cell dark enough to need light text (relative luminance under ~0.3). */
 	function darkCell(hex: string): boolean {
 		const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);

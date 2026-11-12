@@ -823,7 +823,10 @@
 		const key = `${weather}|${prefs.mapWind}`;
 		if (key === lastLayer) return;
 		lastLayer = key;
-		frame = Math.max(0, untrack(() => view.now));
+		frame = Math.max(
+			0,
+			untrack(() => view.now)
+		);
 	});
 
 	async function refresh() {

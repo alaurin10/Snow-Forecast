@@ -342,8 +342,7 @@
 				{/if}
 			</ul>
 			<p class="faint small">
-				From the map's weather: models 2.5–15 km across, so numbers for the area, not this
-				slope.
+				From the map's weather: models 2.5–15 km across, so numbers for the area, not this slope.
 			</p>
 		{/if}
 	</section>
