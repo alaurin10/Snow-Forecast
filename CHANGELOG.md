@@ -13,6 +13,9 @@ Notable changes to Snow Watch. The format follows
   at the foot leave free, and slides when a panel opens or the rail folds, so fits,
   fly-tos and "the middle of the map" (the zone, wind and scene the layers use) follow
   what you can see. On phones and tablets the same applies to the panels above the tab bar.
+- **The map opens flat over Washington.** The full map now always starts as a 2D map
+  framing Washington State, rather than framing every location; 3D terrain lasts for the
+  visit (switching it on, or tilting the map, no longer carries over to the next one).
 - **Map radar covers the whole West and has a type.** Radar now comes from
   Environment Canada's North American composite (Canadian and US radars, 1 km),
   split into snow, mix and rain by its precipitation-type product, and goes back

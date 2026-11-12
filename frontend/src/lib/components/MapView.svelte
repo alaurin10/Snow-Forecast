@@ -1352,8 +1352,9 @@
 					worker: terrain.worker,
 					contourTiles: ctiles
 				}),
-				center: [-120, 48],
-				zoom: 5,
+				center: [-120.8, 47.3],
+				zoom: radar ? 6 : 5,
+				pitch: 0,
 				maxZoom: 18,
 				maxPitch: 80,
 				// Phones draw at 2x, not 3x: less than half the pixels, and it still looks sharp.
@@ -1520,6 +1521,11 @@
 	}
 
 	let fitted = false;
+	/** Washington State ([west, south], [east, north]): where the full map opens. */
+	const HOME_BOUNDS: [[number, number], [number, number]] = [
+		[-124.8, 45.5],
+		[-116.9, 49.05]
+	];
 	function draw() {
 		if (!map || !ml || !ready) return;
 		for (const m of markers) m.remove();
@@ -1572,7 +1578,12 @@
 					.addTo(map)
 			);
 		}
-		// Frame the locations once; after that the view is the viewer's.
+		// The full map opens flat over Washington, home for this site, whatever else is saved.
+		if (radar && !fitted) {
+			fitted = true;
+			map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
+		}
+		// The small overview map frames the locations once; after that the view is the viewer's.
 		if (placed.length && !fitted) {
 			fitted = true;
 			const lons = placed.map((r) => r.lon!);

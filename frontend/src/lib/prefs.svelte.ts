@@ -136,7 +136,8 @@ class Prefs {
 	mapOverlay = $state<MapOverlay>(load('sw.mapOverlay', MAP_OVERLAYS, 'none'));
 	mapFeatures = $state<Set<MapFeature>>(loadFeatures());
 	mapShade = $state<MapShade>(load('sw.mapShade', ['off', 'light', 'strong'] as const, 'light'));
-	mapTerrain = $state<'on' | 'off'>(load('sw.mapTerrain', ['on', 'off'] as const, 'off'));
+	/** 3D terrain: for this visit only. The map always opens flat. */
+	mapTerrain = $state<'on' | 'off'>('off');
 	/** The concern index's warning has been read and accepted on this device. */
 	concernAck = $state<boolean>(read('sw.concernAck') === '1');
 	mapBase = $state<MapBase>(load('sw.mapBase', MAP_BASES, 'topo'));
@@ -227,7 +228,6 @@ class Prefs {
 
 	setMapTerrain(on: boolean) {
 		this.mapTerrain = on ? 'on' : 'off';
-		save('sw.mapTerrain', this.mapTerrain);
 	}
 }
 
