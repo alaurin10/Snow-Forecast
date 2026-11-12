@@ -446,12 +446,11 @@ class Renderer:
     # ---- Everything ----------------------------------------------------------------
 
     def run(self, region: Region) -> dict[str, Any]:
-        """Radar, forecast, totals and the other layers, one after the other
-        (`snowwatch precip`)."""
+        """Radar, forecast and totals, one after the other (the other layers are their
+        own job: `layers`)."""
         self.radar(region)
         self.forecast(region)
-        self.snow_totals(region)
-        return self.layers(region)
+        return self.snow_totals(region)
 
     def layers(self, region: Region) -> dict[str, Any]:
         """Snow level, wind, snow on the ground, observed snowfall and clouds (layers.py)."""
