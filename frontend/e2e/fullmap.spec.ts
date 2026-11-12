@@ -33,3 +33,16 @@ test('the desktop map fills the window and the rail folds', async ({ page }, inf
 	await page.getByRole('button', { name: 'Show navigation' }).click();
 	await expect(page.getByRole('complementary', { name: 'Navigation' })).toBeVisible();
 });
+
+test('the map opens flat, even after 3D was on', async ({ page }) => {
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	const three = page.getByRole('button', { name: '3D terrain' });
+	await expect(three).toHaveAttribute('aria-pressed', 'false');
+	await three.click();
+	await expect(three).toHaveAttribute('aria-pressed', 'true');
+	await page.reload({ waitUntil: 'networkidle' });
+	await expect(page.getByRole('button', { name: '3D terrain' })).toHaveAttribute(
+		'aria-pressed',
+		'false'
+	);
+});

@@ -46,6 +46,17 @@ describe('prefs', () => {
 		expect(prefs.mapFeatures.has('contours')).toBe(false);
 	});
 
+	it('opens the map flat every visit, whatever was chosen before', async () => {
+		localStorage.setItem('sw.mapTerrain', 'on');
+		let { prefs } = await import('./prefs.svelte');
+		expect(prefs.mapTerrain).toBe('off');
+		prefs.setMapTerrain(true);
+		expect(prefs.mapTerrain).toBe('on');
+		vi.resetModules();
+		({ prefs } = await import('./prefs.svelte'));
+		expect(prefs.mapTerrain).toBe('off');
+	});
+
 	it('switches features added later on once, then remembers the choice', async () => {
 		localStorage.setItem('sw.mapFeatures', 'runs,zones');
 		let { prefs } = await import('./prefs.svelte');
