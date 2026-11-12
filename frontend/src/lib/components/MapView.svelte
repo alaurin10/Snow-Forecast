@@ -43,9 +43,10 @@
 		ZonesOut
 	} from '../types.gen';
 	import { prefs, type MapWeather } from '../prefs.svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { layerLabel, layerSource, WEATHER_WORDS, weatherView } from '../map/weather';
 	import { viewport } from '../viewport.svelte';
+	import { RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
 		frameLabel,
 		frameSource,
@@ -738,22 +739,19 @@
 		gpxError = null;
 		if (fit && map) {
 			const [w, s_, e, n] = lineBounds(pts);
-			map.fitBounds(
-				[
-					[w, s_],
-					[e, n]
-				],
-				// Clear of the panel at the foot of the map.
-				{
-					padding: {
-						top: 70,
-						bottom: Math.round(map.getContainer().clientHeight * 0.55),
-						left: 70,
-						right: 50
-					},
-					maxZoom: 15
-				}
-			);
+			// Once the panel is on screen, so the track lands in the space above it (the
+			// map's padding; this padding is on top of that).
+			void tick().then(() => {
+				if (!map) return;
+				applyPadding(false);
+				map.fitBounds(
+					[
+						[w, s_],
+						[e, n]
+					],
+					{ padding: { top: 60, bottom: 40, left: 50, right: 50 }, maxZoom: 15 }
+				);
+			});
 		}
 	}
 	async function openGpx(file: File) {
@@ -954,28 +952,100 @@
 		}
 	});
 
-	// The full map fills the window below the header (and any banner), edge to edge;
-	// on phones and tablets the tab bar floats over it. On desktop it fills the space
-	// beside the navigation rail as a rounded panel.
+	// The full map fills the window. On phones and tablets it starts below the header (and
+	// any banner) and the tab bar floats over it; on desktop it fills the whole window and
+	// the navigation rail floats over its left side (open, or folded to a button).
 	let fillTop = $state(0);
-	let fillLeft = $state(0);
-	let fillRight = $state(0);
 	$effect(() => {
 		if (!radar || !wrap) return;
+		const desktop = viewport.desktop;
 		const main = wrap.closest('main');
 		// Whole pixels: a map placed at a fractional offset blends every tile edge,
 		// which draws a faint grid.
 		const measure = () => {
-			const box = (main ?? wrap!).getBoundingClientRect();
-			fillTop = Math.round(box.top + window.scrollY);
-			fillLeft = viewport.desktop ? Math.round(box.left) : 0;
-			fillRight = viewport.desktop
-				? Math.max(0, Math.round(document.documentElement.clientWidth - box.right))
-				: 0;
+			fillTop = desktop
+				? 0
+				: Math.round((main ?? wrap!).getBoundingClientRect().top + window.scrollY);
 		};
 		measure();
 		window.addEventListener('resize', measure);
 		return () => window.removeEventListener('resize', measure);
+	});
+	/** How far the rail (or its folded button) reaches over the map from the left. */
+	const inset = $derived(
+		radar && viewport.desktop ? (railUi.folded ? RAIL_FOLDED_INSET : RAIL_OPEN_INSET) : 0
+	);
+
+	// ---- The map's centre in the free space -------------------------------------------
+	// Like a phone's maps app with its sheet up or down: the map's padding is the part the
+	// open rail and the controls at the foot cover, so its centre (and every fit, fly-to
+	// and "the middle of the map" this page uses) sits in the space left over, and moves
+	// smoothly when a panel opens, closes or the rail folds.
+	let dock = $state<HTMLDivElement>();
+	let padKey = '';
+	function mapPadding() {
+		if (!map || !wrap) return null;
+		const box = wrap.getBoundingClientRect();
+		let bottom = 0;
+		if (dock && dock.childElementCount) {
+			const top = Math.min(
+				...[...dock.children].map((c) => c.getBoundingClientRect().top).filter((t) => t > 0)
+			);
+			if (Number.isFinite(top)) bottom = Math.max(0, Math.round(box.bottom - top));
+		}
+		// The folded button is small, like the map's own buttons: the map doesn't move for it.
+		const left = radar && viewport.desktop && !railUi.folded ? RAIL_OPEN_INSET : 0;
+		// Never more than half the map either way, so the centre stays on screen.
+		return {
+			top: 0,
+			right: 0,
+			left: Math.min(left, Math.round(box.width / 2)),
+			bottom: Math.min(bottom, Math.round(box.height / 2))
+		};
+	}
+	function applyPadding(animate: boolean) {
+		const pad = mapPadding();
+		if (!pad || !map) return;
+		const key = `${pad.left}/${pad.bottom}`;
+		if (key === padKey) return;
+		const old = padKey.split('/').map(Number);
+		padKey = key;
+		// Small changes (a control's height wobbling) aren't worth moving the map for.
+		if (old.length === 2 && Math.abs(old[0] - pad.left) + Math.abs(old[1] - pad.bottom) < 12) {
+			map.setPadding(pad);
+			return;
+		}
+		if (animate && !map.isMoving()) map.easeTo({ padding: pad, duration: 450 });
+		else map.setPadding(pad);
+	}
+	$effect(() => {
+		void inset;
+		const d = dock;
+		if (!ready || !radar) return;
+		applyPadding(true);
+		if (!d || typeof ResizeObserver === 'undefined') return;
+		let t: ReturnType<typeof setTimeout>;
+		const ro = new ResizeObserver(() => {
+			clearTimeout(t);
+			t = setTimeout(() => applyPadding(true), 60);
+		});
+		ro.observe(d);
+		for (const c of d.children) ro.observe(c);
+		// Panels come and go inside the dock.
+		const mo = new MutationObserver(() => {
+			for (const c of d.children) ro.observe(c);
+			clearTimeout(t);
+			t = setTimeout(() => applyPadding(true), 60);
+		});
+		mo.observe(d, { childList: true });
+		const onResize = () => applyPadding(false);
+		window.addEventListener('resize', onResize);
+		return () => {
+			clearTimeout(t);
+			ro.disconnect();
+			mo.disconnect();
+			window.removeEventListener('resize', onResize);
+		};
 	});
 
 	// ---- Weather layer ----------------------------------------------------------------
@@ -1398,6 +1468,8 @@
 					runner = new AreaRunner(tc, analysisLayer);
 					runner.onstate = (st) => (areaState = st);
 				}
+				// The free space first, so framing the locations lands beside the rail.
+				if (radar) applyPadding(false);
 				ready = true;
 				draw();
 				const c = map!.getCenter();
@@ -1545,12 +1617,11 @@
 <div
 	class="wrap"
 	class:fill={radar}
-	class:panel={radar && viewport.desktop}
+	class:desk={radar && viewport.desktop}
 	class:dark
 	bind:this={wrap}
 	style:--fill-top="{fillTop}px"
-	style:--fill-left="{fillLeft}px"
-	style:--fill-right="{fillRight}px"
+	style:--map-inset="{inset}px"
 >
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
 
@@ -1805,7 +1876,7 @@
 			</div>
 		{/if}
 
-		<div class="dock">
+		<div class="dock" bind:this={dock}>
 			{#if measuring}
 				<Measure
 					title={measureTitle}
@@ -1905,6 +1976,7 @@
 
 <style>
 	.wrap {
+		--ease-slide: 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
 		position: relative;
 		/* Keep the map's layers inside, under the floating tab bar. */
 		isolation: isolate;
@@ -1930,16 +2002,10 @@
 		border-radius: 0;
 		border: 0;
 	}
-	/* Desktop: a rounded panel beside the rail. */
-	.wrap.fill.panel {
-		left: var(--fill-left);
-		right: var(--fill-right);
-		bottom: 14px;
-	}
-	.panel .map {
-		border-radius: 28px;
-		border: 1px solid var(--panel-rim);
-		box-shadow: var(--shadow);
+	/* Desktop: the whole window; the rail floats over the left side. Controls on the left
+	   move clear of it (--map-inset). */
+	.wrap.fill.desk {
+		top: 0;
 	}
 	/* MapLibre's controls: credits as a small (i) in the top-right, and room for our
 	   buttons under the zoom and compass. */
@@ -1975,7 +2041,8 @@
 
 	/* MapLibre's zoom and compass buttons, as a glass column like ours. */
 	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group) {
-		margin: 10px 0 0 10px;
+		margin: 10px 0 0 calc(var(--map-inset, 0px) + 10px);
+		transition: margin-left var(--ease-slide);
 		border-radius: 14px;
 		overflow: hidden;
 		background: var(--glass);
@@ -2003,7 +2070,8 @@
 	/* The controls at the foot of the map: terrain (when its layer has any) over weather. */
 	.dock {
 		position: absolute;
-		left: 10px;
+		left: calc(var(--map-inset, 0px) + 10px);
+		transition: left var(--ease-slide);
 		right: 10px;
 		bottom: 10px;
 		z-index: 1000;
@@ -2026,7 +2094,8 @@
 	.tools {
 		position: absolute;
 		top: 136px;
-		left: 10px;
+		left: calc(var(--map-inset, 0px) + 10px);
+		transition: left var(--ease-slide);
 		z-index: 1000;
 		display: grid;
 		gap: 8px;
@@ -2073,7 +2142,8 @@
 	.top {
 		position: absolute;
 		top: 10px;
-		left: 60px;
+		left: calc(var(--map-inset, 0px) + 60px);
+		transition: left var(--ease-slide);
 		right: 54px;
 		z-index: 1001;
 		display: grid;
@@ -2150,7 +2220,7 @@
 	.info {
 		position: absolute;
 		top: 136px;
-		left: 60px;
+		left: calc(var(--map-inset, 0px) + 60px);
 		right: 10px;
 		max-width: 360px;
 		z-index: 1001;

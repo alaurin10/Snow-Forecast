@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The desktop map fills the whole window.** The rail floats over its left side and
+  folds to a small button (remembered in the browser); the map's buttons move clear of
+  it. Like a phone's maps app, the map's centre sits in the space the rail and the panels
+  at the foot leave free, and slides when a panel opens or the rail folds, so fits,
+  fly-tos and "the middle of the map" (the zone, wind and scene the layers use) follow
+  what you can see. On phones and tablets the same applies to the panels above the tab bar.
 - **Map radar covers the whole West and has a type.** Radar now comes from
   Environment Canada's North American composite (Canadian and US radars, 1 km),
   split into snow, mix and rain by its precipitation-type product, and goes back

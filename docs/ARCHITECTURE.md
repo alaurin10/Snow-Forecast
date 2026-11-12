@@ -59,6 +59,7 @@ frontend/src/
   routes/     overview, location/[id], map, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ observed/ manage/ share/ + small helpers
+              railui.svelte.ts (the desktop rail folded or open over the full-window map)
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend, Inspector, ZoneSheet,
               Measure and Profile (measure.ts: lines, GPX, stats), StationSheet, ReportSheet,

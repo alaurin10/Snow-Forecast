@@ -171,7 +171,7 @@
 	.sheet {
 		position: absolute;
 		top: 136px;
-		left: 60px;
+		left: calc(var(--map-inset, 0px) + 60px);
 		right: 10px;
 		max-width: 380px;
 		max-height: calc(100% - 150px);
