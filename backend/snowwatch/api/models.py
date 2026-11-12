@@ -12,6 +12,7 @@ from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import DayOut, Flag, RoseOut, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
+from snowwatch.maps.point import PointOut
 from snowwatch.maps.sat import SatOut
 from snowwatch.models import Location
 from snowwatch.verify import VerificationOut
@@ -224,6 +225,7 @@ class ApiTypes(BaseModel):
     map_concern: ConcernOut
     avalanche_zones: ZonesOut
     sat: SatOut
+    map_point: PointOut
     trend: TrendOut
     runs: list[RunOut]
     me: Me

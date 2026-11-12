@@ -57,6 +57,9 @@ class MapConfig(BaseModel):
     radar_minutes: int = Field(6, ge=1)
     forecast_minutes: int = Field(30, ge=5)
     totals_minutes: int = Field(60, ge=10)
+    # The other weather layers: snow level, wind, snow on the ground, observed snowfall
+    # and clouds (each redrawn only when its sources change).
+    layers_minutes: int = Field(30, ge=5)
     # NOAA NBM runs (UTC hours) used for the US beyond 48 h and for US snow totals. Only
     # the 00, 06, 12 and 18 UTC runs reach 10 days; each new run is ~60–80 MB to fetch.
     nbm_cycles: list[int] = [0, 12]
