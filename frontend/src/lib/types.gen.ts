@@ -590,8 +590,8 @@ export interface RunOut {
 	status: string;
 }
 /**
- * The map's recent satellite imagery: daily VIIRS, and clear Sentinel-2 scenes per
- * location (newest first).
+ * The map's recent satellite imagery: daily VIIRS everywhere, and per location a
+ * stitched newest-clear view and the newest whole clear scenes.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "SatOut".
@@ -600,16 +600,18 @@ export interface SatOut {
 	attribution?: string[];
 	days?: number;
 	generated_at?: string | null;
-	hls_date?: string | null;
 	locations?: SatLocation[];
 	min_clear_pct?: number;
+	scene_days?: number;
 	viirs_date?: string | null;
+	zooms?: number[];
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "SatLocation".
  */
 export interface SatLocation {
+	box?: [number, number, number, number] | null;
 	checked_at?: string | null;
 	composite?: SatComposite | null;
 	error?: string | null;
@@ -617,84 +619,60 @@ export interface SatLocation {
 	lat: number;
 	lon: number;
 	name: string;
-	scenes: SatScene[];
+	scenes?: SatScene[];
 }
 /**
- * The newest clear view round a location, stitched from passes: each cell from the
- * newest pass that saw the ground there, cloud cut out (see `stitch`).
+ * The newest clear view of the area, stitched from passes (see `stitch`).
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "SatComposite".
  */
 export interface SatComposite {
 	at_location: string | null;
-	boundaries: [number, number][][];
-	/**
-	 * @minItems 4
-	 * @maxItems 4
-	 */
-	box: [number, number, number, number];
 	filled_pct: number;
-	labels: SatLabel[];
 	latest_pass: string | null;
 	layers: SatLayer[];
+	lines?: [number, number][][];
+	parts: SatPart[];
+	view: string;
 }
 /**
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "SatLabel".
- */
-export interface SatLabel {
-	lat: number;
-	lon: number;
-	time: string;
-}
-/**
- * One pass in a stitched view: its clear pixels, over every older layer.
+ * One pass in a stitched view.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "SatLayer".
  */
 export interface SatLayer {
-	/**
-	 * @minItems 4
-	 * @maxItems 4
-	 */
-	bbox: [number, number, number, number];
 	id: string;
-	items: SatItem[];
 	platform: string;
 	share_pct: number;
 	time: string;
 }
 /**
- * One Sentinel-2 tile of a pass: its id for the tile proxy and its outline.
+ * Where one pass supplies a stitched view, for the map's outlines and dates.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "SatItem".
+ * via the `definition` "SatPart".
  */
-export interface SatItem {
-	/**
-	 * @minItems 4
-	 * @maxItems 4
-	 */
-	bbox: [number, number, number, number];
-	id: string;
+export interface SatPart {
+	polygons: [number, number][][][];
+	share_pct: number;
+	time: string;
 }
 /**
- * One Sentinel-2 pass that sees the ground at a location.
+ * One pass that covers the whole area and sees most of it: a coherent picture.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "SatScene".
  */
 export interface SatScene {
 	clear_pct: number;
-	hls?: boolean;
 	id: string;
-	items: SatItem[];
 	nodata_pct: number;
 	platform: string;
 	snow_pct: number;
 	time: string;
+	view: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

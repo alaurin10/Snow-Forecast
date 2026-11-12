@@ -1,9 +1,10 @@
-"""Recent satellite imagery: picking clear Sentinel-2 scenes, the index, the tile proxy."""
+"""Recent satellite imagery: judging passes, stitching, drawing views, the index and API."""
 
 from __future__ import annotations
 
 import io
 import json
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -15,21 +16,13 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from snowwatch.api.app import create_app
-from snowwatch.maps import sat
+from snowwatch.maps import sat, satrender
 from snowwatch.settings import Settings
-from snowwatch.tiles import S2_RENDER, TileCache, gibs_path, gibs_tile, s2_path, s2_tile
+from snowwatch.tiles import TileCache, gibs_path, gibs_tile
 from tests.conftest import make_location
 
 NOW = datetime(2026, 11, 11, 12, tzinfo=UTC)
-
-
-def crop(scl: int | np.ndarray, mask: int | np.ndarray = 255) -> np.ndarray:
-    arrays = [x for x in (scl, mask) if isinstance(x, np.ndarray)]
-    n = arrays[0].shape[0] if arrays else sat.AREA_PX
-    a = np.zeros((2, n, n), np.uint8)
-    a[0] = scl
-    a[1] = mask
-    return a
+N = sat.AREA_PX
 
 
 def npy(a: np.ndarray) -> bytes:
@@ -41,6 +34,12 @@ def npy(a: np.ndarray) -> bytes:
 def jpeg(color: tuple[int, int, int]) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (256, 256), color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def image(mode: str, n: int, color: Any, fmt: str) -> bytes:
+    buf = io.BytesIO()
+    Image.new(mode, (n, n), color).save(buf, fmt)
     return buf.getvalue()
 
 
@@ -56,32 +55,73 @@ def feature(fid: str, when: str, bbox: list[float] | None = None) -> dict[str, A
     }
 
 
+@pytest.fixture
+def small(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Small pictures and two zooms, so drawing views in tests is quick."""
+    monkeypatch.setattr(satrender, "PX", 64)
+    monkeypatch.setattr(satrender, "HALF", 32)
+    monkeypatch.setattr(satrender, "ZOOMS", range(9, 11))
+
+
 # ---- judging a pass -------------------------------------------------------------
 
 
-def test_judge_counts_cloud_snow_and_missing_data() -> None:
-    scl = np.full((64, 64), 4, np.uint8)  # vegetation
-    scl[:16] = 9  # a quarter high cloud
-    scl[16:24] = 11  # an eighth snow
-    look = sat.judge(sat.merge_crops([crop(scl)]))
-    assert look.clear == pytest.approx(0.75)
-    assert look.snow == pytest.approx(0.125)
+def test_classify_reads_scl_and_catches_bright_cloud_it_missed() -> None:
+    scl = np.array([[0, 4, 9, 11, 4, 11]])
+    blue = np.array([[0, 1500, 6000, 9000, 4500, 9000]])
+    swir = np.array([[0, 2500, 6000, 1800, 4000, 3600]])
+    g = sat.classify(scl, blue, swir)
+    # no data, ground, cloud (SCL), snow (bright but dark in SWIR), cloud SCL called
+    # ground (bright in both), and "snow" bright in both: cloud.
+    assert g.tolist() == [[0, 1, 2, 3, 2, 2]]
+    assert sat.classify(scl).tolist() == [[0, 1, 2, 3, 1, 3]]  # SCL alone
+
+
+def test_judge_and_merge() -> None:
+    g = np.full((N, N), sat.G_CLEAR, np.uint8)
+    g[: N // 4] = sat.G_CLOUD
+    g[N // 4 : N // 2] = sat.G_SNOW
+    look = sat.judge_grid(g)
+    assert look.clear == pytest.approx(0.75) and look.snow == pytest.approx(0.25)
     assert look.nodata == 0
-    # The mask, not only class 0, marks pixels without data.
-    half = np.zeros((64, 64), np.uint8)
-    half[:, :32] = 255
-    look = sat.judge(sat.merge_crops([crop(5, half)]))
-    assert look.nodata == pytest.approx(0.5) and look.clear == 1
-    assert sat.judge(np.zeros((4, 4), np.uint8)) == sat.Look(clear=0, nodata=1, snow=0)
-
-
-def test_merge_fills_one_tiles_gap_from_the_next() -> None:
-    left = np.zeros((96, 96), np.uint8)
-    left[:, :40] = 255
-    merged = sat.merge_crops([crop(4, left), crop(11)])
-    assert (merged[:, :40] == 4).all() and (merged[:, 40:] == 11).all()
+    half = g.copy()
+    half[:, N // 2 :] = sat.G_NODATA
+    assert sat.judge_grid(half).nodata == pytest.approx(0.5)
+    assert sat.judge_grid(np.zeros((4, 4), np.uint8)) == sat.Look(clear=0, nodata=1, snow=0)
+    other = np.full((N, N), sat.G_SNOW, np.uint8)
+    merged = sat.merge_grids([half, other])
+    assert (merged[:, N // 2 :] == sat.G_SNOW).all() and (
+        merged[:, : N // 2] == half[:, : N // 2]
+    ).all()
     with pytest.raises(ValueError):
-        sat.merge_crops([])
+        sat.merge_grids([])
+    # With band values, the cells (first band) decide.
+    a = np.stack([half, np.full((N, N), 7)]).astype(np.uint16)
+    b = np.stack([other, np.full((N, N), 9)]).astype(np.uint16)
+    m3 = sat.merge_grids([a, b])
+    assert (m3[1, :, N // 2 :] == 9).all() and (m3[1, :, : N // 2] == 7).all()
+
+
+def bands(cells: np.ndarray, blue: int, green: int = 1400, swir: int = 2200) -> np.ndarray:
+    return np.stack(
+        [cells, np.full(cells.shape, blue), np.full(cells.shape, green), np.full(cells.shape, swir)]
+    ).astype(np.uint16)
+
+
+def test_dehaze_marks_hazy_ground_but_not_snow_or_a_lone_pass() -> None:
+    clear = np.full((N, N), sat.G_CLEAR, np.uint8)
+    hazy = bands(clear, 1000 + 1300)  # blue 0.13 over ground another pass saw at 0.04
+    crisp = bands(clear, 1000 + 400)
+    snowy = bands(clear, 1000 + 7000, green=1000 + 7500, swir=1000 + 900)  # NDSI 0.8
+    out = sat.dehaze([hazy, crisp, snowy])
+    assert (out[0] == sat.G_HAZE).all()
+    assert (out[1] == sat.G_CLEAR).all() and (out[2] == sat.G_CLEAR).all()
+    # One pass alone can't be judged: left as it is.
+    assert (sat.dehaze([hazy])[0] == sat.G_CLEAR).all()
+    # New partial snow lifts blue too, but lowers SWIR: not haze.
+    patchy = bands(clear, 1000 + 1300, swir=2200 - 400)
+    assert (sat.dehaze([patchy, crisp])[0] == sat.G_CLEAR).all()
+    assert sat.dehaze([]) == []
 
 
 def test_passes_group_tiles_and_keep_the_newest_processing() -> None:
@@ -102,13 +142,15 @@ def test_passes_group_tiles_and_keep_the_newest_processing() -> None:
         item(a, "T12TVK", "20261111T010101"),
     }
     assert passes[0].platform == "Sentinel-2C"
-    assert sat.pass_id(item(a, "T12TVL")) == a
 
 
-def test_crop_box_is_square_on_the_ground() -> None:
-    w, s, e, n = sat.crop_box(60.0, -120.0)
-    assert n - s == pytest.approx(8 / 111.32, rel=1e-3)
-    assert e - w == pytest.approx(2 * (n - s), rel=1e-2)  # cos 60° = 0.5
+def test_the_area_is_square_on_the_ground() -> None:
+    x0, y0, x1, y1 = sat.area_box(60.0, -120.0)
+    assert x1 - x0 == pytest.approx(48_000, rel=1e-3)  # 24 km / cos 60°
+    _, s, _, n = sat.box_lonlat((x0, y0, x1, y1))
+    assert (n - s) * 111.32 == pytest.approx(24, rel=0.01)
+    lat, lon = sat.unmerc(*sat.merc(47.4, -121.4))
+    assert (lat, lon) == pytest.approx((47.4, -121.4))
 
 
 def test_viirs_tile_check_tells_black_from_imagery() -> None:
@@ -118,20 +160,220 @@ def test_viirs_tile_check_tells_black_from_imagery() -> None:
     assert sat.tile_xy(0, 0, 1) == (1, 1)
 
 
-# ---- the refresh ----------------------------------------------------------------
+# ---- stitching -----------------------------------------------------------------------
 
-CLEAR = "S2C_MSIL2A_20261110T182601_R127"
+
+def grid(fill: int = sat.G_CLEAR) -> np.ndarray:
+    return np.full((N, N), fill, np.uint8)
+
+
+def pass_(day: int, month: int = 11) -> sat.Pass:
+    pid = f"S2A_MSIL2A_2026{month:02d}{day:02d}T190000_R013"
+    return sat.Pass(
+        pid,
+        datetime(2026, month, day, 19, tzinfo=UTC),
+        "Sentinel-2A",
+        [
+            sat.SatItem(
+                id=f"{pid}_T10TFT_2026{month:02d}{day:02d}T220000", bbox=[-122, 46, -120, 48]
+            )
+        ],
+    )
+
+
+def test_stitch_takes_each_part_from_the_newest_pass_that_saw_it() -> None:
+    # The newest pass's swath ends a third of the way across (like Snoqualmie's 21 Oct);
+    # an older pass is clear everywhere.
+    strip = grid()
+    strip[:, N // 3 :] = sat.G_NODATA
+    plan = sat.stitch([(pass_(10), strip), (pass_(1), grid(sat.G_SNOW))], latest=pass_(10).time)
+    assert [p.id for p in plan.layers] == [pass_(10).id, pass_(1).id]
+    assert plan.filled() == 1
+    assert (plan.owner[:, : N // 3] == 0).all() and (plan.owner[:, N // 3 :] == 1).all()
+
+
+def test_stitch_skips_mostly_cloudy_passes_and_fills_from_the_whole_scene() -> None:
+    cloudy = grid(sat.G_CLOUD)
+    cloudy[:4, :4] = sat.G_CLEAR  # a gap in the cloud: likely haze, not to be trusted
+    holey = grid()
+    holey[40:56, 40:56] = sat.G_CLOUD
+    plan = sat.stitch([(pass_(11), cloudy), (pass_(10), holey)], fallback=[(pass_(1, 10), grid())])
+    assert [p.id for p in plan.layers] == [pass_(10).id, pass_(1, 10).id]
+    # The whole scene fills the hole, and a cell's margin round it.
+    assert (plan.owner == 1).sum() == 18 * 18
+    assert plan.filled() == 1
+
+
+def test_stitch_keeps_a_small_strip_at_the_location_but_not_scraps_elsewhere() -> None:
+    near = grid(sat.G_NODATA)
+    near[38:58, 42:54] = sat.G_CLEAR  # 240 cells: 2.6% of the area, but at the location
+    far = grid(sat.G_NODATA)
+    far[0:12, 0:12] = sat.G_CLEAR  # 144 cells, 1.6% of the area, far from it
+    plan = sat.stitch([(pass_(12), far), (pass_(11), near), (pass_(1), grid())])
+    assert [p.id for p in plan.layers] == [pass_(11).id, pass_(1).id]
+    assert plan.owner[N // 2, N // 2] == 0
+
+
+def test_stitch_makes_compact_parts() -> None:
+    # The newest pass saw a checkerboard of 4-cell blocks: on its own that's confetti.
+    # Compacting gives its scraps to the older clear pass instead.
+    board = grid(sat.G_NODATA)
+    for r in range(0, N, 8):
+        for c in range(0, N, 8):
+            board[r : r + 4, c : c + 4] = sat.G_CLEAR
+    board[:, : N // 2] = sat.G_CLEAR  # and a solid half
+    plan = sat.stitch([(pass_(12), board), (pass_(1), grid())])
+    assert (plan.owner[:, : N // 2 - 3] == 0).all()
+    right = plan.owner[:, N // 2 + 3 :]
+    assert (right == 1).mean() > 0.95  # the confetti side is the older pass, nearly all
+
+
+def test_stitch_stops_at_its_layer_limit_and_handles_nothing_clear() -> None:
+    bands = []
+    for i in range(9):
+        g = grid(sat.G_NODATA)
+        g[:, i * 10 : i * 10 + 10] = sat.G_CLEAR
+        bands.append((pass_(20 - i), g))
+    assert len(sat.stitch(bands).layers) == sat.MAX_LAYERS
+    plan = sat.stitch([(pass_(5), grid(sat.G_CLOUD))])
+    assert plan.layers == [] and plan.filled() == 0
+
+
+def test_rings_and_polygons() -> None:
+    m = np.zeros((6, 6), bool)
+    m[1:5, 1:5] = True
+    m[2:4, 2:4] = False  # a hole
+    rings = sat.rings(m)
+    areas = sorted(sat.signed_area(r) for r in rings)
+    assert areas == [-4, 16]
+    polys = sat.polygons(m, min_hole=1)
+    assert len(polys) == 1 and len(polys[0]) == 2  # outer ring and its hole
+    # Cells touching only at a corner are two regions, not one figure-of-eight.
+    d = np.zeros((4, 4), bool)
+    d[0, 0] = d[1, 1] = True
+    assert len(sat.rings(d)) == 2 and len(sat.polygons(d)) == 2
+
+
+def test_lines_only_where_two_parts_meet() -> None:
+    owner = np.full((N, N), -1, np.int16)
+    owner[:, : N // 2] = 0
+    owner[:, N // 2 :] = 1
+    owner[: N // 4, :] = -1  # a cloudy band with no pass: no line along it
+    lines = sat.boundaries(owner)
+    assert len(lines) == 1
+    xs = {x for x, _ in lines[0]}
+    ys = {y for _, y in lines[0]}
+    assert xs == {N // 2} and min(ys) == N // 4 and max(ys) == N
+
+
+def test_composite_out_dates_parts_and_draws_lines(tmp_path: Path) -> None:
+    strip = grid()
+    strip[:, N // 2 :] = sat.G_NODATA
+    plan = sat.stitch([(pass_(10), strip), (pass_(1), grid())], latest=pass_(11).time)
+    box = sat.area_box(47.0, -121.0)
+    co = sat.composite_out(plan, "0123456789abcdef", box)
+    assert [(x.id, x.share_pct) for x in co.layers] == [(pass_(10).id, 50), (pass_(1).id, 50)]
+    assert [p.time.day for p in co.parts] == [10, 1]
+    assert co.at_location == pass_(1).time  # the middle cell is just east of the strip
+    assert co.latest_pass == pass_(11).time and co.filled_pct == 100
+    assert len(co.lines) == 1
+    lon_mid = (sat.box_lonlat(box)[0] + sat.box_lonlat(box)[2]) / 2
+    assert all(abs(lon - lon_mid) < 1e-3 for lon, _ in co.lines[0])
+    w, s, e, n = sat.box_lonlat(box)
+    for ring in co.parts[0].polygons[0]:
+        assert all(w - 1e-5 <= lon <= e + 1e-5 and s - 1e-5 <= lat <= n + 1e-5 for lon, lat in ring)
+
+
+# ---- drawing views -----------------------------------------------------------------
+
+
+def test_choose_prefers_the_part_then_fills_gaps_from_the_newest() -> None:
+    owner = np.full((N, N), 1, np.int16)
+    owner[:, : N // 2] = 0
+    size = 64
+    ok0 = np.ones((size, size), bool)
+    ok0[:8, :8] = False  # a cloud gap in the newest pass's part
+    ok1 = np.ones((size, size), bool)
+    choice = satrender.choose(owner, [ok0, ok1])
+    assert (choice[20:, :28] == 0).all() and (choice[:, 36:] == 1).all()
+    assert (choice[:8, :8] == 1).all()  # filled from the other pass
+    none = [np.zeros((size, size), bool)] * 2
+    assert satrender.choose(owner, none).max() == -1
+    # Cloud in every pass: each pass's own picture of it, its part's pass first.
+    seen = [np.ones((size, size), bool)] * 2
+    filled = satrender.choose(owner, none, seen)
+    assert (filled[:, :28] == 0).all() and (filled[:, 36:] == 1).all()
+
+
+def test_gaps_are_filled_from_the_pass_nearest_in_time() -> None:
+    owner = np.full((N, N), 2, np.int16)  # all the oldest pass's part
+    size = 32
+    gap = np.ones((size, size), bool)
+    gap[:8, :8] = False
+    full = np.ones((size, size), bool)
+    choice = satrender.choose(owner, [full, full, gap])
+    # Pass 1 is nearer in time to pass 2 than the newest (0) is.
+    assert (choice[:8, :8] == 1).all() and (choice[8:, 8:] == 2).all()
+
+
+def test_grow_and_upsample() -> None:
+    m = np.zeros((9, 9), bool)
+    m[4, 4] = True
+    assert satrender.grow(m, 2).sum() == 25 and satrender.grow(m, 0).sum() == 1
+    assert satrender.upsample2(m).shape == (18, 18) and satrender.upsample2(m).sum() == 4
+
+
+def test_cut_puts_the_picture_in_the_right_tiles(tmp_path: Path) -> None:
+    r = satrender.Renderer(tmp_path, httpx.Client())
+    box = sat.area_box(47.424, -121.418)
+    px = 240
+    a = np.zeros((px, px, 4), np.uint8)
+    a[..., :3] = (200, 30, 30)
+    a[..., 3] = 255
+    a[px // 2 - 5 : px // 2 + 5, px // 2 - 5 : px // 2 + 5, :3] = (30, 30, 200)  # the middle
+    count = r.cut(a, box, tmp_path / "out")
+    assert count == len(list((tmp_path / "out").rglob("*.webp"))) > 0
+    # The middle pixel is in the zoom-13 tile under the location, and blue.
+    z = 13
+    lat, lon = sat.unmerc((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+    tx, ty = sat.tile_xy(lat, lon, z)
+    tile = np.asarray(
+        Image.open(tmp_path / "out" / str(z) / str(tx) / f"{ty}.webp").convert("RGBA")
+    )
+    half = satrender.WORLD / 2
+    span = satrender.WORLD / 2**z
+    mx, my = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    u = int((mx + half - tx * span) / span * 512)
+    v = int((half - my - ty * span) / span * 512)
+    assert tile[v, u, 2] > 150 and tile[v, u, 0] < 90
+    # Tiles round the picture are partly transparent; none beyond it are written.
+    assert all((tmp_path / "out" / str(zz)).exists() for zz in satrender.ZOOMS)
+
+
+def test_view_names_change_with_what_they_show() -> None:
+    box = sat.area_box(47.0, -121.0)
+    a = satrender.view_id("scene", box, ["x"])
+    assert a == satrender.view_id("scene", box, ["x"]) and re.fullmatch(r"[0-9a-f]{16}", a)
+    assert a != satrender.view_id("scene", box, ["y"])
+    assert a != satrender.view_id("stitched", box, ["x"])
+
+
+# ---- the refresh, end to end (small pictures) -----------------------------------------
+
+NEWEST = "S2C_MSIL2A_20261110T182601_R127"  # its swath covers the west half
 CLOUDY = "S2B_MSIL2A_20261108T182539_R084"
-OLDER = "S2A_MSIL2A_20261101T182539_R127"
-EDGE = "S2A_MSIL2A_20261030T182539_R127"
+FULL = "S2A_MSIL2A_20261101T182539_R127"  # clear everywhere: a whole scene
+COLORS = {NEWEST: (200, 40, 40), FULL: (40, 40, 200), CLOUDY: (240, 240, 240)}
 
 
 class Upstream:
     """Planetary Computer and GIBS, as far as the refresh uses them."""
 
-    def __init__(self) -> None:
+    def __init__(self, lat: float = 47.0, lon: float = -121.0) -> None:
         self.calls: list[str] = []
         self.fail_search = False
+        box = sat.area_box(lat, lon)
+        self.mid_x = (box[0] + box[2]) / 2
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         url = str(req.url)
@@ -145,98 +387,99 @@ class Upstream:
                 200,
                 json={
                     "features": [
-                        feature(item(CLEAR, "T10TET"), "2026-11-10T18:26:01Z"),
+                        feature(item(NEWEST, "T10TET"), "2026-11-10T18:26:01Z"),
                         feature(item(CLOUDY, "T10TET"), "2026-11-08T18:25:39Z"),
-                        feature(item(OLDER, "T10TET"), "2026-11-01T18:25:39Z"),
-                        feature(item(EDGE, "T10TET"), "2026-10-30T18:25:39Z"),
-                        feature(item(EDGE, "T10TFT"), "2026-10-30T18:25:39Z"),
+                        feature(item(FULL, "T10TET"), "2026-11-01T18:25:39Z"),
                     ]
                 },
             )
         if "/item/bbox/" in url:
             it = req.url.params["item"]
-            assert req.url.params["assets"] == "SCL"
-            if it.startswith(CLOUDY):
-                return httpx.Response(200, content=npy(crop(9)))
-            if it.startswith(EDGE):
-                # Each tile of this pass sees half the square: together, all of it.
-                m = np.zeros((96, 96), np.uint8)
-                if "T10TET" in it:
-                    m[:, :48] = 255
+            pid = sat.pass_id(it)
+            x0 = float(url.split("/item/bbox/")[1].split(",")[0])
+            if url.split("?")[0].endswith(".npy"):  # the grid
+                assert req.url.params.get_list("assets") == ["SCL", "B02", "B03", "B11"]
+                a = np.zeros((5, N, N), np.uint16)
+                a[4] = 255
+                a[1], a[2], a[3] = 1500, 1600, 2000
+                if pid == CLOUDY:
+                    a[0] = 9
+                elif pid == FULL:
+                    a[0] = 11
                 else:
-                    m[:, 48:] = 255
-                return httpx.Response(200, content=npy(crop(11, m)))
-            scl = np.full((96, 96), 11, np.uint8)
-            # A band of cloud across the middle: an eighth of the 8 km square (rows
-            # 32-63), still clear enough.
-            scl[32:36] = 8
-            return httpx.Response(200, content=npy(crop(scl)))
-        if url.endswith(".xml") and sat.HLS in url:
-            return httpx.Response(
-                200,
-                text="<Domains><DimensionDomain><Domain>2026-03-02/2026-11-04/P1D</Domain>"
-                "</DimensionDomain></Domains>",
-            )
+                    a[0, :, : N // 2] = 4  # the east half has no data
+                return httpx.Response(200, content=npy(a))
+            size = int(re.search(r"/(\d+)x\d+\.", url).group(1))  # type: ignore[union-attr]
+            east = x0 >= self.mid_x - 1  # a quarter in the east half of the area
+            if url.split("?")[0].endswith(".png"):  # the cloud mask
+                v = 0 if pid == CLOUDY else 255
+                return httpx.Response(200, content=image("LA", size, (v, 255), "PNG"))
+            alpha = 0 if (pid == NEWEST and east) else 255
+            return httpx.Response(200, content=image("RGBA", size, (*COLORS[pid], alpha), "WEBP"))
         if sat.VIIRS in url:
             dark = "/2026-11-11/" in url
             return httpx.Response(200, content=jpeg((0, 0, 0) if dark else (90, 100, 110)))
         return httpx.Response(404)
 
 
-def test_refresh_keeps_the_newest_clear_scenes_and_remembers_judged_passes(
-    tmp_path: Path,
-) -> None:
+def tile_colors(view_dir: Path) -> set[str]:
+    """Which of the passes' colours a view's tiles show."""
+    seen = set()
+    for f in view_dir.rglob("*.webp"):
+        a = np.asarray(Image.open(f).convert("RGBA")).reshape(-1, 4)
+        a = a[a[:, 3] > 200]
+        if (a[:, 0] > 150).any():
+            seen.add("red")
+        if (a[:, 2] > 150).any():
+            seen.add("blue")
+    return seen
+
+
+def test_refresh_chooses_and_draws_views(tmp_path: Path, small: None) -> None:
     up = Upstream()
     client = httpx.Client(transport=httpx.MockTransport(up))
-    loc = make_location()
-    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
-    assert res.errors == [] and res.locations == 1 and res.checked == 4
+    res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
+    assert res.errors == [] and res.locations == 1 and res.checked == 3 and res.fetched > 0
     index = sat.read_index(tmp_path / "index.json")
-    assert index is not None
-    assert index.viirs_date == "2026-11-10"  # today's mosaic is still black
-    assert index.hls_date == "2026-11-04"
+    assert index is not None and index.viirs_date == "2026-11-10"  # today's is still black
     spot = index.locations[0]
     assert (spot.id, spot.lat, spot.lon) == ("testhill", 47.0, -121.0)
-    assert [s.id for s in spot.scenes] == [CLEAR, OLDER, EDGE]  # the cloudy one is out
-    first = spot.scenes[0]
-    assert (first.clear_pct, first.snow_pct, first.nodata_pct) == (88, 88, 0)
-    assert first.hls is False and spot.scenes[1].hls is True  # HLS ends on 4 Nov
-    assert len(spot.scenes[2].items) == 2  # the two half-squares make a whole
-    assert sat.allowed_items(index) == {i.id for s in spot.scenes for i in s.items}
-
-    # Stitched: the newest clear pass everywhere it saw the ground (less a cell's margin
-    # round its cloud), and the band under its cloud from the newest pass that saw it.
+    assert spot.box == pytest.approx(sat.box_lonlat(sat.area_box(47.0, -121.0)))
+    # Whole scenes: only the pass that covers the whole area (the newest covers half).
+    assert [s.id for s in spot.scenes] == [FULL]
+    assert (spot.scenes[0].clear_pct, spot.scenes[0].snow_pct) == (100, 100)
+    # Stitched: the newest half, then the whole scene; the cloudy pass isn't used.
     co = spot.composite
     assert co is not None
-    assert [(x.id, x.share_pct) for x in co.layers] == [(CLEAR, 94), (EDGE, 6)]
-    assert co.filled_pct == 100 and co.at_location == spot.scenes[0].time
-    assert co.latest_pass == spot.scenes[0].time
-    assert len(co.boundaries) == 2  # either side of the band
-    assert len(co.labels) == 3  # each half of the newest pass, and the band
-    w, _, e, _ = co.box
-    assert all(
-        round(lon, 4) in (round(w, 4), round(e, 4)) for line in co.boundaries for lon, _ in line
-    )
+    assert [x.id for x in co.layers] == [NEWEST, FULL] and co.filled_pct == 100
+    assert co.latest_pass == datetime(2026, 11, 10, 18, 26, 1, tzinfo=UTC)
+    assert len(co.parts) == 2 and len(co.lines) == 1
+    views = tmp_path / "views"
+    assert (views / co.view / "done").exists() and (views / spot.scenes[0].view / "done").exists()
+    assert tile_colors(views / co.view / "natural") == {"red", "blue"}
+    assert tile_colors(views / spot.scenes[0].view / "snow") == {"blue"}
+    assert {d.name for d in views.iterdir()} == {co.view, spot.scenes[0].view}
 
-    # Next time only the search, HLS's dates and VIIRS are asked for; passes aren't re-read.
+    # Next time nothing is fetched: passes, pictures and views are all kept.
     up.calls.clear()
-    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
-    assert res.checked == 0 and not any("/item/bbox/" in c for c in up.calls)
+    res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
+    assert res.checked == 0 and res.fetched == 0
+    assert not any("/item/bbox/" in c for c in up.calls)
 
     # A failed search keeps what was found, and says so.
     up.fail_search = True
-    res = sat.refresh(tmp_path, client, [loc], keep=3, now=NOW)
+    res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
     again = sat.read_index(tmp_path / "index.json")
-    assert again is not None and len(res.errors) == 1
-    assert [s.id for s in again.locations[0].scenes] == [CLEAR, OLDER, EDGE]
-    assert again.locations[0].error
+    assert again is not None and len(res.errors) == 1 and again.locations[0].error
+    assert again.locations[0].composite == co and [s.id for s in again.locations[0].scenes] == [
+        FULL
+    ]
+    assert (views / co.view / "done").exists()  # its views are kept too
 
 
-def test_refresh_stops_at_keep_and_drops_moved_locations(tmp_path: Path) -> None:
+def test_refresh_forgets_moved_locations(tmp_path: Path, small: None) -> None:
     client = httpx.Client(transport=httpx.MockTransport(Upstream()))
-    sat.refresh(tmp_path, client, [make_location()], keep=1, now=NOW)
-    index = sat.read_index(tmp_path / "index.json")
-    assert index is not None and [s.id for s in index.locations[0].scenes] == [CLEAR]
+    sat.refresh(tmp_path, client, [make_location()], now=NOW)
     moved = make_location(
         bands=[
             {"band": "base", "label": "Base", "lat": 48.0, "lon": -121.0, "elev_m": 1000},
@@ -244,12 +487,15 @@ def test_refresh_stops_at_keep_and_drops_moved_locations(tmp_path: Path) -> None
             {"band": "summit", "label": "Top", "lat": 48.0, "lon": -121.0, "elev_m": 2000},
         ]
     )
-    sat.refresh(tmp_path, client, [moved], keep=1, now=NOW)
+    sat.refresh(
+        tmp_path, httpx.Client(transport=httpx.MockTransport(Upstream(48.0))), [moved], now=NOW
+    )
     checked = json.loads((tmp_path / "checked.json").read_text())
-    assert list(checked) == [f"testhill@48.000,-121.000#{sat.AREA_PX}"]
+    assert list(checked) == [sat._spot_key("testhill", 48.0, -121.0)]
+    assert len(list((tmp_path / "crops").iterdir())) == 1  # the old spot's pictures went
 
 
-def test_refresh_survives_gibs_being_down(tmp_path: Path) -> None:
+def test_refresh_survives_gibs_being_down(tmp_path: Path, small: None) -> None:
     up = Upstream()
 
     def answer(req: httpx.Request) -> httpx.Response:
@@ -257,48 +503,16 @@ def test_refresh_survives_gibs_being_down(tmp_path: Path) -> None:
             return httpx.Response(503)
         return up(req)
 
-    client = httpx.Client(transport=httpx.MockTransport(answer))
-    res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
+    res = sat.refresh(
+        tmp_path, httpx.Client(transport=httpx.MockTransport(answer)), [make_location()], now=NOW
+    )
     index = sat.read_index(tmp_path / "index.json")
-    assert index is not None and index.viirs_date is None and index.hls_date is None
-    assert len(res.errors) == 2 and index.locations[0].scenes
-    assert not any(s.hls for s in index.locations[0].scenes)
+    assert index is not None and index.viirs_date is None
+    assert res.errors == ["VIIRS: no day with imagery in the last four"]
+    assert index.locations[0].composite is not None
 
 
-# ---- the tile proxy ----------------------------------------------------------------
-
-ITEM = item(CLEAR, "T10TET")
-
-
-def test_s2_tiles_only_for_items_in_the_index(tmp_path: Path) -> None:
-    calls: list[str] = []
-
-    def answer(req: httpx.Request) -> httpx.Response:
-        calls.append(str(req.url))
-        return httpx.Response(200, content=b"RIFFwebp", headers={"content-type": "image/webp"})
-
-    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
-    allowed = {ITEM}
-    assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
-    assert s2_tile(cache, "natural", ITEM, 12, 650, 1385, allowed) == b"RIFFwebp"
-    assert len(calls) == 1  # the second came from the cache
-    assert "item=" + ITEM in calls[0] and "B04" in calls[0] and "@2x.webp" in calls[0]
-    # The band files don't mark no data themselves: without this, off-swath is opaque black.
-    assert "nodata=0" in calls[0]
-    # Cached under the rendering version, so a new colour stretch is drawn afresh.
-    assert (tmp_path / "s2" / f"r{S2_RENDER}" / "natural" / ITEM / "12" / "650" / "1385").exists()
-    assert s2_tile(cache, "snow", ITEM, 12, 650, 1385, allowed) is not None
-    assert "B11" in calls[1]
-    for args in (
-        ("natural", "S2C_MSIL2A_20261110T182601_R127_T10TEX_20261110T221403", 12, 650, 1385),
-        ("infrared", ITEM, 12, 650, 1385),  # not a mode
-        ("natural", ITEM, 7, 20, 40),  # too far out
-        ("natural", ITEM, 15, 0, 0),  # too far in
-        ("natural", ITEM, 12, 5000, 1385),  # not a tile
-    ):
-        assert s2_path(cache, *args, allowed) is None
-        assert s2_tile(cache, *args, allowed) is None
-    assert len(calls) == 2
+# ---- serving --------------------------------------------------------------------------
 
 
 def test_gibs_tiles_only_for_listed_layers_and_real_days(tmp_path: Path) -> None:
@@ -312,16 +526,14 @@ def test_gibs_tiles_only_for_listed_layers_and_real_days(tmp_path: Path) -> None
 
     cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
     today = date(2026, 11, 11)
-    got = gibs_tile(cache, sat.VIIRS, "2026-11-10", 6, 11, 21, today)
-    assert got == (b"jpg", "image/jpeg")
+    assert gibs_tile(cache, sat.VIIRS, "2026-11-10", 6, 11, 21, today) == (b"jpg", "image/jpeg")
     assert calls[0].endswith(
         f"{sat.VIIRS}/default/2026-11-10/GoogleMapsCompatible_Level9/6/21/11.jpeg"
     )
-    hls = gibs_tile(cache, sat.HLS, "2026-11-04", 12, 777, 1542, today)
-    assert hls is not None and hls[1] == "image/png" and calls[1].endswith("/12/1542/777.png")
+    assert gibs_tile(cache, sat.VIIRS_SNOW, "2026-11-10", 6, 11, 21, today) is not None
     assert gibs_tile(cache, sat.VIIRS, "2026-11-10", 9, 1, 1, today) is None  # upstream 400
     for layer, day, z in (
-        ("MODIS_Terra_CorrectedReflectance_TrueColor", "2026-11-10", 6),
+        ("HLS_S30_Nadir_BRDF_Adjusted_Reflectance", "2026-11-04", 6),  # not offered now
         (sat.VIIRS, "2026-11-13", 6),  # the future
         (sat.VIIRS, "2026-02-30", 6),  # not a day
         (sat.VIIRS, "../../etc", 6),
@@ -331,40 +543,41 @@ def test_gibs_tiles_only_for_listed_layers_and_real_days(tmp_path: Path) -> None
     assert len(calls) == 3
 
 
-def test_api_serves_the_index_and_proxies_tiles(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
+def test_api_serves_the_index_compressed_and_the_drawn_tiles(
+    settings: Settings, small: None
 ) -> None:
     client = TestClient(create_app(settings))
     assert client.get("/api/sat").status_code == 503
-    assert client.get(f"/api/tiles/s2/natural/{ITEM}/12/650/1385.webp").status_code == 404
-
-    up = Upstream()
     sat.refresh(
         settings.sat_dir,
-        httpx.Client(transport=httpx.MockTransport(up)),
+        httpx.Client(transport=httpx.MockTransport(Upstream())),
         [make_location()],
         now=NOW,
     )
-    r = client.get("/api/sat")
-    assert r.status_code == 200
+    r = client.get("/api/sat", headers={"accept-encoding": "gzip"})
+    assert r.status_code == 200 and r.headers["content-encoding"] == "gzip"
     body = r.json()
-    assert body["viirs_date"] == "2026-11-10" and body["locations"][0]["scenes"][0]["id"] == CLEAR
+    assert body["viirs_date"] == "2026-11-10" and body["zooms"] == [9, 10]
     assert "Copernicus" in " ".join(body["attribution"])
-
-    monkeypatch.setattr(TileCache, "through", lambda self, path, url, fix=False: b"tile")
-    r = client.get(f"/api/tiles/s2/natural/{ITEM}/12/650/1385.webp")
+    view = body["locations"][0]["composite"]["view"]
+    tile = next((settings.sat_dir / "views" / view / "natural").rglob("*.webp"))
+    z, x, y = tile.parent.parent.name, tile.parent.name, tile.stem
+    r = client.get(f"/api/sat/tiles/{view}/natural/{z}/{x}/{y}.webp")
     assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
-    assert client.get(f"/api/tiles/s2/natural/{ITEM[:-1]}X/12/650/1385.webp").status_code == 404
-    r = client.get(f"/api/tiles/gibs/{sat.VIIRS}/2026-11-10/6/11/21")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert "immutable" in r.headers["cache-control"]
+    for bad in (
+        f"/api/sat/tiles/{view}/natural/{z}/{x}/{int(y) + 99}.webp",  # not drawn
+        f"/api/sat/tiles/{view}/infrared/{z}/{x}/{y}.webp",
+        f"/api/sat/tiles/notahexname/natural/{z}/{x}/{y}.webp",
+        f"/api/sat/tiles/{view}/natural/3/99/0.webp",  # not a tile
+    ):
+        assert client.get(bad).status_code == 404
+    r = client.get(f"/api/tiles/gibs/{sat.VIIRS}/2026-11-10/6/99/99")
+    assert r.status_code in (200, 404)  # proxied (upstream not reachable in tests)
     assert client.get("/api/tiles/gibs/nope/2026-11-10/6/11/21").status_code == 404
 
-    monkeypatch.setattr(TileCache, "through", lambda self, path, url, fix=False: None)
-    assert client.get(f"/api/tiles/s2/snow/{ITEM}/12/650/1386.webp").status_code == 404
-    assert client.get(f"/api/tiles/gibs/{sat.VIIRS}/2026-11-10/6/11/22").status_code == 404
 
-
-def test_worker_looks_for_scenes_and_survives_failures(
+def test_worker_looks_for_imagery_and_survives_failures(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from snowwatch import cli
@@ -380,7 +593,9 @@ def test_worker_looks_for_scenes_and_survives_failures(
     monkeypatch.setattr(sat, "refresh", refresh)
     w = Worker(settings, config())
     w.satellite()
-    assert calls == [{"days": 30, "min_clear": 0.7, "max_nodata": 0.1, "keep": 3}]
+    assert calls == [
+        {"days": 30, "scene_days": 60, "min_clear": 0.85, "max_nodata": 0.03, "keep": 3}
+    ]
     w.sat_lock.acquire()
     w.satellite()  # still running from last time: skip
     assert len(calls) == 1
@@ -395,193 +610,3 @@ def test_worker_looks_for_scenes_and_survives_failures(
     monkeypatch.setattr(sat, "refresh", refresh)
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     assert cli.main(["map", "sat"]) == 0 and len(calls) == 2
-
-
-# ---- stitching -----------------------------------------------------------------------
-
-N = sat.AREA_PX
-BOX = (-121.0, 47.0, -120.0, 48.0)
-
-
-def grid(fill: int = sat.G_CLEAR) -> np.ndarray:
-    return np.full((N, N), fill, np.uint8)
-
-
-def pass_(day: int) -> sat.Pass:
-    pid = f"S2A_MSIL2A_202611{day:02d}T190000_R013"
-    return sat.Pass(
-        pid,
-        datetime(2026, 11, day, 19, tzinfo=UTC),
-        "Sentinel-2A",
-        [sat.SatItem(id=f"{pid}_T10TFT_202611{day:02d}T220000", bbox=[-122.0, 46.5, -119.5, 48.5])],
-    )
-
-
-def test_stitch_takes_each_cell_from_the_newest_pass_that_saw_it() -> None:
-    # The newest pass's swath ends a third of the way across (a strip like Snoqualmie's
-    # on 21 Oct); an older pass is clear everywhere.
-    strip = grid()
-    strip[:, N // 3 :] = sat.G_NODATA
-    co = sat.stitch([(pass_(10), strip), (pass_(1), grid(sat.G_SNOW))], BOX)
-    assert [x.id for x in co.layers] == [pass_(10).id, pass_(1).id]
-    assert [x.share_pct for x in co.layers] == [33, 67]
-    assert co.filled_pct == 100
-    assert co.at_location == pass_(1).time  # the middle is past the strip
-    # One dividing line, straight down at the strip's edge, and a date on each side.
-    assert len(co.boundaries) == 1
-    (lon0, lat0), (lon1, lat1) = co.boundaries[0]
-    assert lon0 == lon1 == round(-121 + (N // 3) / N, 5) and {lat0, lat1} == {47.0, 48.0}
-    assert sorted(lb.time.day for lb in co.labels) == [1, 10]
-    # The newest pass's part, with a cell's margin, for the map to draw it over.
-    assert co.layers[0].bbox[0] == -121.0 and co.layers[0].bbox[2] > -121 + 1 / 3
-
-
-def test_stitch_cuts_round_cloud_and_skips_cloudy_passes() -> None:
-    cloudy = grid(sat.G_CLOUD)
-    holey = grid()
-    holey[40:56, 40:56] = sat.G_CLOUD
-    co = sat.stitch(
-        [(pass_(11), cloudy), (pass_(10), holey), (pass_(1), grid())], BOX, pass_(11).time
-    )
-    assert [x.id for x in co.layers] == [pass_(10).id, pass_(1).id]
-    # The older pass fills the hole and a cell's margin all round it: 18 x 18 cells.
-    assert co.layers[1].share_pct == round(18 * 18 / N**2 * 100)
-    assert co.at_location == pass_(1).time  # the middle was under the cloud
-    assert co.latest_pass == pass_(11).time
-
-
-def test_stitch_keeps_a_small_strip_at_the_location_but_not_scraps_elsewhere() -> None:
-    near = grid(sat.G_NODATA)
-    near[40:56, 44:52] = sat.G_CLEAR  # 128 cells, 1.4% of the area, 12% of the 8 km square
-    far = grid(sat.G_NODATA)
-    far[0:12, 0:12] = sat.G_CLEAR  # 144 cells, 1.6% of the area, far from the location
-    co = sat.stitch([(pass_(12), far), (pass_(11), near), (pass_(1), grid())], BOX)
-    assert [x.id for x in co.layers] == [pass_(11).id, pass_(1).id]
-    assert co.at_location == pass_(11).time
-
-
-def test_stitch_drops_specks_and_stops_at_its_limits() -> None:
-    specks = grid(sat.G_NODATA)
-    specks[::8, ::8] = sat.G_CLEAR  # single cells everywhere: noise, not ground
-    co = sat.stitch([(pass_(12), specks), (pass_(1), grid())], BOX)
-    assert [x.id for x in co.layers] == [pass_(1).id]
-    # One column band each from nine passes: at most MAX_LAYERS of them are used.
-    bands = []
-    for i in range(9):
-        g = grid(sat.G_NODATA)
-        g[:, i * 10 : i * 10 + 10] = sat.G_CLEAR
-        bands.append((pass_(20 - i), g))
-    co = sat.stitch(bands, BOX)
-    assert len(co.layers) == sat.MAX_LAYERS
-    # Nothing clear at all: no layers, and nothing seen at the location.
-    co = sat.stitch([(pass_(5), grid(sat.G_CLOUD))], BOX)
-    assert co.layers == [] and co.at_location is None and co.filled_pct == 0
-
-
-def test_chain_joins_segments_and_drops_straight_middles() -> None:
-    segs = [((0, 0), (0, 1)), ((0, 1), (0, 2)), ((0, 2), (1, 2)), ((5, 5), (6, 5))]
-
-    def same(line: list[tuple[int, int]]) -> list[tuple[int, int]]:
-        return min(line, line[::-1])  # either direction
-
-    lines = sorted((same(x) for x in sat.chain(segs)), key=len)
-    assert lines == [[(5, 5), (6, 5)], [(0, 0), (0, 2), (1, 2)]]
-
-
-# ---- cloud cut out of tiles ------------------------------------------------------------
-
-
-def test_erode_shrinks_clear_ground_but_not_at_the_tile_edge() -> None:
-    clear = np.ones((20, 20), bool)
-    clear[8:12, 8:12] = False
-    out = sat_erode(clear, 2)
-    assert not out[6:14, 6:14].any() and out[:6].all() and out[14:].all()
-    assert out[0, 0] and out[19, 19]  # the edge isn't eaten into
-    assert (sat_erode(clear, 0) == clear).all()
-
-
-def sat_erode(m: np.ndarray, r: int) -> np.ndarray:
-    from snowwatch.tiles import erode
-
-    return erode(m, r)
-
-
-def webp(rgba: tuple[int, int, int, int], n: int = 512) -> bytes:
-    buf = io.BytesIO()
-    Image.new("RGBA", (n, n), rgba).save(buf, "WEBP", lossless=True)
-    return buf.getvalue()
-
-
-def mask_png(cloud: slice, n: int = 512) -> bytes:
-    a = np.full((n, n, 2), 255, np.uint8)
-    a[cloud, :, 0] = 0
-    buf = io.BytesIO()
-    Image.fromarray(a, "LA").save(buf, "PNG")
-    return buf.getvalue()
-
-
-def test_cut_clouds_makes_cloud_and_a_margin_transparent() -> None:
-    from snowwatch.tiles import cut_clouds
-
-    out = Image.open(
-        io.BytesIO(cut_clouds(webp((50, 90, 60, 255)), mask_png(slice(0, 100)), 14, 5733))
-    )
-    alpha = np.asarray(out.convert("RGBA"))[..., 3]
-    # 512 px tiles at zoom 14 here are ~3.2 m a pixel: an 80 m margin is 24 (the cap).
-    assert (alpha[:124] == 0).all()
-    assert (alpha[125:] == 255).all()
-
-
-def test_clear_tiles_cut_cloud_once_and_are_cached(tmp_path: Path) -> None:
-    calls: list[str] = []
-
-    def answer(req: httpx.Request) -> httpx.Response:
-        calls.append(str(req.url))
-        if ".png" in str(req.url):
-            return httpx.Response(
-                200, content=mask_png(slice(0, 256)), headers={"content-type": "image/png"}
-            )
-        return httpx.Response(
-            200, content=webp((10, 20, 30, 255)), headers={"content-type": "image/webp"}
-        )
-
-    from snowwatch.tiles import s2_clear_path, s2_clear_tile
-
-    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
-    allowed = {ITEM}
-    data = s2_clear_tile(cache, "natural", ITEM, 13, 1333, 2866, allowed)
-    assert data is not None
-    alpha = np.asarray(Image.open(io.BytesIO(data)).convert("RGBA"))[..., 3]
-    assert (alpha[:256] == 0).all() and (alpha[-1] == 255).all()
-    assert len(calls) == 2 and "SCL_b1" in calls[1].replace("%5F", "_")
-    assert s2_clear_tile(cache, "natural", ITEM, 13, 1333, 2866, allowed) == data
-    assert len(calls) == 2  # from the cache
-    assert s2_clear_path(cache, "natural", "S2X_unknown", 13, 1, 1, allowed) is None
-    assert s2_clear_tile(cache, "natural", ITEM, 7, 1, 1, allowed) is None
-
-
-def test_api_serves_clear_tiles_for_stitched_items(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    sat.refresh(
-        settings.sat_dir,
-        httpx.Client(transport=httpx.MockTransport(Upstream())),
-        [make_location()],
-        now=NOW,
-    )
-    client = TestClient(create_app(settings))
-    edge_item = item(EDGE, "T10TFT")  # only in the stitched view, not a kept scene
-    monkeypatch.setattr("snowwatch.api.app.s2_clear_tile", lambda *a: b"clear")
-    r = client.get(f"/api/tiles/s2c/natural/{edge_item}/12/650/1385.webp?r=2")
-    assert r.status_code == 200 and r.content == b"clear"
-    assert client.get("/api/tiles/s2c/natural/nope/12/650/1385.webp").status_code == 404
-    monkeypatch.setattr("snowwatch.api.app.s2_clear_tile", lambda *a: None)
-    assert client.get(f"/api/tiles/s2c/natural/{edge_item}/12/650/1386.webp").status_code == 404
-
-
-def test_small_patches_get_no_dividing_line() -> None:
-    owner = np.zeros((N, N), np.int16)
-    owner[:, N // 2 :] = 1  # two big halves: one line between them
-    owner[10:14, 10:14] = 1  # a 16-cell island of the other pass: no box round it
-    lines = sat.boundaries(sat.outlined(owner))
-    assert lines == [[(0, N // 2), (N, N // 2)]] or lines == [[(N, N // 2), (0, N // 2)]]

@@ -90,12 +90,13 @@ map:
   # NOAA NBM runs (UTC) for the US beyond 48 h and US snow totals. Only 00/06/12/18
   # reach 10 days; each new run costs ~60-80 MB of downloads.
   nbm_cycles: [0, 12]
-  # Recent satellite: Sentinel-2 scenes near each location that see the ground.
-  sat_hours: 6           # look for new scenes this often
-  sat_days: 30           # this far back
-  sat_min_clear: 0.7     # share of an 8 x 8 km square round the location free of cloud
-  sat_max_nodata: 0.1    # most of that square the scene may miss
-  sat_keep: 3            # clear scenes kept per location (the map steps between them)
+  # Recent satellite: Sentinel-2 views of the 24 x 24 km round each location.
+  sat_hours: 6           # look for new passes this often
+  sat_days: 30           # the stitched newest-clear view uses passes this recent
+  sat_scene_days: 60     # whole scenes are looked for this far back
+  sat_min_clear: 0.85    # a whole scene sees at least this share of the area clearly
+  sat_max_nodata: 0.03   # and misses at most this much of it (off its swath)
+  sat_keep: 3            # whole scenes kept per location (the map steps through them)
 
 # The map's avalanche terrain layers (see docs/MAP-PLAN.md, B7). Treeline bands are in
 # config/treeline.yaml.
