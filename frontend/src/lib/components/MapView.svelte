@@ -68,6 +68,7 @@
 		WIND_MIN_ZOOM
 	} from '../map/style';
 	import { AnalysisLayer, AreaRunner, viewBounds, type AreaState } from '../map/layers/analysis';
+	import { setSnowTiles, snowTilesUrl, TERRAIN_NOTE } from '../map/layers/snowtiles';
 	import type { AreaJob } from '../map/terrain/client';
 	import type { SunFacts } from '../map/terrain/shade';
 	import { sunDay, sunPosition, type Ymd } from '../map/terrain/sun';
@@ -909,6 +910,25 @@
 		return () => clearTimeout(id);
 	});
 
+	// ---- Terrain-adjusted snow totals (Snow total, zoomed in) ----------------------------
+	/** The picked total's terrain-adjusted tiles, when the server has drawn them. */
+	const snowTiles = $derived(
+		weather === 'totals' && on && !offline && pick?.tiles ? pick.tiles : null
+	);
+	/** They're what's on screen (zoomed in far enough). */
+	const adjusted = $derived(!!snowTilesUrl(snowTiles ? pick : undefined, zoom));
+	$effect(() => {
+		const tiles = snowTiles;
+		const tl = timeline;
+		if (!ready || !map || !tl) return;
+		setSnowTiles(map, tiles, {
+			bounds: tl.bounds,
+			opacity: weatherOpacity('totals'),
+			beforeId: PRECIP_BEFORE,
+			pictureId: PrecipLayer.ID
+		});
+	});
+
 	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
 	/** The map's forecast at the centre, for the snow level the drape uses. */
 	let levelPoint = $state.raw<PointOut | null>(null);
@@ -1384,6 +1404,11 @@
 						the border.
 					</p>
 					{#if source}<p class="faint">{source}</p>{/if}
+					{#if pick?.tiles}
+						<p class="faint">
+							{TERRAIN_NOTE} Zoomed in, the map shows it that way; tap a spot for the snow at a few heights.
+						</p>
+					{/if}
 				{:else if on && source}
 					<p>{source}</p>
 					{#if weather === 'snowfall'}
@@ -1492,6 +1517,7 @@
 					{label}
 					{waiting}
 					snowLine={centreLevel}
+					{adjusted}
 					ready={ready_}
 					{loadError}
 				/>

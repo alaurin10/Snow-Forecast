@@ -108,6 +108,11 @@ export interface Total {
 	source?: string;
 	/** Each model used → when its run began (Unix seconds). */
 	runs?: Record<string, number>;
+	/**
+	 * The terrain-adjusted tiles' URL template (`…/{z}/{x}/{y}.png`): the same total
+	 * painted on the terrain by elevation, for zoomed-in views. Absent or null without them.
+	 */
+	tiles?: string | null;
 }
 
 /**

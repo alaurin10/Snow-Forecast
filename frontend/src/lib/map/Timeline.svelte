@@ -20,6 +20,7 @@
 		type Pick,
 		type WeatherView
 	} from './weather';
+	import { TERRAIN_NOTE } from './layers/snowtiles';
 
 	interface Props {
 		view: WeatherView;
@@ -40,6 +41,8 @@
 		loadError: string | null;
 		/** The snow level draped on the terrain (zoomed in), metres; null when it isn't. */
 		snowLine?: number | null;
+		/** The snow total on screen is the terrain-adjusted one (zoomed in). */
+		adjusted?: boolean;
 	}
 
 	let {
@@ -55,7 +58,8 @@
 		waiting,
 		ready,
 		loadError,
-		snowLine = null
+		snowLine = null,
+		adjusted = false
 	}: Props = $props();
 
 	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
@@ -182,7 +186,11 @@
 					{:else}
 						<strong class="one">{pick.name}</strong>
 					{/if}
-					<span class="span faint" title={pick.sources}>{pick.span}</span>
+					<span
+						class="span faint"
+						title={adjusted ? `${TERRAIN_NOTE} ${pick.sources}` : pick.sources}
+						>{pick.span}{#if adjusted}<span class="adj">{' · adjusted to terrain'}</span>{/if}</span
+					>
 				</div>
 			{:else if loadError}
 				<p class="note">{loadError}</p>
