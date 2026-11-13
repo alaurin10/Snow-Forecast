@@ -15,8 +15,13 @@ Notable changes to Snow Watch. The format follows
   locations no longer grows when one is open. Keys 1–4 pick a section (from further
   down the page, that scrolls back up to the tabs, so a section starts at its top). On
   desktop and tablet the tabs and the elevation sit right under the location's name as
-  two pills that scroll with the page; once they've gone, two small pills slide in at
-  the top: the location's name, and a compact elevation picker (numbers only).
+  two pills that scroll with the page.
+- **Only the elevation sticks, on every screen.** Once the page's elevation picker has
+  scrolled away, a compact one (numbers only) slides in at the top right; on windows
+  wide enough to have an empty margin beside the page, it stands there instead, stacked,
+  so it covers nothing. On phones the conditions row no longer sticks.
+- **The chart's range (1–10 days) and Timeline switch sit under the chart on desktop
+  and tablet too**, next to the timeline, where the pointer already is (as on phones).
 - **Notices float at the top as a toast** (new version, offline, stale forecast) and can
   be closed, instead of pushing the page down when they appear. The full map keeps its
   own offline note.

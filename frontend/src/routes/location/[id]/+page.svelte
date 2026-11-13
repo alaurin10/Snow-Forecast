@@ -1,7 +1,8 @@
 <!-- One location. Desktop and tablet: the name on the sky with its conditions, then the
      sections' tabs and the elevation, the outlook card, and the section (Forecast,
-     Models, Backcountry, Observed; keys 1–4 switch them too). Once those controls have
-     scrolled away, a slim band at the top keeps the name and a compact elevation picker. Phones: the name, a "now" pill and the elevation numbers, tabs, and the
+     Models, Backcountry, Observed; keys 1–4 switch them too). On every screen, once the
+     elevation picker has scrolled away, a compact one (numbers only) stays at the top
+     right, or stacked in the empty margin beside the page on wide windows. Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
 <script lang="ts">
 	import { safeHref } from '../../../lib/links';
@@ -253,9 +254,7 @@
 	const avyCenter = $derived(avy?.doc?.center ?? null);
 	const next5 = $derived(band?.windows['next5'] ?? null);
 
-	// Phones: the conditions and elevation row sticks to the top, and once stuck gets a
-	// frosted band so the page doesn't show through around it. Desktops and tablets: once
-	// the tabs and elevation have scrolled away, the top band slides in.
+	// Once the page's elevation picker has scrolled away, the compact one slides in.
 	let stuck = $state(false);
 	function watchStuck(node: HTMLElement, top = 0) {
 		if (typeof IntersectionObserver === 'undefined') return;
@@ -385,8 +384,7 @@
 		<p class="elevname" aria-hidden="true">
 			{band.label} <span class="faint">· {c.heightUnit}</span>
 		</p>
-		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
-		<div class="mrow" class:stuck>
+		<div class="mrow">
 			<span class="pillwrap" bind:this={pillwrap}>
 				<button
 					class="pill glass wxpill"
@@ -416,6 +414,7 @@
 				{/each}
 			</div>
 		</div>
+		{@render elevBand()}
 	{:else}
 		<header class="lhead">
 			<div class="title">
@@ -459,26 +458,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
-		<!-- Scrolled past the controls: two small pills at the top, the name on the left and
-		     a compact elevation picker (numbers only) on the right. They take no room in the
-		     page, and the space between them is the page itself (clicks go through). -->
-		<div class="bandwrap">
-			<div class="band" class:shown={stuck} inert={!stuck}>
-				<span class="bandname glass">{snap.location.name}</span>
-				<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
-					{#each snap.bands as b (b.band)}
-						<button
-							class="num"
-							aria-pressed={band.band === b.band}
-							aria-label="{b.label}, {elevation(b.elev_m, units)}"
-							title="{b.label}, {elevation(b.elev_m, units)}"
-							onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
-						>
-					{/each}
-				</div>
-			</div>
-		</div>
+		{@render elevBand()}
 
 		<section class="card outlook" aria-label="Outlook">
 			<div>
@@ -558,6 +538,27 @@
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
 
+	<!-- The compact elevation picker (numbers only), once the page's own has scrolled away:
+	     at the top right of the page, or stacked in the empty margin on wide windows. It
+	     takes no room in the page; only the pill itself takes clicks. -->
+	{#snippet elevBand()}
+		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
+		<div class="bandwrap">
+			<div class="band" class:shown={stuck} inert={!stuck}>
+				<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
+					{#each snap!.bands as b (b.band)}
+						<button
+							class="num"
+							aria-pressed={band!.band === b.band}
+							aria-label="{b.label}, {elevation(b.elev_m, units)}"
+							title="{b.label}, {elevation(b.elev_m, units)}"
+							onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
+						>
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/snippet}
 	{#snippet sectionTabs()}
 		<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
 			{#each tabs as t, i (t)}
@@ -889,8 +890,8 @@
 		margin: 0 0 16px;
 		scroll-margin-top: 14px;
 	}
-	/* A zero-height sticky holder, so the pills follow the column's width and take no
-	   room; they slide down into view once the controls are gone. */
+	/* A zero-height sticky holder, so the pill follows the column and takes no room; it
+	   slides down into view once the page's picker is gone. */
 	.bandwrap {
 		position: sticky;
 		top: 14px;
@@ -903,10 +904,8 @@
 		left: 0;
 		right: 0;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		/* Only the pills take clicks; the gap between them is the page. */
+		justify-content: flex-end;
+		/* Only the pill takes clicks; the rest is the page. */
 		pointer-events: none;
 		opacity: 0;
 		transform: translateY(-8px);
@@ -925,22 +924,6 @@
 			transform var(--ease),
 			visibility 0s;
 	}
-	.bandname {
-		min-width: 0;
-		height: 40px;
-		box-sizing: border-box;
-		line-height: 38px;
-		padding: 0 16px;
-		border-radius: 999px;
-		font-family: var(--font-num);
-		font-weight: 700;
-		font-size: 0.98rem;
-		letter-spacing: -0.01em;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		pointer-events: auto;
-	}
 	.band .seg.elevs {
 		flex: 0 0 auto;
 		height: 40px;
@@ -952,6 +935,29 @@
 		min-width: 56px;
 		padding: 6px 8px;
 		font-size: 0.84rem;
+	}
+	/* Phones: just under the status bar, where the page's picker was. */
+	@media (max-width: 640px) {
+		.bandwrap {
+			top: calc(env(safe-area-inset-top) + 8px);
+		}
+	}
+	/* Wide windows have an empty margin right of the page: the pill stands there,
+	   stacked, beside the page rather than over it. */
+	@media (min-width: 1620px) {
+		.band {
+			left: calc(100% + 16px);
+			right: auto;
+		}
+		.band .seg.elevs {
+			flex-direction: column;
+			height: auto;
+			border-radius: 24px;
+		}
+		.band .seg.elevs button {
+			min-width: 64px;
+			padding: 9px 8px;
+		}
 	}
 	.ltools .tabs {
 		margin: 0;
@@ -1244,9 +1250,10 @@
 		height: 1px;
 		margin-bottom: -1px;
 	}
+	/* The conditions and the elevation (it scrolls with the page; the compact picker
+	   takes over at the top once it's gone). */
 	.mrow {
-		position: sticky;
-		top: env(safe-area-inset-top);
+		position: relative;
 		z-index: 30;
 		display: flex;
 		flex-wrap: nowrap;
@@ -1255,28 +1262,8 @@
 		gap: 8px;
 		margin: -6px -16px 0;
 		padding: 6px 16px;
-		border-bottom: 1px solid transparent;
-		transition:
-			background-color var(--ease),
-			border-color var(--ease);
 	}
-	.mrow.stuck {
-		background: var(--header-glass);
-		backdrop-filter: var(--blur-glass);
-		-webkit-backdrop-filter: var(--blur-glass);
-		border-bottom-color: var(--border);
-	}
-	/* Fill the strip behind the status bar too. */
-	.mrow.stuck::before {
-		content: '';
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: 100%;
-		height: env(safe-area-inset-top);
-		background: var(--header-glass);
-	}
-	/* One row, always (so the stuck row never changes height). The conditions are an icon
+	/* One row, always. The conditions are an icon
 	   and the temperature, with room for "−10°F", so the pill is the same width whatever
 	   the weather; a tap shows the words under it. */
 	.pillwrap {
