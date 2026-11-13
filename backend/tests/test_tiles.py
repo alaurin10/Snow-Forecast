@@ -438,11 +438,15 @@ def test_osm_to_geojson_keeps_mountain_features() -> None:
         ("glacier", "Big Glacier"),
         ("route", "Spearhead Traverse"),
     ]
+    # Huts, passes and glaciers keep their OpenStreetMap id, so the map can link to them.
+    ids = [f["properties"].get("osm") for f in fc["features"]]
+    assert ids == ["n1", "w2", "n5", "n6", "n7", None, "w9", "r10", "r11"]
     f = fc["features"]
     assert f[0]["properties"] == {
         "kind": "hut",
         "type": "alpine_hut",
         "name": "Himmelsbach Hut",
+        "osm": "n1",
         "ele": 1880,
     }
     assert f[1]["geometry"]["coordinates"] == pytest.approx([-122.998667, 50.000667])

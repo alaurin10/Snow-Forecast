@@ -170,7 +170,7 @@ describe('what a tap landed on', () => {
 		]);
 	});
 
-	it('lists each thing once, in words, with the whole line of a run', () => {
+	it('lists each thing once, in words, most specific first, with the whole line of a run', () => {
 		const hits: Hit[] = [
 			{
 				layer: 'places',
@@ -202,14 +202,15 @@ describe('what a tap landed on', () => {
 		const items = hereItems(hits, 'metric', skiLines(ski));
 		expect(items.map((i) => [i.kind, i.name, i.detail ?? ''])).toEqual([
 			['Hut', 'Wedgemount Hut', '1,880 m'],
+			['Pass', 'Unnamed', ''],
 			['Run', 'Couloir', 'expert'],
 			['Glacier', 'Glacier ice', ''],
-			['ATES', 'Challenging', 'from a.kmz'],
-			['Pass', 'Unnamed', '']
+			['ATES', 'Challenging', '']
 		]);
-		expect(items[1].line).toHaveLength(3);
-		expect(items[1].osm).toBe('w1');
-		expect(items[3].color).toBe(ATES.challenging.color);
+		expect(items[2].line).toHaveLength(3);
+		expect(items[2].osm).toBe('w1');
+		expect(items[4].color).toBe(ATES.challenging.color);
+		expect(items[4].file).toBe('a.kmz');
 		// Without the index, the line as drawn.
 		expect(hereItems([hits[1]], 'metric', null)[0].line).toHaveLength(2);
 		// A run mapped as an outline: named, but no profile.

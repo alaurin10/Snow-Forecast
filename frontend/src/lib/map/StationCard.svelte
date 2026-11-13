@@ -1,6 +1,7 @@
 <!--
-  One snow station, tapped on the map: snow depth now, the change over 24 hours, and the
-  week's daily depths as a sparkline, with when it last reported and a link to its page.
+  One snow station, tapped on the map (the map panel's content; its name is the panel's
+  title): snow depth now, the change over 24 hours, and the week's daily depths as a
+  sparkline, with when it last reported and a link to its page.
 -->
 <script lang="ts">
 	import type { MapStation } from '../types.gen';
@@ -12,10 +13,9 @@
 	interface Props {
 		station: MapStation;
 		units: UnitSystem;
-		onclose: () => void;
 	}
 
-	let { station, units, onclose }: Props = $props();
+	let { station, units }: Props = $props();
 	const W = 220;
 	const H = 44;
 	const line = $derived(sparkline(station.daily, W, H));
@@ -32,15 +32,12 @@
 		});
 </script>
 
-<div class="sheet" role="dialog" aria-label="Snow station: {station.name}">
-	<div class="head">
-		<strong>{station.name}</strong>
-		<span class="faint">
-			{networkName(station)}{station.elev_m != null
-				? ` · ${fmtElevation(station.elev_m, units)}`
-				: ''}
-		</span>
-	</div>
+<div class="content">
+	<span class="faint where">
+		{networkName(station)}{station.elev_m != null
+			? ` · ${fmtElevation(station.elev_m, units)}`
+			: ''}
+	</span>
 	<dl>
 		<div>
 			<dt>Snow depth</dt>
@@ -72,33 +69,15 @@
 			<a href={safeHref(station.url)} target="_blank" rel="noopener noreferrer">Station page</a>
 		{/if}
 	</p>
-	<button class="close" onclick={onclose}>Close</button>
 </div>
 
 <style>
-	.sheet {
-		position: absolute;
-		top: 56px;
-		left: calc(var(--map-inset, 0px) + 60px);
-		right: 10px;
-		max-width: 340px;
-		z-index: 1003;
-		padding: 12px 14px;
-		border-radius: 14px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		box-shadow: var(--glass-shadow);
-		font-size: 0.85rem;
-		color: var(--text);
+	.content {
 		display: grid;
-		gap: 8px;
+		gap: 10px;
 	}
-	.head {
-		display: grid;
-		gap: 2px;
-	}
-	.head .faint {
-		font-size: 0.75rem;
+	.where {
+		font-size: 0.78rem;
 	}
 	dl {
 		margin: 0;
@@ -142,14 +121,5 @@
 	.small {
 		margin: 0;
 		font-size: 0.72rem;
-	}
-	.close {
-		justify-self: end;
-		border: 0;
-		background: transparent;
-		color: var(--accent);
-		font-weight: 600;
-		cursor: pointer;
-		padding: 4px 6px;
 	}
 </style>

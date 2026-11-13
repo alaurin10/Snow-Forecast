@@ -136,8 +136,11 @@
 	);
 	let closed = $state<string | null>(null);
 
-	// Phones and tablets: the tab bar shrinks to icons while you scroll down.
+	// Phones and tablets: the tab bar shrinks to icons while you scroll down, and always on
+	// the map, which doesn't scroll and wants the room. Its height stays the same, so the
+	// map's controls above it never move.
 	let compact = $state(false);
+	const compactBar = $derived(compact || page.route.id === '/map');
 	$effect(() => {
 		let last = window.scrollY;
 		const on = () => {
@@ -332,7 +335,7 @@
 </div>
 
 {#if !viewport.desktop}
-	<nav class="tabbar glass" class:compact aria-label="Main">
+	<nav class="tabbar glass" class:compact={compactBar} aria-label="Main">
 		{#each tabs as t (t.href)}
 			<a
 				href={resolve(t.href)}

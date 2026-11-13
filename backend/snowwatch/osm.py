@@ -202,6 +202,11 @@ def _point(el: dict[str, Any]) -> Coord | None:
     ]
 
 
+def _osm_id(el: dict[str, Any]) -> str:
+    """The element's OpenStreetMap id as "n123", "w123" or "r123", for a link to it."""
+    return f"{str(el.get('type', 'node'))[:1]}{el.get('id', 0)}"
+
+
 def _place(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None:
     """Huts, shelters, trailheads and passes, as points."""
     tourism = tags.get("tourism")
@@ -223,7 +228,12 @@ def _place(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None:
     at = _point(el)
     if at is None:
         return None
-    props: dict[str, Any] = {"kind": kind, "type": typ, "name": tags.get("name", "")}
+    props: dict[str, Any] = {
+        "kind": kind,
+        "type": typ,
+        "name": tags.get("name", ""),
+        "osm": _osm_id(el),
+    }
     if (ele := _ele(tags)) is not None:
         props["ele"] = ele
     return {
@@ -244,7 +254,7 @@ def _relation(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None
         return {
             "type": "Feature",
             "geometry": {"type": "MultiPolygon", "coordinates": polygons(outer, inner)},
-            "properties": {"kind": "glacier", "name": tags.get("name", "")},
+            "properties": {"kind": "glacier", "name": tags.get("name", ""), "osm": _osm_id(el)},
         }
     if tags.get("route") in ("ski", "piste"):
         lines = [simplify(c) for m in members if len(c := _coords(m.get("geometry"))) >= 2]
@@ -306,7 +316,11 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
                     {
                         "type": "Feature",
                         "geometry": {"type": "Polygon", "coordinates": [_closed(coords)]},
-                        "properties": {"kind": "glacier", "name": tags.get("name", "")},
+                        "properties": {
+                            "kind": "glacier",
+                            "name": tags.get("name", ""),
+                            "osm": _osm_id(el),
+                        },
                     }
                 )
             continue

@@ -32,10 +32,8 @@
 	import type {
 		AtesOut,
 		ConcernOut,
-		MapStation,
 		MapWindOut,
 		ObsOut,
-		ObsProps,
 		PointOut,
 		SatOut,
 		StationsOut,
@@ -114,7 +112,9 @@
 	import Legend from '../map/Legend.svelte';
 	import Inspector from '../map/Inspector.svelte';
 	import AvalancheControls from '../map/AvalancheControls.svelte';
-	import ZoneSheet from '../map/ZoneSheet.svelte';
+	import ZoneCard from '../map/ZoneCard.svelte';
+	import MapPanel from '../map/MapPanel.svelte';
+	import FeatureCard from '../map/FeatureCard.svelte';
 	import ConcernAck from '../map/ConcernAck.svelte';
 	import {
 		avyHere,
@@ -126,6 +126,7 @@
 		treelineAt,
 		ymd,
 		zoneAt,
+		zoneName,
 		zonesGeojson
 	} from '../map/avalanche';
 	import { addZones, setZones } from '../map/layers/avalanche';
@@ -136,8 +137,8 @@
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
 	import Measure from '../map/Measure.svelte';
-	import StationSheet from '../map/StationSheet.svelte';
-	import ReportSheet from '../map/ReportSheet.svelte';
+	import StationCard from '../map/StationCard.svelte';
+	import ReportCard from '../map/ReportCard.svelte';
 	import { plainLine, setMeasure } from '../map/layers/measure';
 	import {
 		lineBounds,
@@ -149,7 +150,16 @@
 	} from '../map/measure';
 	import { atesGeojson, reportsGeojson, stationsGeojson } from '../map/features';
 	import { setAtes, setReports, setStations, TAP_LAYERS } from '../map/layers/features';
-	import { HERE_LAYERS, hereItems, skiLines, type HereItem, type SkiLines } from '../map/here';
+	import {
+		glacierArea,
+		HERE_LAYERS,
+		hereItems,
+		skiLines,
+		tapTargets,
+		type HereItem,
+		type SkiLines,
+		type Target
+	} from '../map/here';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -217,13 +227,79 @@
 
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
 		panel = panel === p ? 'none' : p;
-		closeSheets();
+		closeTap();
 	}
-	/** The sheets a tap on the map opens: a zone's bulletin, a station, a field report. */
-	function closeSheets() {
-		zoneOpen = null;
-		stationOpen = null;
-		reportOpen = null;
+
+	// ---- The map panel: what a tap landed on ---------------------------------------------
+	// One panel in one place (../map/MapPanel.svelte), whatever was tapped: it opens on the
+	// most specific thing under the tap, with chips for the rest (../map/here.ts).
+	let targets = $state.raw<Target[]>([]);
+	let active = $state(0);
+	/** Where the map was tapped; null for a panel opened another way (a zone's bulletin). */
+	let tapAt = $state.raw<{ lat: number; lon: number } | null>(null);
+	const target = $derived<Target | null>(targets[active] ?? null);
+	let panelEl = $state<HTMLElement>();
+
+	function openTargets(ts: Target[], at: { lat: number; lon: number } | null, first = 0) {
+		closeInspector();
+		targets = ts;
+		active = first;
+		tapAt = at;
+	}
+	function closeTap() {
+		targets = [];
+		active = 0;
+		tapAt = null;
+		closeInspector();
+	}
+	/** A zone's bulletin, in place: its chip if the tap has one, else a new chip for it. */
+	function showZone(z: ZoneFeature | null) {
+		if (!z) return;
+		const i = targets.findIndex((t) => t.kind === 'zone' && t.zone.id === z.id);
+		if (i >= 0) return void (active = i);
+		const zt: Target = { kind: 'zone', chip: 'Zone', zone: z };
+		const spot = targets.findIndex((t) => t.kind === 'spot');
+		if (spot < 0)
+			return void (targets.length ? (targets = [...targets, zt]) : openTargets([zt], null));
+		targets = [...targets.slice(0, spot), zt, ...targets.slice(spot)];
+		active = spot;
+	}
+	/** The panel's name for what it shows. */
+	function heading(t: Target): { kind: string; title: string } {
+		switch (t.kind) {
+			case 'station':
+				return { kind: 'Snow station', title: t.station.name };
+			case 'report':
+				return { kind: 'Field report', title: t.report.title || 'Field report' };
+			case 'feature':
+				return t.item.type === 'ates'
+					? { kind: 'ATES terrain rating', title: t.item.name }
+					: { kind: t.item.kind, title: t.item.name };
+			case 'zone':
+				return { kind: 'Avalanche forecast', title: zoneName(t.zone) };
+			default:
+				return { kind: 'Terrain & weather', title: 'This spot' };
+		}
+	}
+	const head = $derived(target ? heading(target) : null);
+	/** The spot's coordinates, under its title; a tap copies them. */
+	const coordsText = $derived(
+		tapAt
+			? `${Math.abs(tapAt.lat).toFixed(4)}° ${tapAt.lat >= 0 ? 'N' : 'S'}, ${Math.abs(tapAt.lon).toFixed(4)}° ${tapAt.lon >= 0 ? 'E' : 'W'}`
+			: ''
+	);
+	let copied = $state(false);
+	let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+	async function copyCoords() {
+		if (!tapAt) return;
+		try {
+			await navigator.clipboard.writeText(`${tapAt.lat.toFixed(5)}, ${tapAt.lon.toFixed(5)}`);
+			copied = true;
+			clearTimeout(copiedTimer);
+			copiedTimer = setTimeout(() => (copied = false), 1500);
+		} catch (e) {
+			console.error('copy', e);
+		}
 	}
 
 	// ---- Theme ----------------------------------------------------------------
@@ -503,8 +579,6 @@
 	// ---- Avalanche: zones as published, problems as terrain, the concern index -----------
 	let zonesData = $state.raw<ZonesOut | null>(null);
 	let zonesState = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
-	/** The zone whose bulletin is open. */
-	let zoneOpen = $state.raw<ZoneFeature | null>(null);
 	let problemPick = $state<number | 'all'>('all');
 	let problemSlope = $state(30);
 
@@ -589,8 +663,6 @@
 	let atesData = $state.raw<AtesOut | null>(null);
 	/** Fetched once each, when first needed; null data after a load means none on the server. */
 	let loaded = $state({ stations: false, reports: false, ates: false });
-	let stationOpen = $state.raw<MapStation | null>(null);
-	let reportOpen = $state.raw<ObsProps | null>(null);
 	const atesOn = $derived(radar && prefs.mapFeatures.has('ates') && !!atesData);
 
 	async function loadFeature(which: 'stations' | 'reports' | 'ates') {
@@ -664,6 +736,18 @@
 	let measureHover = $state<number | null>(null);
 	/** Every run's and route's whole line, fetched the first time one is profiled. */
 	let skiIndex: SkiLines | null = null;
+	/** The map's OpenStreetMap file (runs, routes, glaciers…), fetched once when needed. */
+	let skiData: Promise<GeoJSON.FeatureCollection | null> | null = null;
+	function loadSki(): Promise<GeoJSON.FeatureCollection | null> {
+		skiData ??= fetch(SKI_DATA)
+			.then((r) => (r.ok ? (r.json() as Promise<GeoJSON.FeatureCollection>) : null))
+			.catch((e) => {
+				console.error('ski map', e);
+				skiData = null;
+				return null;
+			});
+		return skiData;
+	}
 
 	// The terrain under the line, again whenever it changes (the last request is called off).
 	$effect(() => {
@@ -717,8 +801,7 @@
 
 	function startMeasure() {
 		panel = 'none';
-		closeSheets();
-		closeInspector();
+		closeTap();
 		measuring = true;
 		measureEdit = true;
 		measurePts = [];
@@ -761,7 +844,7 @@
 		try {
 			if (file.size > 30_000_000) throw new Error('This file is too big for a GPX track.');
 			const t = parseGpx(await file.text());
-			closeInspector();
+			closeTap();
 			showLine(
 				t.name || file.name.replace(/\.gpx$/i, ''),
 				'GPX · read on this device',
@@ -773,19 +856,17 @@
 			gpxError = e instanceof Error ? e.message : String(e);
 		}
 	}
-	/** The Inspector's Profile button on a run or route. */
+	/** A run's or route's Profile button in the map panel. */
 	async function profileRun(item: HereItem) {
+		// The profile opens in the Measure panel at the foot of the map.
+		closeTap();
 		let line = item.line;
 		if (item.osm) {
-			try {
-				if (!skiIndex) {
-					const r = await fetch(SKI_DATA);
-					if (r.ok) skiIndex = skiLines(await r.json());
-				}
-				line = skiIndex?.get(item.osm) ?? line;
-			} catch (e) {
-				console.error('ski map', e);
+			if (!skiIndex) {
+				const fc = await loadSki();
+				if (fc) skiIndex = skiLines(fc);
 			}
+			line = skiIndex?.get(item.osm) ?? line;
 		}
 		if (!line || line.length < 2) return;
 		// The whole run turned out to be an outline (the tap only saw part of it).
@@ -796,6 +877,62 @@
 			return;
 		}
 		showLine(item.name, `${item.kind} · OpenStreetMap`, line, false);
+	}
+
+	// ---- Taps: what's under one, as the map panel's targets ---------------------------
+	const LONG_PRESS_MS = 550;
+	let pressTimer: ReturnType<typeof setTimeout> | undefined;
+	let pressFrom: { x: number; y: number } | null = null;
+	/** A finger is on the map; the long press under way has opened the spot already. */
+	let touching = false;
+	let pressDone = false;
+	/** The click a browser may send when a long press lifts: not a new tap. */
+	let suppressClick = false;
+
+	/** Everything under a tap, most specific first; `spotOnly` for the spot's numbers alone. */
+	function tapMap(
+		pt: { x: number; y: number },
+		ll: { lat: number; lng: number },
+		spotOnly: boolean
+	) {
+		if (!map) return;
+		const at = { lat: ll.lat, lon: ll.lng };
+		if (spotOnly) {
+			if (analysis) openTargets(tapTargets({ spot: true }), at);
+			return;
+		}
+		const near = (px: number): [[number, number], [number, number]] => [
+			[pt.x - px, pt.y - px],
+			[pt.x + px, pt.y + px]
+		];
+		const tapLayers = TAP_LAYERS.filter((id) => map!.getLayer(id));
+		const tapped = tapLayers.length
+			? map.queryRenderedFeatures(near(8), { layers: tapLayers })
+			: [];
+		const index = (id: string) => {
+			const f = tapped.find((x) => x.layer.id === id);
+			return f ? Number(f.properties?.i) : -1;
+		};
+		const station = stationsData?.stations[index('stations')] ?? null;
+		const report = reportsData?.features[index('reports')]?.properties ?? null;
+		const hereLayers = HERE_LAYERS.filter((id) => map!.getLayer(id));
+		const here = hereLayers.length
+			? hereItems(
+					map.queryRenderedFeatures(near(5), { layers: hereLayers }).map((f) => ({
+						layer: f.layer.id,
+						properties: f.properties ?? {},
+						geometry: f.geometry as { type: string; coordinates?: unknown }
+					})),
+					units,
+					skiIndex
+				)
+			: [];
+		// The avalanche zone only while zones or an avalanche overlay are on the map.
+		const zone =
+			(zonesOn || avyOverlay) && zonesData ? zoneAt(zonesData.features, at.lat, at.lon) : null;
+		const ts = tapTargets({ station, report, here, zone, spot: analysis });
+		if (!ts.length) return closeTap();
+		openTargets(ts, at);
 	}
 
 	// ---- Inspector: tap the map for the terrain there --------------------------------
@@ -809,8 +946,59 @@
 	let probePointState = $state<'loading' | 'ready' | 'failed'>('loading');
 	let probeMarker: Marker | null = null;
 	let probeToken = 0;
-	/** Map features where the map was tapped: a run, a hut, a glacier, an ATES rating. */
-	let probeHere = $state.raw<HereItem[]>([]);
+	/** Sun and wind at the spot: still being worked out, done, or not to be had. */
+	let probeSunState = $state<'loading' | 'ready' | 'none'>('loading');
+	let probeWindState = $state<'loading' | 'ready' | 'none'>('none');
+
+	// The spot's numbers are worked out only when its chip is shown: they cost a worker
+	// call and a request to the server.
+	$effect(() => {
+		const at = tapAt;
+		if (target?.kind !== 'spot' || !at) return;
+		if (probe && probe.lat === at.lat && probe.lon === at.lon) return;
+		untrack(() => void inspect(at.lat, at.lon));
+	});
+	// The dot on the spot described, for things with an area (not a station or a hut,
+	// which have their own mark).
+	$effect(() => {
+		const at = tapAt;
+		const t = target;
+		if (!ready || !map || !ml) return;
+		const area =
+			t?.kind === 'spot' ||
+			t?.kind === 'zone' ||
+			(t?.kind === 'feature' && (t.item.type === 'glacier' || t.item.type === 'ates'));
+		if (!at || !area) return void probeMarker?.remove();
+		if (!probeMarker) {
+			const dot = document.createElement('div');
+			dot.className = 'probe';
+			probeMarker = new ml.Marker({ element: dot, opacityWhenCovered: '1' });
+		}
+		probeMarker.setLngLat([at.lon, at.lat]).addTo(map);
+	});
+	// A glacier's whole area (from the map's OpenStreetMap file) and the elevation where
+	// it was tapped (from the terrain worker).
+	let glacier = $state.raw<{ area?: number | null; elev: number | null }>({ elev: null });
+	$effect(() => {
+		const t = target;
+		const at = tapAt;
+		if (t?.kind !== 'feature' || t.item.type !== 'glacier' || !at) return;
+		const osm = t.item.osm;
+		let gone = false;
+		glacier = { area: undefined, elev: null };
+		untrack(() => {
+			void loadSki().then((fc) => {
+				if (!gone) glacier = { ...glacier, area: fc ? glacierArea(fc, at.lon, at.lat, osm) : null };
+			});
+			terrainClient()
+				?.point(at.lat, at.lon)
+				.then(
+					(f) => !gone && !f.sea && (glacier = { ...glacier, elev: f.elevation }),
+					() => {}
+				);
+		});
+		return () => (gone = true);
+	});
 
 	const probeZone = $derived(
 		probe && zonesData ? zoneAt(zonesData.features, probe.lat, probe.lon) : null
@@ -871,6 +1059,8 @@
 		factsError = null;
 		probeSun = null;
 		probeWind = null;
+		probeSunState = 'loading';
+		probeWindState = windOn ? 'loading' : 'none';
 		probePoint = null;
 		probePointState = 'loading';
 		// The weather there comes from the server, the terrain from this device: each joins
@@ -884,12 +1074,6 @@
 			},
 			() => token === probeToken && (probePointState = 'failed')
 		);
-		if (!probeMarker) {
-			const dot = document.createElement('div');
-			dot.className = 'probe';
-			probeMarker = new ml.Marker({ element: dot, opacityWhenCovered: '1' });
-		}
-		probeMarker.setLngLat([lon, lat]).addTo(map);
 		try {
 			const f = await c.point(lat, lon);
 			if (token !== probeToken) return;
@@ -898,8 +1082,12 @@
 			// Sun and wind take a little longer and join the numbers when ready; neither is
 			// worth an error message if its terrain can't be had.
 			c.sunPoint(lat, lon, sunYmd).then(
-				(s) => token === probeToken && (probeSun = s),
-				() => {}
+				(s) => {
+					if (token !== probeToken) return;
+					probeSun = s;
+					probeSunState = 'ready';
+				},
+				() => token === probeToken && (probeSunState = 'none')
 			);
 			// The nearest location's wind, else the map's forecast at the spot itself.
 			const w =
@@ -915,10 +1103,14 @@
 				const { scale } = w;
 				const label = WIND_WINDOWS.find((x) => x.id === windWindow)!.label;
 				c.windPoint(lat, lon, $state.snapshot(w.rose.sectors)).then(
-					(v) => token === probeToken && (probeWind = { value: v * scale, window: label }),
-					() => {}
+					(v) => {
+						if (token !== probeToken) return;
+						probeWind = { value: v * scale, window: label };
+						probeWindState = 'ready';
+					},
+					() => token === probeToken && (probeWindState = 'none')
 				);
-			}
+			} else if (windOn) probeWindState = 'none';
 		} catch (e) {
 			if (token === probeToken)
 				factsError = offline
@@ -934,9 +1126,10 @@
 		factsError = null;
 		probeSun = null;
 		probeWind = null;
+		probeSunState = 'loading';
+		probeWindState = 'none';
 		probePoint = null;
-		probeHere = [];
-		probeMarker?.remove();
+		probePointState = 'loading';
 	}
 
 	// 3D: drape everything over the terrain and tilt the view; back to flat and north-up
@@ -985,8 +1178,9 @@
 	// and "the middle of the map" this page uses) sits in the space left over, and moves
 	// smoothly when a panel opens, closes or the rail folds.
 	let dock = $state<HTMLDivElement>();
-	let padKey = '';
-	function mapPadding() {
+	type Pad = { top: number; right: number; bottom: number; left: number };
+	let padNow: Pad | null = null;
+	function mapPadding(): Pad | null {
 		if (!map || !wrap) return null;
 		const box = wrap.getBoundingClientRect();
 		let bottom = 0;
@@ -996,34 +1190,67 @@
 			);
 			if (Number.isFinite(top)) bottom = Math.max(0, Math.round(box.bottom - top));
 		}
+		// The map panel: beside the map on desktop, a sheet over its foot elsewhere.
+		let right = 0;
+		if (panelEl) {
+			const r = panelEl.getBoundingClientRect();
+			if (viewport.desktop) right = Math.max(0, Math.round(box.right - r.left));
+			else if (r.height) bottom = Math.max(bottom, Math.round(box.bottom - r.top));
+		}
 		// The folded button is small, like the map's own buttons: the map doesn't move for it.
 		const left = radar && viewport.desktop && !railUi.folded ? RAIL_OPEN_INSET : 0;
 		// Never more than half the map either way, so the centre stays on screen.
 		return {
 			top: 0,
-			right: 0,
+			right: Math.min(right, Math.round(box.width / 2)),
 			left: Math.min(left, Math.round(box.width / 2)),
 			bottom: Math.min(bottom, Math.round(box.height / 2))
 		};
 	}
+	/**
+	 * The tapped spot, if the new padding would leave it under a panel or the rail: the
+	 * map then centres on it. A padding change keeps the map's centre on the map and moves
+	 * it to the middle of the free space, so everything shifts by half the change.
+	 */
+	function tapCovered(old: Pad, pad: Pad): [number, number] | undefined {
+		if (!map || !wrap || !tapAt) return undefined;
+		const box = wrap.getBoundingClientRect();
+		const p = map.project([tapAt.lon, tapAt.lat]);
+		const x = p.x + (pad.left - old.left - (pad.right - old.right)) / 2;
+		const y = p.y + (pad.top - old.top - (pad.bottom - old.bottom)) / 2;
+		const m = 24;
+		const out =
+			x < pad.left + m ||
+			x > box.width - pad.right - m ||
+			y < pad.top + m ||
+			y > box.height - pad.bottom - m;
+		return out ? [tapAt.lon, tapAt.lat] : undefined;
+	}
 	function applyPadding(animate: boolean) {
 		const pad = mapPadding();
 		if (!pad || !map) return;
-		const key = `${pad.left}/${pad.bottom}`;
-		if (key === padKey) return;
-		const old = padKey.split('/').map(Number);
-		padKey = key;
+		const old = padNow;
+		const change = old
+			? Math.abs(old.left - pad.left) +
+				Math.abs(old.right - pad.right) +
+				Math.abs(old.bottom - pad.bottom)
+			: Infinity;
+		if (change === 0) return;
+		padNow = pad;
+		const center = old ? tapCovered(old, pad) : undefined;
 		// Small changes (a control's height wobbling) aren't worth moving the map for.
-		if (old.length === 2 && Math.abs(old[0] - pad.left) + Math.abs(old[1] - pad.bottom) < 12) {
+		if (change < 12 && !center) {
 			map.setPadding(pad);
 			return;
 		}
-		if (animate && !map.isMoving()) map.easeTo({ padding: pad, duration: 450 });
+		if (animate && !map.isMoving())
+			map.easeTo({ padding: pad, ...(center ? { center } : {}), duration: 450 });
 		else map.setPadding(pad);
 	}
 	$effect(() => {
 		void inset;
 		const d = dock;
+		const pe = panelEl;
 		if (!ready || !radar) return;
 		applyPadding(true);
 		if (!d || typeof ResizeObserver === 'undefined') return;
@@ -1033,6 +1260,7 @@
 			t = setTimeout(() => applyPadding(true), 60);
 		});
 		ro.observe(d);
+		if (pe) ro.observe(pe);
 		for (const c of d.children) ro.observe(c);
 		// Panels come and go inside the dock.
 		const mo = new MutationObserver(() => {
@@ -1399,63 +1627,78 @@
 			map.on('pitchend', () => {
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
 			});
-			// A tap on the map itself (not a marker or a popup) asks what the terrain is there.
+			// A tap on the map itself (not a marker or a popup) opens the map panel on what's
+			// there; a long press (touch) or a right-click goes straight to the spot's numbers.
 			map.on('click', (e) => {
 				if (!radar) return;
+				if (suppressClick) {
+					suppressClick = false;
+					return;
+				}
 				if (popups.some((p) => p.isOpen())) {
 					for (const p of popups) p.remove();
 					return;
 				}
-				if (panel !== 'none' || zoneOpen || stationOpen || reportOpen) {
+				if (panel !== 'none') {
 					panel = 'none';
-					closeSheets();
 					return;
 				}
 				if (measuring && measureEdit) {
 					measurePts = [...measurePts, [e.lngLat.lng, e.lngLat.lat]];
 					return;
 				}
-				const near = (px: number): [[number, number], [number, number]] => [
-					[e.point.x - px, e.point.y - px],
-					[e.point.x + px, e.point.y + px]
-				];
-				// A station or a field report opens its own sheet.
-				const tapLayers = TAP_LAYERS.filter((id) => map!.getLayer(id));
-				const tapped = tapLayers.length
-					? map!.queryRenderedFeatures(near(8), { layers: tapLayers })[0]
-					: undefined;
-				const i = Number(tapped?.properties?.i);
-				if (tapped?.layer.id === 'stations' && stationsData?.stations[i]) {
-					closeInspector();
-					stationOpen = stationsData.stations[i];
-					return;
-				}
-				if (tapped?.layer.id === 'reports' && reportsData?.features[i]) {
-					closeInspector();
-					reportOpen = reportsData.features[i].properties;
-					return;
-				}
-				if (!analysis) {
-					// No terrain worker (old browsers): a tap on a zone opens its bulletin.
-					const z =
-						zonesOn && zonesData ? zoneAt(zonesData.features, e.lngLat.lat, e.lngLat.lng) : null;
-					if (z) zoneOpen = z;
-					return;
-				}
-				void inspect(e.lngLat.lat, e.lngLat.lng);
-				const hereLayers = HERE_LAYERS.filter((id) => map!.getLayer(id));
-				probeHere = hereLayers.length
-					? hereItems(
-							map!.queryRenderedFeatures(near(5), { layers: hereLayers }).map((f) => ({
-								layer: f.layer.id,
-								properties: f.properties ?? {},
-								geometry: f.geometry as { type: string; coordinates?: unknown }
-							})),
-							units,
-							skiIndex
-						)
-					: [];
+				tapMap(e.point, e.lngLat, false);
 			});
+			const spotNow = (pt: { x: number; y: number }, ll: { lat: number; lng: number }) => {
+				for (const p of popups) p.remove();
+				panel = 'none';
+				tapMap(pt, ll, true);
+			};
+			map.on('contextmenu', (e) => {
+				if (!radar || (measuring && measureEdit)) return;
+				e.preventDefault();
+				clearTimeout(pressTimer);
+				// Android sends this for a long press too: the timer below may have got there first.
+				if (touching) {
+					if (pressDone) return;
+					pressDone = true;
+					suppressClick = true;
+				}
+				spotNow(e.point, e.lngLat);
+			});
+			map.on('touchstart', (e) => {
+				clearTimeout(pressTimer);
+				suppressClick = false;
+				pressDone = false;
+				touching = true;
+				pressFrom = null;
+				if (!radar || e.originalEvent.touches.length !== 1 || (measuring && measureEdit)) return;
+				const pt = e.point;
+				const ll = e.lngLat;
+				pressFrom = pt;
+				pressTimer = setTimeout(() => {
+					pressFrom = null;
+					if (pressDone) return;
+					pressDone = true;
+					suppressClick = true;
+					spotNow(pt, ll);
+				}, LONG_PRESS_MS);
+			});
+			map.on('touchmove', (e) => {
+				if (!pressFrom) return;
+				const moved = Math.hypot(e.point.x - pressFrom.x, e.point.y - pressFrom.y);
+				if (moved > 10 || e.originalEvent.touches.length > 1) {
+					clearTimeout(pressTimer);
+					pressFrom = null;
+				}
+			});
+			const lift = () => {
+				clearTimeout(pressTimer);
+				pressFrom = null;
+				touching = false;
+			};
+			map.on('touchend', lift);
+			map.on('touchcancel', lift);
 			map.on('load', () => {
 				if (cancelled) return;
 				// Credits start folded to their (i) button, which opens them.
@@ -1635,13 +1878,11 @@
 		e.key === 'Escape' &&
 		(askAck
 			? prefs.setMapOverlay('none')
-			: zoneOpen || stationOpen || reportOpen
-				? closeSheets()
+			: targets.length
+				? closeTap()
 				: panel !== 'none'
 					? (panel = 'none')
-					: probe
-						? closeInspector()
-						: measuring && stopMeasure())}
+					: measuring && stopMeasure())}
 />
 
 <div
@@ -1650,8 +1891,10 @@
 	class:desk={radar && viewport.desktop}
 	class:dark
 	bind:this={wrap}
+	class:sheet={!!target && !viewport.desktop}
 	style:--fill-top="{fillTop}px"
 	style:--map-inset="{inset}px"
+	style:--map-panel="{radar && viewport.desktop && target ? 370 : 0}px"
 >
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
 
@@ -1759,15 +2002,64 @@
 			/>
 		{/if}
 
-		{#if zoneOpen}
-			<ZoneSheet zone={zoneOpen} onclose={() => (zoneOpen = null)} />
+		{#if target && head}
+			<MapPanel
+				kind={head.kind}
+				title={head.title}
+				chips={targets.map((t) => t.chip)}
+				{active}
+				onchip={(i) => (active = i)}
+				onclose={closeTap}
+				sub={target.kind === 'spot' && tapAt ? coordsLine : undefined}
+				bind:el={panelEl}
+			>
+				{#if target.kind === 'station'}
+					<StationCard station={target.station} {units} />
+				{:else if target.kind === 'report'}
+					<ReportCard report={target.report} />
+				{:else if target.kind === 'feature'}
+					{@const item = target.item}
+					<FeatureCard
+						{item}
+						{units}
+						area={glacier.area}
+						elevHere={glacier.elev}
+						onprofile={() => void profileRun(item)}
+					/>
+				{:else if target.kind === 'zone'}
+					<ZoneCard zone={target.zone} />
+				{:else}
+					<Inspector
+						lat={tapAt?.lat ?? 0}
+						facts={probe ? facts : null}
+						error={probe ? factsError : null}
+						{units}
+						sun={probeSun}
+						sunState={probe ? probeSunState : 'loading'}
+						wind={probeWind}
+						windState={probe ? probeWindState : windOn ? 'loading' : 'none'}
+						avy={probeAvy}
+						concern={probeConcern}
+						point={probePoint}
+						pointState={probe ? probePointState : 'loading'}
+						onzone={() => showZone(probeZone)}
+					/>
+				{/if}
+			</MapPanel>
 		{/if}
-		{#if stationOpen}
-			<StationSheet station={stationOpen} {units} onclose={() => (stationOpen = null)} />
-		{/if}
-		{#if reportOpen}
-			<ReportSheet report={reportOpen} onclose={() => (reportOpen = null)} />
-		{/if}
+		{#snippet coordsLine()}
+			<button class="coords" onclick={copyCoords} title="Copy the coordinates"
+				>{copied ? 'Copied' : coordsText}<svg
+					viewBox="0 0 24 24"
+					width="12"
+					height="12"
+					aria-hidden="true"
+					><rect x="8" y="8" width="12" height="12" rx="2" /><path
+						d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"
+					/></svg
+				></button
+			>
+		{/snippet}
 
 		{#if askAck && concernCfg}
 			<ConcernAck
@@ -1797,25 +2089,6 @@
 						No GPS fix yet. Keep the phone where it can see the sky.
 					{/if}
 				</p>
-			{/if}
-			{#if probe}
-				<Inspector
-					lat={probe.lat}
-					lon={probe.lon}
-					{facts}
-					error={factsError}
-					{units}
-					sun={probeSun}
-					wind={probeWind}
-					avy={probeAvy}
-					concern={probeConcern}
-					point={probePoint}
-					pointState={probePointState}
-					here={probeHere}
-					online={(h) => void profileRun(h)}
-					onzone={() => (zoneOpen = probeZone)}
-					onclose={closeInspector}
-				/>
 			{/if}
 		</div>
 
@@ -1951,7 +2224,8 @@
 					windNote={concern?.windNote ?? ''}
 					sunNote={concern?.sunNote ?? ''}
 					caption={concernCfg?.caption ?? ''}
-					onzone={() => (zoneOpen = centreZone)}
+					onzone={() =>
+						centreZone && openTargets([{ kind: 'zone', chip: 'Zone', zone: centreZone }], null)}
 				/>
 			{/if}
 			{#if (sunOn || windOn) && analysis}
@@ -2042,6 +2316,11 @@
 	.map :global(.maplibregl-ctrl-attrib) {
 		font-size: 0.65rem;
 	}
+	/* The credits step left of the map panel while it's open (desktop). */
+	.map :global(.maplibregl-ctrl-top-right) {
+		right: var(--map-panel, 0px);
+		transition: right var(--ease-slide);
+	}
 	.map :global(.maplibregl-popup-content) {
 		font: inherit;
 		font-size: 0.85rem;
@@ -2115,10 +2394,14 @@
 		max-width: 640px;
 		pointer-events: auto;
 	}
-	/* Clear the floating tab bar on phones. */
+	/* Clear the floating tab bar on phones. While the map panel is up as a sheet, the
+	   controls at the foot make way for it, so they don't stack. */
 	@media (max-width: 1099px) {
 		.dock {
 			bottom: calc(84px + env(safe-area-inset-bottom));
+		}
+		.wrap.sheet .dock {
+			display: none;
 		}
 	}
 	.tools {
@@ -2168,13 +2451,15 @@
 	.tool svg .fill {
 		fill: currentColor;
 	}
-	/* Notes and the inspector: a column at the top centre, clear of the side controls. */
+	/* Notes: a column at the top centre, clear of the side controls and the map panel. */
 	.top {
 		position: absolute;
 		top: 10px;
 		left: calc(var(--map-inset, 0px) + 60px);
-		transition: left var(--ease-slide);
-		right: 54px;
+		right: calc(54px + var(--map-panel, 0px));
+		transition:
+			left var(--ease-slide),
+			right var(--ease-slide);
 		z-index: 1001;
 		display: grid;
 		justify-items: center;
@@ -2191,13 +2476,29 @@
 		color: var(--text);
 		pointer-events: auto;
 	}
-	/* Phones: the inspector spans the top, so the terrain key steps aside while it's open. */
-	@media (max-width: 700px) {
-		.wrap:has(:global(.insp)) :global(.legend) {
-			display: none;
-		}
+	/* The spot's coordinates in the map panel's header: a tap copies them. */
+	.coords {
+		justify-self: start;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: var(--text-2);
+		font: inherit;
+		font-size: 0.74rem;
+		font-variant-numeric: tabular-nums;
+		cursor: copy;
 	}
-	/* The spot the inspector is describing. */
+	.coords:hover {
+		color: var(--text);
+	}
+	.coords svg {
+		margin-left: 5px;
+		vertical-align: -1px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+	}
+	/* The spot the map panel is describing. */
 	:global(.probe) {
 		width: 16px;
 		height: 16px;
