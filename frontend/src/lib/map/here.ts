@@ -29,6 +29,10 @@ export interface HereItem {
 	link?: string;
 	/** The ATES file it came from. */
 	file?: string;
+	/** A glacier's type as mapped ("valley", "cirque"…). */
+	glacierType?: string;
+	/** Its Wikipedia article, when mapped. */
+	wiki?: string;
 }
 
 /** A rendered feature, as MapLibre's queryRenderedFeatures gives it (the parts used). */
@@ -87,6 +91,13 @@ const str = (v: unknown) => (typeof v === 'string' ? v : '');
 export function osmLink(id: string | undefined): string | undefined {
 	const m = id ? /^([nwr])(\d+)$/.exec(id) : null;
 	return m ? `https://www.openstreetmap.org/${OSM_TYPES[m[1]]}/${m[2]}` : undefined;
+}
+
+/** OpenStreetMap's "en:Title" wikipedia tag → the article. */
+export function wikiLink(tag: string): string | undefined {
+	const m = /^([a-z]{2,3}(?:-[a-z]+)?):(.+)$/.exec(tag.trim());
+	if (!m) return undefined;
+	return `https://${m[1]}.wikipedia.org/wiki/${encodeURIComponent(m[2].replace(/ /g, '_'))}`;
 }
 
 function rendered(g: Hit['geometry']): LngLat[] | undefined {
@@ -153,7 +164,9 @@ export function hereItems(hits: Hit[], units: UnitSystem, lines: SkiLines | null
 					kind: 'Glacier',
 					name: name || 'Glacier ice',
 					osm: id,
-					link: osmLink(id)
+					link: osmLink(id),
+					glacierType: str(p.type) || undefined,
+					wiki: wikiLink(str(p.wikipedia))
 				},
 				`g:${id ?? name}`
 			);
@@ -189,25 +202,62 @@ export type Target =
 
 export const SPOT: Target = { kind: 'spot', chip: 'This spot' };
 
-/**
- * Everything a tap landed on, most specific first: station → field report → hut,
- * trailhead or pass → run or route → glacier → ATES → avalanche zone → the spot itself
- * (always last, when it can be measured, so terrain numbers stay one tap away).
- */
-export function tapTargets(o: {
+/** Everything under a tap, before it's ranked. */
+export interface TapInput {
 	station?: MapStation | null;
 	report?: ObsProps | null;
 	here?: HereItem[];
 	zone?: ZoneFeature | null;
+	/** The spot itself can be measured (the terrain worker runs). */
 	spot: boolean;
-}): Target[] {
-	const out: Target[] = [];
-	if (o.station) out.push({ kind: 'station', chip: 'Station', station: o.station });
-	if (o.report) out.push({ kind: 'report', chip: 'Report', report: o.report });
-	for (const item of o.here ?? []) out.push({ kind: 'feature', chip: item.kind, item });
-	if (o.zone) out.push({ kind: 'zone', chip: 'Zone', zone: o.zone });
-	if (o.spot) out.push(SPOT);
-	return out;
+}
+
+/** Which thing a chip is, the same however the chips are ranked. */
+export function targetKey(t: Target): string {
+	switch (t.kind) {
+		case 'station':
+			return `s:${t.station.id}`;
+		case 'report':
+			return `r:${t.report.id}`;
+		case 'feature':
+			return `f:${t.item.type}:${t.item.osm ?? ''}:${t.item.kind}:${t.item.name}`;
+		case 'zone':
+			return `z:${t.zone.id}`;
+		default:
+			return 'spot';
+	}
+}
+
+/**
+ * Everything a tap landed on, in the order the panel offers it. What you aimed at comes
+ * first: a station or field report, then a hut, trailhead or pass, then a run or route.
+ * After that it depends on the zoom, as the map does:
+ * - zoomed out, where the avalanche zones are coloured and glaciers and ATES areas are
+ *   small, the zone comes next, then the spot itself, then the glacier and ATES rating;
+ * - zoomed in, where the zones are bare outlines and areas are plain to see, the glacier
+ *   and ATES rating come next, then the spot, and the zone last.
+ * The spot is there whenever it can be measured.
+ */
+export function tapTargets(
+	o: TapInput & {
+		/** Zoomed in past where the zones' colour fades. */
+		close?: boolean;
+	}
+): Target[] {
+	const here = o.here ?? [];
+	const feature = (types: HereType[]): Target[] =>
+		here
+			.filter((i) => types.includes(i.type))
+			.map((item) => ({ kind: 'feature', chip: item.kind, item }));
+	const zone: Target[] = o.zone ? [{ kind: 'zone', chip: 'Zone', zone: o.zone }] : [];
+	const spot: Target[] = o.spot ? [SPOT] : [];
+	const areas = feature(['glacier', 'ates']);
+	return [
+		...(o.station ? [{ kind: 'station', chip: 'Station', station: o.station } as Target] : []),
+		...(o.report ? [{ kind: 'report', chip: 'Report', report: o.report } as Target] : []),
+		...feature(['place', 'route']),
+		...(o.close ? [...areas, ...spot, ...zone] : [...zone, ...spot, ...areas])
+	];
 }
 
 // ---- Glaciers: the whole outline, from the map's OpenStreetMap file ------------------
@@ -235,7 +285,7 @@ export function polygonArea(rings: Ring[]): number {
 	return Math.max(0, ringArea(rings[0]) - rings.slice(1).reduce((s, r) => s + ringArea(r), 0));
 }
 
-function inRing(ring: Ring, lon: number, lat: number): boolean {
+export function inRing(ring: Ring, lon: number, lat: number): boolean {
 	let inside = false;
 	for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
 		const [xi, yi] = ring[i];
@@ -245,31 +295,42 @@ function inRing(ring: Ring, lon: number, lat: number): boolean {
 	return inside;
 }
 
-function polygons(g: GeoJSON.Geometry): Ring[][] {
+/** A polygon or multipolygon's polygons, each its outline then its holes. */
+export function polygons(g: GeoJSON.Geometry): Ring[][] {
 	if (g.type === 'Polygon') return [g.coordinates as Ring[]];
 	if (g.type === 'MultiPolygon') return g.coordinates as Ring[][];
 	return [];
 }
 
+/** Inside the polygon's outline and not in one of its holes. */
+export function inPolygon(p: Ring[], lon: number, lat: number): boolean {
+	return !!p.length && inRing(p[0], lon, lat) && !p.slice(1).some((h) => inRing(h, lon, lat));
+}
+
 /**
- * The glacier's whole area in square metres: found by its OpenStreetMap id, else as the
- * glacier whose outline holds the tapped point. Null if neither finds it.
+ * The glacier tapped, whole (what's drawn is cut into tiles): found by its OpenStreetMap
+ * id, else as the glacier whose outline holds the tapped point.
  */
+export function findGlacier(
+	fc: GeoJSON.FeatureCollection,
+	lon: number,
+	lat: number,
+	osm?: string
+): GeoJSON.Feature | null {
+	const ice = fc.features.filter((f) => f.properties?.kind === 'glacier');
+	const byId = osm ? ice.find((f) => f.properties?.osm === osm) : undefined;
+	return byId ?? ice.find((f) => polygons(f.geometry).some((p) => inPolygon(p, lon, lat))) ?? null;
+}
+
+/** The glacier's whole area in square metres, or null if it isn't found. */
 export function glacierArea(
 	fc: GeoJSON.FeatureCollection,
 	lon: number,
 	lat: number,
 	osm?: string
 ): number | null {
-	const ice = fc.features.filter((f) => f.properties?.kind === 'glacier');
-	const byId = osm ? ice.find((f) => f.properties?.osm === osm) : undefined;
-	const holds = (f: GeoJSON.Feature) =>
-		polygons(f.geometry).some(
-			(p) => p.length && inRing(p[0], lon, lat) && !p.slice(1).some((h) => inRing(h, lon, lat))
-		);
-	const f = byId ?? ice.find(holds);
-	if (!f) return null;
-	return polygons(f.geometry).reduce((s, p) => s + polygonArea(p), 0);
+	const f = findGlacier(fc, lon, lat, osm);
+	return f ? polygons(f.geometry).reduce((s, p) => s + polygonArea(p), 0) : null;
 }
 
 /** An area in words: hectares or km², acres or square miles. */

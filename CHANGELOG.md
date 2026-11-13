@@ -7,20 +7,32 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The map stays still when its panel opens**, on desktop and on phones (the controls
+  at the foot hide under the sheet without giving up their place).
+- **One gesture on the map: a tap.** What the panel shows first follows the zoom, as
+  the map does: zoomed out, where avalanche zones are coloured and glaciers are specks,
+  the zone's bulletin, then the spot, with glaciers and ATES ratings as chips after
+  them; zoomed in past where the zones' colour fades, a glacier or ATES area you can
+  see, then the spot, with the zone last. An open panel follows the zoom too, until you
+  pick a chip. The long press and right-click shortcuts are gone.
+- **Glaciers tell you more**: their type as mapped (valley, cirque…), area, the
+  elevation of the top and the toe, the distance and drop between them, which way the
+  ice flows, its average slope and how much is steeper than 30°, worked out from the
+  terrain over the whole mapped outline; the forecast snow for 24 hours, 3 days and 7
+  days at the top's and the toe's heights, and the snow level; and a Wikipedia link
+  when mappers gave one.
+- **The phone sheet's whole title bar is its grip**: tap it to switch between the peek
+  and most of the screen, or drag it, without moving the map underneath.
 - **A tap on the map opens one panel, always in the same place**, whatever it lands on:
   docked to the right edge on desktop (the terrain key and the map credits step left of
   it), a bottom sheet above the tab bar on phones and tablets (drag its handle, or tap it,
-  between a peek and most of the screen; the controls at the foot make way while it's up).
-  The map's centre moves into the space it leaves, and a tapped spot it would cover comes
-  into view.
+  between a peek and most of the screen).
 - **The panel opens on what you tapped, not always on "This spot".** A station, a field
   report, a hut, trailhead or pass, a run or route, a glacier, an ATES rating or the
   avalanche zone (while zones or an avalanche layer are on) each has its own content, most
   specific first, with chips for the rest ("Glacier · Zone · This spot") that switch it in
-  place. "This spot" is always the last chip, and its terrain and weather are only worked
-  out when it's shown. A long press (touch) or a right-click goes straight to it. Glaciers
-  show their whole area and the elevation where tapped; huts, passes and glaciers link to
-  OpenStreetMap.
+  place. Its terrain and weather are only worked out when "This spot" is shown. Huts,
+  passes and glaciers link to OpenStreetMap.
 - **"This spot" is tidier**: three sections in a fixed order (Terrain; Snow & weather,
   with a small 24 h / 3 days / 7 days table; Avalanche), one line per row with the label
   on the left and the number on the right. Rows hold their place while the numbers load,

@@ -114,15 +114,56 @@ describe('Inspector', () => {
 });
 
 describe('FeatureCard', () => {
-	it('gives a glacier its area and a hut its elevation and link', () => {
-		const { getByText } = render(FeatureCard, {
-			item: { type: 'glacier', kind: 'Glacier', name: 'Snow Glacier' },
+	it('describes a glacier: its size, top and toe, flow, slope and snow at both ends', () => {
+		const now = Math.floor(Date.now() / 1000);
+		const point = {
+			inside: true,
+			elevations: [1000, 2000, 3000],
+			snow_level: [{ t: now, value: 2100 }],
+			totals: [
+				{ window: 24, cm: 5, by_elevation: [0, 10, 20] },
+				{ window: 72, cm: 15, by_elevation: [0, 20, 40] },
+				{ window: 168, cm: 30, by_elevation: [0, 30, 60] }
+			]
+		} as unknown as PointOut;
+		const { getByText, getByRole } = render(FeatureCard, {
+			item: {
+				type: 'glacier',
+				kind: 'Glacier',
+				name: 'Snow Glacier',
+				glacierType: 'valley',
+				wiki: 'https://en.wikipedia.org/wiki/Snow_Glacier'
+			},
 			units: 'metric',
-			area: 2_340_000,
-			elevHere: 2100
+			glacier: {
+				area: 2_340_000,
+				stats: {
+					top: 2600,
+					toe: 2000,
+					topAt: [-121, 48.01],
+					toeAt: [-121, 48],
+					length: 1500,
+					slope: 22,
+					steep: 0.12,
+					flows: 180
+				},
+				point,
+				pointState: 'ready'
+			}
 		});
+		expect(getByText('Valley glacier')).toBeTruthy();
 		expect(getByText('2.3 km²')).toBeTruthy();
-		expect(getByText('2,100 m')).toBeTruthy();
+		expect(getByText(/2,000 m – 2,600 m/)).toBeTruthy();
+		expect(getByText('south')).toBeTruthy();
+		expect(getByText(/600 m drop/)).toBeTruthy();
+		expect(getByText(/12% over 30°/)).toBeTruthy();
+		const table = getByRole('table', { name: 'Forecast snow' });
+		expect(table.textContent).toMatch(/Top\s*16 cm\s*32 cm\s*48 cm/);
+		expect(table.textContent).toMatch(/Toe\s*10 cm\s*20 cm\s*30 cm/);
+		expect(getByText(/rain possible low down/)).toBeTruthy();
+		expect(getByRole('link', { name: /Wikipedia/ }).getAttribute('href')).toBe(
+			'https://en.wikipedia.org/wiki/Snow_Glacier'
+		);
 		cleanup();
 		const hut = render(FeatureCard, {
 			item: {

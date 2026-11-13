@@ -9,6 +9,7 @@ import {
 	ringArea,
 	SPOT,
 	tapTargets,
+	wikiLink,
 	type Hit
 } from './here';
 
@@ -53,6 +54,15 @@ describe('hereItems', () => {
 		expect(items[3]).toMatchObject({ detail: 'Bowl', file: 'area.geojson', color: '#1b1b1f' });
 	});
 
+	it('links a mapped Wikipedia article', () => {
+		expect(wikiLink('en:Coleman Glacier')).toBe('https://en.wikipedia.org/wiki/Coleman_Glacier');
+		expect(wikiLink('fr:Glacier d’Argentière')).toBe(
+			'https://fr.wikipedia.org/wiki/Glacier_d%E2%80%99Argenti%C3%A8re'
+		);
+		expect(wikiLink('Coleman Glacier')).toBeUndefined();
+		expect(wikiLink('javascript:alert(1)')).toBeUndefined();
+	});
+
 	it('links only well-formed OpenStreetMap ids', () => {
 		expect(osmLink('r11')).toBe('https://www.openstreetmap.org/relation/11');
 		expect(osmLink('x1')).toBeUndefined();
@@ -66,7 +76,7 @@ describe('tapTargets', () => {
 	const report = { title: 'Whumpfing' } as ObsProps;
 	const zone = { id: 'z' } as ZoneFeature;
 
-	it('puts the most specific first and the spot last', () => {
+	it('zoomed out: what was aimed at, then the zone, the spot, and areas last', () => {
 		const here = hereItems(hits, 'metric', null);
 		const ts = tapTargets({ station, report, here, zone, spot: true });
 		expect(ts.map((t) => t.chip)).toEqual([
@@ -74,12 +84,21 @@ describe('tapTargets', () => {
 			'Report',
 			'Hut',
 			'Run',
-			'Glacier',
-			'ATES',
 			'Zone',
-			'This spot'
+			'This spot',
+			'Glacier',
+			'ATES'
 		]);
-		expect(ts.at(-1)).toBe(SPOT);
+		expect(ts).toContain(SPOT);
+	});
+
+	it('zoomed in: areas you can see, then the spot, and the zone last', () => {
+		const here = hereItems(hits, 'metric', null);
+		const ts = tapTargets({ here, zone, spot: true, close: true });
+		expect(ts.map((t) => t.chip)).toEqual(['Hut', 'Run', 'Glacier', 'ATES', 'This spot', 'Zone']);
+		// Bare ground in a zone, zoomed in: the spot first.
+		expect(tapTargets({ zone, spot: true, close: true })[0]).toBe(SPOT);
+		expect(tapTargets({ zone, spot: true })[0].kind).toBe('zone');
 	});
 
 	it('is just the spot on bare ground, and empty without terrain', () => {

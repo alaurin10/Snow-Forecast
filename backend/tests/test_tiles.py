@@ -382,7 +382,12 @@ def test_osm_to_geojson_keeps_mountain_features() -> None:
         {
             "type": "way",
             "id": 9,
-            "tags": {"natural": "glacier", "name": "Small Glacier"},
+            "tags": {
+                "natural": "glacier",
+                "name": "Small Glacier",
+                "glacier:type": "cirque",
+                "wikipedia": "en:Small Glacier",
+            },
             "geometry": g((50.0, -122.0), (50.0, -121.99), (50.01, -121.99), (50.0, -122.0)),
         },
         # A glacier in pieces: two outer ways that join into one ring, and a hole.
@@ -464,6 +469,14 @@ def test_osm_to_geojson_keeps_mountain_features() -> None:
     assert len(route["geometry"]["coordinates"]) == 2
     assert route["properties"]["type"] == "skitour"
     assert route["properties"]["osm"] == "r11"
+    # What mappers say of a glacier comes along.
+    assert f[6]["properties"] == {
+        "kind": "glacier",
+        "name": "Small Glacier",
+        "osm": "w9",
+        "type": "cirque",
+        "wikipedia": "en:Small Glacier",
+    }
 
 
 def test_osm_rings_and_simplify() -> None:
