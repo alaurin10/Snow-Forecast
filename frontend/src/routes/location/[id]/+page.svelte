@@ -1,6 +1,7 @@
-<!-- One location. Desktop: the name on the sky with the elevation control beside it, the
-     outlook card, then the section (Forecast, Models, Backcountry, Observed; the tabs
-     above it switch them, or keys 1–4). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
+<!-- One location. Desktop and tablet: the name on the sky with its conditions, then a
+     toolbar (the sections' tabs and the elevation) that sticks to the top as you scroll,
+     the outlook card, and the section (Forecast, Models, Backcountry, Observed; keys 1–4
+     switch them too). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
 <script lang="ts">
 	import { safeHref } from '../../../lib/links';
@@ -242,12 +243,15 @@
 	const avyCenter = $derived(avy?.doc?.center ?? null);
 	const next5 = $derived(band?.windows['next5'] ?? null);
 
-	// Phones: the conditions and elevation row sticks to the top; once it has, it gets a
-	// frosted band so the page doesn't show through around it.
+	// Phones: the conditions and elevation row sticks to the top; desktops and tablets:
+	// the tabs and elevation toolbar, `top` px down. Once stuck, it gets a frosted band so
+	// the page doesn't show through around it.
 	let stuck = $state(false);
-	function watchStuck(node: HTMLElement) {
+	function watchStuck(node: HTMLElement, top = 0) {
 		if (typeof IntersectionObserver === 'undefined') return;
-		const io = new IntersectionObserver(([e]) => (stuck = !e.isIntersecting));
+		const io = new IntersectionObserver(([e]) => (stuck = !e.isIntersecting), {
+			rootMargin: `-${top}px 0px 0px 0px`
+		});
 		io.observe(node);
 		return { destroy: () => io.disconnect() };
 	}
@@ -429,6 +433,12 @@
 					</a>
 				</div>
 			</div>
+		</header>
+		<!-- The page's controls, together: which section and which elevation. Sticks level
+		     with the rail's top as you scroll; it's the same size stuck or not. -->
+		<div class="stuckmark" use:watchStuck={14} aria-hidden="true"></div>
+		<div class="ltools" class:stuck>
+			{@render sectionTabs()}
 			<div class="seg glass elev" role="group" aria-label="Elevation">
 				{#each snap.bands as b (b.band)}
 					<button
@@ -440,7 +450,7 @@
 					>
 				{/each}
 			</div>
-		</header>
+		</div>
 
 		<section class="card outlook" aria-label="Outlook">
 			<div>
@@ -520,16 +530,21 @@
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
 
-	<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
-		{#each tabs as t, i (t)}
-			<button
-				role="tab"
-				aria-selected={tab === t}
-				title={viewport.desktop ? `${SECTION_NAMES[t]} (${i + 1})` : undefined}
-				onclick={() => (sections.tab = t)}>{SECTION_NAMES[t]}</button
-			>
-		{/each}
-	</div>
+	{#snippet sectionTabs()}
+		<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
+			{#each tabs as t, i (t)}
+				<button
+					role="tab"
+					aria-selected={tab === t}
+					title={phone ? undefined : `${SECTION_NAMES[t]} (${i + 1})`}
+					onclick={() => (sections.tab = t)}>{SECTION_NAMES[t]}</button
+				>
+			{/each}
+		</div>
+	{/snippet}
+	<!-- Phones: the tabs sit above the section (desktops and tablets have them in the
+	     toolbar under the name). -->
+	{#if phone}{@render sectionTabs()}{/if}
 
 	{#if tab === 'forecast'}
 		<div class="stackcol">
@@ -798,12 +813,7 @@
 
 	/* --- Desktop and tablet --- */
 	.lhead {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-end;
-		gap: 12px 24px;
-		flex-wrap: wrap;
-		padding: 18px 4px 14px;
+		padding: 18px 4px 12px;
 	}
 	.lhead h1 {
 		font-size: 2.9rem;
@@ -841,17 +851,60 @@
 		color: var(--text-2);
 		font-weight: 400;
 	}
+	/* The toolbar: tabs on the left, elevation on the right, both 52 px tall. Its padding
+	   and border are always there (only their colour changes when it sticks), and its
+	   negative margin lines the controls up with the cards below. */
+	.ltools {
+		position: sticky;
+		top: 14px;
+		z-index: 30;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px 16px;
+		margin: 0 -6px 16px;
+		padding: 5px;
+		border: 1px solid transparent;
+		border-radius: 30px;
+		transition:
+			background-color var(--ease),
+			border-color var(--ease),
+			box-shadow var(--ease);
+	}
+	.ltools.stuck {
+		background: var(--header-glass);
+		border-color: var(--glass-border);
+		box-shadow: var(--glass-shadow);
+		backdrop-filter: var(--blur-glass);
+		-webkit-backdrop-filter: var(--blur-glass);
+	}
+	.ltools .tabs {
+		margin: 0;
+		height: 52px;
+		box-sizing: border-box;
+		align-items: stretch;
+	}
+	.ltools .tabs button {
+		display: grid;
+		place-items: center;
+		padding: 0 20px;
+	}
 	.seg.elev {
+		height: 52px;
+		box-sizing: border-box;
 		padding: 4px;
-		border-radius: 20px;
+		border-radius: 999px;
 	}
 	.seg.elev button {
 		display: grid;
+		align-content: center;
 		justify-items: center;
 		gap: 0;
-		padding: 5px 16px;
-		border-radius: 16px;
-		min-width: 110px;
+		padding: 0 16px;
+		border-radius: 999px;
+		min-width: 104px;
+		line-height: 1.2;
 	}
 	.bn {
 		font-size: 0.86rem;

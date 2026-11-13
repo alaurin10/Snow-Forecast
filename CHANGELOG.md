@@ -11,9 +11,11 @@ Notable changes to Snow Watch. The format follows
   window's top left), over the map too; only its background gets denser there. Folding
   it on the map slides it away and fades its button in, instead of swapping one for the
   other.
-- **A location's sections are its page's tabs on desktop too** (Forecast, Models,
-  Backcountry, Observed, under the outlook), so the rail's list of locations no longer
-  grows when one is open. Keys 1–4 pick a section.
+- **A location's sections are its page's tabs on desktop too**, so the rail's list of
+  locations no longer grows when one is open. Keys 1–4 pick a section. On desktop and
+  tablet they share a toolbar with the elevation, right under the location's name, and
+  that toolbar sticks to the top as you scroll (level with the rail), the same size
+  whether stuck or not.
 - **Notices float at the top as a toast** (new version, offline, stale forecast) and can
   be closed, instead of pushing the page down when they appear. The full map keeps its
   own offline note.
