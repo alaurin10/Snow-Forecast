@@ -227,9 +227,60 @@ test('touch: a tap opens the panel, a double tap (or double tap and drag) only z
 	await page.waitForTimeout(800);
 	await expect(panel).toHaveCount(0);
 
-	// One tap, after a moment: the panel.
+	// The first tap after that zoom opens the panel; the first tap after it closes it.
 	p = await pin(page);
+	await page.waitForTimeout(600);
 	await tap(Math.round(p.x - 60), Math.round(p.y));
+	await expect(panel).toBeVisible();
+	await page.waitForTimeout(600);
+	await tap(Math.round(p.x - 60), Math.round(p.y));
+	await expect(panel).toHaveCount(0);
+});
+
+test('touch: the first tap after a pan or a pinch opens the panel', async ({ page }, info) => {
+	test.skip(info.project.name !== 'phone', 'touch');
+	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
+	const cdp = await page.context().newCDPSession(page);
+	const touch = (type: string, points: { x: number; y: number }[] = []) =>
+		cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+	const tap = async (x: number, y: number) => {
+		await touch('touchStart', [{ x, y }]);
+		await touch('touchEnd');
+	};
+	const panel = page.locator('[data-map-panel]');
+	// Open ground left of Rainy Pass (clear of its popup).
+	const p = await pin(page);
+	const [cx, cy] = [Math.round(p.x - 0.02 * PX_LON), Math.round(p.y + 40)];
+	// Put away the location's popup (or a panel) first.
+	await tap(cx, cy);
+	await page.waitForTimeout(800);
+	await page.keyboard.press('Escape');
+	await expect(panel).toHaveCount(0);
+
+	// A pan, then one tap: the panel. One more tap puts it away.
+	await touch('touchStart', [{ x: cx, y: cy }]);
+	for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: cx + i * 12, y: cy + i * 8 }]);
+	await touch('touchEnd');
+	await page.waitForTimeout(700);
+	await tap(cx, cy);
+	await expect(panel).toBeVisible();
+	await page.waitForTimeout(700);
+	await tap(cx, cy);
+	await expect(panel).toHaveCount(0);
+
+	// A pinch, then one tap: the panel.
+	await touch('touchStart', [
+		{ x: cx - 40, y: cy },
+		{ x: cx + 40, y: cy }
+	]);
+	for (let i = 1; i <= 6; i++)
+		await touch('touchMove', [
+			{ x: cx - 40 - i * 10, y: cy },
+			{ x: cx + 40 + i * 10, y: cy }
+		]);
+	await touch('touchEnd');
+	await page.waitForTimeout(900);
+	await tap(cx, cy);
 	await expect(panel).toBeVisible();
 });
 
