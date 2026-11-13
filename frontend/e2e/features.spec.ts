@@ -13,10 +13,17 @@ test('stations, field reports and ATES are offered and remembered', async ({ pag
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	await page.getByRole('button', { name: 'Layers' }).click();
 	const sheet = page.getByRole('dialog', { name: 'Map layers' });
-	for (const name of ['Snow stations', 'Field reports', 'ATES terrain ratings'])
-		await sheet.getByRole('checkbox', { name }).check();
-	await expect(sheet.getByRole('checkbox', { name: 'Huts, trailheads, passes' })).toBeChecked();
-	await sheet.getByRole('button', { name: 'Done' }).click();
+	for (const name of ['Snow stations', 'Field reports', 'ATES terrain ratings']) {
+		const tile = sheet.getByRole('button', { name });
+		await expect(tile).toHaveAttribute('aria-pressed', 'false');
+		await tile.click();
+		await expect(tile).toHaveAttribute('aria-pressed', 'true');
+	}
+	await expect(sheet.getByRole('button', { name: 'Huts, trailheads, passes' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await sheet.getByRole('button', { name: 'Close' }).click();
 	await page.reload({ waitUntil: 'networkidle' });
 	const features = await page.evaluate(() => localStorage.getItem('sw.mapFeatures'));
 	for (const f of ['stations', 'obs', 'ates', 'places', 'glaciers'])

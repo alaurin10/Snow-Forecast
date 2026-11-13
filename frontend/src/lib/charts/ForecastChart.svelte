@@ -9,6 +9,8 @@
      range always starts again at today. -->
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { modal } from '../modal';
+	import ForecastChart from './ForecastChart.svelte';
 	import type { BandOut } from '../types.gen';
 	import { converters, elevation, speed, type UnitSystem } from '../units';
 	import { compass } from '../conditions';
@@ -48,6 +50,8 @@
 		shadeDate?: string | null;
 		/** The day under the pointer, or null when it leaves the chart. */
 		onhoverdate?: (date: string | null) => void;
+		/** Shown full-window (phones and tablets): the plot fills it, and a finger scrubs. */
+		fullscreen?: boolean;
 	}
 
 	let {
@@ -60,7 +64,8 @@
 		start,
 		embedded = false,
 		shadeDate = null,
-		onhoverdate
+		onhoverdate,
+		fullscreen = false
 	}: Props = $props();
 	const phone = $derived(viewport.phone);
 	const c = $derived(converters(units));
@@ -782,7 +787,64 @@
 			canNext: off < maxOff
 		};
 	});
-	const showTimeline = $derived(!embedded && prefs.showTimeline === 'on');
+	const showTimeline = $derived(!embedded && !fullscreen && prefs.showTimeline === 'on');
+
+	// ---- Full window (phones and tablets) ------------------------------------------------
+	// The same chart over the whole window, where a finger can scrub without scrolling the
+	// page. A CSS overlay, not the Fullscreen API (which iPhones don't offer for elements);
+	// it asks for landscape where the browser allows it.
+	let expanded = $state(false);
+	const canExpand = $derived(!viewport.desktop && !embedded && !fullscreen);
+	type Lockable = ScreenOrientation & { lock?: (o: string) => Promise<void> };
+	function openFull() {
+		expanded = true;
+		const o = (typeof screen !== 'undefined' ? screen.orientation : undefined) as
+			Lockable | undefined;
+		o?.lock?.('landscape').catch(() => {});
+	}
+	function closeFull() {
+		expanded = false;
+		try {
+			screen.orientation?.unlock?.();
+		} catch {
+			// Not locked, or not allowed: nothing to undo.
+		}
+	}
+
+	// In the page, a touch on the plot picks one direction after its first few pixels:
+	// sideways reads the chart (the page mustn't scroll), up or down scrolls the page.
+	function scrubLock(node: HTMLElement) {
+		let from: { x: number; y: number } | null = null;
+		let dir: 'h' | 'v' | null = null;
+		const start = (e: TouchEvent) => {
+			if (e.touches.length !== 1) return void (from = null);
+			from = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+			dir = null;
+		};
+		const move = (e: TouchEvent) => {
+			if (!from || e.touches.length !== 1) return;
+			const dx = e.touches[0].clientX - from.x;
+			const dy = e.touches[0].clientY - from.y;
+			if (!dir) {
+				if (Math.hypot(dx, dy) < 8) return;
+				dir = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+			}
+			if (dir === 'h' && e.cancelable) e.preventDefault();
+		};
+		const end = () => (from = null);
+		node.addEventListener('touchstart', start, { passive: true });
+		node.addEventListener('touchmove', move, { passive: false });
+		node.addEventListener('touchend', end);
+		node.addEventListener('touchcancel', end);
+		return {
+			destroy() {
+				node.removeEventListener('touchstart', start);
+				node.removeEventListener('touchmove', move);
+				node.removeEventListener('touchend', end);
+				node.removeEventListener('touchcancel', end);
+			}
+		};
+	}
 	/** Show the window starting on day `k` (today = now). */
 	function showDay(k: number) {
 		const d = days[Math.max(0, Math.min(days.length - 1, k))];
@@ -842,7 +904,7 @@
 	}
 </script>
 
-<div class="fc" class:phone class:embedded>
+<div class="fc" class:phone class:embedded class:fullscreen>
 	{#if phone && s && reading}
 		<div class="mread">
 			<div class="mwhen">{when(s)}</div>
@@ -861,7 +923,19 @@
 	<div class="top">
 		<div class="titlerow">
 			<h2>Forecast</h2>
-			{#if place}
+			{#if canExpand}
+				<button
+					class="expand"
+					onclick={openFull}
+					aria-label="Full screen chart"
+					title="Full screen"
+				>
+					<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"
+						><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg
+					>
+				</button>
+			{/if}
+			{#if place && !fullscreen}
 				<ShareButton
 					label="Share this chart"
 					filename={slug(`${place.name} ${METRIC_NAME[metric]} ${R} day`)}
@@ -882,6 +956,7 @@
 			</div>
 			<button
 				class="tltoggle"
+				hidden={fullscreen}
 				aria-pressed={showTimeline}
 				aria-label={showTimeline ? 'Hide the timeline' : 'Show the timeline'}
 				title={showTimeline ? 'Hide the timeline' : 'Show the timeline'}
@@ -946,6 +1021,7 @@
 			onpointerleave={() => onhoverdate?.(null)}
 			onclick={() => !phone && s && onpick?.(s.t)}
 			onkeydown={onkey}
+			use:scrubLock
 		>
 			{#if shadeRect}<div
 					class="dayshade"
@@ -1131,11 +1207,127 @@
 	</div>
 </div>
 
+{#if expanded}
+	<div class="fsx" use:modal={{ onclose: closeFull }}>
+		<div class="fsbar">
+			<strong>Forecast</strong>
+			<button class="fsclose" onclick={closeFull} aria-label="Close the full screen chart">✕</button
+			>
+		</div>
+		<div class="fsbody" role="dialog" aria-label="Forecast chart, full screen">
+			<ForecastChart {band} {bands} {units} bind:range fullscreen />
+		</div>
+	</div>
+{/if}
+
 <style>
 	.fc {
 		display: grid;
 		gap: 14px;
 		min-width: 0;
+		--plot-h: 280px;
+	}
+	.expand {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		margin-left: auto;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text-2);
+		cursor: pointer;
+	}
+	.expand svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	/* Full window: the plot takes what's left after the readout, chips and axes. */
+	.fc.fullscreen {
+		gap: 10px;
+		--plot-h: max(150px, calc(100dvh - 300px - env(safe-area-inset-top)));
+	}
+	.fc.fullscreen .plot {
+		touch-action: none;
+	}
+	.fc.fullscreen .legend {
+		display: none;
+	}
+	.fsx {
+		position: fixed;
+		inset: 0;
+		z-index: 2000;
+		display: flex;
+		flex-direction: column;
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+			env(safe-area-inset-left);
+		background: var(--surface);
+		color: var(--text);
+	}
+	.fsbar {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 12px 0 16px;
+	}
+	.fsbar strong {
+		font-family: var(--font-num);
+		font-size: 1.1rem;
+	}
+	.fsclose {
+		width: 40px;
+		height: 40px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text);
+		font-size: 1rem;
+		cursor: pointer;
+	}
+	.fsbody {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 6px 12px 12px;
+	}
+	/* Full window on a wider screen (a phone turned sideways): no heading or readout (the
+	   chips say the period's numbers), and the chips in one compact row. */
+	.fc.fullscreen .top h2,
+	.fc.fullscreen:not(.phone) .readout {
+		display: none;
+	}
+	.fc.fullscreen:not(.phone) .cards {
+		grid-template-columns: repeat(6, minmax(0, 1fr));
+		gap: 6px;
+	}
+	.fc.fullscreen:not(.phone) .mcard {
+		height: 54px;
+		padding: 6px 10px;
+		gap: 2px;
+		border-radius: 14px;
+	}
+	.fc.fullscreen:not(.phone) .mval {
+		font-size: 1.05rem;
+	}
+	.fc.fullscreen:not(.phone) .mtxt.long,
+	.fc.fullscreen:not(.phone) .msub {
+		display: none;
+	}
+	.fc.fullscreen:not(.phone) .mtxt.short {
+		display: inline;
+	}
+	@media (orientation: landscape) and (max-height: 500px) {
+		.fc.fullscreen {
+			--plot-h: max(130px, calc(100dvh - 230px));
+		}
+		.fsbar {
+			padding-top: 4px;
+		}
 	}
 	.top {
 		display: flex;
@@ -1268,7 +1460,7 @@
 	.yaxis {
 		position: relative;
 		width: 46px;
-		height: 280px;
+		height: var(--plot-h);
 		flex-shrink: 0;
 		font-size: 0.72rem;
 		color: var(--text-3);
@@ -1290,7 +1482,7 @@
 		position: relative;
 		flex: 1;
 		min-width: 0;
-		height: 280px;
+		height: var(--plot-h);
 		border-bottom: 1px solid var(--border);
 		cursor: crosshair;
 		touch-action: pan-y;

@@ -7,10 +7,14 @@ const CAPTION = 'Experimental estimate from the bulletin and terrain shape. Not 
 
 async function openLayers(page: Page) {
 	await page.getByRole('button', { name: 'Layers' }).click();
-	return page.getByRole('group', { name: 'Terrain overlay' });
+	return page
+		.getByRole('dialog', { name: 'Map layers' })
+		.getByRole('group', { name: 'Terrain overlay' });
 }
 
 test('the concern index asks first, and remembers the answer', async ({ page }) => {
+	// Two visits and many steps on the map: slow on a busy machine.
+	test.slow();
 	// A visitor, not signed in.
 	expect((await page.request.get('/api/map/concern')).status()).toBe(200);
 	await page.goto('/map', { waitUntil: 'networkidle' });
@@ -50,7 +54,10 @@ test('the concern index asks first, and remembers the answer', async ({ page }) 
 	await ack.getByRole('button', { name: 'I understand' }).click();
 	await expect(ack).toHaveCount(0);
 	await expect(concern).toHaveAttribute('aria-pressed', 'true');
-	await page.getByRole('button', { name: 'Done' }).click();
+	await page
+		.getByRole('dialog', { name: 'Map layers' })
+		.getByRole('button', { name: 'Close' })
+		.click();
 	const controls = page.getByRole('region', { name: 'Concern index' });
 	await expect(controls).toBeVisible();
 	await expect(controls).toContainText(CAPTION);

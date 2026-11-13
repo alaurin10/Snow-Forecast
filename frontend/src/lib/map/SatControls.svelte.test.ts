@@ -53,6 +53,9 @@ describe('SatControls', () => {
 		const status = screen.getByRole('status').textContent ?? '';
 		expect(status).toContain('Newest clear view · 2 passes, 21 Oct – 4 Nov');
 		expect(status).toContain('Snoqualmie Pass: seen 21 Oct');
+		// The longer story is behind the (i).
+		expect(screen.queryByText(/The newest pass, 10 Nov, was cloudy there\./)).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'About this view' }));
 		expect(screen.getByText(/The newest pass, 10 Nov, was cloudy there\./)).toBeTruthy();
 		expect(screen.getByText('1/2')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Older view' }));
