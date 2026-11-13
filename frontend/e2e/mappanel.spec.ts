@@ -32,9 +32,19 @@ async function panelBox(page: Page) {
 	return { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), h: b.height };
 }
 
+/** Close the location's popup (a map opened on a location always shows it) with its own
+ *  button: a tap on the map would race the tap's short wait on slow machines. */
+async function closePopup(page: Page) {
+	const close = page.getByRole('button', { name: 'Close popup' });
+	await close.click({ timeout: 15_000 });
+	await expect(close).toHaveCount(0);
+}
+
 test('a station, a glacier and bare ground open the same panel in the same place', async ({
 	page
 }, info) => {
+	// Many steps, each waiting for the map to settle: slow on a shared CI machine.
+	test.slow();
 	await page.addInitScript(() => localStorage.setItem('sw.mapFeatures', 'stations,glaciers'));
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
 	const desktop = info.project.name === 'desktop';
@@ -127,6 +137,7 @@ test('phones: the sheet grows and shrinks from its title bar or a swipe anywhere
 	page
 }, info) => {
 	test.skip(info.project.name !== 'phone', 'the sheet is for phones and tablets');
+	test.slow();
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
 	let p = await pin(page);
 	await page.mouse.click(p.x - 0.02 * PX_LON, p.y);
@@ -179,6 +190,8 @@ test('phones: the sheet grows and shrinks from its title bar or a swipe anywhere
 test('touch: a tap opens the panel, a double tap (or double tap and drag) only zooms', async ({
 	page
 }, info) => {
+	// Many steps, each waiting for the map to settle: slow on a shared CI machine.
+	test.slow();
 	test.skip(info.project.name !== 'phone', 'touch');
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
 	const cdp = await page.context().newCDPSession(page);
@@ -192,13 +205,9 @@ test('touch: a tap opens the panel, a double tap (or double tap and drag) only z
 		await touch('touchEnd');
 	};
 	const panel = page.locator('[data-map-panel]');
-	// A first tap closes the location's popup, or opens the panel (put away with Escape).
+	await closePopup(page);
 	let p = await pin(page);
 	const at = { x: Math.round(p.x - 0.02 * PX_LON), y: Math.round(p.y) };
-	await tap(at.x, at.y);
-	await page.waitForTimeout(1200);
-	await page.keyboard.press('Escape');
-	await expect(panel).toHaveCount(0);
 
 	// A gesture's touches, sent together so they arrive as quickly as a finger's (one at a
 	// time, each waits for the page, which is busy drawing after a zoom).
@@ -238,6 +247,8 @@ test('touch: a tap opens the panel, a double tap (or double tap and drag) only z
 });
 
 test('touch: the first tap after a pan or a pinch opens the panel', async ({ page }, info) => {
+	// Many steps, each waiting for the map to settle: slow on a shared CI machine.
+	test.slow();
 	test.skip(info.project.name !== 'phone', 'touch');
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
 	const cdp = await page.context().newCDPSession(page);
@@ -251,11 +262,7 @@ test('touch: the first tap after a pan or a pinch opens the panel', async ({ pag
 	// Open ground left of Rainy Pass (clear of its popup).
 	const p = await pin(page);
 	const [cx, cy] = [Math.round(p.x - 0.02 * PX_LON), Math.round(p.y + 40)];
-	// Put away the location's popup (or a panel) first.
-	await tap(cx, cy);
-	await page.waitForTimeout(800);
-	await page.keyboard.press('Escape');
-	await expect(panel).toHaveCount(0);
+	await closePopup(page);
 
 	// A pan, then one tap: the panel. One more tap puts it away.
 	await touch('touchStart', [{ x: cx, y: cy }]);
