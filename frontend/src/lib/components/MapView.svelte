@@ -235,6 +235,11 @@
 	const tooClose = $derived(zoom >= (weather === 'radar' || weather === 'clouds' ? 13 : 15));
 
 	const layersOpen = $derived(panel === 'layers');
+	/** Phones and tablets: the More menu (measure, offline maps, about) is open. */
+	let moreOpen = $state(false);
+	/** Heights of the controls at the foot and of the map's buttons, which sit on them. */
+	let dockH = $state(0);
+	let toolsH = $state(0);
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
 		panel = panel === p ? 'none' : p;
 		closeTap();
@@ -1774,6 +1779,10 @@
 			// panel is open, closes it.
 			const onTap = (e: MapMouseEvent) => {
 				if (!radar) return;
+				if (moreOpen) {
+					moreOpen = false;
+					return;
+				}
 				// With the map panel open, a tap elsewhere on the map just puts it away.
 				if (tapInput && !(measuring && measureEdit)) {
 					closeTap();
@@ -2000,11 +2009,13 @@
 		e.key === 'Escape' &&
 		(askAck
 			? prefs.setMapOverlay('none')
-			: targets.length
-				? closeTap()
-				: panel !== 'none'
-					? (panel = 'none')
-					: measuring && stopMeasure())}
+			: moreOpen
+				? (moreOpen = false)
+				: targets.length
+					? closeTap()
+					: panel !== 'none'
+						? (panel = 'none')
+						: measuring && stopMeasure())}
 />
 
 <div
@@ -2016,16 +2027,18 @@
 	class:sheet={!!target && !viewport.desktop}
 	style:--fill-top="{fillTop}px"
 	style:--map-inset="{inset}px"
+	style:--dock-h="{dockH}px"
+	style:--tools-h="{toolsH}px"
 	style:--map-drop="{radar && viewport.desktop && railUi.folded ? RAIL_FOLDED_DROP : 0}px"
 	style:--map-panel="{radar && viewport.desktop && target ? 370 : 0}px"
 >
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
 
 	{#if radar}
-		<div class="tools">
+		<div class="tools" bind:clientHeight={toolsH}>
 			{#if canLocate}
 				<button
-					class="tool"
+					class="tool o-locate"
 					class:active={locState === 'following'}
 					class:shown={locState === 'shown' || locState === 'locating'}
 					aria-pressed={locState === 'following' || locState === 'shown'}
@@ -2043,7 +2056,7 @@
 				</button>
 			{/if}
 			<button
-				class="tool three"
+				class="tool three o-3d"
 				class:active={terrainOn}
 				aria-pressed={terrainOn}
 				onclick={() => prefs.setMapTerrain(!terrainOn)}
@@ -2053,7 +2066,7 @@
 				aria-label="3D terrain">3D</button
 			>
 			<button
-				class="tool"
+				class="tool o-layers"
 				class:active={layersOpen}
 				aria-expanded={layersOpen}
 				aria-controls="map-layers"
@@ -2065,44 +2078,111 @@
 					><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" /></svg
 				>
 			</button>
-			<button
-				class="tool"
-				class:active={measuring}
-				aria-pressed={measuring}
-				onclick={() => (measuring ? stopMeasure() : startMeasure())}
-				title={measuring
-					? 'Stop measuring'
-					: 'Measure a line: distance, climb and its profile. Or open a GPX track.'}
-				aria-label="Measure"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path d="M3.5 16.5l13-13 4 4-13 13zM7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2" /></svg
+			{#if viewport.desktop}
+				<button
+					class="tool"
+					class:active={measuring}
+					aria-pressed={measuring}
+					onclick={() => (measuring ? stopMeasure() : startMeasure())}
+					title={measuring
+						? 'Stop measuring'
+						: 'Measure a line: distance, climb and its profile. Or open a GPX track.'}
+					aria-label="Measure"
 				>
-			</button>
-			<button
-				class="tool"
-				class:active={panel === 'offline'}
-				aria-expanded={panel === 'offline'}
-				onclick={() => togglePanel('offline')}
-				title="Save maps for use with no signal"
-				aria-label="Offline maps"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" /></svg
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+						><path d="M3.5 16.5l13-13 4 4-13 13zM7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2" /></svg
+					>
+				</button>
+				<button
+					class="tool"
+					class:active={panel === 'offline'}
+					aria-expanded={panel === 'offline'}
+					onclick={() => togglePanel('offline')}
+					title="Save maps for use with no signal"
+					aria-label="Offline maps"
 				>
-			</button>
-			<button
-				class="tool"
-				class:active={panel === 'info'}
-				aria-expanded={panel === 'info'}
-				aria-controls="map-info"
-				onclick={() => togglePanel('info')}
-				aria-label="About this map"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></svg
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+						><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" /></svg
+					>
+				</button>
+				<button
+					class="tool"
+					class:active={panel === 'info'}
+					aria-expanded={panel === 'info'}
+					aria-controls="map-info"
+					onclick={() => togglePanel('info')}
+					aria-label="About this map"
 				>
-			</button>
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+						><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></svg
+					>
+				</button>
+			{:else}
+				<!-- Phones and tablets: the tools used now and then, behind one button. -->
+				<div class="morewrap o-more">
+					<button
+						class="tool"
+						class:active={moreOpen}
+						aria-expanded={moreOpen}
+						aria-controls="map-more"
+						onclick={() => (moreOpen = !moreOpen)}
+						aria-label="More map tools"
+						title="Measure, offline maps, about this map"
+					>
+						<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+							><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle
+								cx="19"
+								cy="12"
+								r="1.4"
+							/></svg
+						>
+					</button>
+					{#if moreOpen}
+						<div class="moremenu glass" id="map-more" role="group" aria-label="More map tools">
+							<button
+								aria-pressed={measuring}
+								aria-label="Measure"
+								onclick={() => {
+									moreOpen = false;
+									if (measuring) stopMeasure();
+									else startMeasure();
+								}}
+							>
+								<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+									><path
+										d="M3.5 16.5l13-13 4 4-13 13zM7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2"
+									/></svg
+								>
+								{measuring ? 'Stop measuring' : 'Measure'}
+							</button>
+							<button
+								aria-label="Offline maps"
+								onclick={() => {
+									moreOpen = false;
+									togglePanel('offline');
+								}}
+							>
+								<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+									><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14" /></svg
+								>
+								Offline maps
+							</button>
+							<button
+								aria-label="About this map"
+								onclick={() => {
+									moreOpen = false;
+									togglePanel('info');
+								}}
+							>
+								<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+									><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></svg
+								>
+								About this map
+							</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		{#if layersOpen}
@@ -2328,7 +2408,7 @@
 				{/each}
 			</div>
 		{/snippet}
-		<div class="dock" bind:this={dock}>
+		<div class="dock" bind:this={dock} bind:clientHeight={dockH}>
 			{#if measuring}
 				<DockItem open={openDock === 'measure'} ontouch={() => (dockOpen = 'measure')}>
 					<Measure
@@ -2607,6 +2687,100 @@
 		z-index: 1000;
 		display: grid;
 		gap: 8px;
+	}
+	/* Phones and tablets: the map's buttons at the bottom right, under the thumb, sitting
+	   on the controls at the foot (and rising with them); the compass on top, the zoom
+	   buttons left to pinch and double tap; Layers, the most used, lowest. Out of the way
+	   while the map panel is up. */
+	@media (max-width: 1099px) {
+		.tools {
+			top: auto;
+			left: auto;
+			right: 10px;
+			bottom: calc(84px + env(safe-area-inset-bottom) + var(--dock-h, 0px) + 14px);
+			display: flex;
+			flex-direction: column;
+			transition: bottom var(--ease-slide);
+		}
+		.tools .o-more {
+			order: 1;
+		}
+		.tools .o-3d {
+			order: 2;
+		}
+		.tools .o-locate {
+			order: 3;
+		}
+		.tools .o-layers {
+			order: 4;
+		}
+		.map :global(.maplibregl-ctrl-top-left) {
+			top: auto;
+			left: auto;
+			right: 0;
+			bottom: calc(
+				84px + env(safe-area-inset-bottom) + var(--dock-h, 0px) + 22px + var(--tools-h, 0px)
+			);
+			transition: bottom var(--ease-slide);
+		}
+		.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group) {
+			margin: 0 10px 0 0;
+		}
+		.map :global(.maplibregl-ctrl-zoom-in),
+		.map :global(.maplibregl-ctrl-zoom-out) {
+			display: none !important;
+		}
+		.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group button + button) {
+			border-top: 0;
+		}
+		.wrap.sheet .tools,
+		.wrap.sheet .map :global(.maplibregl-ctrl-top-left) {
+			visibility: hidden;
+		}
+		.wrap .top,
+		.wrap .info {
+			left: 10px;
+		}
+	}
+	.morewrap {
+		position: relative;
+	}
+	.moremenu {
+		position: absolute;
+		right: calc(100% + 8px);
+		top: 0;
+		z-index: 2;
+		display: grid;
+		min-width: 190px;
+		padding: 4px;
+		border-radius: 16px;
+		background: color-mix(in srgb, var(--surface) 94%, transparent);
+	}
+	.moremenu button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		height: 42px;
+		padding: 0 12px;
+		border: 0;
+		border-radius: 12px;
+		background: transparent;
+		color: var(--text);
+		font: inherit;
+		font-size: 0.86rem;
+		text-align: left;
+		cursor: pointer;
+	}
+	.moremenu button:hover,
+	.moremenu button[aria-pressed='true'] {
+		background: var(--hover);
+	}
+	.moremenu svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 	/* Our own map buttons: glass tiles that light up in the accent when on. */
 	.tool {

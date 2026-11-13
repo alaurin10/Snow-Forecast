@@ -34,6 +34,9 @@ test('measure opens its panel, and a GPX track opens in it', async ({ page }) =>
 	const uploads: string[] = [];
 	page.on('request', (r) => r.method() !== 'GET' && uploads.push(r.url()));
 	await page.goto('/map', { waitUntil: 'networkidle' });
+	// Phones and tablets: Measure is in the More menu.
+	const more = page.getByRole('button', { name: 'More map tools' });
+	if (await more.isVisible()) await more.click();
 	await page.getByRole('button', { name: 'Measure' }).click();
 	const panel = page.getByRole('region', { name: 'Measure' });
 	await expect(panel).toContainText('Tap the map to add points');

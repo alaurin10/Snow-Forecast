@@ -201,3 +201,37 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	await expect(full).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();
 });
+
+test('phones: the map buttons sit bottom right on the dock, with the rarer ones under More', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'phone', 'the buttons move on phones and tablets');
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	const vp = page.viewportSize()!;
+	const layers = (await page.getByRole('button', { name: 'Layers' }).boundingBox())!;
+	const tabs = (await page.getByRole('group', { name: 'Map controls' }).boundingBox())!;
+	expect(layers.x + layers.width).toBeGreaterThan(vp.width - 20);
+	expect(layers.y + layers.height).toBeLessThan(tabs.y);
+	expect(layers.y).toBeGreaterThan(vp.height / 2);
+	// No zoom buttons (pinch, double tap); the compass stays.
+	await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
+	await expect(page.locator('.maplibregl-ctrl-compass')).toBeVisible();
+	// The rarer tools behind More; a tap on the map closes it.
+	await expect(page.getByRole('button', { name: 'Offline maps' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'More map tools' }).click();
+	const menu = page.getByRole('group', { name: 'More map tools' });
+	for (const name of ['Measure', 'Offline maps', 'About this map'])
+		await expect(menu.getByRole('button', { name })).toBeVisible();
+	await page.mouse.click(60, 200);
+	await expect(menu).toHaveCount(0);
+	// Folded, then the weather's controls opened: the buttons rise with them.
+	const weather = page.getByRole('button', { name: /^Weather: / });
+	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
+	await expect(weather).toHaveAttribute('aria-pressed', 'false');
+	await page.waitForTimeout(400);
+	const folded = (await page.getByRole('button', { name: 'Layers' }).boundingBox())!.y;
+	await weather.click();
+	await expect
+		.poll(async () => (await page.getByRole('button', { name: 'Layers' }).boundingBox())!.y)
+		.toBeLessThan(folded - 30);
+});
