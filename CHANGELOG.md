@@ -17,6 +17,11 @@ Notable changes to Snow Watch. The format follows
 - **Notices float at the top as a toast** (new version, offline, stale forecast) and can
   be closed, instead of pushing the page down when they appear. The full map keeps its
   own offline note.
+- **The phone conditions pill is a weather icon and the temperature** (sun, moon,
+  cloud, fog, rain, snow, mixed), instead of a sky name cut to "Ov…" beside the
+  elevations. It's the same width whatever the weather; a tap shows the words
+  ("Overcast · 33°F · Summit · updated …"), which are also its accessible name. On
+  desktop the same icon replaces the plain sky swatch.
 - **Chosen buttons and tabs no longer change width.** Selection is shown by colour and
   background only (it used to turn the label bold, which made it wider and could push
   its neighbours onto another row).

@@ -51,7 +51,8 @@
 	import { viewport } from '../../../lib/viewport.svelte';
 	import { sections, SECTION_NAMES, type Section } from '../../../lib/sections.svelte';
 	import { skyState } from '../../../lib/skystate.svelte';
-	import { skyOf, hourIndex } from '../../../lib/sky';
+	import { skyOf, hourIndex, sceneIcon } from '../../../lib/sky';
+	import WxIcon from '../../../lib/components/WxIcon.svelte';
 	import DayList from '../../../lib/components/DayList.svelte';
 	import DaySheet from '../../../lib/charts/DaySheet.svelte';
 	import ErrorNote from '../../../lib/components/ErrorNote.svelte';
@@ -217,6 +218,26 @@
 				})
 			: ''
 	);
+	// Phones: the conditions pill is an icon and the temperature; a tap shows the words.
+	const nowTemp = $derived(band ? temperature(band.hourly.temp_c[nowAt], units) : '');
+	const wxLine = $derived(
+		band ? `${sky.label} · ${nowTemp} · ${band.label} · updated ${updated}` : ''
+	);
+	let wxOpen = $state(false);
+	let pillwrap = $state<HTMLElement>();
+	$effect(() => {
+		if (!wxOpen) return;
+		const away = (e: PointerEvent) => {
+			if (!pillwrap?.contains(e.target as Node)) wxOpen = false;
+		};
+		const esc = (e: KeyboardEvent) => e.key === 'Escape' && (wxOpen = false);
+		window.addEventListener('pointerdown', away);
+		window.addEventListener('keydown', esc);
+		return () => {
+			window.removeEventListener('pointerdown', away);
+			window.removeEventListener('keydown', esc);
+		};
+	});
 	const avyRated = $derived(avy?.status === 'current' && !!avy.today_max);
 	const avyCenter = $derived(avy?.doc?.center ?? null);
 	const next5 = $derived(band?.windows['next5'] ?? null);
@@ -352,10 +373,23 @@
 		</p>
 		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
 		<div class="mrow" class:stuck>
-			<span class="pill glass" title="{sky.label} · {band.label} · updated {updated}">
-				<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
-				<span class="ptxt">{sky.label}</span>
-				<span class="ptemp num">· {temperature(band.hourly.temp_c[nowAt], units)}</span>
+			<span class="pillwrap" bind:this={pillwrap}>
+				<button
+					class="pill glass wxpill"
+					aria-label={wxLine}
+					aria-expanded={wxOpen}
+					aria-controls="wxpop"
+					title={wxLine}
+					onclick={() => (wxOpen = !wxOpen)}
+				>
+					<span class="skydot" data-scene={sky.scene}
+						><WxIcon icon={sceneIcon(sky)} size={15} label={sky.label} /></span
+					>
+					<span class="ptemp num">{nowTemp}</span>
+				</button>
+				{#if wxOpen}
+					<span class="wxpop glass" id="wxpop" role="status">{wxLine}</span>
+				{/if}
 			</span>
 			<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
 				{#each snap.bands as b (b.band)}
@@ -374,7 +408,9 @@
 				<h1>{snap.location.name}</h1>
 				<div class="pills">
 					<span class="pill glass" title="{snap.location.region} · {sky.label} now">
-						<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
+						<span class="skydot" data-scene={sky.scene} aria-hidden="true"
+							><WxIcon icon={sceneIcon(sky)} size={14} label={sky.label} /></span
+						>
 						<span class="ptxt">{snap.location.region} · {sky.label} now</span>
 					</span>
 					<span class="pill glass faintpill" title="Updated {updated}">
@@ -721,17 +757,22 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	.ptemp {
-		flex: 0 0 auto;
-		margin-left: -4px;
-	}
-	/* A swatch of the scene's sky (the same colours as the backdrop's top). */
+	/* A swatch of the scene's sky (the same colours as the backdrop's top), with the
+	   weather's icon on it: dark lines on the light skies, light on the night sky. */
 	.skydot {
 		flex: 0 0 20px;
 		height: 20px;
+		display: grid;
+		place-items: center;
 		border-radius: 50%;
 		background: linear-gradient(180deg, #62a8ea, #e6f1fa);
 		box-shadow: inset 0 0 0 1px var(--glass-border);
+		--text-2: #22324d;
+		--snow: #2f5fae;
+		--rain: #1f6f5a;
+	}
+	.skydot[data-scene='night'] {
+		--text-2: #f2f4ff;
 	}
 	.skydot[data-scene='clear'] {
 		background: linear-gradient(180deg, #4f9fec, #dff0fc);
@@ -1108,12 +1149,44 @@
 		height: env(safe-area-inset-top);
 		background: var(--header-glass);
 	}
-	/* One row, always (so the stuck row never changes height): the elevations keep their
-	   size, and the conditions shrink to what's left, the sky's name ending in "…". */
-	.mrow .pill {
-		flex: 0 1 auto;
+	/* One row, always (so the stuck row never changes height). The conditions are an icon
+	   and the temperature, with room for "−10°F", so the pill is the same width whatever
+	   the weather; a tap shows the words under it. */
+	.pillwrap {
+		position: relative;
+		flex: 0 0 auto;
+	}
+	.wxpill {
+		border-color: var(--glass-border);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.86rem;
+		font-weight: 500;
 		padding: 5px 12px 5px 5px;
+		cursor: pointer;
+	}
+	.wxpill .skydot {
+		flex-basis: 26px;
+		height: 26px;
+	}
+	.wxpill .ptemp {
+		min-width: 4.6ch;
+		font-variant-numeric: tabular-nums;
+		text-align: left;
+	}
+	.wxpop {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		z-index: 5;
+		width: max-content;
+		max-width: calc(100vw - 32px);
+		padding: 8px 12px;
+		border-radius: 14px;
 		font-size: 0.8rem;
+		font-weight: 500;
+		white-space: normal;
+		background-color: color-mix(in srgb, var(--surface) 94%, transparent);
 	}
 	.seg.elevs {
 		flex: 0 0 auto;
@@ -1124,13 +1197,6 @@
 		min-width: 52px;
 		padding: 8px 6px;
 		font-size: 0.86rem;
-	}
-	/* The narrowest phones: slimmer elevations, so the sky's name keeps a word or two. */
-	@media (max-width: 360px) {
-		.seg.elevs button {
-			min-width: 44px;
-			padding: 8px 4px;
-		}
 	}
 	/* The chosen elevation's name, above the selector (it scrolls away; the selector stays). */
 	.elevname {

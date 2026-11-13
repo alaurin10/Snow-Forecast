@@ -91,3 +91,29 @@ test('a notice floats over the page and can be closed', async ({ page, context }
 	await expect(notice).toHaveCount(0);
 	await context.setOffline(false);
 });
+
+test('the phone conditions pill is an icon, the same width whatever it shows', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'phone', 'the icon pill is the phone layout');
+	for (const width of [320, 375]) {
+		await page.setViewportSize({ width, height: 740 });
+		await page.goto('/location/whistler', { waitUntil: 'networkidle' });
+		const pill = page.getByRole('button', { name: /· updated / });
+		await expect(pill.locator('svg.wx')).toBeVisible();
+		// The words are its accessible name, not its text: nothing to cut off.
+		expect(await pill.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+		const before = (await pill.boundingBox())!.width;
+		await page
+			.getByRole('group', { name: /^Elevation/ })
+			.getByRole('button')
+			.first()
+			.click();
+		expect((await pill.boundingBox())!.width).toBe(before);
+		// A tap shows the words; Escape puts them away.
+		await pill.click();
+		await expect(page.getByRole('status').filter({ hasText: /· updated / })).toBeVisible();
+		await page.keyboard.press('Escape');
+		await expect(page.locator('#wxpop')).toHaveCount(0);
+	}
+});

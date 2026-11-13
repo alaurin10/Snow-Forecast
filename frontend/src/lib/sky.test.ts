@@ -1,6 +1,6 @@
 // The sky's scene comes from the current hour only, so it never changes while you scrub.
 import { describe, expect, it } from 'vitest';
-import { hourIndex, pickScene } from './sky';
+import { hourIndex, pickScene, SCENE_LABEL, sceneIcon, type Scene } from './sky';
 import type { HourlyOut, SunDay } from './types.gen';
 
 /** Three hours from 2 PM, with the given values for every hour unless overridden. */
@@ -59,5 +59,29 @@ describe('pickScene', () => {
 		const h = hours();
 		expect(hourIndex(h, '2026-11-04T15:20-07:00')).toBe(1);
 		expect(hourIndex(h, null)).toBe(0);
+	});
+});
+
+describe('sceneIcon', () => {
+	const icon = (scene: Scene, night = false) =>
+		sceneIcon({ scene, night, label: SCENE_LABEL[scene] });
+	it('gives every scene an icon', () => {
+		expect(
+			Object.fromEntries((Object.keys(SCENE_LABEL) as Scene[]).map((s) => [s, icon(s)]))
+		).toEqual({
+			clear: 'clear-day',
+			night: 'clear-night',
+			glow: 'clear-day',
+			partly: 'partly-day',
+			overcast: 'cloud',
+			snow: 'snow',
+			heavy: 'snow',
+			mixed: 'mix',
+			rain: 'rain',
+			fog: 'fog'
+		});
+	});
+	it('draws a partly cloudy night with the moon', () => {
+		expect(icon('partly', true)).toBe('partly-night');
 	});
 });
