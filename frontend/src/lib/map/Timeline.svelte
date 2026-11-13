@@ -342,6 +342,13 @@
 	.modes::-webkit-scrollbar {
 		display: none;
 	}
+	/* Phones and tablets: the weather layer is chosen in Layers; this row would only
+	   repeat it. */
+	@media (max-width: 1099px) {
+		.modes {
+			display: none;
+		}
+	}
 	.modes button {
 		flex: 0 0 auto;
 		white-space: nowrap;

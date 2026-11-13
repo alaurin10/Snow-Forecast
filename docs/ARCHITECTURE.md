@@ -62,7 +62,8 @@ frontend/src/
               railui.svelte.ts (the desktop rail folded or open over the full-window map)
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend,
-              Measure and Profile (measure.ts: lines, GPX, stats); MapPanel, the one
+              Measure and Profile (measure.ts: lines, GPX, stats); DockItem and DockTabs (the
+              controls at the map's foot: on phones one open over a row of tabs); MapPanel, the one
               panel a tap opens, showing Inspector (the spot), StationCard, ReportCard,
               ZoneCard or FeatureCard; features.ts (stations, reports, ATES) and here.ts
               (what a tap landed on, ranked, as the panel's targets);

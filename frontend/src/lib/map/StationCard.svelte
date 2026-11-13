@@ -21,9 +21,11 @@
 	const line = $derived(sparkline(station.daily, W, H));
 	const change = $derived.by(() => {
 		const c = station.change24_cm;
-		if (c == null) return '–';
-		if (Math.abs(c) < 0.5) return 'no change';
-		return c > 0 ? `+${fmtSnow(c, units)}` : `−${fmtSnow(-c, units)} (settling or melt)`;
+		if (c == null) return { v: '–', sub: '' };
+		if (Math.abs(c) < 0.5) return { v: 'No change', sub: '' };
+		return c > 0
+			? { v: `+${fmtSnow(c, units)}`, sub: 'new snow' }
+			: { v: `−${fmtSnow(-c, units)}`, sub: 'settling or melt' };
 	});
 	const day = (iso: string) =>
 		new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', {
@@ -38,14 +40,16 @@
 			? ` · ${fmtElevation(station.elev_m, units)}`
 			: ''}
 	</span>
-	<dl>
-		<div>
-			<dt>Snow depth</dt>
-			<dd class="num">{fmtSnow(station.depth_cm, units)}</dd>
+	<dl class="mp-stats" style:--cols="2">
+		<div class="mp-stat">
+			<dt class="eyebrow">Snow depth</dt>
+			<dd class="v">{fmtSnow(station.depth_cm, units)}</dd>
+			<dd class="sub">on the ground</dd>
 		</div>
-		<div>
-			<dt>Last 24 hours</dt>
-			<dd class="num">{change}</dd>
+		<div class="mp-stat">
+			<dt class="eyebrow">Last 24 h</dt>
+			<dd class="v">{change.v}</dd>
+			<dd class="sub">{change.sub || ' '}</dd>
 		</div>
 	</dl>
 	{#if line.d}
@@ -79,19 +83,8 @@
 	.where {
 		font-size: 0.78rem;
 	}
-	dl {
-		margin: 0;
-		display: flex;
-		gap: 18px;
-	}
-	dt {
-		font-size: 0.72rem;
-		color: var(--text-2);
-	}
 	dd {
 		margin: 0;
-		font-weight: 600;
-		font-size: 1rem;
 	}
 	figure {
 		margin: 0;

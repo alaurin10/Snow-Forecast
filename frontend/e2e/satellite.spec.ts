@@ -11,12 +11,16 @@ test('recent satellite can be chosen, and is remembered', async ({ page }) => {
 	const recent = bases.getByRole('button', { name: 'Recent satellite' });
 	await recent.click();
 	await expect(recent).toHaveAttribute('aria-pressed', 'true');
-	await page.getByRole('button', { name: 'Done' }).click();
+	await page
+		.getByRole('dialog', { name: 'Map layers' })
+		.getByRole('button', { name: 'Close' })
+		.click();
 
 	const controls = page.getByRole('region', { name: 'Recent satellite' });
 	await expect(controls).toBeVisible();
 	await expect(controls).toContainText('10 m Sentinel-2 views are kept near saved locations.');
 	await controls.getByRole('button', { name: 'Snow vs cloud' }).click();
+	await controls.getByRole('button', { name: 'About this view' }).click();
 	await expect(controls).toContainText('Snow shows cyan, cloud white.');
 
 	await page.reload({ waitUntil: 'networkidle' });

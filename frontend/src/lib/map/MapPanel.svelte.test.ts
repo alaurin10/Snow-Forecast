@@ -67,8 +67,8 @@ describe('Inspector', () => {
 		});
 		for (const name of ['Terrain', 'Snow and weather'])
 			expect(getByRole('region', { name })).toBeTruthy();
-		expect(container.querySelectorAll('.skel').length).toBeGreaterThan(6);
-		expect(getByRole('table', { name: 'Loading the weather here' })).toBeTruthy();
+		expect(container.querySelectorAll('.mp-skel').length).toBeGreaterThan(6);
+		expect(container.querySelector('[aria-label="Loading the weather here"]')).toBeTruthy();
 	});
 
 	it('shows terrain, a snow table and one disclosure for the caveats', () => {
@@ -93,7 +93,7 @@ describe('Inspector', () => {
 				{ window: 168, cm: 40 }
 			]
 		} as unknown as PointOut;
-		const { getByRole, getByText, container } = render(Inspector, {
+		const { getByText, container } = render(Inspector, {
 			lat: 47.4,
 			facts,
 			error: null,
@@ -104,12 +104,13 @@ describe('Inspector', () => {
 		});
 		expect(getByText('1,800 m')).toBeTruthy();
 		expect(getByText('NE')).toBeTruthy();
-		const table = getByRole('table', { name: 'Forecast snow' });
-		expect(table.textContent).toMatch(/Area\s*10 cm\s*25 cm\s*40 cm/);
+		// Three big numbers: 24 hours, 3 days, 7 days (for the area: not adjusted here).
+		const snow = container.querySelector('[aria-label="Forecast snow"]')!;
+		expect(snow.textContent).toMatch(/Next 24 h\s*10 cm[\s\S]*3 days\s*25 cm[\s\S]*7 days\s*40 cm/);
 		expect(getByText('SW 50 km/h')).toBeTruthy();
 		expect(container.querySelectorAll('details')).toHaveLength(1);
 		expect(getByText('About these numbers')).toBeTruthy();
-		expect(container.querySelector('.skel')).toBeNull();
+		expect(container.querySelector('.mp-skel')).toBeNull();
 	});
 });
 
@@ -155,7 +156,7 @@ describe('FeatureCard', () => {
 				{ window: 168, cm: 30, by_elevation: [0, 30, 60] }
 			]
 		} as unknown as PointOut;
-		const { getByText, getByRole } = render(FeatureCard, {
+		const { getByText, getByRole, container } = render(FeatureCard, {
 			item: {
 				type: 'glacier',
 				kind: 'Glacier',
@@ -182,13 +183,15 @@ describe('FeatureCard', () => {
 		});
 		expect(getByText('Valley glacier')).toBeTruthy();
 		expect(getByText('2.3 km²')).toBeTruthy();
-		expect(getByText(/2,000 m – 2,600 m/)).toBeTruthy();
+		expect(getByText('2,600 m')).toBeTruthy();
+		expect(getByText('2,000 m')).toBeTruthy();
 		expect(getByText('south')).toBeTruthy();
 		expect(getByText(/600 m drop/)).toBeTruthy();
 		expect(getByText(/12% over 30°/)).toBeTruthy();
-		const table = getByRole('table', { name: 'Forecast snow' });
-		expect(table.textContent).toMatch(/Top\s*16 cm\s*32 cm\s*48 cm/);
-		expect(table.textContent).toMatch(/Toe\s*10 cm\s*20 cm\s*30 cm/);
+		// At the top, big; at the toe, under it.
+		const snow = container.querySelector('[aria-label="Forecast snow"]')!;
+		expect(snow.textContent).toMatch(/Next 24 h\s*16 cm\s*toe 10 cm/);
+		expect(snow.textContent).toMatch(/7 days\s*48 cm\s*toe 30 cm/);
 		expect(getByText(/rain possible low down/)).toBeTruthy();
 		expect(getByRole('link', { name: /Wikipedia/ }).getAttribute('href')).toBe(
 			'https://en.wikipedia.org/wiki/Snow_Glacier'

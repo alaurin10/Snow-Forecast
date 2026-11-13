@@ -75,12 +75,41 @@
 </script>
 
 <div class="content">
-	<dl class="rows">
+	{#if icy}
+		<dl class="mp-stats">
+			<div class="mp-stat">
+				<dt class="eyebrow">Area</dt>
+				<dd class="v">
+					{#if glacier?.area === undefined}<span class="mp-skel short"></span>
+					{:else if glacier.area}{areaText(glacier.area, units)}
+					{:else}<span class="faint">–</span>{/if}
+				</dd>
+			</div>
+			<div class="mp-stat">
+				<dt class="eyebrow">Top</dt>
+				<dd class="v">
+					{#if stats === undefined}<span class="mp-skel short"></span>
+					{:else if stats}{fmtElevation(stats.top, units)}
+					{:else}<span class="faint">–</span>{/if}
+				</dd>
+			</div>
+			<div class="mp-stat">
+				<dt class="eyebrow">Toe</dt>
+				<dd class="v">
+					{#if stats === undefined}<span class="mp-skel short"></span>
+					{:else if stats}{fmtElevation(stats.toe, units)}
+					{:else}<span class="faint">–</span>{/if}
+				</dd>
+			</div>
+		</dl>
+	{/if}
+	<dl class="mp-kv">
 		{#if item.type === 'ates'}
 			<div>
 				<dt>Rating</dt>
 				<dd>
-					{#if item.color}<i style:background={item.color} aria-hidden="true"></i>{/if}{item.name}
+					{#if item.color}<i class="sw" style:background={item.color} aria-hidden="true"
+						></i>{/if}{item.name}
 				</dd>
 			</div>
 			{#if item.detail}
@@ -101,25 +130,9 @@
 				<dd>{typeWord}</dd>
 			</div>
 			<div>
-				<dt>Area</dt>
-				<dd class="num">
-					{#if glacier?.area === undefined}<span class="skel"></span>
-					{:else if glacier.area}{areaText(glacier.area, units)}
-					{:else}<span class="faint">–</span>{/if}
-				</dd>
-			</div>
-			<div>
-				<dt>Elevation</dt>
-				<dd class="num">
-					{#if stats === undefined}<span class="skel"></span>
-					{:else if stats}{fmtElevation(stats.toe, units)} – {fmtElevation(stats.top, units)}
-					{:else}<span class="faint">–</span>{/if}
-				</dd>
-			</div>
-			<div>
 				<dt>Top to toe</dt>
-				<dd class="num">
-					{#if stats === undefined}<span class="skel"></span>
+				<dd>
+					{#if stats === undefined}<span class="mp-skel"></span>
 					{:else if stats}{distanceText(stats.length, units)}
 						<span class="faint">· {heightText(stats.top - stats.toe, units)} drop</span>
 					{:else}<span class="faint">–</span>{/if}
@@ -128,7 +141,7 @@
 			<div>
 				<dt>Flows</dt>
 				<dd>
-					{#if stats === undefined}<span class="skel short"></span>
+					{#if stats === undefined}<span class="mp-skel short"></span>
 					{:else if stats?.flows != null}
 						{FLOWS[sectorOf(stats.flows)]}
 					{:else if stats}<span class="faint">every way</span>
@@ -137,8 +150,8 @@
 			</div>
 			<div>
 				<dt>Slope</dt>
-				<dd class="num">
-					{#if stats === undefined}<span class="skel"></span>
+				<dd>
+					{#if stats === undefined}<span class="mp-skel"></span>
 					{:else if stats}{Math.round(stats.slope)}° average
 						<span class="faint">· {Math.round(stats.steep * 100)}% over {STEEP_DEG}°</span>
 					{:else}<span class="faint">–</span>{/if}
@@ -158,7 +171,7 @@
 			{#if item.ele != null}
 				<div>
 					<dt>Elevation</dt>
-					<dd class="num">{fmtElevation(item.ele, units)}</dd>
+					<dd>{fmtElevation(item.ele, units)}</dd>
 				</div>
 			{/if}
 		{/if}
@@ -166,36 +179,37 @@
 
 	{#if icy && glacier}
 		<section aria-label="Forecast snow on the glacier">
-			<h3>Forecast snow</h3>
+			<h3 class="eyebrow">
+				Forecast snow{snow?.rows.length === 2 || snowLoading ? ' at the top' : ''}
+			</h3>
 			{#if snowLoading}
-				<table class="snow" aria-busy="true" aria-label="Loading the forecast here">
-					<thead><tr><th></th><th>24 h</th><th>3 days</th><th>7 days</th></tr></thead>
-					<tbody>
-						{#each ['Top', 'Toe'] as k (k)}
-							<tr>
-								<th>{k}</th>
-								{#each [0, 1, 2] as i (i)}<td><span class="skel tiny"></span></td>{/each}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+				<dl class="mp-stats" aria-busy="true" aria-label="Loading the forecast here">
+					{#each ['Next 24 h', '3 days', '7 days'] as k (k)}
+						<div class="mp-stat">
+							<dt class="eyebrow">{k}</dt>
+							<dd class="v"><span class="mp-skel short"></span></dd>
+							<dd class="sub">&nbsp;</dd>
+						</div>
+					{/each}
+				</dl>
 			{:else if snow}
-				<table class="snow" aria-label="Forecast snow">
-					<thead><tr><th></th><th>24 h</th><th>3 days</th><th>7 days</th></tr></thead>
-					<tbody>
-						{#each snow.rows as r (r.label)}
-							<tr>
-								<th scope="row">{r.label}</th>
-								{#each r.cm as v, i (i)}<td>{fmtSnow(v, units)}</td>{/each}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+				{@const [first, second] = snow.rows}
+				<dl class="mp-stats" aria-label="Forecast snow">
+					{#each ['Next 24 h', '3 days', '7 days'] as k, i (k)}
+						<div class="mp-stat">
+							<dt class="eyebrow">{k}</dt>
+							<dd class="v" class:zero={!first.cm[i]}>{fmtSnow(first.cm[i], units)}</dd>
+							<dd class="sub">
+								{second ? `toe ${fmtSnow(second.cm[i], units)}` : 'for the area'}
+							</dd>
+						</div>
+					{/each}
+				</dl>
 				{#if snow.level != null}
-					<dl class="rows">
+					<dl class="mp-kv">
 						<div>
 							<dt>Snow level now</dt>
-							<dd class="num">
+							<dd>
 								{fmtElevation(snow.level, units)}
 								{#if stats && snow.level > stats.toe}
 									<span class="faint">· rain possible low down</span>
@@ -243,117 +257,32 @@
 <style>
 	.content {
 		display: grid;
-		gap: 12px;
+		gap: 14px;
 	}
 	section {
 		display: grid;
-		gap: 6px;
+		gap: 8px;
 	}
 	h3 {
-		margin: 0;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: var(--text-2);
+		margin: 0 0 0 2px;
 	}
-	.rows {
-		margin: 0;
-		display: grid;
-		gap: 2px;
-	}
-	.rows div {
-		display: grid;
-		grid-template-columns: 6.5rem minmax(0, 1fr);
-		align-items: center;
-		gap: 8px;
-		min-height: 1.45rem;
-	}
-	dt {
-		font-size: 0.75rem;
-		color: var(--text-2);
-		white-space: nowrap;
-	}
+	dl,
 	dd {
 		margin: 0;
-		font-weight: 600;
-		font-size: 0.82rem;
-		text-align: right;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
-	dd .faint {
-		font-weight: 500;
-		font-size: 0.76rem;
+	.mp-skel.short {
+		width: 2.6rem;
 	}
-	.num {
-		font-variant-numeric: tabular-nums;
+	.v.zero {
+		color: var(--text-3);
 	}
-	i {
+	.sw {
 		display: inline-block;
 		width: 10px;
 		height: 10px;
 		margin-right: 6px;
 		border-radius: 3px;
 		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15);
-	}
-	.snow {
-		width: 100%;
-		border-collapse: collapse;
-		table-layout: fixed;
-		font-size: 0.82rem;
-		font-variant-numeric: tabular-nums;
-	}
-	.snow th,
-	.snow td {
-		height: 1.45rem;
-		padding: 0 0 0 8px;
-		text-align: right;
-		white-space: nowrap;
-	}
-	.snow th:first-child {
-		width: 6.5rem;
-		padding-left: 0;
-		text-align: left;
-	}
-	.snow thead th {
-		height: 1.1rem;
-		font-size: 0.7rem;
-		font-weight: 500;
-		color: var(--text-2);
-	}
-	.snow tbody th {
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: var(--text-2);
-	}
-	.snow td {
-		font-weight: 600;
-	}
-	.skel {
-		display: inline-block;
-		width: 4.5rem;
-		height: 0.8rem;
-		border-radius: 4px;
-		background: var(--grid);
-		vertical-align: middle;
-	}
-	.skel.short {
-		width: 2.5rem;
-	}
-	.skel.tiny {
-		width: 2.6rem;
-	}
-	@media (prefers-reduced-motion: no-preference) {
-		.skel {
-			animation: pulse 1.4s ease-in-out infinite;
-		}
-	}
-	@keyframes pulse {
-		50% {
-			opacity: 0.45;
-		}
 	}
 	.act {
 		justify-self: start;

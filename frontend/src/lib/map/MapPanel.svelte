@@ -189,7 +189,7 @@
 		</button>
 		<header>
 			<div class="names">
-				<span class="kind">{kind}</span>
+				<span class="kind eyebrow">{kind}</span>
 				<strong class="title" {title}>{title}</strong>
 				{#if sub}{@render sub()}{/if}
 			</div>
@@ -249,16 +249,18 @@
 		gap: 1px;
 	}
 	.kind {
-		font-size: 0.7rem;
-		color: var(--text-2);
-		height: 1.1em;
-		line-height: 1.1;
+		font-size: 0.66rem;
+		height: 1.2em;
+		line-height: 1.2;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 	.title {
-		font-size: 1rem;
+		font-family: var(--font-num);
+		font-size: 1.08rem;
+		font-weight: 700;
+		letter-spacing: -0.01em;
 		line-height: 1.3;
 		white-space: nowrap;
 		overflow: hidden;
@@ -278,11 +280,18 @@
 	.x:hover {
 		background: var(--hover);
 	}
+	/* Everything under the tap: a well with the one shown raised, like the app's
+	   segmented controls and the Layers tiles. */
 	.chips {
 		flex: none;
 		display: flex;
-		gap: 6px;
-		padding: 0 14px 8px;
+		gap: 2px;
+		margin: 0 12px 10px;
+		padding: 3px;
+		width: max-content;
+		max-width: calc(100% - 24px);
+		border-radius: 999px;
+		background: var(--surface-2);
 		overflow-x: auto;
 		scrollbar-width: none;
 	}
@@ -293,35 +302,38 @@
 		flex: none;
 		max-width: 9rem;
 		height: 28px;
-		padding: 0 11px;
+		padding: 0 12px;
+		border: 0;
 		border-radius: 999px;
-		border: 1px solid var(--border);
 		background: transparent;
-		color: var(--text);
+		color: var(--text-2);
 		font: inherit;
 		font-size: 0.78rem;
-		font-weight: 600;
+		font-weight: 500;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		cursor: pointer;
+		transition:
+			background-color var(--ease),
+			box-shadow var(--ease),
+			color var(--ease);
 	}
 	.chip:hover {
-		background: var(--hover);
+		color: var(--text);
 	}
 	.chip[aria-pressed='true'] {
-		background: var(--accent);
-		border-color: transparent;
-		color: var(--on-accent);
+		background: var(--sel);
+		color: var(--text);
+		box-shadow: var(--sel-shadow);
 	}
 	.body {
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
 		overscroll-behavior: contain;
-		padding: 2px 14px 14px;
+		padding: 12px 12px 14px;
 		border-top: 1px solid var(--border);
-		padding-top: 10px;
 	}
 
 	/* Phones and tablets: a bottom sheet above the floating tab bar, at a peek or most of

@@ -7,6 +7,23 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The map's Layers sheet is redesigned**: every choice is a tile of the same size in a
+  well, the chosen one raised (as the app's other switches), with "None" first in Weather
+  and Terrain and the features shown as toggle tiles; shorter names ("Huts & passes",
+  "Avy zones", Concern with a "beta" tag); hill shading beside the base maps; and each
+  section's (i) says in one line what the chosen option is. No label is ever cut short
+  (a long one takes two lines; the narrowest phones get three tiles across). It fits a
+  375 × 667 phone without scrolling, as a sheet above the tab bar.
+- **"This spot" and the other map panels share the overview's look**: big numbers in
+  tiles (elevation, slope and aspect; forecast snow for 24 hours, 3 days and 7 days),
+  snow by height as little bars like the overview's days, label-and-value rows divided
+  like its list, the avalanche rating as the usual danger pill, and the chips as a
+  segmented well. Glaciers and snow stations use the same tiles.
+- **Phones: the controls at the foot of the map cover less of it.** One row of tabs
+  names them (Weather, Terrain, Satellite…) and at most one is open above it: choosing a
+  layer opens its controls, a tab switches, and a tap on the open tab folds it away,
+  leaving just the row. The Recent satellite controls are one row, with the longer story
+  behind an (i); the weather controls no longer repeat the layer choice on phones.
 - **A double tap on a phone only zooms.** A tap on the map waits a moment (about a fifth
   of a second) before opening or closing the panel, and a second tap in that moment, as
   in a double tap to zoom in or a double tap held and dragged to zoom with one finger,
@@ -98,6 +115,14 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **Pin Layers open (desktop)**: a pin in the sheet keeps it beside the map's buttons,
+  remembered in this browser; a tap on the map then reads the spot instead of closing it.
+  A row of terrain overlays (None, Slope, Aspect, Elevation, Sun, Wind, Avy) sits over
+  the weather controls.
+- **Full screen forecast chart on phones and tablets**: an expand button opens the chart
+  over the whole window, where a finger scrubs it without scrolling the page (and it asks
+  for landscape where the browser allows). In the page, a touch on the chart now picks
+  sideways (read the chart) or up and down (scroll) after its first few pixels.
 - **View a location on the map.** A Map button on each location page opens the map
   centred on it, close in and flat, with its popup open (`/map?loc=<id>`); the popup's
   "Open forecast →" goes back.

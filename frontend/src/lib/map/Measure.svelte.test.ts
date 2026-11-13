@@ -99,7 +99,8 @@ describe('map panel cards', () => {
 		};
 		const { getByText, container } = render(StationCard, { station: st, units: 'metric' });
 		expect(getByText('40 cm')).toBeTruthy();
-		expect(getByText(/−3 cm \(settling or melt\)/)).toBeTruthy();
+		expect(getByText('−3 cm')).toBeTruthy();
+		expect(getByText('settling or melt')).toBeTruthy();
 		expect(getByText(/2 h ago/)).toBeTruthy();
 		expect(container.querySelector('path.spark')?.getAttribute('d')).toMatch(/^M0/);
 		expect(getByText('Station page').getAttribute('href')).toBe(st.url);

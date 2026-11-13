@@ -21,7 +21,7 @@
 	import type { SunFacts } from './terrain/shade';
 	import { windWord } from './terrain/wind';
 	import { dangerWord } from '../conditions';
-	import { BAND_WORDS, DANGER_COLORS, type AvyHere } from './avalanche';
+	import { BAND_WORDS, type AvyHere } from './avalanche';
 	import { CONCERN_CLASSES, type ConcernFactors } from './terrain/concern';
 	import type { PointOut } from '../types.gen';
 	import { RAMPS, type PrecipKind } from '../radar';
@@ -201,52 +201,55 @@
 
 <div class="insp">
 	<section aria-label="Terrain">
-		<h3>Terrain</h3>
+		<h3 class="eyebrow">Terrain</h3>
 		{#if error}
 			<p class="faint msg">{error}</p>
 		{:else if facts?.sea}
 			<p class="msg">Water, at sea level.</p>
 		{:else}
-			<dl class="big">
-				<div>
-					<dt>Elevation</dt>
-					<dd class="num">
-						{#if facts}{fmtElevation(facts.elevation, units)}{:else}<span class="skel"></span>{/if}
+			<dl class="mp-stats">
+				<div class="mp-stat">
+					<dt class="eyebrow">Elevation</dt>
+					<dd class="v">
+						{#if facts}{fmtElevation(facts.elevation, units)}{:else}<span class="mp-skel"
+							></span>{/if}
 					</dd>
 				</div>
-				<div>
-					<dt>Slope</dt>
-					<dd class="num">
+				<div class="mp-stat">
+					<dt class="eyebrow">Slope</dt>
+					<dd class="v">
 						{#if facts}
-							{#if cls >= 0}<i style:background={SLOPE_CLASSES[cls].color} aria-hidden="true"
+							{Math.round(facts.slope)}°{#if cls >= 0}<i
+									class="sw"
+									style:background={SLOPE_CLASSES[cls].color}
+									title={SLOPE_CLASSES[cls].label}
+									aria-hidden="true"
 								></i>{/if}
-							{Math.round(facts.slope)}°
-						{:else}<span class="skel short"></span>{/if}
+						{:else}<span class="mp-skel short"></span>{/if}
 					</dd>
 				</div>
-				<div>
-					<dt>Faces</dt>
-					<dd>
-						{#if !facts}<span class="skel short"></span>
+				<div class="mp-stat">
+					<dt class="eyebrow">Faces</dt>
+					<dd class="v">
+						{#if !facts}<span class="mp-skel short"></span>
 						{:else if flat}
-							<span class="faint">flat</span>
+							<small>flat</small>
 						{:else}
 							<span title={SECTOR_WORDS[sector]}>{sector}</span>
-							<span class="faint num">{Math.round(facts.aspect)}°</span>
+							<small>{Math.round(facts.aspect)}°</small>
 						{/if}
 					</dd>
 				</div>
 			</dl>
-			<dl class="rows">
+			<dl class="mp-kv">
 				<div>
 					<dt>Sun {sunDay}</dt>
-					<dd class="num">
-						{#if !facts || sunState === 'loading'}<span class="skel"></span>
+					<dd>
+						{#if !facts || sunState === 'loading'}<span class="mp-skel"></span>
 						{:else if !sun}<span class="faint">–</span>
 						{:else if sun.first != null && sun.last != null}
 							{clock(sun.first)} – {clock(sun.last)}
-							{zone}
-							<span class="faint">· {sunHours}</span>
+							<span class="faint">{zone} · {sunHours}</span>
 						{:else if sun.sunrise == null}
 							<span class="faint">no sunrise or sunset</span>
 						{:else}
@@ -258,7 +261,7 @@
 					<div>
 						<dt>Wind effect</dt>
 						<dd title={wind?.window}>
-							{#if windState === 'loading' || !facts}<span class="skel"></span>
+							{#if windState === 'loading' || !facts}<span class="mp-skel"></span>
 							{:else if wind}{windWord(wind.value)}
 								<span class="faint">· {wind.window.toLowerCase()}</span>
 							{:else}<span class="faint">–</span>{/if}
@@ -280,26 +283,26 @@
 	</section>
 
 	<section aria-label="Snow and weather">
-		<h3>Snow & weather</h3>
+		<h3 class="eyebrow">Forecast snow</h3>
 		{#if pointState === 'loading'}
-			<table class="snow" aria-busy="true" aria-label="Loading the weather here">
-				<thead><tr><th></th><th>24 h</th><th>3 days</th><th>7 days</th></tr></thead>
-				<tbody
-					><tr
-						><th>Area</th>{#each [0, 1, 2] as i (i)}<td><span class="skel tiny"></span></td
-							>{/each}</tr
-					></tbody
-				>
-			</table>
+			<dl class="mp-stats" aria-busy="true" aria-label="Loading the weather here">
+				{#each ['Next 24 h', '3 days', '7 days'] as k (k)}
+					<div class="mp-stat">
+						<dt class="eyebrow">{k}</dt>
+						<dd class="v"><span class="mp-skel short"></span></dd>
+						<dd class="sub">&nbsp;</dd>
+					</div>
+				{/each}
+			</dl>
 			<div class="next">
 				<div class="cap"><span>Next 48 h</span></div>
 				<span class="strip skel-strip"></span>
 			</div>
-			<dl class="rows">
+			<dl class="mp-kv">
 				{#each ['Snow level', 'Ridge wind', 'On the ground'] as k (k)}
 					<div>
 						<dt>{k}</dt>
-						<dd><span class="skel"></span></dd>
+						<dd><span class="mp-skel"></span></dd>
 					</div>
 				{/each}
 			</dl>
@@ -309,36 +312,33 @@
 			<p class="faint msg">Outside the area the map's weather covers.</p>
 		{:else}
 			{#if wx.hasTotals}
-				<table class="snow" aria-label="Forecast snow">
-					<thead><tr><th></th><th>24 h</th><th>3 days</th><th>7 days</th></tr></thead>
-					<tbody>
-						{#if wx.adjusted}
-							<tr>
-								<th scope="row" title={TERRAIN_NOTE}>Here</th>
-								{#each wx.snow as v, i (i)}<td>{fmtSnow(v, units)}</td>{/each}
-							</tr>
-						{/if}
-						<tr class:faint={wx.adjusted}>
-							<th scope="row">Area</th>
-							{#each wx.area as v, i (i)}<td>{fmtSnow(v, units)}</td>{/each}
-						</tr>
-					</tbody>
-				</table>
+				<dl class="mp-stats" aria-label="Forecast snow">
+					{#each ['Next 24 h', '3 days', '7 days'] as k, i (k)}
+						<div class="mp-stat">
+							<dt class="eyebrow">{k}</dt>
+							<dd class="v" class:zero={!(wx.adjusted ? wx.snow[i] : wx.area[i])}>
+								{fmtSnow(wx.adjusted ? wx.snow[i] : wx.area[i], units)}
+							</dd>
+							<dd class="sub" title={wx.adjusted ? TERRAIN_NOTE : undefined}>
+								{wx.adjusted ? `area ${fmtSnow(wx.area[i], units)}` : 'for the area'}
+							</dd>
+						</div>
+					{/each}
+				</dl>
 				{#if wx.ladder.length}
-					<table class="snow" aria-label="Snow by height, {wx.ladderLabel}">
-						<thead>
-							<tr>
-								<th>By height</th>
-								{#each wx.ladder as r (r.m)}<th>{fmtElevation(r.m, units)}</th>{/each}
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<th scope="row">{wx.ladderLabel}</th>
-								{#each wx.ladder as r (r.m)}<td>{fmtSnow(r.cm, units)}</td>{/each}
-							</tr>
-						</tbody>
-					</table>
+					{@const top = Math.max(1, ...wx.ladder.map((r) => r.cm ?? 0))}
+					<figure class="ladder" aria-label="Snow by height, {wx.ladderLabel}">
+						<figcaption>By height · {wx.ladderLabel}</figcaption>
+						<div class="bars">
+							{#each wx.ladder as r (r.m)}
+								<div class="col">
+									<span class="val num" class:zero={!r.cm}>{fmtSnow(r.cm, units)}</span>
+									<i style:height="{r.cm ? Math.max(3, Math.round((r.cm / top) * 34)) : 0}px"></i>
+									<span class="el num">{fmtElevation(r.m, units)}</span>
+								</div>
+							{/each}
+						</div>
+					</figure>
 				{/if}
 			{/if}
 			{#if wx.strip.length}
@@ -352,11 +352,11 @@
 					</span>
 				</div>
 			{/if}
-			<dl class="rows">
+			<dl class="mp-kv">
 				{#if wx.level != null}
 					<div>
 						<dt>Snow level</dt>
-						<dd class="num">
+						<dd>
 							{fmtElevation(wx.level, units)}
 							{#if wx.lowest != null && wx.lowest < wx.level - 100}
 								<span class="faint">· lowest {fmtElevation(wx.lowest, units)}</span>
@@ -367,7 +367,7 @@
 				{#if wx.ridge?.kmh != null}
 					<div>
 						<dt>Ridge wind</dt>
-						<dd class="num">
+						<dd>
 							{wx.ridge.dir != null ? `${sectorOf(wx.ridge.dir)} ` : ''}{fmtSpeed(
 								wx.ridge.kmh,
 								units
@@ -378,7 +378,7 @@
 				{#if wx.gust != null}
 					<div>
 						<dt>Gusts</dt>
-						<dd class="num">
+						<dd>
 							{fmtSpeed(wx.gust, units)} <span class="faint">near the ground</span>
 						</dd>
 					</div>
@@ -386,13 +386,13 @@
 				{#if wx.depth != null}
 					<div>
 						<dt>On the ground</dt>
-						<dd class="num">{fmtSnow(wx.depth, units)}</dd>
+						<dd>{fmtSnow(wx.depth, units)}</dd>
 					</div>
 				{/if}
 				{#if wx.fell.length}
 					<div>
 						<dt>Fell</dt>
-						<dd class="num">
+						<dd>
 							{#each wx.fell as o, i (o.hours)}{i ? ' · ' : ''}{fmtSnow(o.cm, units)}
 								<span class="faint">{o.hours} h</span>{/each}
 						</dd>
@@ -404,26 +404,16 @@
 
 	{#if avySection}
 		<section aria-label="Avalanche">
-			<h3>Avalanche</h3>
-			<dl class="rows">
-				{#if ates}
-					<div>
-						<dt>ATES</dt>
-						<dd>
-							{#if ates.color}<i style:background={ates.color} aria-hidden="true"></i>{/if}
-							{ates.name}
-						</dd>
-					</div>
-				{/if}
+			<h3 class="eyebrow">Avalanche</h3>
+			<dl class="mp-kv">
 				{#if avy}
 					<div>
-						<dt>{BAND_WORDS[avy.band]}</dt>
+						<dt>{BAND_WORDS[avy.band]} today</dt>
 						<dd>
 							{#if avy.level}
-								<i style:background={DANGER_COLORS[avy.level]} aria-hidden="true"></i>
-								{avy.level} · {dangerWord(avy.level)}
+								<span class="danger d{avy.level}">{avy.level} · {dangerWord(avy.level)}</span>
 							{:else}
-								<span class="faint">{avy.status ?? 'no rating'}</span>
+								<span class="danger d0">{avy.status ?? 'No rating'}</span>
 							{/if}
 						</dd>
 					</div>
@@ -434,12 +424,26 @@
 						</dd>
 					</div>
 				{/if}
+				{#if ates}
+					<div>
+						<dt>ATES</dt>
+						<dd>
+							{#if ates.color}<i class="sw" style:background={ates.color} aria-hidden="true"
+								></i>{/if}
+							{ates.name}
+						</dd>
+					</div>
+				{/if}
 				{#if concern && concern.base != null}
 					<div>
 						<dt>Concern <span class="beta">beta</span></dt>
 						<dd>
 							{#if concern.cls >= 0}
-								<i style:background={CONCERN_CLASSES[concern.cls].color} aria-hidden="true"></i>
+								<i
+									class="sw"
+									style:background={CONCERN_CLASSES[concern.cls].color}
+									aria-hidden="true"
+								></i>
 								{CONCERN_CLASSES[concern.cls].label}
 							{:else}
 								<span class="faint">not drawn (under 25°)</span>
@@ -499,138 +503,110 @@
 <style>
 	.insp {
 		display: grid;
-		gap: 14px;
+		gap: 18px;
 	}
 	section {
 		display: grid;
-		gap: 6px;
+		gap: 8px;
 	}
 	h3 {
-		margin: 0;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: var(--text-2);
+		margin: 0 0 0 2px;
 	}
 	p {
 		margin: 0;
 	}
 	.msg {
-		font-size: 0.8rem;
-	}
-	dl {
-		margin: 0;
-	}
-	.big {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 8px;
-	}
-	.big dt {
-		font-size: 0.7rem;
-		color: var(--text-2);
-	}
-	.big dd {
-		margin: 0;
-		height: 1.5rem;
-		font-weight: 650;
-		font-size: 1.05rem;
-		display: flex;
-		align-items: center;
-		gap: 5px;
-		white-space: nowrap;
-	}
-	.big dd .faint {
-		font-weight: 500;
-		font-size: 0.78rem;
-	}
-	/* One line per row: the label in a fixed column, the value right-aligned. */
-	.rows {
-		display: grid;
-		gap: 2px;
-	}
-	.rows div {
-		display: grid;
-		grid-template-columns: 6.5rem minmax(0, 1fr);
-		align-items: center;
-		gap: 8px;
-		min-height: 1.45rem;
-	}
-	.rows dt {
-		font-size: 0.75rem;
-		color: var(--text-2);
-		white-space: nowrap;
-	}
-	.rows dd {
-		margin: 0;
-		text-align: right;
-		font-weight: 600;
 		font-size: 0.82rem;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
-	.rows dd .faint {
-		font-weight: 500;
-		font-size: 0.76rem;
+	dl,
+	dd {
+		margin: 0;
 	}
-	.num {
-		font-variant-numeric: tabular-nums;
+	.mp-skel.short {
+		width: 2.6rem;
 	}
-	i {
+	/* A colour swatch beside a number: the slope's class, an ATES rating, the concern. */
+	.sw {
 		display: inline-block;
+		flex: none;
 		width: 10px;
 		height: 10px;
 		border-radius: 3px;
 		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15);
 		vertical-align: baseline;
 	}
-	.rows dd i {
-		margin-right: 4px;
+	.mp-kv dd .sw {
+		margin-right: 5px;
 	}
-	/* The snow tables: a label column, then 24 h, 3 days, 7 days (or a few heights). */
-	.snow {
-		width: 100%;
-		border-collapse: collapse;
-		table-layout: fixed;
-		font-size: 0.82rem;
-		font-variant-numeric: tabular-nums;
+	.v.zero {
+		color: var(--text-3);
 	}
-	.snow th,
-	.snow td {
-		height: 1.45rem;
-		padding: 0 0 0 8px;
-		text-align: right;
-		white-space: nowrap;
+	.link {
+		border: 0;
+		background: transparent;
+		color: var(--accent-ink, var(--accent));
+		font: inherit;
+		font-weight: 600;
+		padding: 0;
+		cursor: pointer;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-	.snow th:first-child {
-		width: 6.5rem;
-		padding-left: 0;
-		text-align: left;
+	/* Snow at a few heights round the spot: little bars, like the overview's days. */
+	.ladder {
+		margin: 0;
+		padding: 8px 12px 6px;
+		border-radius: 14px;
+		background: var(--surface-2);
 	}
-	.snow thead th {
-		height: 1.1rem;
+	figcaption {
+		font-size: 0.72rem;
+		color: var(--text-3);
+		margin-bottom: 4px;
+	}
+	.bars {
+		display: grid;
+		grid-auto-flow: column;
+		grid-auto-columns: minmax(0, 1fr);
+		gap: 8px;
+		align-items: end;
+	}
+	.col {
+		display: grid;
+		justify-items: center;
+		align-content: end;
+		gap: 3px;
+		height: 74px;
+	}
+	.col i {
+		width: 44%;
+		max-width: 26px;
+		border-radius: 3px 3px 0 0;
+		background: var(--snow);
+	}
+	.val {
+		font-size: 0.8rem;
+		font-weight: 650;
+	}
+	.val.zero {
+		color: var(--text-3);
+		font-weight: 500;
+	}
+	.el {
+		width: 100%;
+		text-align: center;
+		border-top: 1px solid var(--border);
+		padding-top: 3px;
 		font-size: 0.7rem;
-		font-weight: 500;
 		color: var(--text-2);
-	}
-	.snow tbody th {
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: var(--text-2);
-	}
-	.snow td {
-		font-weight: 600;
-	}
-	.snow tr.faint td {
-		font-weight: 500;
+		white-space: nowrap;
 	}
 	.next {
 		display: grid;
-		gap: 3px;
+		gap: 4px;
+		padding: 2px 2px 0;
 	}
 	.cap {
 		display: flex;
@@ -656,51 +632,23 @@
 	.strip b {
 		flex: 1;
 	}
-	.skel,
 	.skel-strip {
-		display: inline-block;
-		width: 4.5rem;
-		height: 0.8rem;
-		border-radius: 4px;
 		background: var(--grid);
 	}
-	.skel.short {
-		width: 2.5rem;
-	}
-	.skel.tiny {
-		width: 2.6rem;
-		vertical-align: middle;
-	}
-	.skel-strip {
-		display: flex;
-		width: 100%;
-		height: 12px;
-	}
-	.link {
-		border: 0;
-		background: transparent;
-		color: var(--accent-ink, var(--accent));
-		font: inherit;
-		font-weight: 600;
-		padding: 0;
-		cursor: pointer;
-		max-width: 100%;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
 	.beta {
-		font-size: 0.6rem;
+		font-size: 0.56rem;
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		padding: 0 4px;
+		padding: 1px 4px;
 		border-radius: 4px;
-		background: var(--hover);
+		background: var(--accent-soft);
+		color: var(--accent-ink);
+		vertical-align: 1px;
 	}
 	details summary {
 		cursor: pointer;
-		font-size: 0.75rem;
+		font-size: 0.78rem;
 		font-weight: 600;
 		color: var(--accent-ink, var(--accent));
 		width: max-content;
@@ -711,23 +659,12 @@
 	}
 	.about {
 		border-top: 1px solid var(--border);
-		padding-top: 8px;
+		padding-top: 10px;
 	}
 	.about div {
 		display: grid;
 		gap: 6px;
 		margin-top: 6px;
 		font-size: 0.74rem;
-	}
-	@media (prefers-reduced-motion: no-preference) {
-		.skel,
-		.skel-strip {
-			animation: pulse 1.4s ease-in-out infinite;
-		}
-	}
-	@keyframes pulse {
-		50% {
-			opacity: 0.45;
-		}
 	}
 </style>

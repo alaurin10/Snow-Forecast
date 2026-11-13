@@ -90,6 +90,21 @@ export function satViews(spot: SatLocation | null): SatView[] {
 	return out;
 }
 
+/** What's on screen in a few words, for the folded controls: "Newest clear · 21 Oct – 4
+ *  Nov", "4 Nov · 6 days ago", "Daily mosaic · 10 Nov". */
+export function satSummary(
+	viirsDate: string | null | undefined,
+	spot: SatLocation | null,
+	index: number,
+	now: number
+): string {
+	const views = satViews(spot);
+	const view = views[Math.min(index, views.length - 1)];
+	if (view?.kind === 'stitched') return `Newest clear · ${stitchedSpan(view.composite)}`;
+	if (view?.kind === 'scene') return `${shortDate(view.scene.time)} · ${ago(view.scene.time, now)}`;
+	return viirsDate ? `Daily mosaic · ${dayLabel(viirsDate)}` : 'Daily mosaic';
+}
+
 /** "21 Oct – 10 Nov": the span of a stitched view's passes. */
 export function stitchedSpan(c: SatComposite): string {
 	const times = c.layers.map((l) => l.time).sort();
