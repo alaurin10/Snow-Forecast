@@ -1,7 +1,8 @@
 <!--
   One field report from Avalanche Canada's Mountain Information Network, tapped on the
-  map: its title, when, where, what kinds of observation it has, and a link to read it
-  in full on avalanche.ca. What someone saw, not checked by anyone.
+  map (the map panel's content; its title is the panel's): when, where, what kinds of
+  observation it has, and a link to read it in full on avalanche.ca. What someone saw,
+  not checked by anyone.
 -->
 <script lang="ts">
 	import type { ObsProps } from '../types.gen';
@@ -10,10 +11,9 @@
 
 	interface Props {
 		report: ObsProps;
-		onclose: () => void;
 	}
 
-	let { report, onclose }: Props = $props();
+	let { report }: Props = $props();
 	const when = $derived(
 		new Date(report.time).toLocaleString('en-US', {
 			weekday: 'short',
@@ -25,13 +25,10 @@
 	);
 </script>
 
-<div class="sheet" role="dialog" aria-label="Field report">
-	<div class="head">
-		<strong>{report.title || 'Field report'}</strong>
-		<span class="faint"
-			>{when} · {ago(report.time)}{report.region ? ` · ${report.region}` : ''}</span
-		>
-	</div>
+<div class="content">
+	<span class="faint where"
+		>{when} · {ago(report.time)}{report.region ? ` · ${report.region}` : ''}</span
+	>
 	{#if report.kinds.length}
 		<ul class="kinds" aria-label="What it reports">
 			{#each report.kinds as k (k)}
@@ -54,33 +51,15 @@
 			>Read it on avalanche.ca →</a
 		>
 	{/if}
-	<button class="close" onclick={onclose}>Close</button>
 </div>
 
 <style>
-	.sheet {
-		position: absolute;
-		top: 56px;
-		left: calc(var(--map-inset, 0px) + 60px);
-		right: 10px;
-		max-width: 340px;
-		z-index: 1003;
-		padding: 12px 14px;
-		border-radius: 14px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		box-shadow: var(--glass-shadow);
-		font-size: 0.85rem;
-		color: var(--text);
+	.content {
 		display: grid;
-		gap: 8px;
+		gap: 10px;
 	}
-	.head {
-		display: grid;
-		gap: 2px;
-	}
-	.head .faint {
-		font-size: 0.75rem;
+	.where {
+		font-size: 0.78rem;
 	}
 	.kinds {
 		list-style: none;
@@ -107,14 +86,5 @@
 	}
 	a {
 		font-weight: 600;
-	}
-	.close {
-		justify-self: end;
-		border: 0;
-		background: transparent;
-		color: var(--accent);
-		font-weight: 600;
-		cursor: pointer;
-		padding: 4px 6px;
 	}
 </style>

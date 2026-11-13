@@ -53,7 +53,9 @@
 	.legend {
 		position: absolute;
 		top: 44px;
-		right: 10px;
+		/* Left of the map panel while it's open (desktop). */
+		right: calc(10px + var(--map-panel, 0px));
+		transition: right 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
 		z-index: 1000;
 		display: grid;
 		gap: 2px;

@@ -7,6 +7,28 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A tap on the map opens one panel, always in the same place**, whatever it lands on:
+  docked to the right edge on desktop (the terrain key and the map credits step left of
+  it), a bottom sheet above the tab bar on phones and tablets (drag its handle, or tap it,
+  between a peek and most of the screen; the controls at the foot make way while it's up).
+  The map's centre moves into the space it leaves, and a tapped spot it would cover comes
+  into view.
+- **The panel opens on what you tapped, not always on "This spot".** A station, a field
+  report, a hut, trailhead or pass, a run or route, a glacier, an ATES rating or the
+  avalanche zone (while zones or an avalanche layer are on) each has its own content, most
+  specific first, with chips for the rest ("Glacier · Zone · This spot") that switch it in
+  place. "This spot" is always the last chip, and its terrain and weather are only worked
+  out when it's shown. A long press (touch) or a right-click goes straight to it. Glaciers
+  show their whole area and the elevation where tapped; huts, passes and glaciers link to
+  OpenStreetMap.
+- **"This spot" is tidier**: three sections in a fixed order (Terrain; Snow & weather,
+  with a small 24 h / 3 days / 7 days table; Avalanche), one line per row with the label
+  on the left and the number on the right. Rows hold their place while the numbers load,
+  the concern index's arithmetic sits behind "How?", every caveat is in one "About these
+  numbers", and the coordinates under the title copy on a tap.
+- **On the map, the phone and tablet tab bar is icons only** (as it is while scrolling
+  down other pages), leaving more of the map in view. Its height doesn't change, so the
+  controls above it stay put.
 - **The desktop rail never moves.** It sits in one place on every page (14 px from the
   window's top left), over the map too; only its background gets denser there. Folding
   it on the map slides it away and fades its button in, instead of swapping one for the

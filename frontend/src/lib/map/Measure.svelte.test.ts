@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import Measure from './Measure.svelte';
 import Profile from './Profile.svelte';
-import StationSheet from './StationSheet.svelte';
-import ReportSheet from './ReportSheet.svelte';
+import StationCard from './StationCard.svelte';
+import ReportCard from './ReportCard.svelte';
 import { expectMarksInside } from '../charts/__tests__/marks';
 import type { Sample } from './measure';
 import type { MapStation } from '../types.gen';
@@ -82,7 +82,7 @@ describe('Measure', () => {
 	});
 });
 
-describe('sheets', () => {
+describe('map panel cards', () => {
 	it('shows a station’s depth, its change and its page', () => {
 		const st: MapStation = {
 			id: '908:WA:SNTL',
@@ -97,11 +97,7 @@ describe('sheets', () => {
 			daily: [10, 20, 30, 40].map((v, i) => ({ date: `2026-11-0${i + 1}`, depth_cm: v })),
 			url: 'https://wcc.sc.egov.usda.gov/nwcc/site?sitenum=908'
 		};
-		const { getByText, container } = render(StationSheet, {
-			station: st,
-			units: 'metric',
-			onclose: vi.fn()
-		});
+		const { getByText, container } = render(StationCard, { station: st, units: 'metric' });
 		expect(getByText('40 cm')).toBeTruthy();
 		expect(getByText(/−3 cm \(settling or melt\)/)).toBeTruthy();
 		expect(getByText(/2 h ago/)).toBeTruthy();
@@ -119,8 +115,8 @@ describe('sheets', () => {
 			images: 2,
 			url: 'javascript:alert(1)'
 		};
-		const { getByText, queryByText } = render(ReportSheet, { report, onclose: vi.fn() });
-		expect(getByText('Whumpfing')).toBeTruthy();
+		const { getByText, queryByText } = render(ReportCard, { report });
+		expect(getByText(/Purcells/)).toBeTruthy();
 		expect(getByText('Avalanche')).toBeTruthy();
 		expect(getByText(/2 photos/)).toBeTruthy();
 		expect(queryByText(/Read it on avalanche.ca/)).toBeNull();
