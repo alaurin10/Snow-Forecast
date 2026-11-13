@@ -286,10 +286,34 @@
 			case 'zone':
 				return { kind: 'Avalanche forecast', title: zoneName(t.zone) };
 			default:
-				return { kind: 'Terrain & weather', title: 'This spot' };
+				return {
+					kind: 'Terrain & weather',
+					title: spotGlacier ? `This spot · ${spotGlacier.name}` : 'This spot'
+				};
 		}
 	}
 	const head = $derived(target ? heading(target) : null);
+	/** A glacier or ATES area under the tap: the spot names them, each a chip away. */
+	const spotGlacier = $derived(tapInput?.here?.find((i) => i.type === 'glacier') ?? null);
+	const spotAtes = $derived(tapInput?.here?.find((i) => i.type === 'ates') ?? null);
+	/** The spot's glacier's whole area, for its line in the spot's terrain. */
+	let spotGlacierArea = $state<number | null | undefined>(undefined);
+	$effect(() => {
+		const ice = spotGlacier;
+		const at = tapAt;
+		spotGlacierArea = undefined;
+		if (!ice || !at || target?.kind !== 'spot') return;
+		let gone = false;
+		void loadSki().then((fc) => {
+			if (!gone) spotGlacierArea = fc ? glacierArea(fc, at.lon, at.lat, ice.osm) : null;
+		});
+		return () => (gone = true);
+	});
+	/** Switch the panel to a feature's own chip. */
+	function showFeature(item: HereItem | null) {
+		const t = item && targets.find((x) => x.kind === 'feature' && x.item === item);
+		if (t) chosen = targetKey(t);
+	}
 	/** The spot's coordinates, under its title; a tap copies them. */
 	const coordsText = $derived(
 		tapAt
@@ -1617,9 +1641,15 @@
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
 			});
 			// A tap on the map itself (not a marker or a popup) opens the map panel on what's
-			// there. One gesture: what it shows first follows the zoom (../map/here.ts).
+			// there (what it shows first follows the zoom: ../map/here.ts), or, while the
+			// panel is open, closes it.
 			map.on('click', (e) => {
 				if (!radar) return;
+				// With the map panel open, a tap elsewhere on the map just puts it away.
+				if (tapInput && !(measuring && measureEdit)) {
+					closeTap();
+					return;
+				}
 				if (popups.some((p) => p.isOpen())) {
 					for (const p of popups) p.remove();
 					return;
@@ -1976,6 +2006,9 @@
 						point={probePoint}
 						pointState={probe ? probePointState : 'loading'}
 						onzone={() => showZone(probeZone)}
+						glacier={spotGlacier ? { name: spotGlacier.name, area: spotGlacierArea } : null}
+						onglacier={() => showFeature(spotGlacier)}
+						ates={spotAtes}
 					/>
 				{/if}
 			</MapPanel>

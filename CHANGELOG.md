@@ -7,22 +7,28 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A tap elsewhere on the map puts the panel away**, rather than opening it on the new
+  spot; the next tap opens it again.
+- **On a glacier or an ATES area, a tap shows the spot first** (its terrain and weather),
+  named for the glacier ("This spot · Tacoma Glacier"), with a line for the glacier and
+  its area, and the ATES rating under Avalanche. The glacier's own card is a chip, or a
+  tap on its line, away.
+- **The phone sheet follows your finger anywhere on it.** At the peek, a swipe up (or a
+  scroll) grows it instead of scrolling its few lines; grown, the content scrolls, and
+  pulling down from its top shrinks it again. A tap on the title bar still switches.
 - **The map stays still when its panel opens**, on desktop and on phones (the controls
   at the foot hide under the sheet without giving up their place).
 - **One gesture on the map: a tap.** What the panel shows first follows the zoom, as
   the map does: zoomed out, where avalanche zones are coloured and glaciers are specks,
-  the zone's bulletin, then the spot, with glaciers and ATES ratings as chips after
-  them; zoomed in past where the zones' colour fades, a glacier or ATES area you can
-  see, then the spot, with the zone last. An open panel follows the zoom too, until you
-  pick a chip. The long press and right-click shortcuts are gone.
+  the zone's bulletin, then the spot; zoomed in past where the zones' colour fades, the
+  spot, with the zone last. An open panel follows the zoom too, until you pick a chip.
+  The long press and right-click shortcuts are gone.
 - **Glaciers tell you more**: their type as mapped (valley, cirque…), area, the
   elevation of the top and the toe, the distance and drop between them, which way the
   ice flows, its average slope and how much is steeper than 30°, worked out from the
   terrain over the whole mapped outline; the forecast snow for 24 hours, 3 days and 7
   days at the top's and the toe's heights, and the snow level; and a Wikipedia link
   when mappers gave one.
-- **The phone sheet's whole title bar is its grip**: tap it to switch between the peek
-  and most of the screen, or drag it, without moving the map underneath.
 - **A tap on the map opens one panel, always in the same place**, whatever it lands on:
   docked to the right edge on desktop (the terrain key and the map credits step left of
   it), a bottom sheet above the tab bar on phones and tablets (drag its handle, or tap it,

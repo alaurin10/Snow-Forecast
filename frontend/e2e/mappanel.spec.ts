@@ -64,29 +64,43 @@ test('a station, a glacier and bare ground open the same panel in the same place
 		expect(first.y).toBeLessThan(20);
 	}
 
-	// A glacier, zoomed in (where it's plain to see): its own card first, with its area
-	// from the whole outline, and the spot one chip away.
+	// With the panel open, a tap elsewhere on the map only puts it away.
 	p = await pin(page);
 	await page.mouse.click(p.x, p.y + 0.014 * PX_LAT);
-	const glacier = page.getByRole('dialog', { name: 'Test Glacier' });
-	await expect(glacier).toBeVisible();
-	await expect(glacier).toContainText('Glacier');
+	await expect(page.locator('[data-map-panel]')).toHaveCount(0);
+
+	// A glacier: the spot first, named for the glacier, with the glacier's own card a chip
+	// (or a tap on its line) away.
+	await page.mouse.click(p.x, p.y + 0.014 * PX_LAT);
+	const onIce = page.getByRole('dialog', { name: 'This spot · Test Glacier' });
+	await expect(onIce).toBeVisible();
+	await expect(onIce.getByRole('button', { name: 'This spot', pressed: true })).toBeVisible();
+	await expect(
+		onIce.getByRole('button', { name: 'Glacier', exact: true, pressed: false })
+	).toBeVisible();
+	expect(await panelBox(page)).toMatchObject(
+		desktop ? { x: first.x, y: first.y, width: first.width } : first
+	);
 	// 0.02° × 0.008° at 48.5° N: about 1.5 km × 0.9 km.
+	const line = onIce.getByRole('button', { name: /Test Glacier/ });
+	await expect(line).toContainText(/1\.3 km²|1\.2 km²|3\d\d acres/);
+	await line.click();
+	const glacier = page.getByRole('dialog', { name: 'Test Glacier', exact: true });
+	await expect(glacier).toBeVisible();
+	await expect(
+		glacier.getByRole('button', { name: 'Glacier', exact: true, pressed: true })
+	).toBeVisible();
 	await expect(glacier).toContainText(/1\.3 km²|1\.2 km²|3\d\d acres/);
 	expect(await panelBox(page)).toMatchObject(
 		desktop ? { x: first.x, y: first.y, width: first.width } : first
 	);
-	const spotChip = glacier.getByRole('button', { name: 'This spot' });
-	if (await spotChip.count()) {
-		await spotChip.click();
-		await expect(page.getByRole('dialog', { name: 'This spot' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Glacier', pressed: false })).toBeVisible();
-	}
 
-	// Bare ground: the spot itself, terrain and weather, in the same place.
+	// Bare ground (after a tap to put the panel away): the spot, in the same place.
 	p = await pin(page);
 	await page.mouse.click(p.x - 0.02 * PX_LON, p.y);
-	const spot = page.getByRole('dialog', { name: 'This spot' });
+	await expect(page.locator('[data-map-panel]')).toHaveCount(0);
+	await page.mouse.click(p.x - 0.02 * PX_LON, p.y);
+	const spot = page.getByRole('dialog', { name: 'This spot', exact: true });
 	await expect(spot).toBeVisible();
 	await expect(spot.getByRole('region', { name: 'Terrain' })).toBeVisible();
 	await expect(spot.getByRole('region', { name: 'Snow and weather' })).toBeVisible();
@@ -98,16 +112,20 @@ test('a station, a glacier and bare ground open the same panel in the same place
 	await page.keyboard.press('Escape');
 	await expect(page.locator('[data-map-panel]')).toHaveCount(0);
 
-	// Zoomed out, where a glacier is a speck: the spot first, the glacier a chip after it.
+	// Zoomed out too: the spot first, the glacier a chip after it.
 	await page.getByRole('button', { name: 'Zoom out' }).click();
 	await page.getByRole('button', { name: 'Zoom out' }).click();
 	p = await pin(page);
 	await page.mouse.click(p.x, p.y + (0.0165 * PX_LAT) / 4);
-	await expect(page.getByRole('dialog', { name: 'This spot' })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Glacier', pressed: false })).toBeVisible();
+	await expect(page.getByRole('dialog', { name: 'This spot · Test Glacier' })).toBeVisible();
+	await expect(
+		page.getByRole('button', { name: 'Glacier', exact: true, pressed: false })
+	).toBeVisible();
 });
 
-test('phones: the sheet’s whole title bar makes it bigger or smaller', async ({ page }, info) => {
+test('phones: the sheet grows and shrinks from its title bar or a swipe anywhere on it', async ({
+	page
+}, info) => {
 	test.skip(info.project.name !== 'phone', 'the sheet is for phones and tablets');
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
 	let p = await pin(page);
@@ -130,6 +148,30 @@ test('phones: the sheet’s whole title bar makes it bigger or smaller', async (
 	await page.mouse.down();
 	for (let i = 1; i <= 10; i++) await page.mouse.move(t.x + 40, t.y + 5 + i * 25);
 	await page.mouse.up();
+	await expect.poll(async () => Math.round((await panelBox(page)).h)).toBe(Math.round(peek));
+	expect(await pin(page)).toEqual(before);
+
+	// A finger anywhere on it: swiping up the content at the peek grows the sheet (rather
+	// than scrolling), and pulling down from the top of its content shrinks it again.
+	const cdp = await page.context().newCDPSession(page);
+	const swipe = async (x: number, from: number, to: number) => {
+		await cdp.send('Input.dispatchTouchEvent', {
+			type: 'touchStart',
+			touchPoints: [{ x, y: from }]
+		});
+		for (let i = 1; i <= 8; i++)
+			await cdp.send('Input.dispatchTouchEvent', {
+				type: 'touchMove',
+				touchPoints: [{ x, y: from + ((to - from) * i) / 8 }]
+			});
+		await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	};
+	const terrain = (await sheet.getByRole('region', { name: 'Terrain' }).boundingBox())!;
+	await swipe(terrain.x + 60, terrain.y + 30, terrain.y - 120);
+	await expect.poll(async () => (await panelBox(page)).h).toBeGreaterThan(peek * 1.5);
+	expect(await pin(page)).toEqual(before);
+	const grown = (await sheet.getByRole('region', { name: 'Terrain' }).boundingBox())!;
+	await swipe(grown.x + 60, grown.y + 20, grown.y + 200);
 	await expect.poll(async () => Math.round((await panelBox(page)).h)).toBe(Math.round(peek));
 	expect(await pin(page)).toEqual(before);
 });

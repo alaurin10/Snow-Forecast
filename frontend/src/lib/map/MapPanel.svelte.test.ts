@@ -113,6 +113,35 @@ describe('Inspector', () => {
 	});
 });
 
+describe('Inspector on a glacier', () => {
+	it('names the glacier and its ATES rating, a tap from their own cards', async () => {
+		const onglacier = vi.fn();
+		const { getByRole, getByText } = render(Inspector, {
+			lat: 48.5,
+			facts: {
+				elevation: 2100,
+				slope: 20,
+				aspect: 0,
+				sea: false,
+				srcZ: 14,
+				metresPerPixel: 10,
+				fallback: false
+			},
+			error: null,
+			units: 'metric',
+			sunState: 'none',
+			pointState: 'failed',
+			glacier: { name: 'Tacoma Glacier', area: 4_200_000 },
+			onglacier,
+			ates: { name: 'Complex', color: '#1b1b1f' }
+		});
+		await fireEvent.click(getByRole('button', { name: /Tacoma Glacier · 4\.2 km²/ }));
+		expect(onglacier).toHaveBeenCalled();
+		expect(getByRole('region', { name: 'Avalanche' })).toBeTruthy();
+		expect(getByText('Complex')).toBeTruthy();
+	});
+});
+
 describe('FeatureCard', () => {
 	it('describes a glacier: its size, top and toe, flow, slope and snow at both ends', () => {
 		const now = Math.floor(Date.now() / 1000);

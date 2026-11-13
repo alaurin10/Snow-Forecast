@@ -27,6 +27,7 @@
 	import { RAMPS, type PrecipKind } from '../radar';
 	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
 	import { elevationLadder, snowAtElevation, TERRAIN_NOTE } from './layers/snowtiles';
+	import { areaText } from './here';
 
 	type Pending = 'loading' | 'ready' | 'none';
 
@@ -50,6 +51,11 @@
 		point?: PointOut | null;
 		pointState?: 'loading' | 'ready' | 'failed';
 		onzone?: () => void;
+		/** The glacier the spot is on (its whole area once known), and its own card. */
+		glacier?: { name: string; area?: number | null } | null;
+		onglacier?: () => void;
+		/** The ATES rating mapped here. */
+		ates?: { name: string; color?: string } | null;
 	}
 
 	let {
@@ -65,7 +71,10 @@
 		concern = null,
 		point = null,
 		pointState = 'ready',
-		onzone
+		onzone,
+		glacier = null,
+		onglacier,
+		ates = null
 	}: Props = $props();
 	const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 
@@ -187,7 +196,7 @@
 					: ''
 		};
 	});
-	const avySection = $derived(land && (!!avy || (!!concern && concern.base != null)));
+	const avySection = $derived(land && (!!avy || !!ates || (!!concern && concern.base != null)));
 </script>
 
 <div class="insp">
@@ -253,6 +262,16 @@
 							{:else if wind}{windWord(wind.value)}
 								<span class="faint">· {wind.window.toLowerCase()}</span>
 							{:else}<span class="faint">–</span>{/if}
+						</dd>
+					</div>
+				{/if}
+				{#if glacier}
+					<div>
+						<dt>On a glacier</dt>
+						<dd>
+							<button class="link" onclick={() => onglacier?.()} title={glacier.name}
+								>{glacier.name}{glacier.area ? ` · ${areaText(glacier.area, units)}` : ''} ›</button
+							>
 						</dd>
 					</div>
 				{/if}
@@ -387,6 +406,15 @@
 		<section aria-label="Avalanche">
 			<h3>Avalanche</h3>
 			<dl class="rows">
+				{#if ates}
+					<div>
+						<dt>ATES</dt>
+						<dd>
+							{#if ates.color}<i style:background={ates.color} aria-hidden="true"></i>{/if}
+							{ates.name}
+						</dd>
+					</div>
+				{/if}
 				{#if avy}
 					<div>
 						<dt>{BAND_WORDS[avy.band]}</dt>

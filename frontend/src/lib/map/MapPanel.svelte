@@ -2,7 +2,8 @@
   The one panel a tap on the map opens, whatever was tapped (a station, a field report, a
   hut, a run, a glacier, an avalanche zone, the spot itself), so it always opens in the
   same place: docked to the right edge on desktop, a bottom sheet above the tab bar on
-  phones and tablets (peek or full, by its handle). A fixed header (what it is, its name,
+  phones and tablets (a peek or most of the map: a swipe anywhere on it, or a tap on its
+  title bar). A fixed header (what it is, its name,
   close) and chips for the other things under the tap, which switch the content in place;
   the body scrolls.
 -->
@@ -41,10 +42,9 @@
 	const PEEK = 0.35;
 	const FULL = 0.8;
 	let full = $state(false);
-	/** While the handle is dragged: the sheet's height in pixels. */
+	/** While the sheet is dragged: its height in pixels. */
 	let dragH = $state<number | null>(null);
 	let body = $state<HTMLElement>();
-	let drag: { y: number; h: number; max: number; moved: boolean } | null = null;
 
 	// A new target starts at the top of its content.
 	$effect(() => {
@@ -53,36 +53,107 @@
 		if (body) body.scrollTop = 0;
 	});
 
-	/** The whole title bar is the sheet's grip (phones and tablets): drag it up or down,
-	 *  or tap it to switch between the peek and most of the map. Its buttons stay buttons. */
-	function down(e: PointerEvent) {
-		if (!matchMedia('(max-width: 1099px)').matches) return;
-		if ((e.target as Element).closest('button:not(.handle)')) return;
-		const box = el?.parentElement?.getBoundingClientRect();
-		if (!el || !box) return;
-		drag = { y: e.clientY, h: el.getBoundingClientRect().height, max: box.height, moved: false };
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	// ---- The sheet (phones and tablets) moves with a finger anywhere on it -------------
+	// At the peek, a swipe up anywhere grows it (its content doesn't scroll yet), and a
+	// swipe down puts it away. Grown, the content scrolls; pulled down from the top of its
+	// content, the sheet shrinks again. A tap on the title bar switches between the two.
+	const sheetLayout = () =>
+		typeof matchMedia === 'function' && matchMedia('(max-width: 1099px)').matches;
+	interface Gesture {
+		y0: number;
+		h0: number;
+		max: number;
+		/** Not yet decided; moving the sheet; scrolling its content. */
+		mode: 'wait' | 'sheet' | 'scroll';
+		/** It started on the title bar (not one of its buttons). */
+		grip: boolean;
+		dy: number;
 	}
-	function move(e: PointerEvent) {
-		if (!drag) return;
-		const dy = e.clientY - drag.y;
-		if (!drag.moved && Math.abs(dy) < 6) return;
-		drag.moved = true;
-		dragH = Math.max(40, Math.min(drag.max * FULL, drag.h - dy));
+	let g: Gesture | null = null;
+
+	function start(y: number, target: Element) {
+		if (!el || !sheetLayout()) return;
+		const box = el.parentElement?.getBoundingClientRect();
+		if (!box) return;
+		g = {
+			y0: y,
+			h0: el.getBoundingClientRect().height,
+			max: box.height,
+			mode: 'wait',
+			grip: !!target.closest('.grip') && !target.closest('button:not(.handle)'),
+			dy: 0
+		};
 	}
-	function up() {
-		if (!drag) return;
-		const { moved, max } = drag;
-		drag = null;
-		if (!moved) {
-			full = !full;
+	/** True when this move is the sheet's (the browser mustn't scroll for it). */
+	function moveTo(y: number): boolean {
+		if (!g) return false;
+		const dy = y - g.y0;
+		g.dy = dy;
+		if (g.mode === 'wait') {
+			if (Math.abs(dy) < 4) return g.grip || !full;
+			const atTop = (body?.scrollTop ?? 0) <= 0;
+			g.mode = g.grip || !full || (dy > 0 && atTop) ? 'sheet' : 'scroll';
+		}
+		if (g.mode !== 'sheet') return false;
+		dragH = Math.max(40, Math.min(g.max * FULL, g.h0 - dy));
+		return true;
+	}
+	function end() {
+		if (!g) return;
+		const { mode, dy, grip, max } = g;
+		g = null;
+		// A tap on the title bar.
+		if (mode === 'wait') {
+			if (grip) full = !full;
 			return;
 		}
+		if (mode !== 'sheet') return;
 		const h = dragH ?? 0;
 		dragH = null;
-		// Pulled well below the peek: put away.
-		if (h < max * PEEK * 0.6) return onclose();
-		full = h > max * ((PEEK + FULL) / 2);
+		if (dy < -24) full = true;
+		else if (dy > 24) {
+			// Pulled well below the peek: put away.
+			if (h < max * PEEK * 0.6) return onclose();
+			full = false;
+		}
+	}
+	function cancel() {
+		g = null;
+		dragH = null;
+	}
+	// Touch: listened for directly, so a move can be kept from scrolling the page.
+	$effect(() => {
+		const node = el;
+		if (!node) return;
+		const ts = (e: TouchEvent) =>
+			e.touches.length === 1 ? start(e.touches[0].clientY, e.target as Element) : cancel();
+		const tm = (e: TouchEvent) => {
+			if (e.touches.length !== 1) return;
+			if (moveTo(e.touches[0].clientY) && e.cancelable) e.preventDefault();
+		};
+		node.addEventListener('touchstart', ts, { passive: true });
+		node.addEventListener('touchmove', tm, { passive: false });
+		node.addEventListener('touchend', end);
+		node.addEventListener('touchcancel', cancel);
+		return () => {
+			node.removeEventListener('touchstart', ts);
+			node.removeEventListener('touchmove', tm);
+			node.removeEventListener('touchend', end);
+			node.removeEventListener('touchcancel', cancel);
+		};
+	});
+	// A mouse (a narrow desktop window) drags or taps the title bar.
+	function pdown(e: PointerEvent) {
+		if (e.pointerType === 'touch') return;
+		start(e.clientY, e.target as Element);
+		if (g?.grip) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		else g = null;
+	}
+	// The wheel, at the peek, grows the sheet before anything scrolls.
+	function wheel(e: WheelEvent) {
+		if (full || e.deltaY <= 0 || !sheetLayout()) return;
+		e.preventDefault();
+		full = true;
 	}
 </script>
 
@@ -94,6 +165,7 @@
 	aria-label={title}
 	data-map-panel
 	bind:this={el}
+	onwheel={wheel}
 	style:--peek={PEEK}
 	style:--full={FULL}
 	style:--drag-h={dragH != null ? `${dragH}px` : null}
@@ -101,10 +173,10 @@
 	<div
 		class="grip"
 		role="presentation"
-		onpointerdown={down}
-		onpointermove={move}
-		onpointerup={up}
-		onpointercancel={() => ((drag = null), (dragH = null))}
+		onpointerdown={pdown}
+		onpointermove={(e) => e.pointerType !== 'touch' && moveTo(e.clientY)}
+		onpointerup={(e) => e.pointerType !== 'touch' && end()}
+		onpointercancel={(e) => e.pointerType !== 'touch' && cancel()}
 	>
 		<button
 			class="handle"
@@ -273,6 +345,20 @@
 		}
 		.mappanel.dragging {
 			transition: none;
+		}
+		/* A finger anywhere on the sheet moves it (see the script); grown, its content
+		   scrolls, and its chips scroll sideways. */
+		.mappanel {
+			touch-action: none;
+		}
+		.mappanel:not(.full) .body {
+			overflow-y: hidden;
+		}
+		.mappanel.full .body {
+			touch-action: pan-y;
+		}
+		.chips {
+			touch-action: pan-x;
 		}
 		/* The handle and the title together: one big target, which the map never gets. */
 		.grip {
