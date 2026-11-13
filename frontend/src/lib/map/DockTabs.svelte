@@ -1,13 +1,15 @@
 <!--
-  Phones and tablets: one row naming the controls at the foot of the map (Weather,
-  Terrain, Satellite…). A tap opens that control above the row (and folds the one that
-  was open); a tap on the open one folds it, leaving just this row over the map.
+  One row naming the controls at the foot of the map, each with what it shows now
+  ("Terrain · Slope", "Weather · Off"). A tap opens that control above the row (and folds
+  the one that was open); a tap on the open one folds it, leaving just this row.
 -->
 <script lang="ts">
 	interface Tab {
 		id: string;
 		title: string;
-		/** What it shows now, in a few words (said to screen readers, and on hover). */
+		/** What it shows now, in a word, on the tab ("Slope", "Off"); may be empty. */
+		value: string;
+		/** More of the same, for screen readers and on hover. */
 		status: string;
 	}
 
@@ -28,7 +30,7 @@
 			title="{t.title}: {t.status}"
 			onclick={() => onpick(open === t.id ? null : t.id)}
 		>
-			<span>{t.title}</span>
+			<span>{t.title}</span>{#if t.value}<b class:off={t.value === 'Off'}>{t.value}</b>{/if}
 			<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
 				><path d={open === t.id ? 'M6 9l6 6 6-6' : 'M6 15l6-6 6 6'} /></svg
 			>
@@ -56,7 +58,7 @@
 		flex: none;
 		display: inline-flex;
 		align-items: center;
-		gap: 4px;
+		gap: 5px;
 		height: 32px;
 		padding: 0 12px;
 		border: 0;
@@ -77,6 +79,14 @@
 		background: var(--sel);
 		color: var(--text);
 		box-shadow: var(--sel-shadow);
+	}
+	b {
+		font-weight: 650;
+		color: var(--text);
+	}
+	b.off {
+		font-weight: 500;
+		color: var(--text-3);
 	}
 	svg {
 		fill: none;

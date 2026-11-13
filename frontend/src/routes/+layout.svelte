@@ -470,13 +470,14 @@
 		max-width: none;
 		margin: 0;
 	}
+	/* Folded: the first of the map's buttons, the same size, at the head of their column. */
 	.railfold {
 		position: fixed;
-		top: 14px;
-		left: 14px;
+		top: 10px;
+		left: 10px;
 		z-index: 20;
-		width: 44px;
-		height: 44px;
+		width: 40px;
+		height: 40px;
 		display: grid;
 		place-items: center;
 		border-radius: 14px;

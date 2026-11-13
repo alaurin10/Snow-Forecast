@@ -1,6 +1,6 @@
 <!--
-  The weather layer's controls at the foot of the map: which layer (radar & forecast, snow
-  total, snow level, wind, snow on the ground, observed snowfall or clouds); for the loops,
+  The weather layer's controls at the foot of the map (the layer itself is chosen in the
+  row of types above it, or in Layers): for the loops,
   a player and a slider (radar from three hours ago, through the nowcast, to ten days out;
   snow level and wind to three and a half days; clouds over the last three hours); for the
   others, a window picker; and the colour key for whichever is showing.
@@ -14,7 +14,6 @@
 		depthTick,
 		levelTick,
 		SNOWLEVEL,
-		WEATHER_CHOICES,
 		WIND,
 		windTick,
 		type Pick,
@@ -149,25 +148,9 @@
 						? 'Loading…'
 						: "This layer isn't drawn yet."
 	);
-	// Keep the chosen layer's button in view in the scrolling row.
-	let modesEl = $state<HTMLDivElement>();
-	$effect(() => {
-		void weather;
-		modesEl?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({
-			block: 'nearest',
-			inline: 'nearest'
-		});
-	});
 </script>
 
 <section class="controls glass" aria-label="Precipitation">
-	<div class="modes seg" role="group" aria-label="Show" bind:this={modesEl}>
-		{#each WEATHER_CHOICES as w (w.id)}
-			<button aria-pressed={weather === w.id} onclick={() => prefs.setMapWeather(w.id)}
-				>{w.label}</button
-			>
-		{/each}
-	</div>
 	<!-- Fixed rows, so the box keeps its size whatever it shows. -->
 	<div class="main">
 		{#if view.mode === 'pick'}
@@ -329,30 +312,6 @@
 		border-radius: 18px;
 		font-size: 0.85rem;
 	}
-	/* Every weather layer in one row, scrolling sideways on a phone. */
-	.modes {
-		justify-self: stretch;
-		display: flex;
-		overflow-x: auto;
-		scrollbar-width: none;
-		-webkit-overflow-scrolling: touch;
-		min-width: 0;
-		max-width: 100%;
-	}
-	.modes::-webkit-scrollbar {
-		display: none;
-	}
-	/* Phones and tablets: the weather layer is chosen in Layers; this row would only
-	   repeat it. */
-	@media (max-width: 1099px) {
-		.modes {
-			display: none;
-		}
-	}
-	.modes button {
-		flex: 0 0 auto;
-		white-space: nowrap;
-	}
 	.foot .sub {
 		flex: 0 0 auto;
 		margin-right: 6px;
@@ -383,10 +342,6 @@
 	.sw.mixy {
 		background: rgb(244 166 198);
 		margin-left: 4px;
-	}
-	.modes button {
-		font-size: 0.78rem;
-		padding: 3px 10px;
 	}
 	/* Two fixed rows under the mode switch, so the box never changes size: the player
 	   (or the total's window), then one line of key. */

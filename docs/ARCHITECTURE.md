@@ -63,7 +63,7 @@ frontend/src/
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend,
               Measure and Profile (measure.ts: lines, GPX, stats); DockItem and DockTabs (the
-              controls at the map's foot: on phones one open over a row of tabs); MapPanel, the one
+              controls at the map's foot: one open over a row of tabs); MapPanel, the one
               panel a tap opens, showing Inspector (the spot), StationCard, ReportCard,
               ZoneCard or FeatureCard; features.ts (stations, reports, ATES) and here.ts
               (what a tap landed on, ranked, as the panel's targets);

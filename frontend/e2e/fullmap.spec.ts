@@ -22,6 +22,13 @@ test('the desktop map fills the window and the rail folds', async ({ page }, inf
 	await expect
 		.poll(async () => (await page.getByRole('button', { name: 'Layers' }).boundingBox())!.x)
 		.toBeLessThan(120);
+	// The folded button heads the map's column of buttons: same left edge and width, and
+	// the zoom buttons start under it.
+	const fold = (await page.getByRole('button', { name: 'Show navigation' }).boundingBox())!;
+	const zoom = (await page.getByRole('button', { name: 'Zoom in' }).boundingBox())!;
+	expect(Math.abs(fold.x - zoom.x)).toBeLessThan(2);
+	expect(Math.abs(fold.width - zoom.width)).toBeLessThan(2);
+	expect(zoom.y).toBeGreaterThan(fold.y + fold.height);
 
 	await page.reload({ waitUntil: 'networkidle' });
 	await expect(page.getByRole('button', { name: 'Show navigation' })).toBeVisible();

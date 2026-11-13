@@ -52,21 +52,10 @@ const base = {
 describe('Timeline (weather controls)', () => {
 	afterEach(cleanup);
 
-	it('lists every layer and switches between them', async () => {
+	it('leaves the choice of layer to the row of types above it', () => {
 		render(Timeline, { ...base, weather: 'snowfall', view: weatherView(tl, 'snowfall', 'gust') });
-		const group = screen.getByRole('group', { name: 'Show' });
-		const names = [...group.querySelectorAll('button')].map((b) => b.textContent);
-		expect(names).toEqual([
-			'Radar & forecast',
-			'Snow total',
-			'Snow level',
-			'Wind',
-			'Snow depth',
-			'Observed snow',
-			'Clouds'
-		]);
-		await fireEvent.click(screen.getByRole('button', { name: 'Clouds' }));
-		expect(prefs.mapWeather).toBe('clouds');
+		expect(screen.queryByRole('group', { name: 'Show' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Clouds' })).toBeNull();
 	});
 
 	it('picks observed snowfall by window, with its key in cm', () => {

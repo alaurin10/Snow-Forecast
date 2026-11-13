@@ -42,15 +42,9 @@
 	} from '../types.gen';
 	import { prefs, type MapOverlay, type MapWeather } from '../prefs.svelte';
 	import { tick, untrack } from 'svelte';
-	import {
-		layerLabel,
-		layerSource,
-		WEATHER_CHOICES,
-		WEATHER_WORDS,
-		weatherView
-	} from '../map/weather';
+	import { layerLabel, layerSource, WEATHER_WORDS, weatherView } from '../map/weather';
 	import { viewport } from '../viewport.svelte';
-	import { RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
+	import { RAIL_FOLDED_DROP, RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
 		frameLabel,
 		frameSource,
@@ -145,6 +139,7 @@
 	import Measure from '../map/Measure.svelte';
 	import DockItem from '../map/DockItem.svelte';
 	import DockTabs from '../map/DockTabs.svelte';
+	import { hscroll } from '../hscroll';
 	import StationCard from '../map/StationCard.svelte';
 	import ReportCard from '../map/ReportCard.svelte';
 	import { plainLine, setMeasure } from '../map/layers/measure';
@@ -239,16 +234,8 @@
 	/** Smooth fields (totals, snow level, wind, snow on the ground) stay on further in. */
 	const tooClose = $derived(zoom >= (weather === 'radar' || weather === 'clouds' ? 13 : 15));
 
-	/** Desktop: the Layers sheet pinned open beside the map (a tap on the map then inspects). */
-	const layersPinned = $derived(radar && viewport.desktop && prefs.layersPinned);
-	const layersOpen = $derived(panel === 'layers' || layersPinned);
+	const layersOpen = $derived(panel === 'layers');
 	function togglePanel(p: 'info' | 'offline' | 'layers') {
-		// The Layers button closes a pinned sheet, and unpins it.
-		if (p === 'layers' && layersPinned) {
-			prefs.setLayersPinned(false);
-			panel = 'none';
-			return;
-		}
 		panel = panel === p ? 'none' : p;
 		closeTap();
 	}
@@ -1312,13 +1299,17 @@
 	// ---- Weather layer ----------------------------------------------------------------
 	// The server draws every picture; here we download them once and swap them.
 	const on = $derived(weather !== 'off');
-	// Phones and tablets: one control at the foot open at a time, the last one touched
-	// (or the newest to appear); the rest fold to a line (../map/DockItem.svelte).
-	// Remembered in this browser, so a reload opens the same one.
+	// ---- The controls at the foot of the map (every screen) ------------------------------
+	// One row of tabs, Terrain and Weather always there (Satellite and Measure when in use),
+	// each saying what it shows; at most one open above it, so they never stack up over
+	// the map. An open one starts with a row of its types, None first, then that type's
+	// own controls. A tap on the open tab folds it, leaving only the row. The open tab is
+	// remembered in this browser.
 	let dockOpen = $state<string | null>(
 		(() => {
 			try {
-				return localStorage.getItem('sw.dockOpen');
+				const v = localStorage.getItem('sw.dockOpen');
+				return v === 'timeline' ? 'weather' : v === 'avy' ? 'terrain' : v;
 			} catch {
 				return null;
 			}
@@ -1333,16 +1324,11 @@
 		}
 	});
 	const docked = $derived(
-		[
-			measuring && 'measure',
-			recent && !offline && 'sat',
-			avyOverlay && analysis && 'avy',
-			(sunOn || windOn) && analysis && 'terrain',
-			on && 'timeline'
-		].filter((x): x is string => !!x)
+		[measuring && 'measure', recent && !offline && 'sat', 'terrain', 'weather'].filter(
+			(x): x is string => !!x
+		)
 	);
-	// A control opens when you choose what it controls (a layer, Measure); on loading the
-	// page the last one (the weather's) is open.
+	// A control opens when you choose what it controls (in Layers, or Measure).
 	let lastChoice = '';
 	$effect(() => {
 		const choice = [prefs.mapBase, prefs.mapOverlay, prefs.mapWeather, measuring].join('|');
@@ -1351,62 +1337,93 @@
 		if (!before) return;
 		const [base, overlay, weather_, meas] = before.split('|');
 		if (String(measuring) !== meas && measuring) dockOpen = 'measure';
-		else if (prefs.mapOverlay !== overlay)
-			dockOpen =
-				prefs.mapOverlay === 'sun' || prefs.mapOverlay === 'wind'
-					? 'terrain'
-					: prefs.mapOverlay === 'problems' || prefs.mapOverlay === 'concern'
-						? 'avy'
-						: dockOpen;
+		else if (prefs.mapOverlay !== overlay && prefs.mapOverlay !== 'none') dockOpen = 'terrain';
 		else if (prefs.mapBase !== base && prefs.mapBase === 'recent') dockOpen = 'sat';
-		else if (prefs.mapWeather !== weather_ && prefs.mapWeather !== 'off') dockOpen = 'timeline';
+		else if (prefs.mapWeather !== weather_ && prefs.mapWeather !== 'off') dockOpen = 'weather';
 	});
-	// 'none': every control folded away, leaving just the row of tabs.
+	// 'none': every control folded away. With nothing remembered, Weather is open.
 	const openDock = $derived(
-		dockOpen === 'none'
-			? null
-			: dockOpen && docked.includes(dockOpen)
-				? dockOpen
-				: (docked.at(-1) ?? null)
+		dockOpen === 'none' ? null : dockOpen && docked.includes(dockOpen) ? dockOpen : 'weather'
 	);
+	/** A sideways-scrolling row keeps its chosen button in view. */
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the action reruns on it
+	function showPressed(node: HTMLElement, value: string) {
+		const show = () =>
+			node.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({
+				block: 'nearest',
+				inline: 'nearest'
+			});
+		show();
+		return { update: show };
+	}
+	interface DockType<T> {
+		id: T;
+		label: string;
+		name: string;
+		worker?: boolean;
+	}
+	const TERRAIN_TYPES = $derived<DockType<MapOverlay>[]>([
+		{ id: 'none', label: 'None', name: 'No terrain overlay' },
+		{ id: 'slope', label: 'Slope', name: 'Slope', worker: true },
+		{ id: 'aspect', label: 'Aspect', name: 'Aspect', worker: true },
+		{ id: 'bands', label: 'Elevation', name: 'Elevation bands' },
+		{ id: 'sun', label: 'Sun', name: 'Sun & shade', worker: true },
+		{ id: 'wind', label: 'Wind', name: 'Wind effect', worker: true },
+		{ id: 'problems', label: 'Avalanche', name: 'Avalanche problems', worker: true },
+		...(concernCfg
+			? [
+					{
+						id: 'concern' as const,
+						label: 'Concern',
+						name: 'Concern index (experimental)',
+						worker: true
+					}
+				]
+			: [])
+	]);
+	const WEATHER_TYPES: DockType<MapWeather>[] = [
+		{ id: 'off', label: 'None', name: 'No weather layer' },
+		{ id: 'radar', label: 'Radar', name: 'Radar & forecast' },
+		{ id: 'totals', label: 'Snow total', name: 'Snow total' },
+		{ id: 'snowlevel', label: 'Snow level', name: 'Snow level' },
+		{ id: 'wind', label: 'Wind', name: 'Wind' },
+		{ id: 'depth', label: 'Depth', name: 'Snow depth' },
+		{ id: 'snowfall', label: 'Observed', name: 'Observed snow' },
+		{ id: 'clouds', label: 'Clouds', name: 'Clouds' }
+	];
 	const DOCK_TITLES: Record<string, string> = {
 		measure: 'Measure',
 		sat: 'Satellite',
-		avy: 'Avalanche',
 		terrain: 'Terrain',
-		timeline: 'Weather'
+		weather: 'Weather'
 	};
-	/** What each control shows now, in a few words, for its tab. */
-	const dockStatus = (id: string): string => {
+	/** What each tab shows now: a word on it, and more for screen readers and on hover. */
+	const dockValue = (id: string): { value: string; status: string } => {
 		switch (id) {
 			case 'measure':
-				return measureTitle;
+				return { value: '', status: measureTitle };
 			case 'sat':
-				return satSummary(satData?.viirs_date, satSpot, sceneIndex, now);
-			case 'avy':
-				return overlayMode === 'concern'
-					? 'Concern index'
-					: `Problems${centreZone ? ` · ${zoneName(centreZone)}` : ''}`;
-			case 'terrain':
-				return sunOn
-					? `Sun & shade · ${sunMode === 'hours' ? 'hours of sun' : 'shade now'}`
-					: `Wind effect · ${WIND_WINDOWS.find((w) => w.id === windWindow)?.label ?? ''}`;
-			default:
-				return `${WEATHER_CHOICES.find((w) => w.id === weather)?.label ?? ''}${label ? ` · ${label.when}` : pick ? ` · ${pick.name}` : ''}`;
+				return { value: '', status: satSummary(satData?.viirs_date, satSpot, sceneIndex, now) };
+			case 'terrain': {
+				const t = TERRAIN_TYPES.find((x) => x.id === prefs.mapOverlay);
+				return {
+					value: prefs.mapOverlay === 'none' ? 'Off' : (t?.label ?? ''),
+					status: prefs.mapOverlay === 'none' ? 'off' : (t?.name ?? '')
+				};
+			}
+			default: {
+				const w = WEATHER_TYPES.find((x) => x.id === weather);
+				return {
+					value: weather === 'off' ? 'Off' : (w?.label ?? ''),
+					status:
+						weather === 'off'
+							? 'off'
+							: `${w?.name ?? ''}${label ? ` · ${label.when}` : pick ? ` · ${pick.name}` : ''}`
+				};
+			}
 		}
 	};
-	const dockTabs = $derived(
-		docked.map((id) => ({ id, title: DOCK_TITLES[id], status: dockStatus(id) }))
-	);
-	const QUICK_TERRAIN: { id: MapOverlay; label: string; title: string; worker?: boolean }[] = [
-		{ id: 'none', label: 'None', title: 'No terrain overlay' },
-		{ id: 'slope', label: 'Slope', title: 'Slope angle', worker: true },
-		{ id: 'aspect', label: 'Aspect', title: 'The way slopes face', worker: true },
-		{ id: 'bands', label: 'Elevation', title: 'Elevation bands' },
-		{ id: 'sun', label: 'Sun', title: 'Sun & shade', worker: true },
-		{ id: 'wind', label: 'Wind', title: 'Wind effect', worker: true },
-		{ id: 'problems', label: 'Avy', title: 'Avalanche problems', worker: true }
-	];
+	const dockTabs = $derived(docked.map((id) => ({ id, title: DOCK_TITLES[id], ...dockValue(id) })));
 	let timeline = $state<Timeline | null>(null);
 	/** Why the weather isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
@@ -1766,8 +1783,7 @@
 					for (const p of popups) p.remove();
 					return;
 				}
-				// A pinned Layers sheet stays, and the tap goes through to the map.
-				if (panel !== 'none' && !(panel === 'layers' && layersPinned)) {
+				if (panel !== 'none') {
 					panel = 'none';
 					return;
 				}
@@ -2000,8 +2016,8 @@
 	class:sheet={!!target && !viewport.desktop}
 	style:--fill-top="{fillTop}px"
 	style:--map-inset="{inset}px"
+	style:--map-drop="{radar && viewport.desktop && railUi.folded ? RAIL_FOLDED_DROP : 0}px"
 	style:--map-panel="{radar && viewport.desktop && target ? 370 : 0}px"
-	style:--layers-w="{layersPinned ? 362 : 0}px"
 >
 	<div class="map" bind:this={el} role="region" aria-label="Map of locations"></div>
 
@@ -2096,17 +2112,7 @@
 				{offline}
 				concern={!!concernCfg}
 				ates={!!atesData}
-				pinnable={viewport.desktop}
-				pinned={layersPinned}
-				onpin={() => {
-					// Unpinned, it stays open until a tap on the map or Done.
-					prefs.setLayersPinned(!layersPinned);
-					panel = 'layers';
-				}}
-				onclose={() => {
-					prefs.setLayersPinned(false);
-					panel = 'none';
-				}}
+				onclose={() => (panel = 'none')}
 			/>
 		{/if}
 
@@ -2297,13 +2303,34 @@
 			</div>
 		{/if}
 
+		{#snippet typeRow<T extends string>(
+			name: string,
+			types: { id: T; label: string; name: string; worker?: boolean }[],
+			value: T,
+			pickType: (id: T) => void,
+			noWorker: boolean
+		)}
+			<div
+				class="types seg glass"
+				role="group"
+				aria-label={name}
+				use:hscroll
+				use:showPressed={value}
+			>
+				{#each types as t (t.id)}
+					<button
+						aria-pressed={value === t.id}
+						aria-label={t.name}
+						title={t.worker && noWorker ? 'Needs a newer browser' : t.name}
+						disabled={t.worker && noWorker}
+						onclick={() => pickType(t.id)}>{t.label}</button
+					>
+				{/each}
+			</div>
+		{/snippet}
 		<div class="dock" bind:this={dock}>
 			{#if measuring}
-				<DockItem
-					compact={!viewport.desktop}
-					open={openDock === 'measure'}
-					ontouch={() => (dockOpen = 'measure')}
-				>
+				<DockItem open={openDock === 'measure'} ontouch={() => (dockOpen = 'measure')}>
 					<Measure
 						title={measureTitle}
 						note={measureNote}
@@ -2322,11 +2349,7 @@
 				</DockItem>
 			{/if}
 			{#if recent && !offline}
-				<DockItem
-					compact={!viewport.desktop}
-					open={openDock === 'sat'}
-					ontouch={() => (dockOpen = 'sat')}
-				>
+				<DockItem open={openDock === 'sat'} ontouch={() => (dockOpen = 'sat')}>
 					<SatControls
 						data={satData}
 						loadState={satState}
@@ -2339,12 +2362,15 @@
 					/>
 				</DockItem>
 			{/if}
-			{#if avyOverlay && analysis}
-				<DockItem
-					compact={!viewport.desktop}
-					open={openDock === 'avy'}
-					ontouch={() => (dockOpen = 'avy')}
-				>
+			<DockItem open={openDock === 'terrain'} ontouch={() => (dockOpen = 'terrain')}>
+				{@render typeRow(
+					'Terrain type',
+					TERRAIN_TYPES,
+					prefs.mapOverlay,
+					(id) => prefs.setMapOverlay(id),
+					!analysis
+				)}
+				{#if avyOverlay && analysis}
 					<AvalancheControls
 						overlay={overlayMode === 'concern' ? 'concern' : 'problems'}
 						{units}
@@ -2361,14 +2387,7 @@
 						caption={concernCfg?.caption ?? ''}
 						onzone={() => centreZone && openTap({ zone: centreZone, spot: false }, null)}
 					/>
-				</DockItem>
-			{/if}
-			{#if (sunOn || windOn) && analysis}
-				<DockItem
-					compact={!viewport.desktop}
-					open={openDock === 'terrain'}
-					ontouch={() => (dockOpen = 'terrain')}
-				>
+				{:else if (sunOn || windOn) && analysis}
 					<TerrainControls
 						overlay={sunOn ? 'sun' : 'wind'}
 						{units}
@@ -2385,27 +2404,17 @@
 						{windLoaded}
 						{pointTried}
 					/>
-				</DockItem>
-			{/if}
-			{#if viewport.desktop}
-				<!-- Desktop: the terrain overlays a click away, like the weather layers below. -->
-				<div class="quick seg glass" role="group" aria-label="Terrain shortcuts">
-					{#each QUICK_TERRAIN as o (o.id)}
-						<button
-							aria-pressed={prefs.mapOverlay === o.id}
-							disabled={o.worker && !analysis}
-							title={o.title}
-							onclick={() => prefs.setMapOverlay(o.id)}>{o.label}</button
-						>
-					{/each}
-				</div>
-			{/if}
-			{#if on}
-				<DockItem
-					compact={!viewport.desktop}
-					open={openDock === 'timeline'}
-					ontouch={() => (dockOpen = 'timeline')}
-				>
+				{/if}
+			</DockItem>
+			<DockItem open={openDock === 'weather'} ontouch={() => (dockOpen = 'weather')}>
+				{@render typeRow(
+					'Weather type',
+					WEATHER_TYPES,
+					weather,
+					(id) => prefs.setMapWeather(id),
+					false
+				)}
+				{#if on}
 					<TimelineControls
 						{view}
 						{weather}
@@ -2422,11 +2431,9 @@
 						ready={ready_}
 						{loadError}
 					/>
-				</DockItem>
-			{/if}
-			{#if !viewport.desktop && dockTabs.length}
-				<DockTabs tabs={dockTabs} open={openDock} onpick={(id) => (dockOpen = id ?? 'none')} />
-			{/if}
+				{/if}
+			</DockItem>
+			<DockTabs tabs={dockTabs} open={openDock} onpick={(id) => (dockOpen = id ?? 'none')} />
 		</div>
 	{/if}
 </div>
@@ -2513,8 +2520,8 @@
 
 	/* MapLibre's zoom and compass buttons, as a glass column like ours. */
 	.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group) {
-		margin: 10px 0 0 calc(var(--map-inset, 0px) + 10px);
-		transition: margin-left var(--ease-slide);
+		margin: calc(10px + var(--map-drop, 0px)) 0 0 calc(var(--map-inset, 0px) + 10px);
+		transition: margin var(--ease-slide);
 		border-radius: 14px;
 		overflow: hidden;
 		background: var(--glass);
@@ -2557,19 +2564,26 @@
 		max-width: 640px;
 		pointer-events: auto;
 	}
-	/* Desktop: the terrain overlays in one row over the weather controls. */
-	.quick {
+	/* An open control's types, None first: one row, sideways-scrolling if it must. */
+	.types {
 		justify-self: center;
 		width: auto !important;
+		max-width: 100%;
 		display: flex;
 		padding: 3px;
+		overflow-x: auto;
+		scrollbar-width: none;
 		background: color-mix(in srgb, var(--surface) 88%, transparent);
 	}
-	.quick button {
-		font-size: 0.78rem;
-		padding: 3px 11px;
+	.types::-webkit-scrollbar {
+		display: none;
 	}
-	.quick button:disabled {
+	.types button {
+		flex: none;
+		font-size: 0.78rem;
+		padding: 4px 11px;
+	}
+	.types button:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
@@ -2585,9 +2599,11 @@
 	}
 	.tools {
 		position: absolute;
-		top: 136px;
+		top: calc(136px + var(--map-drop, 0px));
 		left: calc(var(--map-inset, 0px) + 10px);
-		transition: left var(--ease-slide);
+		transition:
+			left var(--ease-slide),
+			top var(--ease-slide);
 		z-index: 1000;
 		display: grid;
 		gap: 8px;
@@ -2730,7 +2746,7 @@
 	.info {
 		position: absolute;
 		top: 136px;
-		left: calc(var(--map-inset, 0px) + 60px + var(--layers-w, 0px));
+		left: calc(var(--map-inset, 0px) + 60px);
 		right: 10px;
 		max-width: 360px;
 		z-index: 1001;

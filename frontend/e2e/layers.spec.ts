@@ -76,32 +76,42 @@ for (const width of [320, 375]) {
 	});
 }
 
-test('desktop: Layers pinned open stays through a tap on the map and a reload', async ({
+test('the dock always has Terrain and Weather, and None turns either off from there', async ({
 	page
-}, info) => {
-	test.skip(info.project.name !== 'desktop', 'pinning is for desktop');
-	// A map, a reload and many steps: slow on a busy machine.
+}) => {
+	// A map and many steps: slow on a busy machine.
 	test.slow();
+	await page.addInitScript(() => {
+		localStorage.setItem('sw.mapOverlay', 'none');
+		localStorage.setItem('sw.mapWeather', 'radar');
+	});
 	await page.goto('/map', { waitUntil: 'networkidle' });
-	await page.getByRole('button', { name: 'Layers' }).click();
-	const sheet = page.getByRole('dialog', { name: 'Map layers' });
-	await sheet.getByRole('button', { name: 'Pin layers open' }).click();
-	// A tap on the map: the sheet stays (and the tap reaches the map).
-	const vp = page.viewportSize()!;
-	await page.mouse.click(vp.width - 300, vp.height / 2);
-	await expect(sheet).toBeVisible();
-	await page.reload({ waitUntil: 'networkidle' });
-	await expect(page.getByRole('dialog', { name: 'Map layers' })).toBeVisible();
-	await page.getByRole('button', { name: 'Unpin layers' }).click();
-	await page.mouse.click(vp.width - 300, vp.height / 2);
-	await expect(page.getByRole('dialog', { name: 'Map layers' })).toHaveCount(0);
-	// The quick terrain row over the weather controls.
-	const quick = page.getByRole('group', { name: 'Terrain shortcuts' });
-	await quick.getByRole('button', { name: 'Elevation' }).click();
-	await expect(quick.getByRole('button', { name: 'Elevation' })).toHaveAttribute(
-		'aria-pressed',
-		'true'
-	);
+	const tabs = page.getByRole('group', { name: 'Map controls' });
+	const terrain = tabs.getByRole('button', { name: /^Terrain: / });
+	const weather = tabs.getByRole('button', { name: /^Weather: / });
+	await expect(terrain).toContainText('Off');
+	await expect(weather).toContainText('Radar');
+	// Weather: its types, None first; None turns it off and the tab stays.
+	const wtypes = page.getByRole('group', { name: 'Weather type' });
+	await expect(wtypes.getByRole('button').first()).toHaveText('None');
+	await wtypes.getByRole('button', { name: 'No weather layer' }).click();
+	await expect(weather).toContainText('Off');
+	await expect(page.getByRole('region', { name: 'Precipitation' })).toHaveCount(0);
+	await expect(weather).toBeVisible();
+	// Terrain: pick a type there; its tab says so.
+	await terrain.click();
+	const ttypes = page.getByRole('group', { name: 'Terrain type' });
+	await ttypes.getByRole('button', { name: 'Elevation bands' }).click();
+	await expect(terrain).toContainText('Elevation');
+	expect(await page.evaluate(() => localStorage.getItem('sw.mapOverlay'))).toBe('bands');
+	// Back on: the weather's controls return under its types.
+	await weather.click();
+	await wtypes.getByRole('button', { name: 'Snow total' }).click();
+	await expect(page.getByRole('region', { name: 'Precipitation' })).toBeVisible();
+	// Folded: just the row of tabs.
+	await weather.click();
+	await expect(wtypes).toHaveCount(0);
+	expect((await page.locator('.dock').boundingBox())!.height).toBeLessThan(50);
 });
 
 test('phones: one row of tabs at the foot of the map, at most one control open over it', async ({
