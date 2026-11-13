@@ -4,8 +4,10 @@
 
 /** Where the open rail ends, from the window's left edge: 14 px margin, 248 px rail, 10 px gap. */
 export const RAIL_OPEN_INSET = 272;
-/** Where the folded button ends: 14 px margin, 44 px button, 10 px gap. */
-export const RAIL_FOLDED_INSET = 68;
+/** Folded, the button heads the map's own column of buttons (10 px in, 40 px wide), so
+ *  nothing moves right for it; the column starts this much lower instead. */
+export const RAIL_FOLDED_INSET = 0;
+export const RAIL_FOLDED_DROP = 48;
 
 function read(): boolean {
 	try {

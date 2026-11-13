@@ -166,7 +166,7 @@
 	.offline {
 		position: absolute;
 		top: 112px;
-		left: calc(var(--map-inset, 0px) + 54px + var(--layers-w, 0px));
+		left: calc(var(--map-inset, 0px) + 54px);
 		right: 10px;
 		max-width: 380px;
 		max-height: calc(100% - 130px);

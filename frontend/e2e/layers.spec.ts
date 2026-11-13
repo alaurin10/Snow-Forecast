@@ -76,32 +76,42 @@ for (const width of [320, 375]) {
 	});
 }
 
-test('desktop: Layers pinned open stays through a tap on the map and a reload', async ({
+test('the dock always has Terrain and Weather, and None turns either off from there', async ({
 	page
-}, info) => {
-	test.skip(info.project.name !== 'desktop', 'pinning is for desktop');
-	// A map, a reload and many steps: slow on a busy machine.
+}) => {
+	// A map and many steps: slow on a busy machine.
 	test.slow();
+	await page.addInitScript(() => {
+		localStorage.setItem('sw.mapOverlay', 'none');
+		localStorage.setItem('sw.mapWeather', 'radar');
+	});
 	await page.goto('/map', { waitUntil: 'networkidle' });
-	await page.getByRole('button', { name: 'Layers' }).click();
-	const sheet = page.getByRole('dialog', { name: 'Map layers' });
-	await sheet.getByRole('button', { name: 'Pin layers open' }).click();
-	// A tap on the map: the sheet stays (and the tap reaches the map).
-	const vp = page.viewportSize()!;
-	await page.mouse.click(vp.width - 300, vp.height / 2);
-	await expect(sheet).toBeVisible();
-	await page.reload({ waitUntil: 'networkidle' });
-	await expect(page.getByRole('dialog', { name: 'Map layers' })).toBeVisible();
-	await page.getByRole('button', { name: 'Unpin layers' }).click();
-	await page.mouse.click(vp.width - 300, vp.height / 2);
-	await expect(page.getByRole('dialog', { name: 'Map layers' })).toHaveCount(0);
-	// The quick terrain row over the weather controls.
-	const quick = page.getByRole('group', { name: 'Terrain shortcuts' });
-	await quick.getByRole('button', { name: 'Elevation' }).click();
-	await expect(quick.getByRole('button', { name: 'Elevation' })).toHaveAttribute(
-		'aria-pressed',
-		'true'
-	);
+	const tabs = page.getByRole('group', { name: 'Map controls' });
+	const terrain = tabs.getByRole('button', { name: /^Terrain: / });
+	const weather = tabs.getByRole('button', { name: /^Weather: / });
+	await expect(terrain).toContainText('Off');
+	await expect(weather).toContainText('Radar');
+	// Weather: its types, None first; None turns it off and the tab stays.
+	const wtypes = page.getByRole('group', { name: 'Weather type' });
+	await expect(wtypes.getByRole('button').first()).toHaveText('None');
+	await wtypes.getByRole('button', { name: 'No weather layer' }).click();
+	await expect(weather).toContainText('Off');
+	await expect(page.getByRole('region', { name: 'Precipitation' })).toHaveCount(0);
+	await expect(weather).toBeVisible();
+	// Terrain: pick a type there; its tab says so.
+	await terrain.click();
+	const ttypes = page.getByRole('group', { name: 'Terrain type' });
+	await ttypes.getByRole('button', { name: 'Elevation bands' }).click();
+	await expect(terrain).toContainText('Elevation');
+	expect(await page.evaluate(() => localStorage.getItem('sw.mapOverlay'))).toBe('bands');
+	// Back on: the weather's controls return under its types.
+	await weather.click();
+	await wtypes.getByRole('button', { name: 'Snow total' }).click();
+	await expect(page.getByRole('region', { name: 'Precipitation' })).toBeVisible();
+	// Folded: just the row of tabs.
+	await weather.click();
+	await expect(wtypes).toHaveCount(0);
+	expect((await page.locator('.dock').boundingBox())!.height).toBeLessThan(50);
 });
 
 test('phones: one row of tabs at the foot of the map, at most one control open over it', async ({
@@ -141,18 +151,40 @@ test('phones: one row of tabs at the foot of the map, at most one control open o
 	expect(dock.height).toBeLessThan(50);
 });
 
-test('phones: the forecast chart opens full screen, and Escape closes it', async ({
+test('phones: the forecast chart opens truly full screen, with an "All" view, and Escape closes it', async ({
 	page
 }, info) => {
 	test.skip(info.project.name !== 'phone', 'full screen is for phones and tablets');
+	// The owner's case: the timeline switched off in the page.
+	await page.addInitScript(() => localStorage.setItem('sw.showTimeline', 'off'));
 	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
 	await page.getByRole('button', { name: 'Full screen chart' }).click();
 	const full = page.getByRole('dialog', { name: 'Forecast chart, full screen' });
 	await expect(full).toBeVisible();
+	// The whole window (not trapped in the page's card), and nothing to scroll.
+	const vp = page.viewportSize()!;
+	const box = (await page.locator('.fsx').boundingBox())!;
+	expect(box).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+	const { sh, ch } = await full.evaluate((e) => ({ sh: e.scrollHeight, ch: e.clientHeight }));
+	expect(sh).toBeLessThanOrEqual(ch + 1);
 	const plot = full.locator('.plot');
 	expect(await plot.evaluate((e) => getComputedStyle(e).touchAction)).toBe('none');
-	expect((await plot.boundingBox())!.height).toBeGreaterThan(200);
+	expect((await plot.boundingBox())!.height).toBeGreaterThan(300);
 	await expect(full.getByRole('group', { name: 'Chart metric' })).toBeVisible();
+	await expect(full.getByRole('slider', { name: 'Days the chart shows' })).toBeVisible();
+
+	// All: four lanes on one time axis; reading one reads them all.
+	await page.getByRole('button', { name: 'All', exact: true }).click();
+	const lanes = full.locator('.fc.lane:not(.tlonly)');
+	await expect(lanes).toHaveCount(4);
+	await expect(full.locator('.lanehead:visible')).toHaveCount(4);
+	const time = full.locator('.ltime:visible');
+	const before = await time.textContent();
+	const wind = (await lanes.nth(2).locator('.plot').boundingBox())!;
+	await page.mouse.move(wind.x + wind.width * 0.85, wind.y + wind.height / 2);
+	await expect(time).not.toHaveText(before ?? '');
+	expect(await full.evaluate((e) => e.scrollHeight <= e.clientHeight + 1)).toBe(true);
+
 	await page.keyboard.press('Escape');
 	await expect(full).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();

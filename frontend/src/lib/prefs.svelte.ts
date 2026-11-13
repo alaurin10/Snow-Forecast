@@ -142,8 +142,6 @@ class Prefs {
 	concernAck = $state<boolean>(read('sw.concernAck') === '1');
 	mapBase = $state<MapBase>(load('sw.mapBase', MAP_BASES, 'topo'));
 	satBands = $state<SatBands>(load('sw.satBands', ['natural', 'snow'] as const, 'natural'));
-	/** Desktop: the map's Layers sheet stays open beside the map. */
-	layersPinned = $state<boolean>(read('sw.layersPinned') === '1');
 
 	/** Overview order on phones: the order set on the Manage page, or most snow first. */
 	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
@@ -221,11 +219,6 @@ class Prefs {
 	setSatBands(b: SatBands) {
 		this.satBands = b;
 		save('sw.satBands', b);
-	}
-
-	setLayersPinned(on: boolean) {
-		this.layersPinned = on;
-		save('sw.layersPinned', on ? '1' : '0');
 	}
 
 	acceptConcern() {

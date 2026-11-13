@@ -5,8 +5,7 @@
 
   Every choice is a tile of the same size in a well, the chosen one raised (colour only,
   so nothing moves); "None" comes first. Each section's (i) says, in one line, what the
-  chosen option is; the long version is in the map's About panel. On desktop the sheet
-  can be pinned open beside the map's buttons.
+  chosen option is; the long version is in the map's About panel.
 -->
 <script lang="ts">
 	import {
@@ -27,24 +26,10 @@
 		concern?: boolean;
 		/** The owner has supplied ATES ratings. */
 		ates?: boolean;
-		/** Desktop: the sheet can be pinned open. */
-		pinnable?: boolean;
-		pinned?: boolean;
-		onpin?: () => void;
 		onclose: () => void;
 	}
 
-	let {
-		analysis,
-		contours,
-		offline,
-		concern = false,
-		ates = false,
-		pinnable = false,
-		pinned = false,
-		onpin,
-		onclose
-	}: Props = $props();
+	let { analysis, contours, offline, concern = false, ates = false, onclose }: Props = $props();
 
 	interface Choice<T> {
 		id: T;
@@ -262,25 +247,12 @@
 	</button>
 {/snippet}
 
-<div class="sheet" class:pinned role="dialog" aria-label="Map layers" id="map-layers">
+<div class="sheet" role="dialog" aria-label="Map layers" id="map-layers">
 	<header>
 		<div class="names">
 			<span class="eyebrow">Map</span>
 			<strong class="title">Layers</strong>
 		</div>
-		{#if pinnable}
-			<button
-				class="hbtn"
-				aria-pressed={pinned}
-				aria-label={pinned ? 'Unpin layers' : 'Pin layers open'}
-				title={pinned ? 'Unpin: close with a tap on the map' : 'Keep open beside the map'}
-				onclick={() => onpin?.()}
-			>
-				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
-					><path d="M9 4h6l-1 6 3 3H7l3-3-1-6zM12 13v7" /></svg
-				>
-			</button>
-		{/if}
 		<button class="hbtn" onclick={onclose} aria-label="Close">✕</button>
 	</header>
 
@@ -438,11 +410,6 @@
 	.hbtn:hover {
 		background: var(--hover);
 	}
-	.hbtn[aria-pressed='true'] {
-		background: var(--accent-soft);
-		color: var(--accent-ink);
-	}
-	.hbtn svg,
 	.i svg {
 		fill: none;
 		stroke: currentColor;
