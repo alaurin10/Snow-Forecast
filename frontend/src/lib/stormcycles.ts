@@ -64,6 +64,28 @@ export function stormCycles(rows: OverviewRow[]): StormCycle[] {
 			last.max_cm = Math.max(last.max_cm, s.total_cm);
 		} else cycles.push({ start: s.start, end: s.end, max_cm: s.total_cm, locations: [s] });
 	}
-	for (const c of cycles) c.locations.sort((a, b) => b.total_cm - a.total_cm);
+	for (const c of cycles) {
+		c.locations = foldByLocation(c.locations);
+		c.max_cm = Math.max(...c.locations.map((l) => l.total_cm));
+		c.locations.sort((a, b) => b.total_cm - a.total_cm);
+	}
 	return cycles;
+}
+
+/** One entry per location: a location can storm twice in one cycle (its two storms
+ *  both overlap a longer one elsewhere), and the lists showing a cycle are keyed by
+ *  location id. Two storms become one spanning both, with their totals summed. */
+function foldByLocation(storms: LocationStorm[]): LocationStorm[] {
+	const byId = new Map<string, LocationStorm>();
+	for (const s of storms) {
+		const had = byId.get(s.id);
+		if (!had) byId.set(s.id, { ...s });
+		else {
+			if (s.start < had.start) had.start = s.start;
+			if (s.end > had.end) had.end = s.end;
+			had.total_cm += s.total_cm;
+			had.wet ||= s.wet;
+		}
+	}
+	return [...byId.values()];
 }

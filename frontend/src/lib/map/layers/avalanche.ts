@@ -49,9 +49,9 @@ export function addZones(
 			layout: { visibility: 'none' },
 			paint: {
 				'fill-color': fillColor,
-				// Strong when zoomed out, where zones are the point; faint up close, where
-				// the terrain is.
-				'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.42, 9, 0.28, 12, 0.08]
+				// Strong when zoomed out, where zones are the point; gone up close, where the
+				// terrain is (the outline stays, as the boundary and the thing to tap).
+				'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.42, 8, 0.3, 10, 0.12, 11, 0]
 			}
 		},
 		fillBefore

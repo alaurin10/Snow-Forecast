@@ -45,4 +45,31 @@ describe('stormCycles', () => {
 		expect(c[0].max_cm).toBe(18);
 		expect(c[1].locations.map((l) => l.id)).toEqual(['d']);
 	});
+
+	it('folds a location that storms twice in one cycle into one entry', () => {
+		// A: Mon–Tue and Thu–Fri; B: Mon–Fri. All three overlap, so they make one cycle,
+		// and A must appear once (lists of a cycle's locations are keyed by id).
+		const c = stormCycles([
+			row('a', [
+				per('2026-11-09', 'day', 3),
+				per('2026-11-10', 'day', 3, 'mix'),
+				per('2026-11-11', 'day', 0),
+				per('2026-11-12', 'day', 4),
+				per('2026-11-13', 'day', 4)
+			]),
+			row('b', [
+				per('2026-11-09', 'day', 2),
+				per('2026-11-10', 'day', 2),
+				per('2026-11-11', 'day', 2),
+				per('2026-11-12', 'day', 2),
+				per('2026-11-13', 'day', 2)
+			])
+		]);
+		expect(c).toHaveLength(1);
+		expect(c[0].locations.map((l) => l.id)).toEqual(['a', 'b']);
+		const a = c[0].locations[0];
+		expect([a.start, a.end, a.total_cm, a.wet]).toEqual(['2026-11-09', '2026-11-13', 14, true]);
+		expect(c[0].max_cm).toBe(14);
+		expect(new Set(c[0].locations.map((l) => l.id)).size).toBe(c[0].locations.length);
+	});
 });

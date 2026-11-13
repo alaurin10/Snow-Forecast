@@ -103,6 +103,21 @@ Notable changes to Snow Watch. The format follows
   (`gribberish`), ready for the longer forecast in milestone 2 of
   `docs/MAP-PLAN.md`.
 
+### Fixed
+- **The Calendar no longer fails with "Something went wrong"** when a location storms
+  twice inside another location's longer storm: a storm cycle now lists each location
+  once, with its storms' totals added together. The error page now shows what failed,
+  in small print, and the browser console logs it in full.
+- **The current-conditions pill is no longer cut off** on desktop or phone (including
+  when it sticks to the top). Long text ends in "…" and the temperature always shows;
+  on phones the pill and the elevations stay on one row. On desktop, "Updated …" has its
+  own pill. The Calendar's subtitle does the same.
+- **Satellite no longer brightens as you zoom in.** Hill shading over imagery now ramps
+  up with zoom (and uses a softer shadow) to even out MapLibre's stronger shading when
+  zoomed out.
+- **Avalanche danger zones stop tinting the map up close.** Their colour fades out by
+  zoom 11; the outline stays at every zoom, as the boundary and the thing to tap.
+
 ## [1.0.0] – 2026-11-10
 
 The first release prepared as a product: no third-party login, safe to expose

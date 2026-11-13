@@ -341,9 +341,10 @@
 		</p>
 		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
 		<div class="mrow" class:stuck>
-			<span class="pill glass" title="{band.label} · updated {updated}">
+			<span class="pill glass" title="{sky.label} · {band.label} · updated {updated}">
 				<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
-				{sky.label} · <span class="num">{temperature(band.hourly.temp_c[nowAt], units)}</span>
+				<span class="ptxt">{sky.label}</span>
+				<span class="ptemp num">· {temperature(band.hourly.temp_c[nowAt], units)}</span>
 			</span>
 			<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
 				{#each snap.bands as b (b.band)}
@@ -360,10 +361,15 @@
 		<header class="lhead">
 			<div class="title">
 				<h1>{snap.location.name}</h1>
-				<span class="pill glass">
-					<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
-					{snap.location.region} · {sky.label} now · updated {updated}
-				</span>
+				<div class="pills">
+					<span class="pill glass" title="{snap.location.region} · {sky.label} now">
+						<span class="skydot" data-scene={sky.scene} aria-hidden="true"></span>
+						<span class="ptxt">{snap.location.region} · {sky.label} now</span>
+					</span>
+					<span class="pill glass faintpill" title="Updated {updated}">
+						<span class="ptxt">Updated {updated}</span>
+					</span>
+				</div>
 			</div>
 			<div class="seg glass elev" role="group" aria-label="Elevation">
 				{#each snap.bands as b (b.band)}
@@ -682,9 +688,19 @@
 		font-size: 0.88rem;
 		font-weight: 500;
 		white-space: nowrap;
+		max-width: 100%;
+		min-width: 0;
+	}
+	/* Ellipsis works on a block, not on the flex pill itself: the words shrink and end in
+	   "…", the temperature beside them never does. */
+	.ptxt {
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		max-width: 100%;
+	}
+	.ptemp {
+		flex: 0 0 auto;
+		margin-left: -4px;
 	}
 	/* A swatch of the scene's sky (the same colours as the backdrop's top). */
 	.skydot {
@@ -731,6 +747,18 @@
 	}
 	.title {
 		min-width: 0;
+		max-width: 100%;
+	}
+	.pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+	.faintpill {
+		padding-left: 14px;
+		color: var(--text-2);
+		font-weight: 400;
 	}
 	.seg.elev {
 		padding: 4px;
@@ -1010,7 +1038,7 @@
 		top: env(safe-area-inset-top);
 		z-index: 30;
 		display: flex;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 8px;
@@ -1037,16 +1065,15 @@
 		height: env(safe-area-inset-top);
 		background: var(--header-glass);
 	}
-	/* The conditions never shrink; the elevations wrap below them if both can't fit. */
+	/* One row, always (so the stuck row never changes height): the elevations keep their
+	   size, and the conditions shrink to what's left, the sky's name ending in "…". */
 	.mrow .pill {
-		flex: 0 0 auto;
-		overflow: visible;
+		flex: 0 1 auto;
 		padding: 5px 12px 5px 5px;
 		font-size: 0.8rem;
 	}
 	.seg.elevs {
-		flex: 0 1 auto;
-		min-width: 0;
+		flex: 0 0 auto;
 		margin-left: auto;
 		padding: 3px;
 	}
@@ -1054,6 +1081,13 @@
 		min-width: 52px;
 		padding: 8px 6px;
 		font-size: 0.86rem;
+	}
+	/* The narrowest phones: slimmer elevations, so the sky's name keeps a word or two. */
+	@media (max-width: 360px) {
+		.seg.elevs button {
+			min-width: 44px;
+			padding: 8px 4px;
+		}
 	}
 	/* The chosen elevation's name, above the selector (it scrolls away; the selector stays). */
 	.elevname {
