@@ -169,15 +169,27 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	expect(sh).toBeLessThanOrEqual(ch + 1);
 	const plot = full.locator('.plot');
 	expect(await plot.evaluate((e) => getComputedStyle(e).touchAction)).toBe('none');
-	expect((await plot.boundingBox())!.height).toBeGreaterThan(300);
+	expect((await plot.boundingBox())!.height).toBeGreaterThan(250);
 	await expect(full.getByRole('group', { name: 'Chart metric' })).toBeVisible();
 	await expect(full.getByRole('slider', { name: 'Days the chart shows' })).toBeVisible();
+	// Clear of the edges: room at the top, the controls at the foot above the corners.
+	const bar = (await page.locator('.fsbar').boundingBox())!;
+	expect(bar.y).toBeGreaterThanOrEqual(14);
+	const range = page.locator('.fsfoot').getByRole('group', { name: 'Time range' });
+	const rb = (await range.boundingBox())!;
+	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(20);
+	expect(rb.height).toBeGreaterThanOrEqual(40);
+	// The lower panel: cloud cover and the chance of precipitation.
+	await expect(full.locator('.lowcap')).toContainText('Chance of precipitation');
+	await expect(full.locator('.lplot')).toBeVisible();
 
-	// All: four lanes on one time axis; reading one reads them all.
+	// All: every measure, six lanes on one time axis; reading one reads them all.
 	await page.getByRole('button', { name: 'All', exact: true }).click();
 	const lanes = full.locator('.fc.lane:not(.tlonly)');
-	await expect(lanes).toHaveCount(4);
-	await expect(full.locator('.lanehead:visible')).toHaveCount(4);
+	await expect(lanes).toHaveCount(6);
+	await expect(full.locator('.lanehead:visible')).toHaveCount(6);
+	for (const name of ['Cloud cover', 'Snow ratio'])
+		await expect(full.locator('.lanehead:visible', { hasText: name })).toHaveCount(1);
 	const time = full.locator('.ltime:visible');
 	const before = await time.textContent();
 	const wind = (await lanes.nth(2).locator('.plot').boundingBox())!;

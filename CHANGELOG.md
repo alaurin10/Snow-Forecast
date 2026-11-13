@@ -122,14 +122,16 @@ Notable changes to Snow Watch. The format follows
 ### Added
 - **Full screen forecast chart on phones and tablets**: an expand button opens the chart
   over the whole screen (the browser's own full screen where it offers one, as on
-  Android; edge to edge on iPhone), with nothing to scroll: a bar with the place, the
-  range (1–10 days) and the view, the chart filling the rest, the metrics as one row of
-  chips and the day timeline always there. "All" stacks snow, temperature, wind and
-  freezing level on one time axis (two by two with the phone on its side); reading any
-  of them reads them all, each lane saying its value at that time. It opens and closes
-  where the chart in the page is, and follows the phone's turn rather than forcing one.
-  In the page, a touch on the chart picks sideways (read it) or up and down (scroll)
-  after its first few pixels.
+  Android; edge to edge on iPhone), clear of the notch and the rounded corners, with
+  nothing to scroll: the place at the top, the chart, the cloud cover and chance of
+  precipitation under it, the metrics as one row of chips, the day timeline, and the
+  range (1–10 days) and the view in a bar at the foot, under the thumb. "All" stacks
+  every measure on one time axis (snow and rain, temperature, wind, cloud cover,
+  freezing level and snow ratio; three by two with the phone on its side, where the
+  range and view move up beside the title); reading any of them reads them all, each
+  lane saying its value at that time. It opens and closes where the chart in the page
+  is, and follows the phone's turn rather than forcing one. In the page, a touch on the
+  chart picks sideways (read it) or up and down (scroll) after its first few pixels.
 - **View a location on the map.** A Map button on each location page opens the map
   centred on it, close in and flat, with its popup open (`/map?loc=<id>`); the popup's
   "Open forecast →" goes back.
