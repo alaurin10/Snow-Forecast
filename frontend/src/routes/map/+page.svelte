@@ -2,6 +2,7 @@
 	import ErrorNote from '../../lib/components/ErrorNote.svelte';
 	import { friendlyError } from '../../lib/errors';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { getOverview } from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
 	import { savedAreas } from '../../lib/offlineMaps';
@@ -37,6 +38,8 @@
 	});
 
 	const href = (id: string) => resolve('/location/[id]', { id });
+	// From a location's Map button (/map?loc=<id>): open on that location.
+	const focus = $derived(page.url.searchParams.get('loc'));
 </script>
 
 <svelte:head><title>Map · Snow Watch</title></svelte:head>
@@ -48,7 +51,7 @@
 {:else if !rows}
 	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else}
-	<MapView {rows} units={prefs.units} {href} radar />
+	<MapView {rows} units={prefs.units} {href} {focus} radar />
 {/if}
 
 <style>

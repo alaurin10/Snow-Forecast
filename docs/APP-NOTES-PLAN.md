@@ -146,6 +146,36 @@ Paths are relative to `frontend/src/` unless they start with `backend/`.
 - Banners in `.col` (update / offline / stale) push the page down when they appear:
   render them as a fixed toast at the top on all pages, as `.overmap .banner` does.
 
+### 2.5 Conditions pill on phones: an icon, not words
+
+- **Why**: after 1.2 the phone pill no longer overflows, but on most phones the sky's
+  name is cut to "Ov…" or "Cl…" beside the elevation buttons, which reads as broken.
+  The owner's call: show the weather as an icon instead of words.
+- **Fix** (`routes/location/[id]/+page.svelte`, `.mrow .pill`):
+  - Replace the sky swatch and the `.ptxt` label with `lib/components/WxIcon.svelte`
+    (already used by the day list), drawn on the swatch's sky-coloured circle so the
+    scene's colour stays. The pill becomes icon + temperature: "☁ 33°F".
+  - Map the scene to an icon in one place, next to `SCENE_LABEL` in `lib/sky.ts`
+    (`sceneIcon(sky): WxIcon`): clear → `clear-day`, night → `clear-night`, glow →
+    `clear-day`, partly → `partly-day` / `partly-night` by `sky.night`, overcast →
+    `cloud`, fog → `fog`, snow and heavy → `snow`, mixed → `mix`, rain → `rain`. Unit
+    test every scene.
+  - The words stay for screen readers and pointer users: the icon's `aria-label` and the
+    pill's `title` are "Overcast · 33°F · Summit · updated Wed 1:34 PM". A tap on the
+    pill shows that line in a small popover under it (touch has no `title`), closed by a
+    second tap, a tap elsewhere or Escape.
+  - The pill now has a fixed width whatever the weather: icon (20 px), temperature in
+    tabular numbers with a `min-width` sized for "−10°F", so it never resizes as the
+    scene or the temperature changes. Drop the 360 px elevation-button squeeze from 1.2
+    if it's no longer needed.
+- **Desktop and tablet**: keep the words (they fit), but use the same icon in place of
+  the plain swatch, so both layouts show the same symbol.
+- **With M6**: when the sky gains more weather types (storm, heavy or blowing snow) and
+  a day/night phase, extend `sceneIcon` with them (`thunder` already exists in
+  `WxIcon`) so the pill and the backdrop always agree.
+- **Tests**: e2e at 320 and 375 px: the pill shows an icon with an accessible name, has
+  no text overflow, and keeps its width when the elevation changes.
+
 ---
 
 ## Milestone 3: Map taps: one panel, one place, the right content
@@ -366,7 +396,8 @@ and independent. M6 is independent and the most open-ended.
 - `cd backend && uv run pytest` (M5; also anything touching the API schema)
 - `npm run e2e -- --trace off` (starts `e2e/serve.sh`: API + built frontend on fixtures,
   no network). Add e2e cases for: Calendar renders with a twice-storming location
-  (M1); rail's bounding box is identical on `/`, `/calendar` and `/map` (M2); a tap on
+  (M1); rail's bounding box is identical on `/`, `/calendar` and `/map`, and the phone
+  conditions pill is an icon with a fixed width (M2); a tap on
   a station, a glacier and bare ground all open a panel at the same rect (M3); Layers
   sheet has no vertical scroll at 375 × 667 and tiles keep their rects when selected
   (M4).

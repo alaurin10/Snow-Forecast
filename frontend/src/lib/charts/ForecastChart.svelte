@@ -1962,6 +1962,7 @@
 		background: var(--surface-2);
 		color: var(--text-2);
 		font-size: 0.86rem;
+		font-weight: 500;
 		cursor: pointer;
 		transition:
 			background-color var(--ease),
@@ -1971,7 +1972,6 @@
 		background: var(--sel);
 		box-shadow: var(--sel-shadow);
 		color: var(--text);
-		font-weight: 600;
 	}
 	.dayshade {
 		position: absolute;

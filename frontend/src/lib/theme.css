@@ -354,6 +354,7 @@ button {
 	border-radius: 999px;
 	padding: 5px 12px;
 	font-size: 0.86rem;
+	font-weight: 500;
 	color: var(--text-2);
 	cursor: pointer;
 	white-space: nowrap;
@@ -367,11 +368,12 @@ button {
 	color: var(--text);
 }
 
+/* Selection is colour and background only, never weight: a bolder label is wider, and
+   would push its neighbours along (or onto another row). Controls never move. */
 .seg button[aria-pressed='true'] {
 	background: var(--sel);
 	color: var(--text);
 	box-shadow: var(--sel-shadow);
-	font-weight: 600;
 }
 
 /* On glass, the track is the glass itself. */

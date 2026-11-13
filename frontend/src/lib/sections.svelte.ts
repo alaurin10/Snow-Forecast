@@ -1,6 +1,6 @@
 // The open location's sections (Forecast, Models, Backcountry, Observed). The location
-// page owns them; on desktop the left rail shows them under that location, on phones
-// and tablets the page shows them as tabs. Both read and set the same state.
+// page owns them and shows them as its tabs on every screen; the shell's keys 1–4 pick
+// one, and the rail marks which location is open. All read and set the same state.
 export type Section = 'forecast' | 'models' | 'backcountry' | 'observed';
 
 export const SECTION_NAMES: Record<Section, string> = {

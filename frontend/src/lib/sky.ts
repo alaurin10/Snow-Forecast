@@ -1,6 +1,7 @@
 // The weather behind the page: one scene for the location's current hour. The sky is
 // deliberately static; it never follows the chart while you scrub, so the page never
 // flashes. It changes only when the location (or the data) changes.
+import type { WxIcon } from './periodwx';
 import type { HourlyOut, Snapshot, SunDay } from './types.gen';
 
 export type Scene =
@@ -26,6 +27,30 @@ export const SCENE_LABEL: Record<Scene, string> = {
 	rain: 'Rain',
 	fog: 'Fog'
 };
+
+/** The weather icon for a scene: the conditions pill shows it in place of the words. */
+export function sceneIcon(sky: SkyState): WxIcon {
+	switch (sky.scene) {
+		case 'clear':
+		case 'glow':
+			return 'clear-day';
+		case 'night':
+			return 'clear-night';
+		case 'partly':
+			return sky.night ? 'partly-night' : 'partly-day';
+		case 'overcast':
+			return 'cloud';
+		case 'fog':
+			return 'fog';
+		case 'snow':
+		case 'heavy':
+			return 'snow';
+		case 'mixed':
+			return 'mix';
+		case 'rain':
+			return 'rain';
+	}
+}
 
 /** The calm default before any forecast has loaded. */
 export const DEFAULT_SKY: SkyState = { scene: 'partly', night: false, label: SCENE_LABEL.partly };
