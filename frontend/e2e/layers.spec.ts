@@ -151,18 +151,40 @@ test('phones: one row of tabs at the foot of the map, at most one control open o
 	expect(dock.height).toBeLessThan(50);
 });
 
-test('phones: the forecast chart opens full screen, and Escape closes it', async ({
+test('phones: the forecast chart opens truly full screen, with an "All" view, and Escape closes it', async ({
 	page
 }, info) => {
 	test.skip(info.project.name !== 'phone', 'full screen is for phones and tablets');
+	// The owner's case: the timeline switched off in the page.
+	await page.addInitScript(() => localStorage.setItem('sw.showTimeline', 'off'));
 	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
 	await page.getByRole('button', { name: 'Full screen chart' }).click();
 	const full = page.getByRole('dialog', { name: 'Forecast chart, full screen' });
 	await expect(full).toBeVisible();
+	// The whole window (not trapped in the page's card), and nothing to scroll.
+	const vp = page.viewportSize()!;
+	const box = (await page.locator('.fsx').boundingBox())!;
+	expect(box).toMatchObject({ x: 0, y: 0, width: vp.width, height: vp.height });
+	const { sh, ch } = await full.evaluate((e) => ({ sh: e.scrollHeight, ch: e.clientHeight }));
+	expect(sh).toBeLessThanOrEqual(ch + 1);
 	const plot = full.locator('.plot');
 	expect(await plot.evaluate((e) => getComputedStyle(e).touchAction)).toBe('none');
-	expect((await plot.boundingBox())!.height).toBeGreaterThan(200);
+	expect((await plot.boundingBox())!.height).toBeGreaterThan(300);
 	await expect(full.getByRole('group', { name: 'Chart metric' })).toBeVisible();
+	await expect(full.getByRole('slider', { name: 'Days the chart shows' })).toBeVisible();
+
+	// All: four lanes on one time axis; reading one reads them all.
+	await page.getByRole('button', { name: 'All', exact: true }).click();
+	const lanes = full.locator('.fc.lane:not(.tlonly)');
+	await expect(lanes).toHaveCount(4);
+	await expect(full.locator('.lanehead:visible')).toHaveCount(4);
+	const time = full.locator('.ltime:visible');
+	const before = await time.textContent();
+	const wind = (await lanes.nth(2).locator('.plot').boundingBox())!;
+	await page.mouse.move(wind.x + wind.width * 0.85, wind.y + wind.height / 2);
+	await expect(time).not.toHaveText(before ?? '');
+	expect(await full.evaluate((e) => e.scrollHeight <= e.clientHeight + 1)).toBe(true);
+
 	await page.keyboard.press('Escape');
 	await expect(full).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();

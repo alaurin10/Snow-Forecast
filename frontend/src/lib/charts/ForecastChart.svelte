@@ -50,8 +50,21 @@
 		shadeDate?: string | null;
 		/** The day under the pointer, or null when it leaves the chart. */
 		onhoverdate?: (date: string | null) => void;
-		/** Shown full-window (phones and tablets): the plot fills it, and a finger scrubs. */
+		/** Shown full screen: the plot fills the space, and a finger scrubs. */
 		fullscreen?: boolean;
+		/** The metric shown, the step read and where the window starts: bindable, so the
+		 *  full screen view and its lanes share them with the chart in the page. */
+		metric?: Metric;
+		hoverT?: string | null;
+		startMs?: number | null;
+		/** One lane of the full screen "All" view: a heading with its value, and the plot. */
+		lane?: boolean;
+		/** The lane at the foot: the days under it, and the timeline. */
+		last?: boolean;
+		/** The lane at the top: the time being read. */
+		first?: boolean;
+		/** Just the timeline (under the lanes of the "All" view). */
+		tlonly?: boolean;
 	}
 
 	let {
@@ -65,20 +78,24 @@
 		embedded = false,
 		shadeDate = null,
 		onhoverdate,
-		fullscreen = false
+		fullscreen = false,
+		metric = $bindable('precip'),
+		hoverT = $bindable(null),
+		startMs = $bindable(null),
+		lane = false,
+		last = false,
+		first = false,
+		tlonly = false
 	}: Props = $props();
 	const phone = $derived(viewport.phone);
 	const c = $derived(converters(units));
 	const ranges = $derived(availableRanges(band.hourly.t.length));
-	let metric = $state<Metric>('precip');
-	let hoverT = $state<string | null>(null);
 	const R = $derived<Range>(ranges.includes(range) ? range : (ranges[ranges.length - 1] ?? 1));
 	// Every step to the end of the data; the chart shows a window of them. It starts now
 	// and moves with the timeline under the chart.
 	const allSteps = $derived(buildSteps(band.hourly, R, true));
 	const nWin = $derived(Math.min((R * 24) / STEP[R], allSteps.length));
 	const maxOff = $derived(Math.max(0, allSteps.length - nWin));
-	let startMs = $state<number | null>(null);
 	const off = $derived.by(() => {
 		const t = startMs ?? (start ? Date.parse(start) : null);
 		if (t === null) return 0;
@@ -703,11 +720,11 @@
 	// there is no way to move the window, so it always starts today.
 	function pickRange(r: Range) {
 		range = r;
-		if (!showTimeline) startMs = null;
+		if (!showTimeline && !fullscreen) startMs = null;
 		hoverT = null;
 	}
 	$effect(() => {
-		if (!showTimeline) untrack(() => (startMs = null));
+		if (!showTimeline && !fullscreen) untrack(() => (startMs = null));
 	});
 
 	// --- The timeline: one column per forecast day, the chart's window marked ---
@@ -787,7 +804,11 @@
 			canNext: off < maxOff
 		};
 	});
-	const showTimeline = $derived(!embedded && !fullscreen && prefs.showTimeline === 'on');
+	// Full screen, the timeline is always there (it's how you move through the days); in
+	// the "All" view, once, under the lanes.
+	const showTimeline = $derived(
+		!embedded && (fullscreen ? !lane || tlonly : prefs.showTimeline === 'on')
+	);
 
 	// ---- Full window (phones and tablets) ------------------------------------------------
 	// The same chart over the whole window, where a finger can scrub without scrolling the
@@ -795,20 +816,53 @@
 	// it asks for landscape where the browser allows it.
 	let expanded = $state(false);
 	const canExpand = $derived(!viewport.desktop && !embedded && !fullscreen);
-	type Lockable = ScreenOrientation & { lock?: (o: string) => Promise<void> };
+	/** Full screen: the one chart, or every lane stacked ("All"). */
+	let fsView = $state<'chart' | 'all'>('chart');
+	const ALL_LANES: Metric[] = ['precip', 'temp', 'wind', 'fl'];
+	/** A phone on its side: the lanes two by two. */
+	let sideways = $state(false);
+	$effect(() => {
+		if (!expanded || typeof matchMedia === 'undefined') return;
+		const mq = matchMedia('(orientation: landscape)');
+		sideways = mq.matches;
+		const on = (e: MediaQueryListEvent) => (sideways = e.matches);
+		mq.addEventListener('change', on);
+		return () => mq.removeEventListener('change', on);
+	});
+	/** The browser's own full screen was entered (Android); iPhones get the overlay only. */
+	let nativeFull = false;
 	function openFull() {
 		expanded = true;
-		const o = (typeof screen !== 'undefined' ? screen.orientation : undefined) as
-			Lockable | undefined;
-		o?.lock?.('landscape').catch(() => {});
+		// Inside the tap, as browsers require; where it isn't offered, the overlay alone.
+		const root = document.documentElement;
+		if (root.requestFullscreen && !document.fullscreenElement)
+			root.requestFullscreen({ navigationUI: 'hide' }).then(
+				() => (nativeFull = true),
+				() => {}
+			);
 	}
 	function closeFull() {
 		expanded = false;
-		try {
-			screen.orientation?.unlock?.();
-		} catch {
-			// Not locked, or not allowed: nothing to undo.
-		}
+		if (nativeFull && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+		nativeFull = false;
+	}
+	// Leaving the browser's full screen (its own gesture or key) closes the view too.
+	$effect(() => {
+		if (!expanded) return;
+		const off = () => {
+			if (nativeFull && !document.fullscreenElement) {
+				nativeFull = false;
+				expanded = false;
+			}
+		};
+		document.addEventListener('fullscreenchange', off);
+		return () => document.removeEventListener('fullscreenchange', off);
+	});
+	/** Moves the full screen view to the end of <body>, out of the card: a card's blur
+	 *  makes it the box that position: fixed is measured from, which trapped the view. */
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return { destroy: () => node.remove() };
 	}
 
 	// In the page, a touch on the plot picks one direction after its first few pixels:
@@ -904,7 +958,7 @@
 	}
 </script>
 
-<div class="fc" class:phone class:embedded class:fullscreen>
+<div class="fc" class:phone class:embedded class:fullscreen class:lane class:last class:tlonly>
 	{#if phone && s && reading}
 		<div class="mread">
 			<div class="mwhen">{when(s)}</div>
@@ -918,6 +972,13 @@
 					<strong class="num">{cumTxt}<small>of {totalTxt}</small></strong>
 				</div>
 			{/if}
+		</div>
+	{/if}
+	{#if lane && s && reading}
+		<div class="lanehead">
+			<span class="lname"><i style:background={reading.color}></i>{reading.label}</span>
+			{#if first}<span class="ltime">{when(s)}</span>{/if}
+			<strong class="lval num">{reading.value}</strong>
 		</div>
 	{/if}
 	<div class="top">
@@ -1208,14 +1269,75 @@
 </div>
 
 {#if expanded}
-	<div class="fsx" use:modal={{ onclose: closeFull }}>
-		<div class="fsbar">
-			<strong>Forecast</strong>
+	<div class="fsx" use:portal use:modal={{ onclose: closeFull }}>
+		<header class="fsbar">
 			<button class="fsclose" onclick={closeFull} aria-label="Close the full screen chart">✕</button
 			>
-		</div>
-		<div class="fsbody" role="dialog" aria-label="Forecast chart, full screen">
-			<ForecastChart {band} {bands} {units} bind:range fullscreen />
+			<div class="fstitle">
+				<strong>Forecast</strong>
+				{#if place || band.label}<span>{[place?.name, band.label].filter(Boolean).join(' · ')}</span
+					>{/if}
+			</div>
+			<div class="seg fsrange" role="group" aria-label="Time range">
+				{#each ranges as r (r)}
+					<button aria-pressed={R === r} onclick={() => pickRange(r)}>{r}d</button>
+				{/each}
+			</div>
+			<div class="seg" role="group" aria-label="View">
+				<button aria-pressed={fsView === 'chart'} onclick={() => (fsView = 'chart')}>Chart</button>
+				<button
+					aria-pressed={fsView === 'all'}
+					onclick={() => (fsView = 'all')}
+					title="Snow, temperature, wind and freezing level, stacked">All</button
+				>
+			</div>
+		</header>
+		<div
+			class="fsbody"
+			class:all={fsView === 'all'}
+			class:sideways
+			role="dialog"
+			aria-label="Forecast chart, full screen"
+		>
+			{#if fsView === 'chart'}
+				<ForecastChart
+					{band}
+					{bands}
+					{units}
+					bind:range
+					bind:metric
+					bind:hoverT
+					bind:startMs
+					fullscreen
+				/>
+			{:else}
+				{#each ALL_LANES as m, i (m)}
+					<ForecastChart
+						{band}
+						{bands}
+						{units}
+						bind:range
+						bind:hoverT
+						bind:startMs
+						metric={m}
+						fullscreen
+						lane
+						first={i === 0}
+						last={sideways ? i >= 2 : i === ALL_LANES.length - 1}
+					/>
+				{/each}
+				<ForecastChart
+					{band}
+					{bands}
+					{units}
+					bind:range
+					bind:hoverT
+					bind:startMs
+					fullscreen
+					lane
+					tlonly
+				/>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -1246,23 +1368,17 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
-	/* Full window: the plot takes what's left after the readout, chips and axes. */
-	.fc.fullscreen {
-		gap: 10px;
-		--plot-h: max(150px, calc(100dvh - 300px - env(safe-area-inset-top)));
-	}
-	.fc.fullscreen .plot {
-		touch-action: none;
-	}
-	.fc.fullscreen .legend {
-		display: none;
-	}
+
+	/* ---- Full screen: the whole window, nothing to scroll -------------------------------
+	   A bar (close, place, range, view), then the chart, whose plot takes whatever height
+	   is left; the metric cards are one row of chips, the timeline is always there. */
 	.fsx {
 		position: fixed;
 		inset: 0;
-		z-index: 2000;
+		z-index: 3000;
 		display: flex;
 		flex-direction: column;
+		height: 100dvh;
 		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
 			env(safe-area-inset-left);
 		background: var(--surface);
@@ -1272,62 +1388,175 @@
 		flex: none;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 8px 12px 0 16px;
-	}
-	.fsbar strong {
-		font-family: var(--font-num);
-		font-size: 1.1rem;
+		gap: 8px;
+		padding: 8px 10px;
+		border-bottom: 1px solid var(--border);
 	}
 	.fsclose {
-		width: 40px;
-		height: 40px;
+		flex: none;
+		width: 36px;
+		height: 36px;
 		border: 0;
 		border-radius: 999px;
 		background: var(--surface-2);
 		color: var(--text);
-		font-size: 1rem;
+		font-size: 0.95rem;
 		cursor: pointer;
+	}
+	.fstitle {
+		flex: 1;
+		min-width: 0;
+		display: grid;
+		line-height: 1.2;
+	}
+	.fstitle strong {
+		font-family: var(--font-num);
+		font-size: 1rem;
+	}
+	.fstitle span {
+		font-size: 0.72rem;
+		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.fsbar .seg {
+		flex: none;
+	}
+	.fsbar .seg button {
+		font-size: 0.76rem;
+		padding: 4px 9px;
 	}
 	.fsbody {
 		flex: 1;
 		min-height: 0;
-		overflow-y: auto;
-		padding: 6px 12px 12px;
-	}
-	/* Full window on a wider screen (a phone turned sideways): no heading or readout (the
-	   chips say the period's numbers), and the chips in one compact row. */
-	.fc.fullscreen .top h2,
-	.fc.fullscreen:not(.phone) .readout {
-		display: none;
-	}
-	.fc.fullscreen:not(.phone) .cards {
-		grid-template-columns: repeat(6, minmax(0, 1fr));
+		display: flex;
+		flex-direction: column;
 		gap: 6px;
+		padding: 8px 12px 10px;
+		overflow: hidden;
 	}
-	.fc.fullscreen:not(.phone) .mcard {
-		height: 54px;
-		padding: 6px 10px;
-		gap: 2px;
-		border-radius: 14px;
+	.fc.fullscreen {
+		flex: 1 1 0;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
 	}
-	.fc.fullscreen:not(.phone) .mval {
-		font-size: 1.05rem;
-	}
-	.fc.fullscreen:not(.phone) .mtxt.long,
-	.fc.fullscreen:not(.phone) .msub {
+	.fc.fullscreen .top,
+	.fc.fullscreen .lower,
+	.fc.fullscreen .legend,
+	.fc.fullscreen .tlnote {
 		display: none;
 	}
-	.fc.fullscreen:not(.phone) .mtxt.short {
+	.fc.fullscreen .plotrow {
+		flex: 1 1 auto;
+		min-height: 60px;
+	}
+	.fc.fullscreen .plot,
+	.fc.fullscreen .plotrow .yaxis {
+		height: auto;
+	}
+	.fc.fullscreen .plot {
+		touch-action: none;
+	}
+	/* The metric cards as one row of chips. */
+	.fc.fullscreen .cards {
+		display: flex;
+		gap: 6px;
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.fc.fullscreen .cards::-webkit-scrollbar {
+		display: none;
+	}
+	.fc.fullscreen .mcard {
+		flex: none;
+		min-width: 78px;
+		height: 46px;
+		padding: 5px 10px;
+		gap: 1px;
+		border-radius: 12px;
+	}
+	.fc.fullscreen .mval {
+		font-size: 0.98rem;
+	}
+	.fc.fullscreen .mtxt.long,
+	.fc.fullscreen .msub {
+		display: none;
+	}
+	.fc.fullscreen .mtxt.short {
 		display: inline;
 	}
-	@media (orientation: landscape) and (max-height: 500px) {
-		.fc.fullscreen {
-			--plot-h: max(130px, calc(100dvh - 230px));
-		}
-		.fsbar {
-			padding-top: 4px;
-		}
+	.fc.fullscreen .tltrack {
+		height: 46px;
+	}
+	/* "All": every lane stacked on one time axis, each with its value at the time read;
+	   sideways, two by two. The timeline once, across the foot. */
+	.fsbody.all {
+		gap: 4px;
+	}
+	.fsbody.all.sideways {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
+		column-gap: 14px;
+	}
+	.fsbody.all.sideways > :global(.fc.tlonly) {
+		grid-column: 1 / -1;
+	}
+	.fc.tlonly {
+		flex: none;
+	}
+	.fc.tlonly > :not(.tl) {
+		display: none !important;
+	}
+	.fc.lane {
+		gap: 2px;
+	}
+	.fc.lane .mread,
+	.fc.lane .readout,
+	.fc.lane .cards,
+	.fc.lane .axes,
+	.fc.lane:not(.last) .xaxis {
+		display: none;
+	}
+	.fc.lane .plotrow {
+		min-height: 40px;
+	}
+	.lanehead {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		min-width: 0;
+		font-size: 0.78rem;
+	}
+	.lname {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-weight: 600;
+		color: var(--text-2);
+		white-space: nowrap;
+	}
+	.lname i {
+		width: 9px;
+		height: 9px;
+		border-radius: 3px;
+	}
+	.ltime {
+		flex: 1;
+		min-width: 0;
+		color: var(--text-3);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.lval {
+		margin-left: auto;
+		font-size: 1rem;
+		font-weight: 650;
+		white-space: nowrap;
 	}
 	.top {
 		display: flex;
@@ -2147,6 +2376,10 @@
 	   under the plot and the timeline, where the pointer already is (as on phones). */
 	.fc:not(.phone):not(.embedded) .top {
 		display: contents;
+	}
+	/* Full screen, the bar above has the range: not the chart's own. */
+	.fc.fullscreen:not(.phone):not(.embedded) .top {
+		display: none;
 	}
 	.fc:not(.phone):not(.embedded) .controls {
 		order: 1;
