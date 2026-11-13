@@ -144,6 +144,7 @@
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
 	import Measure from '../map/Measure.svelte';
 	import DockItem from '../map/DockItem.svelte';
+	import DockTabs from '../map/DockTabs.svelte';
 	import StationCard from '../map/StationCard.svelte';
 	import ReportCard from '../map/ReportCard.svelte';
 	import { plainLine, setMeasure } from '../map/layers/measure';
@@ -1313,7 +1314,24 @@
 	const on = $derived(weather !== 'off');
 	// Phones and tablets: one control at the foot open at a time, the last one touched
 	// (or the newest to appear); the rest fold to a line (../map/DockItem.svelte).
-	let dockOpen = $state<string | null>(null);
+	// Remembered in this browser, so a reload opens the same one.
+	let dockOpen = $state<string | null>(
+		(() => {
+			try {
+				return localStorage.getItem('sw.dockOpen');
+			} catch {
+				return null;
+			}
+		})()
+	);
+	$effect(() => {
+		const d = dockOpen;
+		try {
+			if (d) localStorage.setItem('sw.dockOpen', d);
+		} catch {
+			// Storage off: it just isn't remembered.
+		}
+	});
 	const docked = $derived(
 		[
 			measuring && 'measure',
@@ -1323,15 +1341,62 @@
 			on && 'timeline'
 		].filter((x): x is string => !!x)
 	);
-	let dockedBefore: string[] = [];
+	// A control opens when you choose what it controls (a layer, Measure); on loading the
+	// page the last one (the weather's) is open.
+	let lastChoice = '';
 	$effect(() => {
-		const now_ = docked;
-		const fresh = now_.find((d) => !dockedBefore.includes(d));
-		if (fresh) dockOpen = fresh;
-		dockedBefore = now_;
+		const choice = [prefs.mapBase, prefs.mapOverlay, prefs.mapWeather, measuring].join('|');
+		const before = lastChoice;
+		lastChoice = choice;
+		if (!before) return;
+		const [base, overlay, weather_, meas] = before.split('|');
+		if (String(measuring) !== meas && measuring) dockOpen = 'measure';
+		else if (prefs.mapOverlay !== overlay)
+			dockOpen =
+				prefs.mapOverlay === 'sun' || prefs.mapOverlay === 'wind'
+					? 'terrain'
+					: prefs.mapOverlay === 'problems' || prefs.mapOverlay === 'concern'
+						? 'avy'
+						: dockOpen;
+		else if (prefs.mapBase !== base && prefs.mapBase === 'recent') dockOpen = 'sat';
+		else if (prefs.mapWeather !== weather_ && prefs.mapWeather !== 'off') dockOpen = 'timeline';
 	});
+	// 'none': every control folded away, leaving just the row of tabs.
 	const openDock = $derived(
-		dockOpen && docked.includes(dockOpen) ? dockOpen : (docked.at(-1) ?? null)
+		dockOpen === 'none'
+			? null
+			: dockOpen && docked.includes(dockOpen)
+				? dockOpen
+				: (docked.at(-1) ?? null)
+	);
+	const DOCK_TITLES: Record<string, string> = {
+		measure: 'Measure',
+		sat: 'Satellite',
+		avy: 'Avalanche',
+		terrain: 'Terrain',
+		timeline: 'Weather'
+	};
+	/** What each control shows now, in a few words, for its tab. */
+	const dockStatus = (id: string): string => {
+		switch (id) {
+			case 'measure':
+				return measureTitle;
+			case 'sat':
+				return satSummary(satData?.viirs_date, satSpot, sceneIndex, now);
+			case 'avy':
+				return overlayMode === 'concern'
+					? 'Concern index'
+					: `Problems${centreZone ? ` · ${zoneName(centreZone)}` : ''}`;
+			case 'terrain':
+				return sunOn
+					? `Sun & shade · ${sunMode === 'hours' ? 'hours of sun' : 'shade now'}`
+					: `Wind effect · ${WIND_WINDOWS.find((w) => w.id === windWindow)?.label ?? ''}`;
+			default:
+				return `${WEATHER_CHOICES.find((w) => w.id === weather)?.label ?? ''}${label ? ` · ${label.when}` : pick ? ` · ${pick.name}` : ''}`;
+		}
+	};
+	const dockTabs = $derived(
+		docked.map((id) => ({ id, title: DOCK_TITLES[id], status: dockStatus(id) }))
 	);
 	const QUICK_TERRAIN: { id: MapOverlay; label: string; title: string; worker?: boolean }[] = [
 		{ id: 'none', label: 'None', title: 'No terrain overlay' },
@@ -2235,8 +2300,6 @@
 		<div class="dock" bind:this={dock}>
 			{#if measuring}
 				<DockItem
-					title="Measure"
-					status={measureTitle}
 					compact={!viewport.desktop}
 					open={openDock === 'measure'}
 					ontouch={() => (dockOpen = 'measure')}
@@ -2260,8 +2323,6 @@
 			{/if}
 			{#if recent && !offline}
 				<DockItem
-					title="Satellite"
-					status={satSummary(satData?.viirs_date, satSpot, sceneIndex, now)}
 					compact={!viewport.desktop}
 					open={openDock === 'sat'}
 					ontouch={() => (dockOpen = 'sat')}
@@ -2280,10 +2341,6 @@
 			{/if}
 			{#if avyOverlay && analysis}
 				<DockItem
-					title="Avalanche"
-					status={overlayMode === 'concern'
-						? 'Concern index'
-						: `Problems${centreZone ? ` · ${zoneName(centreZone)}` : ''}`}
 					compact={!viewport.desktop}
 					open={openDock === 'avy'}
 					ontouch={() => (dockOpen = 'avy')}
@@ -2308,10 +2365,6 @@
 			{/if}
 			{#if (sunOn || windOn) && analysis}
 				<DockItem
-					title="Terrain"
-					status={sunOn
-						? `Sun & shade · ${sunMode === 'hours' ? 'hours of sun' : 'shade now'}`
-						: `Wind effect · ${WIND_WINDOWS.find((w) => w.id === windWindow)?.label ?? ''}`}
 					compact={!viewport.desktop}
 					open={openDock === 'terrain'}
 					ontouch={() => (dockOpen = 'terrain')}
@@ -2349,8 +2402,6 @@
 			{/if}
 			{#if on}
 				<DockItem
-					title="Weather"
-					status={`${WEATHER_CHOICES.find((w) => w.id === weather)?.label ?? ''}${label ? ` · ${label.when}` : pick ? ` · ${pick.name}` : ''}`}
 					compact={!viewport.desktop}
 					open={openDock === 'timeline'}
 					ontouch={() => (dockOpen = 'timeline')}
@@ -2372,6 +2423,9 @@
 						{loadError}
 					/>
 				</DockItem>
+			{/if}
+			{#if !viewport.desktop && dockTabs.length}
+				<DockTabs tabs={dockTabs} open={openDock} onpick={(id) => (dockOpen = id ?? 'none')} />
 			{/if}
 		</div>
 	{/if}

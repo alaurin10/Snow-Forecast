@@ -548,5 +548,14 @@
 			height: 34px;
 			font-size: 0.78rem;
 		}
+		.body :global(.mp-tiles button > span) {
+			font-size: 0.76rem;
+		}
+	}
+	/* The narrowest phones: three across, so every word fits its tile. */
+	@media (max-width: 359px) {
+		.body :global(.mp-tiles) {
+			--cols: 3 !important;
+		}
 	}
 </style>

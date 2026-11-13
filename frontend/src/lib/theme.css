@@ -630,7 +630,7 @@ textarea {
 	gap: 5px;
 	min-width: 0;
 	height: 36px;
-	padding: 0 6px;
+	padding: 0 4px;
 	border: 0;
 	border-radius: 11px;
 	background: transparent;
@@ -643,11 +643,13 @@ textarea {
 		box-shadow var(--ease),
 		color var(--ease);
 }
+/* A label is never cut short: one that doesn't fit takes a second line (between words). */
 .mp-tiles button > span {
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	text-align: center;
+	line-height: 1.12;
+	overflow-wrap: normal;
+	hyphens: manual;
 }
 .mp-tiles button:hover {
 	color: var(--text);

@@ -45,6 +45,37 @@ test('Layers fits a small phone without scrolling, and its tiles keep their plac
 	await ctx.close();
 });
 
+for (const width of [320, 375]) {
+	test(`no Layers label is cut short at ${width} px`, async ({ browser }, info) => {
+		test.skip(info.project.name !== 'phone', 'one run is enough');
+		const ctx = await browser.newContext({ viewport: { width, height: 700 }, hasTouch: true });
+		const page = await ctx.newPage();
+		await page.addInitScript(() => localStorage.setItem('sw.mapFeatures', 'ates'));
+		await page.goto('/map', { waitUntil: 'networkidle' });
+		await page.getByRole('button', { name: 'Layers' }).click();
+		const sheet = page.getByRole('dialog', { name: 'Map layers' });
+		await expect(sheet).toBeVisible();
+		const cut = await sheet.locator('.mp-tiles button > span').evaluateAll((spans) =>
+			spans
+				.filter((s) => {
+					const b = s.parentElement!.getBoundingClientRect();
+					const r = s.getBoundingClientRect();
+					// Wider than its text box, or spilling out of its tile.
+					return (
+						s.scrollWidth > s.clientWidth + 1 ||
+						r.left < b.left - 0.5 ||
+						r.right > b.right + 0.5 ||
+						r.top < b.top - 0.5 ||
+						r.bottom > b.bottom + 0.5
+					);
+				})
+				.map((s) => s.textContent)
+		);
+		expect(cut).toEqual([]);
+		await ctx.close();
+	});
+}
+
 test('desktop: Layers pinned open stays through a tap on the map and a reload', async ({
 	page
 }, info) => {
@@ -73,7 +104,9 @@ test('desktop: Layers pinned open stays through a tap on the map and a reload', 
 	);
 });
 
-test('phones: one control open at the foot of the map, the rest folded', async ({ page }, info) => {
+test('phones: one row of tabs at the foot of the map, at most one control open over it', async ({
+	page
+}, info) => {
 	test.skip(info.project.name !== 'phone', 'the dock folds on phones');
 	// A map, a reload and many steps: slow on a busy machine.
 	test.slow();
@@ -83,19 +116,29 @@ test('phones: one control open at the foot of the map, the rest folded', async (
 		localStorage.setItem('sw.mapWeather', 'radar');
 	});
 	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
-	const folded = page.locator('.dock .fold');
-	await expect(folded).toHaveCount(2);
-	await expect(page.getByRole('button', { name: /^Satellite: .*Show the controls/ })).toBeVisible();
-	await expect(page.getByRole('button', { name: /^Weather: .*Show the controls/ })).toBeVisible();
-	await page.getByRole('button', { name: /^Weather: / }).click();
+	const tabs = page.getByRole('group', { name: 'Map controls' });
+	await expect(tabs.getByRole('button')).toHaveCount(3);
+	// Weather (the last) is open; the others aren't drawn.
+	await expect(tabs.getByRole('button', { name: /^Weather: / })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
 	await expect(page.getByRole('region', { name: 'Precipitation' })).toBeVisible();
-	await expect(page.getByRole('button', { name: /^Terrain: / })).toBeVisible();
-	await expect(folded).toHaveCount(2);
-	// The satellite controls are one row, with the long story behind (i).
-	await page.getByRole('button', { name: /^Satellite: / }).click();
+	await expect(page.getByRole('region', { name: 'Recent satellite' })).toHaveCount(0);
+	// Another tab: that one instead.
+	await tabs.getByRole('button', { name: /^Satellite: / }).click();
 	const sat = page.getByRole('region', { name: 'Recent satellite' });
+	await expect(sat).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Precipitation' })).toHaveCount(0);
+	// The satellite controls are one row, with the long story behind (i).
 	await expect(sat.getByRole('button', { name: 'About this view' })).toBeVisible();
 	expect((await sat.boundingBox())!.height).toBeLessThan(60);
+	// The open tab again: everything folded, just the row of tabs over the map.
+	await tabs.getByRole('button', { name: /^Satellite: / }).click();
+	await expect(sat).toHaveCount(0);
+	await expect(tabs.getByRole('button', { pressed: true })).toHaveCount(0);
+	const dock = (await page.locator('.dock').boundingBox())!;
+	expect(dock.height).toBeLessThan(50);
 });
 
 test('phones: the forecast chart opens full screen, and Escape closes it', async ({
