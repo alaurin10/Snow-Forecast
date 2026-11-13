@@ -52,7 +52,7 @@ test('sections are the page’s tabs on desktop, by click or 1–4', async ({ pa
 	expect(await rect(list)).toEqual(before);
 });
 
-test('desktop: once the controls scroll away, a top band keeps the elevation', async ({
+test('desktop: once the controls scroll away, a compact pill keeps the elevation', async ({
 	page
 }, info) => {
 	test.skip(info.project.name !== 'desktop', 'phones have their own sticky row');
@@ -63,16 +63,18 @@ test('desktop: once the controls scroll away, a top band keeps the elevation', a
 	// Under the name, above the outlook: nothing between the outlook and the section.
 	const outlook = page.getByRole('region', { name: 'Outlook' });
 	expect((await tabs.boundingBox())!.y).toBeLessThan((await outlook.boundingBox())!.y);
-	// At the top the band is hidden (and out of the accessibility tree).
+	// At the top the compact pill is hidden (and out of the accessibility tree).
 	await expect(compact).toHaveCount(0);
 
-	// Scrolled down: the tabs go with the page; the band shows the compact picker.
+	// Scrolled down: the tabs go with the page; the compact picker shows at the top right.
 	await page.mouse.wheel(0, 1200);
 	await expect(compact).toBeVisible();
 	expect((await tabs.boundingBox())!.y).toBeLessThan(0);
-	const band = (await compact.boundingBox())!;
-	expect(band.y).toBeLessThan(30);
-	expect(band.height).toBeLessThan(44);
+	const pill = (await compact.boundingBox())!;
+	expect(pill.y).toBeLessThan(30);
+	expect(pill.height).toBeLessThan(44);
+	// Only the pill: no name pill or band beside it.
+	await expect(page.locator('.bandwrap')).not.toContainText(/[A-Za-z]{3}/);
 	// Numbers only, and in step with the header's picker.
 	await expect(compact.getByRole('button').first()).toHaveText(/^[\d,]+$/);
 	await compact.getByRole('button').last().click();
@@ -83,6 +85,54 @@ test('desktop: once the controls scroll away, a top band keeps the elevation', a
 	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Models');
 	await expect.poll(async () => (await tabs.boundingBox())!.y).toBeGreaterThanOrEqual(0);
 	await expect(compact).toHaveCount(0);
+});
+
+test('wide windows: the compact elevation stands stacked beside the page', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'desktop', 'wide windows are desktops');
+	await page.setViewportSize({ width: 1920, height: 1000 });
+	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
+	await page.mouse.wheel(0, 1200);
+	const compact = page.getByRole('group', { name: /^Elevation, / });
+	await expect(compact).toBeVisible();
+	const pill = (await compact.boundingBox())!;
+	const main = (await page.locator('main').boundingBox())!;
+	// In the margin right of the page, not over it; one above another.
+	expect(pill.x).toBeGreaterThanOrEqual(main.x + main.width);
+	expect(pill.x + pill.width).toBeLessThanOrEqual(1920);
+	expect(pill.height).toBeGreaterThan(pill.width);
+});
+
+test('phones: only the elevation sticks, as a compact pill', async ({ page }, info) => {
+	test.skip(info.project.name !== 'phone', 'the phone layout');
+	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
+	const row = page.locator('.mrow');
+	const compact = page.locator('.bandwrap').getByRole('group');
+	await expect(compact).toHaveCount(0);
+	await page.evaluate(() => window.scrollTo(0, 900));
+	await expect(compact).toBeVisible();
+	// The conditions row scrolls away with the page; the pill stays at the top.
+	expect((await row.boundingBox())!.y).toBeLessThan(0);
+	expect((await compact.boundingBox())!.y).toBeLessThan(60);
+	await compact.getByRole('button').last().click();
+	await expect(row.getByRole('group').getByRole('button').last()).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+});
+
+test('desktop chart: the range and timeline switch sit under the plot', async ({ page }, info) => {
+	test.skip(info.project.name !== 'desktop', 'phones already have them at the foot');
+	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
+	const range = page.getByRole('group', { name: 'Time range' });
+	const cards = page.getByRole('group', { name: 'Chart metric' });
+	const title = page.getByRole('heading', { name: 'Forecast', exact: true });
+	expect((await title.boundingBox())!.y).toBeLessThan((await cards.boundingBox())!.y);
+	expect((await range.boundingBox())!.y).toBeGreaterThan((await cards.boundingBox())!.y + 200);
+	const slider = page.getByRole('slider', { name: 'Days the chart shows' });
+	if (await slider.count())
+		expect((await range.boundingBox())!.y).toBeGreaterThan((await slider.boundingBox())!.y);
 });
 
 test('choosing a tab or an elevation moves nothing', async ({ page }) => {

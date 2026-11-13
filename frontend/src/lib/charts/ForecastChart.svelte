@@ -1951,6 +1951,19 @@
 		align-items: center;
 		gap: 8px;
 	}
+	/* Desktops and tablets: the title and Share on top; the range and the timeline switch
+	   under the plot and the timeline, where the pointer already is (as on phones). */
+	.fc:not(.phone):not(.embedded) .top {
+		display: contents;
+	}
+	.fc:not(.phone):not(.embedded) .controls {
+		order: 1;
+		justify-content: center;
+		flex-wrap: wrap;
+	}
+	.fc:not(.phone):not(.embedded) .legend {
+		order: 2;
+	}
 	.tltoggle {
 		display: inline-flex;
 		align-items: center;
