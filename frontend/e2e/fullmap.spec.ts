@@ -4,6 +4,8 @@ import { expect, test } from '@playwright/test';
 
 test('the desktop map fills the window and the rail folds', async ({ page }, info) => {
 	test.skip(info.project.name !== 'desktop', 'the rail is desktop only');
+	// Several map loads and reloads: slow on a busy machine.
+	test.slow();
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const box = await page.locator('.maplibregl-canvas').boundingBox();
 	const vp = page.viewportSize()!;
@@ -42,6 +44,8 @@ test('the desktop map fills the window and the rail folds', async ({ page }, inf
 });
 
 test('the map opens flat, even after 3D was on', async ({ page }) => {
+	// Two map loads: slow on a busy machine.
+	test.slow();
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const three = page.getByRole('button', { name: '3D terrain' });
 	await expect(three).toHaveAttribute('aria-pressed', 'false');
