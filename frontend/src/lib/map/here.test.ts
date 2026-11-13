@@ -92,12 +92,16 @@ describe('tapTargets', () => {
 		expect(ts).toContain(SPOT);
 	});
 
-	it('zoomed in: areas you can see, then the spot, and the zone last', () => {
+	it('zoomed in: the spot before glaciers and ATES, and the zone last', () => {
 		const here = hereItems(hits, 'metric', null);
 		const ts = tapTargets({ here, zone, spot: true, close: true });
-		expect(ts.map((t) => t.chip)).toEqual(['Hut', 'Run', 'Glacier', 'ATES', 'This spot', 'Zone']);
-		// Bare ground in a zone, zoomed in: the spot first.
-		expect(tapTargets({ zone, spot: true, close: true })[0]).toBe(SPOT);
+		expect(ts.map((t) => t.chip)).toEqual(['Hut', 'Run', 'This spot', 'Glacier', 'ATES', 'Zone']);
+		// A glacier alone: the spot first, the glacier one chip away.
+		const ice = here.filter((i) => i.type === 'glacier');
+		expect(tapTargets({ here: ice, spot: true, close: true }).map((t) => t.chip)).toEqual([
+			'This spot',
+			'Glacier'
+		]);
 		expect(tapTargets({ zone, spot: true })[0].kind).toBe('zone');
 	});
 

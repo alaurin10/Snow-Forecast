@@ -14,7 +14,7 @@
 <script lang="ts">
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-	import type { Map as MlMap, Marker, Popup } from 'maplibre-gl';
+	import type { Map as MlMap, MapMouseEvent, Marker, Popup } from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -286,10 +286,34 @@
 			case 'zone':
 				return { kind: 'Avalanche forecast', title: zoneName(t.zone) };
 			default:
-				return { kind: 'Terrain & weather', title: 'This spot' };
+				return {
+					kind: 'Terrain & weather',
+					title: spotGlacier ? `This spot · ${spotGlacier.name}` : 'This spot'
+				};
 		}
 	}
 	const head = $derived(target ? heading(target) : null);
+	/** A glacier or ATES area under the tap: the spot names them, each a chip away. */
+	const spotGlacier = $derived(tapInput?.here?.find((i) => i.type === 'glacier') ?? null);
+	const spotAtes = $derived(tapInput?.here?.find((i) => i.type === 'ates') ?? null);
+	/** The spot's glacier's whole area, for its line in the spot's terrain. */
+	let spotGlacierArea = $state<number | null | undefined>(undefined);
+	$effect(() => {
+		const ice = spotGlacier;
+		const at = tapAt;
+		spotGlacierArea = undefined;
+		if (!ice || !at || target?.kind !== 'spot') return;
+		let gone = false;
+		void loadSki().then((fc) => {
+			if (!gone) spotGlacierArea = fc ? glacierArea(fc, at.lon, at.lat, ice.osm) : null;
+		});
+		return () => (gone = true);
+	});
+	/** Switch the panel to a feature's own chip. */
+	function showFeature(item: HereItem | null) {
+		const t = item && targets.find((x) => x.kind === 'feature' && x.item === item);
+		if (t) chosen = targetKey(t);
+	}
 	/** The spot's coordinates, under its title; a tap copies them. */
 	const coordsText = $derived(
 		tapAt
@@ -888,6 +912,15 @@
 	}
 
 	// ---- Taps: what's under one, as the map panel's targets ---------------------------
+	/** How long a tap on a touch screen waits for a second one (a double-tap zoom). */
+	const DOUBLE_TAP_MS = 350;
+	/** A click this soon after a touch began came from the touch. */
+	const TOUCH_CLICK_MS = 1000;
+	let lastTouch = 0;
+	/** Touches begun since the last click, and when a waiting tap was last called off. */
+	let touchesSinceClick = 0;
+	let cancelledAt = 0;
+	let pendingTap: ReturnType<typeof setTimeout> | undefined;
 	function tapMap(pt: { x: number; y: number }, ll: { lat: number; lng: number }) {
 		if (!map) return;
 		const at = { lat: ll.lat, lon: ll.lng };
@@ -1617,9 +1650,15 @@
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
 			});
 			// A tap on the map itself (not a marker or a popup) opens the map panel on what's
-			// there. One gesture: what it shows first follows the zoom (../map/here.ts).
-			map.on('click', (e) => {
+			// there (what it shows first follows the zoom: ../map/here.ts), or, while the
+			// panel is open, closes it.
+			const onTap = (e: MapMouseEvent) => {
 				if (!radar) return;
+				// With the map panel open, a tap elsewhere on the map just puts it away.
+				if (tapInput && !(measuring && measureEdit)) {
+					closeTap();
+					return;
+				}
 				if (popups.some((p) => p.isOpen())) {
 					for (const p of popups) p.remove();
 					return;
@@ -1633,6 +1672,33 @@
 					return;
 				}
 				tapMap(e.point, e.lngLat);
+			};
+			// Touch: a tap waits a moment first, and a second tap in that moment (a double
+			// tap to zoom in, or a double tap held and dragged to zoom with one finger) means
+			// it was never a tap. A mouse click acts at once.
+			const dropTap = () => {
+				if (pendingTap) cancelledAt = Date.now();
+				clearTimeout(pendingTap);
+				pendingTap = undefined;
+			};
+			map.on('touchstart', () => {
+				lastTouch = Date.now();
+				touchesSinceClick++;
+				dropTap();
+			});
+			map.on('dblclick', dropTap);
+			map.on('click', (e) => {
+				if (Date.now() - lastTouch > TOUCH_CLICK_MS) return onTap(e);
+				const touches = touchesSinceClick;
+				touchesSinceClick = 0;
+				dropTap();
+				// Another touch began before this click arrived, or this is the second tap of a
+				// double tap whose first was just called off: not a tap.
+				if (touches > 1 || Date.now() - cancelledAt < 2 * DOUBLE_TAP_MS) return;
+				pendingTap = setTimeout(() => {
+					pendingTap = undefined;
+					onTap(e);
+				}, DOUBLE_TAP_MS);
 			});
 			map.on('load', () => {
 				if (cancelled) return;
@@ -1661,6 +1727,7 @@
 		});
 		return () => {
 			cancelled = true;
+			clearTimeout(pendingTap);
 			loc?.stop();
 			loc = null;
 			ready = false;
@@ -1976,6 +2043,9 @@
 						point={probePoint}
 						pointState={probe ? probePointState : 'loading'}
 						onzone={() => showZone(probeZone)}
+						glacier={spotGlacier ? { name: spotGlacier.name, area: spotGlacierArea } : null}
+						onglacier={() => showFeature(spotGlacier)}
+						ates={spotAtes}
 					/>
 				{/if}
 			</MapPanel>

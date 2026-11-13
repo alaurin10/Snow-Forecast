@@ -231,12 +231,10 @@ export function targetKey(t: Target): string {
 /**
  * Everything a tap landed on, in the order the panel offers it. What you aimed at comes
  * first: a station or field report, then a hut, trailhead or pass, then a run or route.
- * After that it depends on the zoom, as the map does:
- * - zoomed out, where the avalanche zones are coloured and glaciers and ATES areas are
- *   small, the zone comes next, then the spot itself, then the glacier and ATES rating;
- * - zoomed in, where the zones are bare outlines and areas are plain to see, the glacier
- *   and ATES rating come next, then the spot, and the zone last.
- * The spot is there whenever it can be measured.
+ * Then the spot itself (its terrain and weather), except zoomed out, where the avalanche
+ * zones are coloured and the zone's bulletin comes first; zoomed in past where their
+ * colour fades, the zone comes after the spot. A glacier or ATES area under the tap is a
+ * chip after those (the spot names them too), so a tap on a mountain shows the mountain.
  */
 export function tapTargets(
 	o: TapInput & {
@@ -256,7 +254,7 @@ export function tapTargets(
 		...(o.station ? [{ kind: 'station', chip: 'Station', station: o.station } as Target] : []),
 		...(o.report ? [{ kind: 'report', chip: 'Report', report: o.report } as Target] : []),
 		...feature(['place', 'route']),
-		...(o.close ? [...areas, ...spot, ...zone] : [...zone, ...spot, ...areas])
+		...(o.close ? [...spot, ...areas, ...zone] : [...zone, ...spot, ...areas])
 	];
 }
 
