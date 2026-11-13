@@ -1,6 +1,6 @@
 <!-- One location. Desktop: the name on the sky with the elevation control beside it, the
-     outlook card, then the section (Forecast, Models, Backcountry, Observed; the rail
-     switches them). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
+     outlook card, then the section (Forecast, Models, Backcountry, Observed; the tabs
+     above it switch them, or keys 1–4). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
 <script lang="ts">
 	import { safeHref } from '../../../lib/links';
@@ -151,6 +151,7 @@
 		skyState.page = null;
 	});
 	const tab = $derived(sections.tab);
+	const MAP_ICON = 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14';
 	const band = $derived(
 		snap ? (snap.bands.find((b) => b.band === prefs.band) ?? snap.bands[1]) : null
 	);
@@ -335,6 +336,16 @@
 				>
 			</a>
 			<h1>{snap.location.name}</h1>
+			<a
+				class="mmap glass"
+				href="{resolve('/map')}?loc={encodeURIComponent(id)}"
+				aria-label="View {snap.location.name} on the map"
+				title="View on the map"
+			>
+				<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
+					><path d={MAP_ICON} /></svg
+				>
+			</a>
 		</header>
 		<p class="elevname" aria-hidden="true">
 			{band.label} <span class="faint">· {c.heightUnit}</span>
@@ -369,6 +380,17 @@
 					<span class="pill glass faintpill" title="Updated {updated}">
 						<span class="ptxt">Updated {updated}</span>
 					</span>
+					<a
+						class="pill glass maplink"
+						href="{resolve('/map')}?loc={encodeURIComponent(id)}"
+						aria-label="View {snap.location.name} on the map"
+						title="View on the map"
+					>
+						<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+							><path d={MAP_ICON} /></svg
+						>
+						Map
+					</a>
 				</div>
 			</div>
 			<div class="seg glass elev" role="group" aria-label="Elevation">
@@ -462,15 +484,16 @@
 		<div class="alert"><strong>{a.event}</strong> {a.headline ?? ''}</div>
 	{/each}
 
-	{#if !viewport.desktop}
-		<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
-			{#each tabs as t (t)}
-				<button role="tab" aria-selected={tab === t} onclick={() => (sections.tab = t)}
-					>{SECTION_NAMES[t]}</button
-				>
-			{/each}
-		</div>
-	{/if}
+	<div class="tabs" class:under={phone} role="tablist" aria-label="Sections">
+		{#each tabs as t, i (t)}
+			<button
+				role="tab"
+				aria-selected={tab === t}
+				title={viewport.desktop ? `${SECTION_NAMES[t]} (${i + 1})` : undefined}
+				onclick={() => (sections.tab = t)}>{SECTION_NAMES[t]}</button
+			>
+		{/each}
+	</div>
 
 	{#if tab === 'forecast'}
 		<div class="stackcol">
@@ -755,6 +778,23 @@
 		gap: 6px;
 		min-width: 0;
 	}
+	.maplink {
+		flex: 0 0 auto;
+		padding-left: 12px;
+		color: var(--text);
+		text-decoration: none;
+	}
+	.maplink:hover {
+		background-color: var(--hover);
+	}
+	.maplink svg,
+	.mmap svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.9;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
 	.faintpill {
 		padding-left: 14px;
 		color: var(--text-2);
@@ -877,15 +917,16 @@
 		border-radius: 999px;
 		white-space: nowrap;
 		font-size: 0.9rem;
+		font-weight: 500;
 		transition:
 			background-color var(--ease),
 			box-shadow var(--ease);
 	}
+	/* Colour and background only: bold would widen the chosen tab and shift the others. */
 	.tabs button[aria-selected='true'] {
 		color: var(--text);
 		background: var(--sel);
 		box-shadow: var(--sel-shadow);
-		font-weight: 600;
 	}
 	.stackcol {
 		display: grid;
@@ -1006,13 +1047,15 @@
 		margin: 0 0 4px;
 	}
 	.mhead h1 {
+		flex: 1 1 auto;
 		min-width: 0;
 		font-size: 1.6rem;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	.mback {
+	.mback,
+	.mmap {
 		flex: 0 0 44px;
 		height: 44px;
 		border-radius: 50%;

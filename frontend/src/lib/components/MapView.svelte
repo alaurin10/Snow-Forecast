@@ -157,9 +157,12 @@
 		href: (id: string) => string;
 		/** The full map: weather, terrain, their controls, and the whole window. */
 		radar?: boolean;
+		/** A location to open on (its id), from its page's Map button: centred, close in,
+		 *  flat, with its popup open. Otherwise the full map opens over Washington. */
+		focus?: string | null;
 	}
 
-	let { rows, units, href, radar = false }: Props = $props();
+	let { rows, units, href, radar = false, focus = null }: Props = $props();
 	let el = $state<HTMLDivElement>();
 	let wrap = $state<HTMLDivElement>();
 	let map: MlMap | null = null;
@@ -1504,10 +1507,18 @@
 		draw();
 	});
 
+	/** A location with a place on the map, by id. */
+	function placedRow(id: string) {
+		const r = rows.find((x) => x.id === id);
+		return r && r.lat != null && r.lon != null
+			? (r as OverviewRow & { lat: number; lon: number })
+			: null;
+	}
+
 	/** Fly to a location, tilted, in 3D: the quickest way to look at its terrain. */
 	function flyTo(id: string) {
-		const r = rows.find((x) => x.id === id);
-		if (!map || !r || r.lat == null || r.lon == null) return;
+		const r = placedRow(id);
+		if (!map || !r) return;
 		prefs.setMapTerrain(true);
 		for (const p of popups) p.remove();
 		map.flyTo({
@@ -1532,6 +1543,7 @@
 		for (const p of popups) p.remove();
 		markers = [];
 		popups = [];
+		const popupOf: Record<string, Popup> = {};
 		const placed = rows.filter((r) => r.lat !== null && r.lat !== undefined && r.lon != null);
 		for (const r of placed) {
 			const b = bucket(r.next5_cm);
@@ -1554,6 +1566,7 @@
 					`<button type="button" data-fly="${esc(r.id)}">3D view</button></div>`
 			);
 			popups.push(popup);
+			popupOf[r.id] = popup;
 			const toggle = () => {
 				if (popup.isOpen()) popup.remove();
 				else {
@@ -1578,10 +1591,16 @@
 					.addTo(map)
 			);
 		}
-		// The full map opens flat over Washington, home for this site, whatever else is saved.
+		// The full map opens flat over Washington, home for this site, whatever else is saved;
+		// or, from a location's Map button, on that location with its popup open (flat: the
+		// 3D view button is in the popup).
 		if (radar && !fitted) {
 			fitted = true;
-			map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
+			const f = focus ? placedRow(focus) : null;
+			if (f) {
+				map.jumpTo({ center: [f.lon, f.lat], zoom: 11.5, pitch: 0, bearing: 0 });
+				popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
+			} else map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
 		}
 		// The small overview map frames the locations once; after that the view is the viewer's.
 		if (placed.length && !fitted) {

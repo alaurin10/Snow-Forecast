@@ -7,6 +7,19 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The desktop rail never moves.** It sits in one place on every page (14 px from the
+  window's top left), over the map too; only its background gets denser there. Folding
+  it on the map slides it away and fades its button in, instead of swapping one for the
+  other.
+- **A location's sections are its page's tabs on desktop too** (Forecast, Models,
+  Backcountry, Observed, under the outlook), so the rail's list of locations no longer
+  grows when one is open. Keys 1–4 pick a section.
+- **Notices float at the top as a toast** (new version, offline, stale forecast) and can
+  be closed, instead of pushing the page down when they appear. The full map keeps its
+  own offline note.
+- **Chosen buttons and tabs no longer change width.** Selection is shown by colour and
+  background only (it used to turn the label bold, which made it wider and could push
+  its neighbours onto another row).
 - **The desktop map fills the whole window.** The rail floats over its left side and
   folds to a small button (remembered in the browser); the map's buttons move clear of
   it. Like a phone's maps app, the map's centre sits in the space the rail and the panels
@@ -27,6 +40,9 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **View a location on the map.** A Map button on each location page opens the map
+  centred on it, close in and flat, with its popup open (`/map?loc=<id>`); the popup's
+  "Open forecast →" goes back.
 - **Measure on the map.** A new tool measures a line tapped out on the map: distance,
   climb and descent, its average and steepest grade, the steepest ground it crosses, and
   an elevation profile coloured like the slope overlay (drag along it to find the spot on
