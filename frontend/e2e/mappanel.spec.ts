@@ -176,6 +176,63 @@ test('phones: the sheet grows and shrinks from its title bar or a swipe anywhere
 	expect(await pin(page)).toEqual(before);
 });
 
+test('touch: a tap opens the panel, a double tap (or double tap and drag) only zooms', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'phone', 'touch');
+	await page.goto('/map?loc=rainy', { waitUntil: 'networkidle' });
+	const cdp = await page.context().newCDPSession(page);
+	const touch = (type: string, x?: number, y?: number) =>
+		cdp.send('Input.dispatchTouchEvent', {
+			type,
+			touchPoints: x == null ? [] : [{ x, y: y! }]
+		});
+	const tap = async (x: number, y: number) => {
+		await touch('touchStart', x, y);
+		await touch('touchEnd');
+	};
+	const panel = page.locator('[data-map-panel]');
+	// A first tap closes the location's popup, or opens the panel (put away with Escape).
+	let p = await pin(page);
+	const at = { x: Math.round(p.x - 0.02 * PX_LON), y: Math.round(p.y) };
+	await tap(at.x, at.y);
+	await page.waitForTimeout(1200);
+	await page.keyboard.press('Escape');
+	await expect(panel).toHaveCount(0);
+
+	// A gesture's touches, sent together so they arrive as quickly as a finger's (one at a
+	// time, each waits for the page, which is busy drawing after a zoom).
+	const gesture = (steps: [string, number?, number?][]) =>
+		Promise.all(steps.map(([type, x, y]) => touch(type, x, y)));
+
+	// A double tap zooms in, and opens nothing.
+	await gesture([
+		['touchStart', at.x, at.y],
+		['touchEnd'],
+		['touchStart', at.x, at.y],
+		['touchEnd']
+	]);
+	await page.waitForTimeout(800);
+	await expect(panel).toHaveCount(0);
+
+	// A double tap held and dragged (one-finger zoom): nothing either.
+	await pin(page);
+	await gesture([
+		['touchStart', at.x, at.y],
+		['touchEnd'],
+		['touchStart', at.x, at.y],
+		...[1, 2, 3, 4, 5, 6].map((i): [string, number, number] => ['touchMove', at.x, at.y + i * 15]),
+		['touchEnd']
+	]);
+	await page.waitForTimeout(800);
+	await expect(panel).toHaveCount(0);
+
+	// One tap, after a moment: the panel.
+	p = await pin(page);
+	await tap(Math.round(p.x - 60), Math.round(p.y));
+	await expect(panel).toBeVisible();
+});
+
 test('phones: the tab bar is icons only on the map, at the same height', async ({ page }, info) => {
 	test.skip(info.project.name !== 'phone', 'the tab bar is for phones and tablets');
 	const bar = page.getByRole('navigation', { name: 'Main' });
