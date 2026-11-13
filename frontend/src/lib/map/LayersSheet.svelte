@@ -63,7 +63,11 @@
 		{ id: 'places', label: 'Huts, trailheads, passes', hint: 'From zoom 10' },
 		{ id: 'glaciers', label: 'Glaciers and cliffs' },
 		{ id: 'stations', label: 'Snow stations', hint: 'Depth and new snow, hourly' },
-		{ id: 'zones', label: 'Avalanche danger zones', hint: 'Today, as published' },
+		{
+			id: 'zones',
+			label: 'Avalanche danger zones',
+			hint: 'Colour when zoomed out; outline up close'
+		},
 		{ id: 'obs', label: 'Field reports', hint: 'Canada (MIN), last 2 weeks' },
 		...(ates
 			? [{ id: 'ates' as const, label: 'ATES terrain ratings', hint: 'From Avalanche Canada' }]

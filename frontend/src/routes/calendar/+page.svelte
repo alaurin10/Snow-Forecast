@@ -92,7 +92,9 @@
 
 <header class="head">
 	<h1>Calendar</h1>
-	<span class="sub glass">Every location, next {DAYS} days · snow per day</span>
+	<span class="sub glass" title="Every location, next {DAYS} days · snow per day"
+		><span class="ptxt">Every location, next {DAYS} days · snow per day</span></span
+	>
 </header>
 
 {#if error}
@@ -307,10 +309,18 @@
 	}
 	.sub {
 		display: inline-flex;
+		max-width: 100%;
 		padding: 6px 14px;
 		border-radius: 999px;
 		font-size: 0.88rem;
 		font-weight: 500;
+		white-space: nowrap;
+	}
+	/* Ellipsis needs a block inside the flex pill, so a narrow screen ends it in "…". */
+	.ptxt {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.loading {
 		display: inline-block;

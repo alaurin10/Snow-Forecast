@@ -3,6 +3,8 @@
 	import { resolve } from '$app/paths';
 
 	const missing = $derived(page.status === 404);
+	// What failed, from hooks.client.ts: small and faint, for a bug report.
+	const detail = $derived(missing ? '' : (page.error?.message ?? ''));
 </script>
 
 <svelte:head
@@ -20,6 +22,7 @@
 		<a class="btn primary" href={resolve('/')}>Back to the overview</a>
 		{#if !missing}<button class="btn" onclick={() => location.reload()}>Reload</button>{/if}
 	</div>
+	{#if detail}<p class="detail faint">{detail}</p>{/if}
 </section>
 
 <style>
@@ -41,5 +44,10 @@
 		gap: 10px;
 		flex-wrap: wrap;
 		margin-top: 12px;
+	}
+	.detail {
+		margin: 16px 0 0;
+		font-size: 0.74rem;
+		overflow-wrap: anywhere;
 	}
 </style>

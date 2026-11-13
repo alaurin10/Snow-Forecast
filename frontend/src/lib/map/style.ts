@@ -190,18 +190,40 @@ export function demSources(worker: boolean): Record<string, SourceSpecification>
 export function shadePaint(shade: MapShade, dark: boolean, base: MapBase) {
 	// Esri topo is already shaded; satellite imagery has its own shadows. Both want less.
 	const k = shade === 'strong' ? 1 : 0.55;
-	const ex = (base === 'topo' ? 0.35 : 0.45) * k;
+	const imagery = base !== 'topo';
 	return {
 		'hillshade-method': 'igor' as const,
-		'hillshade-exaggeration': ex,
+		'hillshade-exaggeration': imagery ? imageryShade(k) : 0.35 * k,
 		// The map-drawing convention: lit from the top-left of the screen.
 		'hillshade-illumination-direction': 335,
 		'hillshade-illumination-altitude': 45,
 		'hillshade-illumination-anchor': 'viewport' as const,
-		'hillshade-shadow-color': dark ? '#000000' : '#2a2f3a',
+		// Over a photo, a softer shadow: it adds relief without darkening the picture.
+		'hillshade-shadow-color': dark
+			? imagery
+				? '#0d1016'
+				: '#000000'
+			: imagery
+				? '#4a5262'
+				: '#2a2f3a',
 		'hillshade-highlight-color': dark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.35)',
-		'hillshade-accent-color': dark ? '#000000' : '#3b3f4a'
+		'hillshade-accent-color': dark
+			? imagery
+				? '#0d1016'
+				: '#000000'
+			: imagery
+				? '#565b67'
+				: '#3b3f4a'
 	};
+}
+
+/** Hillshade over imagery, by zoom. MapLibre steepens the slopes it shades zoomed out
+ *  and relaxes them toward z15, so one fixed strength darkened the photo zoomed out and
+ *  barely touched it up close: the picture brightened as you zoomed in. This ramps the
+ *  other way so the tone stays even. */
+export function imageryShade(k: number): ExpressionSpecification {
+	const r = (x: number) => Math.round(x * k * 1000) / 1000;
+	return ['interpolate', ['linear'], ['zoom'], 7, r(0.12), 11, r(0.25), 14, r(0.45)];
 }
 
 /** Hill shading lit by the sun where it really is (compass degrees, degrees up). */
