@@ -53,7 +53,11 @@
 		if (body) body.scrollTop = 0;
 	});
 
+	/** The whole title bar is the sheet's grip (phones and tablets): drag it up or down,
+	 *  or tap it to switch between the peek and most of the map. Its buttons stay buttons. */
 	function down(e: PointerEvent) {
+		if (!matchMedia('(max-width: 1099px)').matches) return;
+		if ((e.target as Element).closest('button:not(.handle)')) return;
 		const box = el?.parentElement?.getBoundingClientRect();
 		if (!el || !box) return;
 		drag = { y: e.clientY, h: el.getBoundingClientRect().height, max: box.height, moved: false };
@@ -94,26 +98,32 @@
 	style:--full={FULL}
 	style:--drag-h={dragH != null ? `${dragH}px` : null}
 >
-	<button
-		class="handle"
-		aria-label={full ? 'Make the panel smaller' : 'Make the panel bigger'}
-		aria-expanded={full}
+	<div
+		class="grip"
+		role="presentation"
 		onpointerdown={down}
 		onpointermove={move}
 		onpointerup={up}
 		onpointercancel={() => ((drag = null), (dragH = null))}
-		onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), (full = !full))}
 	>
-		<span aria-hidden="true"></span>
-	</button>
-	<header>
-		<div class="names">
-			<span class="kind">{kind}</span>
-			<strong class="title" {title}>{title}</strong>
-			{#if sub}{@render sub()}{/if}
-		</div>
-		<button class="x" onclick={onclose} aria-label="Close">✕</button>
-	</header>
+		<button
+			class="handle"
+			aria-label={full ? 'Make the panel smaller' : 'Make the panel bigger'}
+			aria-expanded={full}
+			onkeydown={(e) =>
+				(e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), (full = !full))}
+		>
+			<span aria-hidden="true"></span>
+		</button>
+		<header>
+			<div class="names">
+				<span class="kind">{kind}</span>
+				<strong class="title" {title}>{title}</strong>
+				{#if sub}{@render sub()}{/if}
+			</div>
+			<button class="x" onclick={onclose} aria-label="Close">✕</button>
+		</header>
+	</div>
 	{#if chips.length > 1}
 		<div class="chips" role="group" aria-label="Here">
 			{#each chips as c, i (i)}
@@ -264,17 +274,23 @@
 		.mappanel.dragging {
 			transition: none;
 		}
+		/* The handle and the title together: one big target, which the map never gets. */
+		.grip {
+			flex: none;
+			cursor: grab;
+			touch-action: none;
+			user-select: none;
+			-webkit-user-select: none;
+		}
 		.handle {
 			display: grid;
 			place-items: center;
-			flex: none;
-			height: 18px;
+			height: 22px;
 			width: 100%;
 			border: 0;
 			padding: 0;
 			background: transparent;
 			cursor: grab;
-			touch-action: none;
 		}
 		.handle span {
 			width: 40px;

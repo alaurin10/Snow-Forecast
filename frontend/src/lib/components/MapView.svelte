@@ -129,7 +129,7 @@
 		zoneName,
 		zonesGeojson
 	} from '../map/avalanche';
-	import { addZones, setZones } from '../map/layers/avalanche';
+	import { addZones, setZones, ZONES_FADED_ZOOM } from '../map/layers/avalanche';
 	import { nearestSpot, recentSpec, satViews, type RecentSpec } from '../map/sat';
 	import { setRecent, setRecentDates } from '../map/layers/sat';
 	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
@@ -143,6 +143,7 @@
 	import {
 		lineBounds,
 		parseGpx,
+		profileZoom,
 		sampleLine,
 		segmentsGeojson,
 		type LngLat,
@@ -151,15 +152,19 @@
 	import { atesGeojson, reportsGeojson, stationsGeojson } from '../map/features';
 	import { setAtes, setReports, setStations, TAP_LAYERS } from '../map/layers/features';
 	import {
+		findGlacier,
 		glacierArea,
 		HERE_LAYERS,
 		hereItems,
 		skiLines,
 		tapTargets,
 		type HereItem,
+		targetKey,
 		type SkiLines,
+		type TapInput,
 		type Target
 	} from '../map/here';
+	import { glacierGrid, glacierStats, type GlacierInfo } from '../map/glacier';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -233,36 +238,39 @@
 	// ---- The map panel: what a tap landed on ---------------------------------------------
 	// One panel in one place (../map/MapPanel.svelte), whatever was tapped: it opens on the
 	// most specific thing under the tap, with chips for the rest (../map/here.ts).
-	let targets = $state.raw<Target[]>([]);
-	let active = $state(0);
+	/** What the last tap landed on; the panel's chips are these, ranked for the zoom. */
+	let tapInput = $state.raw<TapInput | null>(null);
 	/** Where the map was tapped; null for a panel opened another way (a zone's bulletin). */
 	let tapAt = $state.raw<{ lat: number; lon: number } | null>(null);
+	/** The chip chosen by hand; until then the panel shows the first, which follows the
+	 *  zoom (the zone's bulletin zoomed out, the spot once the zones' colour has faded). */
+	let chosen = $state<string | null>(null);
+	const close = $derived(zoom >= ZONES_FADED_ZOOM);
+	const targets = $derived<Target[]>(tapInput ? tapTargets({ ...tapInput, close }) : []);
+	const active = $derived.by(() => {
+		const i = chosen ? targets.findIndex((t) => targetKey(t) === chosen) : -1;
+		return i >= 0 ? i : 0;
+	});
 	const target = $derived<Target | null>(targets[active] ?? null);
-	let panelEl = $state<HTMLElement>();
 
-	function openTargets(ts: Target[], at: { lat: number; lon: number } | null, first = 0) {
+	function openTap(input: TapInput, at: { lat: number; lon: number } | null) {
 		closeInspector();
-		targets = ts;
-		active = first;
+		tapInput = input;
 		tapAt = at;
+		chosen = null;
 	}
 	function closeTap() {
-		targets = [];
-		active = 0;
+		tapInput = null;
 		tapAt = null;
+		chosen = null;
 		closeInspector();
 	}
 	/** A zone's bulletin, in place: its chip if the tap has one, else a new chip for it. */
 	function showZone(z: ZoneFeature | null) {
 		if (!z) return;
-		const i = targets.findIndex((t) => t.kind === 'zone' && t.zone.id === z.id);
-		if (i >= 0) return void (active = i);
-		const zt: Target = { kind: 'zone', chip: 'Zone', zone: z };
-		const spot = targets.findIndex((t) => t.kind === 'spot');
-		if (spot < 0)
-			return void (targets.length ? (targets = [...targets, zt]) : openTargets([zt], null));
-		targets = [...targets.slice(0, spot), zt, ...targets.slice(spot)];
-		active = spot;
+		if (!tapInput) return (openTap({ zone: z, spot: false }, null), void (chosen = `z:${z.id}`));
+		tapInput = { ...tapInput, zone: z };
+		chosen = `z:${z.id}`;
 	}
 	/** The panel's name for what it shows. */
 	function heading(t: Target): { kind: string; title: string } {
@@ -880,27 +888,9 @@
 	}
 
 	// ---- Taps: what's under one, as the map panel's targets ---------------------------
-	const LONG_PRESS_MS = 550;
-	let pressTimer: ReturnType<typeof setTimeout> | undefined;
-	let pressFrom: { x: number; y: number } | null = null;
-	/** A finger is on the map; the long press under way has opened the spot already. */
-	let touching = false;
-	let pressDone = false;
-	/** The click a browser may send when a long press lifts: not a new tap. */
-	let suppressClick = false;
-
-	/** Everything under a tap, most specific first; `spotOnly` for the spot's numbers alone. */
-	function tapMap(
-		pt: { x: number; y: number },
-		ll: { lat: number; lng: number },
-		spotOnly: boolean
-	) {
+	function tapMap(pt: { x: number; y: number }, ll: { lat: number; lng: number }) {
 		if (!map) return;
 		const at = { lat: ll.lat, lon: ll.lng };
-		if (spotOnly) {
-			if (analysis) openTargets(tapTargets({ spot: true }), at);
-			return;
-		}
 		const near = (px: number): [[number, number], [number, number]] => [
 			[pt.x - px, pt.y - px],
 			[pt.x + px, pt.y + px]
@@ -930,9 +920,9 @@
 		// The avalanche zone only while zones or an avalanche overlay are on the map.
 		const zone =
 			(zonesOn || avyOverlay) && zonesData ? zoneAt(zonesData.features, at.lat, at.lon) : null;
-		const ts = tapTargets({ station, report, here, zone, spot: analysis });
-		if (!ts.length) return closeTap();
-		openTargets(ts, at);
+		const input: TapInput = { station, report, here, zone, spot: analysis };
+		if (!tapTargets(input).length) return closeTap();
+		openTap(input, at);
 	}
 
 	// ---- Inspector: tap the map for the terrain there --------------------------------
@@ -976,28 +966,54 @@
 		}
 		probeMarker.setLngLat([at.lon, at.lat]).addTo(map);
 	});
-	// A glacier's whole area (from the map's OpenStreetMap file) and the elevation where
-	// it was tapped (from the terrain worker).
-	let glacier = $state.raw<{ area?: number | null; elev: number | null }>({ elev: null });
+	// A glacier, described: its whole area (from the map's OpenStreetMap file), its top,
+	// toe, slope and the way it flows (the terrain worker, over a grid on the ice), and
+	// the forecast where it was tapped (the server).
+	let glacier = $state.raw<GlacierInfo>({ pointState: 'loading' });
+	const glacierKey = $derived(
+		target?.kind === 'feature' && target.item.type === 'glacier' && tapAt
+			? `${target.item.osm ?? target.item.name}|${tapAt.lat}|${tapAt.lon}`
+			: null
+	);
 	$effect(() => {
-		const t = target;
-		const at = tapAt;
-		if (t?.kind !== 'feature' || t.item.type !== 'glacier' || !at) return;
+		if (!glacierKey) return;
+		const t = untrack(() => target);
+		const at = untrack(() => tapAt);
+		if (t?.kind !== 'feature' || !at) return;
 		const osm = t.item.osm;
 		let gone = false;
-		glacier = { area: undefined, elev: null };
-		untrack(() => {
-			void loadSki().then((fc) => {
-				if (!gone) glacier = { ...glacier, area: fc ? glacierArea(fc, at.lon, at.lat, osm) : null };
-			});
-			terrainClient()
-				?.point(at.lat, at.lon)
-				.then(
-					(f) => !gone && !f.sea && (glacier = { ...glacier, elev: f.elevation }),
-					() => {}
+		const ctl = new AbortController();
+		const set = (g: Partial<GlacierInfo>) => {
+			if (!gone) glacier = { ...glacier, ...g };
+		};
+		const away = untrack(() => offline);
+		glacier = { pointState: away ? 'failed' : 'loading' };
+		if (!away)
+			getMapPoint(at.lat, at.lon).then(
+				(point) => set({ point, pointState: 'ready' }),
+				() => set({ pointState: 'failed' })
+			);
+		void loadSki().then(async (fc) => {
+			const f = fc ? findGlacier(fc, at.lon, at.lat, osm) : null;
+			set({ area: fc ? glacierArea(fc, at.lon, at.lat, osm) : null });
+			const grid = f ? glacierGrid(f.geometry) : null;
+			const c = terrainClient();
+			if (!grid || !c) return set({ stats: null });
+			try {
+				const { elev, slope } = await c.profile(
+					grid.points,
+					profileZoom(Math.min(grid.dx, grid.dy), at.lat),
+					ctl.signal
 				);
+				set({ stats: glacierStats(grid, elev, slope) });
+			} catch {
+				set({ stats: null });
+			}
 		});
-		return () => (gone = true);
+		return () => {
+			gone = true;
+			ctl.abort();
+		};
 	});
 
 	const probeZone = $derived(
@@ -1190,13 +1206,9 @@
 			);
 			if (Number.isFinite(top)) bottom = Math.max(0, Math.round(box.bottom - top));
 		}
-		// The map panel: beside the map on desktop, a sheet over its foot elsewhere.
-		let right = 0;
-		if (panelEl) {
-			const r = panelEl.getBoundingClientRect();
-			if (viewport.desktop) right = Math.max(0, Math.round(box.right - r.left));
-			else if (r.height) bottom = Math.max(bottom, Math.round(box.bottom - r.top));
-		}
+		// The map panel doesn't count: the map stays still when it opens, and on phones the
+		// controls it covers keep their place (hidden), so nothing moves.
+		const right = 0;
 		// The folded button is small, like the map's own buttons: the map doesn't move for it.
 		const left = radar && viewport.desktop && !railUi.folded ? RAIL_OPEN_INSET : 0;
 		// Never more than half the map either way, so the centre stays on screen.
@@ -1206,25 +1218,6 @@
 			left: Math.min(left, Math.round(box.width / 2)),
 			bottom: Math.min(bottom, Math.round(box.height / 2))
 		};
-	}
-	/**
-	 * The tapped spot, if the new padding would leave it under a panel or the rail: the
-	 * map then centres on it. A padding change keeps the map's centre on the map and moves
-	 * it to the middle of the free space, so everything shifts by half the change.
-	 */
-	function tapCovered(old: Pad, pad: Pad): [number, number] | undefined {
-		if (!map || !wrap || !tapAt) return undefined;
-		const box = wrap.getBoundingClientRect();
-		const p = map.project([tapAt.lon, tapAt.lat]);
-		const x = p.x + (pad.left - old.left - (pad.right - old.right)) / 2;
-		const y = p.y + (pad.top - old.top - (pad.bottom - old.bottom)) / 2;
-		const m = 24;
-		const out =
-			x < pad.left + m ||
-			x > box.width - pad.right - m ||
-			y < pad.top + m ||
-			y > box.height - pad.bottom - m;
-		return out ? [tapAt.lon, tapAt.lat] : undefined;
 	}
 	function applyPadding(animate: boolean) {
 		const pad = mapPadding();
@@ -1237,20 +1230,17 @@
 			: Infinity;
 		if (change === 0) return;
 		padNow = pad;
-		const center = old ? tapCovered(old, pad) : undefined;
 		// Small changes (a control's height wobbling) aren't worth moving the map for.
-		if (change < 12 && !center) {
+		if (change < 12) {
 			map.setPadding(pad);
 			return;
 		}
-		if (animate && !map.isMoving())
-			map.easeTo({ padding: pad, ...(center ? { center } : {}), duration: 450 });
+		if (animate && !map.isMoving()) map.easeTo({ padding: pad, duration: 450 });
 		else map.setPadding(pad);
 	}
 	$effect(() => {
 		void inset;
 		const d = dock;
-		const pe = panelEl;
 		if (!ready || !radar) return;
 		applyPadding(true);
 		if (!d || typeof ResizeObserver === 'undefined') return;
@@ -1260,7 +1250,6 @@
 			t = setTimeout(() => applyPadding(true), 60);
 		});
 		ro.observe(d);
-		if (pe) ro.observe(pe);
 		for (const c of d.children) ro.observe(c);
 		// Panels come and go inside the dock.
 		const mo = new MutationObserver(() => {
@@ -1628,13 +1617,9 @@
 				if (radar && map!.getPitch() > 10 && prefs.mapTerrain !== 'on') prefs.setMapTerrain(true);
 			});
 			// A tap on the map itself (not a marker or a popup) opens the map panel on what's
-			// there; a long press (touch) or a right-click goes straight to the spot's numbers.
+			// there. One gesture: what it shows first follows the zoom (../map/here.ts).
 			map.on('click', (e) => {
 				if (!radar) return;
-				if (suppressClick) {
-					suppressClick = false;
-					return;
-				}
 				if (popups.some((p) => p.isOpen())) {
 					for (const p of popups) p.remove();
 					return;
@@ -1647,58 +1632,8 @@
 					measurePts = [...measurePts, [e.lngLat.lng, e.lngLat.lat]];
 					return;
 				}
-				tapMap(e.point, e.lngLat, false);
+				tapMap(e.point, e.lngLat);
 			});
-			const spotNow = (pt: { x: number; y: number }, ll: { lat: number; lng: number }) => {
-				for (const p of popups) p.remove();
-				panel = 'none';
-				tapMap(pt, ll, true);
-			};
-			map.on('contextmenu', (e) => {
-				if (!radar || (measuring && measureEdit)) return;
-				e.preventDefault();
-				clearTimeout(pressTimer);
-				// Android sends this for a long press too: the timer below may have got there first.
-				if (touching) {
-					if (pressDone) return;
-					pressDone = true;
-					suppressClick = true;
-				}
-				spotNow(e.point, e.lngLat);
-			});
-			map.on('touchstart', (e) => {
-				clearTimeout(pressTimer);
-				suppressClick = false;
-				pressDone = false;
-				touching = true;
-				pressFrom = null;
-				if (!radar || e.originalEvent.touches.length !== 1 || (measuring && measureEdit)) return;
-				const pt = e.point;
-				const ll = e.lngLat;
-				pressFrom = pt;
-				pressTimer = setTimeout(() => {
-					pressFrom = null;
-					if (pressDone) return;
-					pressDone = true;
-					suppressClick = true;
-					spotNow(pt, ll);
-				}, LONG_PRESS_MS);
-			});
-			map.on('touchmove', (e) => {
-				if (!pressFrom) return;
-				const moved = Math.hypot(e.point.x - pressFrom.x, e.point.y - pressFrom.y);
-				if (moved > 10 || e.originalEvent.touches.length > 1) {
-					clearTimeout(pressTimer);
-					pressFrom = null;
-				}
-			});
-			const lift = () => {
-				clearTimeout(pressTimer);
-				pressFrom = null;
-				touching = false;
-			};
-			map.on('touchend', lift);
-			map.on('touchcancel', lift);
 			map.on('load', () => {
 				if (cancelled) return;
 				// Credits start folded to their (i) button, which opens them.
@@ -2008,10 +1943,9 @@
 				title={head.title}
 				chips={targets.map((t) => t.chip)}
 				{active}
-				onchip={(i) => (active = i)}
+				onchip={(i) => (chosen = targetKey(targets[i]))}
 				onclose={closeTap}
 				sub={target.kind === 'spot' && tapAt ? coordsLine : undefined}
-				bind:el={panelEl}
 			>
 				{#if target.kind === 'station'}
 					<StationCard station={target.station} {units} />
@@ -2022,8 +1956,7 @@
 					<FeatureCard
 						{item}
 						{units}
-						area={glacier.area}
-						elevHere={glacier.elev}
+						glacier={item.type === 'glacier' ? glacier : null}
 						onprofile={() => void profileRun(item)}
 					/>
 				{:else if target.kind === 'zone'}
@@ -2224,8 +2157,7 @@
 					windNote={concern?.windNote ?? ''}
 					sunNote={concern?.sunNote ?? ''}
 					caption={concernCfg?.caption ?? ''}
-					onzone={() =>
-						centreZone && openTargets([{ kind: 'zone', chip: 'Zone', zone: centreZone }], null)}
+					onzone={() => centreZone && openTap({ zone: centreZone, spot: false }, null)}
 				/>
 			{/if}
 			{#if (sunOn || windOn) && analysis}
@@ -2395,13 +2327,13 @@
 		pointer-events: auto;
 	}
 	/* Clear the floating tab bar on phones. While the map panel is up as a sheet, the
-	   controls at the foot make way for it, so they don't stack. */
+	   controls at the foot hide under it (keeping their place, so the map doesn't move). */
 	@media (max-width: 1099px) {
 		.dock {
 			bottom: calc(84px + env(safe-area-inset-bottom));
 		}
 		.wrap.sheet .dock {
-			display: none;
+			visibility: hidden;
 		}
 	}
 	.tools {

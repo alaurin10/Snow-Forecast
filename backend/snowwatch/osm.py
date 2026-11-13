@@ -207,6 +207,19 @@ def _osm_id(el: dict[str, Any]) -> str:
     return f"{str(el.get('type', 'node'))[:1]}{el.get('id', 0)}"
 
 
+def _glacier(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any]:
+    """A glacier's properties: its name and id, and what mappers say of it (its type, as
+    in valley or cirque, a summit or terminus elevation, its Wikipedia article)."""
+    props: dict[str, Any] = {"kind": "glacier", "name": tags.get("name", ""), "osm": _osm_id(el)}
+    if gtype := tags.get("glacier:type"):
+        props["type"] = str(gtype)
+    if (ele := _ele(tags)) is not None:
+        props["ele"] = ele
+    if wiki := tags.get("wikipedia"):
+        props["wikipedia"] = str(wiki)
+    return props
+
+
 def _place(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None:
     """Huts, shelters, trailheads and passes, as points."""
     tourism = tags.get("tourism")
@@ -254,7 +267,7 @@ def _relation(el: dict[str, Any], tags: dict[str, Any]) -> dict[str, Any] | None
         return {
             "type": "Feature",
             "geometry": {"type": "MultiPolygon", "coordinates": polygons(outer, inner)},
-            "properties": {"kind": "glacier", "name": tags.get("name", ""), "osm": _osm_id(el)},
+            "properties": _glacier(el, tags),
         }
     if tags.get("route") in ("ski", "piste"):
         lines = [simplify(c) for m in members if len(c := _coords(m.get("geometry"))) >= 2]
@@ -316,11 +329,7 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
                     {
                         "type": "Feature",
                         "geometry": {"type": "Polygon", "coordinates": [_closed(coords)]},
-                        "properties": {
-                            "kind": "glacier",
-                            "name": tags.get("name", ""),
-                            "osm": _osm_id(el),
-                        },
+                        "properties": _glacier(el, tags),
                     }
                 )
             continue

@@ -8,6 +8,9 @@ export const ZONES_SOURCE = 'avyzones';
 export const ZONE_FILL = 'avyzones-fill';
 export const ZONE_LINE = 'avyzones-line';
 export const ZONE_FOCUS = 'avyzones-focus';
+/** Zoomed in this far, the zones' colour has all but faded (ZONE_FILL's opacity): a tap
+ *  then opens on the spot rather than the zone's bulletin. */
+export const ZONES_FADED_ZOOM = 10.5;
 
 const fillColor: ExpressionSpecification = [
 	'match',
