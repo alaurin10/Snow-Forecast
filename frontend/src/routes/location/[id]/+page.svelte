@@ -1,7 +1,7 @@
-<!-- One location. Desktop and tablet: the name on the sky with its conditions, then a
-     toolbar (the sections' tabs and the elevation) that sticks to the top as you scroll,
-     the outlook card, and the section (Forecast, Models, Backcountry, Observed; keys 1–4
-     switch them too). Phones: the name, a "now" pill and the elevation numbers, tabs, and the
+<!-- One location. Desktop and tablet: the name on the sky with its conditions, then the
+     sections' tabs and the elevation, the outlook card, and the section (Forecast,
+     Models, Backcountry, Observed; keys 1–4 switch them too). Once those controls have
+     scrolled away, a slim band at the top keeps the name and a compact elevation picker. Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
 <script lang="ts">
 	import { safeHref } from '../../../lib/links';
@@ -153,6 +153,16 @@
 		skyState.page = null;
 	});
 	const tab = $derived(sections.tab);
+	// Switching section (keys 1–4) from further down: back up to the tabs, so the new
+	// section starts at its top rather than somewhere in its middle.
+	let toolsEl = $state<HTMLElement>();
+	let lastTab: Section | null = null;
+	$effect(() => {
+		const t = tab;
+		if (lastTab && lastTab !== t && toolsEl && toolsEl.getBoundingClientRect().top < 0)
+			toolsEl.scrollIntoView({ block: 'start' });
+		lastTab = t;
+	});
 	const MAP_ICON = 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14';
 	const band = $derived(
 		snap ? (snap.bands.find((b) => b.band === prefs.band) ?? snap.bands[1]) : null
@@ -243,9 +253,9 @@
 	const avyCenter = $derived(avy?.doc?.center ?? null);
 	const next5 = $derived(band?.windows['next5'] ?? null);
 
-	// Phones: the conditions and elevation row sticks to the top; desktops and tablets:
-	// the tabs and elevation toolbar, `top` px down. Once stuck, it gets a frosted band so
-	// the page doesn't show through around it.
+	// Phones: the conditions and elevation row sticks to the top, and once stuck gets a
+	// frosted band so the page doesn't show through around it. Desktops and tablets: once
+	// the tabs and elevation have scrolled away, the top band slides in.
 	let stuck = $state(false);
 	function watchStuck(node: HTMLElement, top = 0) {
 		if (typeof IntersectionObserver === 'undefined') return;
@@ -434,10 +444,8 @@
 				</div>
 			</div>
 		</header>
-		<!-- The page's controls, together: which section and which elevation. Sticks level
-		     with the rail's top as you scroll; it's the same size stuck or not. -->
-		<div class="stuckmark" use:watchStuck={14} aria-hidden="true"></div>
-		<div class="ltools" class:stuck>
+		<!-- Which section and which elevation: two pills that scroll with the page. -->
+		<div class="ltools" bind:this={toolsEl}>
 			{@render sectionTabs()}
 			<div class="seg glass elev" role="group" aria-label="Elevation">
 				{#each snap.bands as b (b.band)}
@@ -449,6 +457,26 @@
 						></button
 					>
 				{/each}
+			</div>
+		</div>
+		<div class="stuckmark" use:watchStuck aria-hidden="true"></div>
+		<!-- Scrolled past the controls: two small pills at the top, the name on the left and
+		     a compact elevation picker (numbers only) on the right. They take no room in the
+		     page, and the space between them is the page itself (clicks go through). -->
+		<div class="bandwrap">
+			<div class="band" class:shown={stuck} inert={!stuck}>
+				<span class="bandname glass">{snap.location.name}</span>
+				<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
+					{#each snap.bands as b (b.band)}
+						<button
+							class="num"
+							aria-pressed={band.band === b.band}
+							aria-label="{b.label}, {elevation(b.elev_m, units)}"
+							title="{b.label}, {elevation(b.elev_m, units)}"
+							onclick={() => prefs.setBand(b.band as BandName)}>{elevNum(b.elev_m)}</button
+						>
+					{/each}
+				</div>
 			</div>
 		</div>
 
@@ -851,33 +879,79 @@
 		color: var(--text-2);
 		font-weight: 400;
 	}
-	/* The toolbar: tabs on the left, elevation on the right, both 52 px tall. Its padding
-	   and border are always there (only their colour changes when it sticks), and its
-	   negative margin lines the controls up with the cards below. */
+	/* Tabs on the left, elevation on the right: two separate pills, both 52 px tall. */
 	.ltools {
-		position: sticky;
-		top: 14px;
-		z-index: 30;
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 8px 16px;
-		margin: 0 -6px 16px;
-		padding: 5px;
-		border: 1px solid transparent;
-		border-radius: 30px;
-		transition:
-			background-color var(--ease),
-			border-color var(--ease),
-			box-shadow var(--ease);
+		margin: 0 0 16px;
+		scroll-margin-top: 14px;
 	}
-	.ltools.stuck {
-		background: var(--header-glass);
-		border-color: var(--glass-border);
-		box-shadow: var(--glass-shadow);
-		backdrop-filter: var(--blur-glass);
-		-webkit-backdrop-filter: var(--blur-glass);
+	/* A zero-height sticky holder, so the pills follow the column's width and take no
+	   room; they slide down into view once the controls are gone. */
+	.bandwrap {
+		position: sticky;
+		top: 14px;
+		z-index: 30;
+		height: 0;
+	}
+	.band {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		/* Only the pills take clicks; the gap between them is the page. */
+		pointer-events: none;
+		opacity: 0;
+		transform: translateY(-8px);
+		visibility: hidden;
+		transition:
+			opacity var(--ease),
+			transform var(--ease),
+			visibility 0s 200ms;
+	}
+	.band.shown {
+		opacity: 1;
+		transform: none;
+		visibility: visible;
+		transition:
+			opacity var(--ease),
+			transform var(--ease),
+			visibility 0s;
+	}
+	.bandname {
+		min-width: 0;
+		height: 40px;
+		box-sizing: border-box;
+		line-height: 38px;
+		padding: 0 16px;
+		border-radius: 999px;
+		font-family: var(--font-num);
+		font-weight: 700;
+		font-size: 0.98rem;
+		letter-spacing: -0.01em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		pointer-events: auto;
+	}
+	.band .seg.elevs {
+		flex: 0 0 auto;
+		height: 40px;
+		box-sizing: border-box;
+		padding: 3px;
+		pointer-events: auto;
+	}
+	.band .seg.elevs button {
+		min-width: 56px;
+		padding: 6px 8px;
+		font-size: 0.84rem;
 	}
 	.ltools .tabs {
 		margin: 0;

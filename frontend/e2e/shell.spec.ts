@@ -52,26 +52,37 @@ test('sections are the page’s tabs on desktop, by click or 1–4', async ({ pa
 	expect(await rect(list)).toEqual(before);
 });
 
-test('the desktop tabs and elevation stick to the top, the same size', async ({ page }, info) => {
+test('desktop: once the controls scroll away, a top band keeps the elevation', async ({
+	page
+}, info) => {
 	test.skip(info.project.name !== 'desktop', 'phones have their own sticky row');
 	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
 	const tabs = page.getByRole('tablist', { name: 'Sections' });
-	const elev = page.getByRole('group', { name: 'Elevation' });
+	const head = page.getByRole('group', { name: 'Elevation', exact: true });
+	const compact = page.getByRole('group', { name: /^Elevation, / });
 	// Under the name, above the outlook: nothing between the outlook and the section.
 	const outlook = page.getByRole('region', { name: 'Outlook' });
 	expect((await tabs.boundingBox())!.y).toBeLessThan((await outlook.boundingBox())!.y);
-	const [t0, e0] = [await rect(tabs), await rect(elev)];
+	// At the top the band is hidden (and out of the accessibility tree).
+	await expect(compact).toHaveCount(0);
+
+	// Scrolled down: the tabs go with the page; the band shows the compact picker.
 	await page.mouse.wheel(0, 1200);
-	await expect.poll(async () => (await rect(tabs))[1]).toBe(20);
-	const [t1, e1] = [await rect(tabs), await rect(elev)];
-	expect([t1[0], t1[2], t1[3]]).toEqual([t0[0], t0[2], t0[3]]);
-	expect([e1[0], e1[2], e1[3]]).toEqual([e0[0], e0[2], e0[3]]);
-	expect(e1[1]).toBe(20);
-	// Still works from down the page.
-	await elev.getByRole('button').first().click();
-	await expect(elev.getByRole('button').first()).toHaveAttribute('aria-pressed', 'true');
-	await tabs.getByRole('tab', { name: 'Models' }).click();
+	await expect(compact).toBeVisible();
+	expect((await tabs.boundingBox())!.y).toBeLessThan(0);
+	const band = (await compact.boundingBox())!;
+	expect(band.y).toBeLessThan(30);
+	expect(band.height).toBeLessThan(44);
+	// Numbers only, and in step with the header's picker.
+	await expect(compact.getByRole('button').first()).toHaveText(/^[\d,]+$/);
+	await compact.getByRole('button').last().click();
+	await expect(head.getByRole('button').last()).toHaveAttribute('aria-pressed', 'true');
+
+	// Switching section from down here goes back up to the tabs.
+	await page.keyboard.press('2');
 	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Models');
+	await expect.poll(async () => (await tabs.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+	await expect(compact).toHaveCount(0);
 });
 
 test('choosing a tab or an elevation moves nothing', async ({ page }) => {
