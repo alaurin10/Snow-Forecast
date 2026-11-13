@@ -14,7 +14,7 @@
 <script lang="ts">
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-	import type { Map as MlMap, MapMouseEvent, Marker, Popup } from 'maplibre-gl';
+	import type { Map as MlMap, MapMouseEvent, MapTouchEvent, Marker, Popup } from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -165,6 +165,7 @@
 		type Target
 	} from '../map/here';
 	import { glacierGrid, glacierStats, type GlacierInfo } from '../map/glacier';
+	import { TAP_WAIT_MS, TapGate } from '../map/taps';
 
 	interface Props {
 		rows: OverviewRow[];
@@ -912,14 +913,8 @@
 	}
 
 	// ---- Taps: what's under one, as the map panel's targets ---------------------------
-	/** How long a tap on a touch screen waits for a second one (a double-tap zoom). */
-	const DOUBLE_TAP_MS = 350;
-	/** A click this soon after a touch began came from the touch. */
-	const TOUCH_CLICK_MS = 1000;
-	let lastTouch = 0;
-	/** Touches begun since the last click, and when a waiting tap was last called off. */
-	let touchesSinceClick = 0;
-	let cancelledAt = 0;
+	/** Taps on a touch screen, told from double taps and other gestures (../map/taps.ts). */
+	const taps = new TapGate();
 	let pendingTap: ReturnType<typeof setTimeout> | undefined;
 	function tapMap(pt: { x: number; y: number }, ll: { lat: number; lng: number }) {
 		if (!map) return;
@@ -1675,30 +1670,30 @@
 			};
 			// Touch: a tap waits a moment first, and a second tap in that moment (a double
 			// tap to zoom in, or a double tap held and dragged to zoom with one finger) means
-			// it was never a tap. A mouse click acts at once.
+			// it was never a tap. Pans and pinches never count as taps. A mouse click acts at
+			// once.
 			const dropTap = () => {
-				if (pendingTap) cancelledAt = Date.now();
 				clearTimeout(pendingTap);
 				pendingTap = undefined;
 			};
-			map.on('touchstart', () => {
-				lastTouch = Date.now();
-				touchesSinceClick++;
+			const fingers = (e: MapTouchEvent) => e.originalEvent.touches.length;
+			map.on('touchstart', (e) => {
+				taps.start(e.point.x, e.point.y, fingers(e));
 				dropTap();
 			});
+			map.on('touchmove', (e) => taps.move(e.point.x, e.point.y, fingers(e)));
+			map.on('touchend', (e) => taps.end(fingers(e)));
+			map.on('touchcancel', (e) => taps.end(fingers(e)));
 			map.on('dblclick', dropTap);
 			map.on('click', (e) => {
-				if (Date.now() - lastTouch > TOUCH_CLICK_MS) return onTap(e);
-				const touches = touchesSinceClick;
-				touchesSinceClick = 0;
+				const verdict = taps.click();
+				if (verdict === 'now') return onTap(e);
 				dropTap();
-				// Another touch began before this click arrived, or this is the second tap of a
-				// double tap whose first was just called off: not a tap.
-				if (touches > 1 || Date.now() - cancelledAt < 2 * DOUBLE_TAP_MS) return;
+				if (verdict === 'drop') return;
 				pendingTap = setTimeout(() => {
 					pendingTap = undefined;
 					onTap(e);
-				}, DOUBLE_TAP_MS);
+				}, TAP_WAIT_MS);
 			});
 			map.on('load', () => {
 				if (cancelled) return;

@@ -7,10 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
-- **A double tap on a phone only zooms.** A tap on the map waits a moment (a third of a
-  second) before opening the panel, and a second tap in that moment, as in a double tap
-  to zoom in or a double tap held and dragged to zoom with one finger, calls it off. A
-  mouse click still acts at once.
+- **A double tap on a phone only zooms.** A tap on the map waits a moment (about a fifth
+  of a second) before opening or closing the panel, and a second tap in that moment, as
+  in a double tap to zoom in or a double tap held and dragged to zoom with one finger,
+  calls it off. Pans and pinches never count towards a double tap, so the first tap after
+  one acts. A mouse click still acts at once.
 - **A tap elsewhere on the map puts the panel away**, rather than opening it on the new
   spot; the next tap opens it again.
 - **On a glacier or an ATES area, a tap shows the spot first** (its terrain and weather),
