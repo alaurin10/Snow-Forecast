@@ -1379,8 +1379,9 @@
 	}
 
 	/* ---- Full screen: the whole window, nothing to scroll -------------------------------
-	   A bar (close, place, range, view), then the chart, whose plot takes whatever height
-	   is left; the metric cards are one row of chips, the timeline is always there. */
+	   A bar (close, place), then the chart, whose plot takes the height left up to a
+	   point; the metric cards are one row of chips, the timeline is always there; the
+	   range and the view at the foot, under the thumb. */
 	.fsx {
 		position: fixed;
 		inset: 0;
@@ -1388,9 +1389,11 @@
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;
-		/* Clear of the notch and the rounded corners, whether or not the phone reports them. */
+		/* Clear of the notch and the rounded corners, whether or not the phone reports them.
+		   On a tall screen the controls at the foot sit higher, nearer the thumb. */
 		padding: calc(env(safe-area-inset-top) + 14px) calc(env(safe-area-inset-right) + 6px)
-			calc(env(safe-area-inset-bottom) + 20px) calc(env(safe-area-inset-left) + 6px);
+			calc(env(safe-area-inset-bottom) + clamp(20px, 100dvh - 700px, 56px))
+			calc(env(safe-area-inset-left) + 6px);
 		background: var(--surface);
 		color: var(--text);
 	}
@@ -1510,6 +1513,11 @@
 		flex: 1 1 auto;
 		min-height: 60px;
 	}
+	/* The one chart is no taller than it needs to be, so the lower panel, the timeline and
+	   the metrics stay up within reach; any room left over is above the controls. */
+	.fc.fullscreen:not(.lane) .plotrow {
+		max-height: 290px;
+	}
 	.fc.fullscreen .plot,
 	.fc.fullscreen .plotrow .yaxis {
 		height: auto;
@@ -1552,6 +1560,10 @@
 	.fc.fullscreen .lplot,
 	.fc.fullscreen .yaxis.lowaxis {
 		height: 64px;
+	}
+	.fc.fullscreen.phone .lplot,
+	.fc.fullscreen.phone .yaxis.lowaxis {
+		height: 56px;
 	}
 	.fc.fullscreen.phone .lower .yaxis {
 		display: block;

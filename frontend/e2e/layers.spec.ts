@@ -177,7 +177,10 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	expect(bar.y).toBeGreaterThanOrEqual(14);
 	const range = page.locator('.fsfoot').getByRole('group', { name: 'Time range' });
 	const rb = (await range.boundingBox())!;
-	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(20);
+	// On a tall phone they sit higher, nearer the thumb; the plot is no taller than it
+	// needs to be, so the lower panel, the timeline and the metrics stay up too.
+	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(vp.height >= 760 ? 50 : 20);
+	expect((await plot.boundingBox())!.height).toBeLessThanOrEqual(292);
 	expect(rb.height).toBeGreaterThanOrEqual(40);
 	// The lower panel: cloud cover and the chance of precipitation.
 	await expect(full.locator('.lowcap')).toContainText('Chance of precipitation');
@@ -202,24 +205,34 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();
 });
 
-test('phones: the map buttons sit bottom right, level with the tabs, and rise over an open control', async ({
+test('phones: Layers sits beside the tab bar, the other map buttons over it rise over an open control', async ({
 	page
 }, info) => {
 	test.skip(info.project.name !== 'phone', 'the buttons move on phones and tablets');
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const vp = page.viewportSize()!;
-	const layersBtn = page.getByRole('button', { name: 'Layers' });
+	const layersBtn = page.getByRole('button', { name: 'Layers', exact: true });
+	const locateBtn = page.getByRole('button', { name: 'Your location' });
 	const tabsRow = page.getByRole('group', { name: 'Map controls' });
 	const weather = tabsRow.getByRole('button', { name: /^Weather: / });
-	// Everything folded: the lowest button level with the row of tabs, beside it.
+	// Everything folded: Layers level with the tab bar and centred in the gap beside it;
+	// the column's lowest button level with the row of tabs, beside it.
 	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
 	await expect(weather).toHaveAttribute('aria-pressed', 'false');
 	await page.waitForTimeout(500);
 	const layers = (await layersBtn.boundingBox())!;
+	const bar = (await page.locator('nav.tabbar').boundingBox())!;
+	expect(layers.width).toBeGreaterThanOrEqual(46);
+	expect(Math.abs(layers.y + layers.height / 2 - (bar.y + bar.height / 2))).toBeLessThan(3);
+	expect(layers.x).toBeGreaterThan(bar.x + bar.width);
+	const gapL = layers.x - (bar.x + bar.width);
+	const gapR = vp.width - (layers.x + layers.width);
+	expect(Math.abs(gapL - gapR)).toBeLessThan(4);
+	const locate = (await locateBtn.boundingBox())!;
 	const tabs = (await tabsRow.boundingBox())!;
-	expect(layers.x + layers.width).toBeGreaterThan(vp.width - 20);
-	expect(Math.abs(layers.y + layers.height - (tabs.y + tabs.height))).toBeLessThan(4);
-	expect(layers.x).toBeGreaterThan(tabs.x + tabs.width);
+	expect(Math.abs(locate.y + locate.height - (tabs.y + tabs.height))).toBeLessThan(4);
+	expect(locate.x).toBeGreaterThan(tabs.x + tabs.width);
+	expect(Math.abs(locate.x - layers.x)).toBeLessThan(2);
 	// No zoom buttons (pinch, double tap); the compass stays.
 	await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
 	await expect(page.locator('.maplibregl-ctrl-compass')).toBeVisible();
@@ -231,15 +244,69 @@ test('phones: the map buttons sit bottom right, level with the tabs, and rise ov
 		await expect(menu.getByRole('button', { name })).toBeVisible();
 	await page.mouse.click(60, 200);
 	await expect(menu).toHaveCount(0);
-	// The weather's controls opened: the buttons rise above the whole of them.
+	// The weather's controls opened: the column rises above the whole of them; Layers
+	// stays where it was.
 	await weather.click();
 	const panel = page.getByRole('group', { name: 'Weather type' });
 	await expect(panel).toBeVisible();
 	await expect
 		.poll(async () => {
-			const b = (await layersBtn.boundingBox())!;
+			const b = (await locateBtn.boundingBox())!;
 			const p = (await panel.boundingBox())!;
 			return b.y + b.height <= p.y;
 		})
 		.toBe(true);
+	expect((await layersBtn.boundingBox())!.y).toBeCloseTo(layers.y, 0);
+
+	// Layers open: its button stays in reach, under the sheet, and closes it again.
+	await layersBtn.click();
+	const sheet = page.getByRole('dialog', { name: 'Map layers' });
+	await expect(sheet).toBeVisible();
+	const sb = (await sheet.boundingBox())!;
+	expect(sb.y + sb.height).toBeLessThanOrEqual(layers.y);
+	await layersBtn.click();
+	await expect(sheet).toHaveCount(0);
+});
+
+test('phones: a swipe down puts the Layers sheet away; a short one does not', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'phone', 'the sheet is for phones and tablets');
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	await page.getByRole('button', { name: 'Layers' }).click();
+	const sheet = page.getByRole('dialog', { name: 'Map layers' });
+	await expect(sheet).toBeVisible();
+	const swipe = async (from: string, dy: number, steps: number) =>
+		sheet.evaluate(
+			async (el, [sel, dy, steps]) => {
+				const target = el.querySelector(sel as string)!;
+				const r = target.getBoundingClientRect();
+				const x = r.left + r.width / 2;
+				const y0 = r.top + r.height / 2;
+				const touch = (y: number) => new Touch({ identifier: 1, target, clientX: x, clientY: y });
+				const fire = (type: string, y: number) =>
+					target.dispatchEvent(
+						new TouchEvent(type, {
+							bubbles: true,
+							cancelable: true,
+							touches: type === 'touchend' ? [] : [touch(y)],
+							changedTouches: [touch(y)]
+						})
+					);
+				fire('touchstart', y0);
+				for (let i = 1; i <= (steps as number); i++) {
+					await new Promise((r) => setTimeout(r, 30));
+					fire('touchmove', y0 + ((dy as number) * i) / (steps as number));
+				}
+				fire('touchend', y0 + (dy as number));
+			},
+			[from, dy, steps] as const
+		);
+	// A short, slow pull springs back.
+	await swipe('.body', 30, 6);
+	await page.waitForTimeout(400);
+	await expect(sheet).toBeVisible();
+	// A long pull, from the tiles, puts it away.
+	await swipe('.body', 160, 6);
+	await expect(sheet).toHaveCount(0);
 });

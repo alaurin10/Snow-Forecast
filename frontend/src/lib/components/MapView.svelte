@@ -2065,20 +2065,8 @@
 					: '3D terrain: tilt with two fingers or right-drag, turn by twisting or Ctrl-drag'}
 				aria-label="3D terrain">3D</button
 			>
-			<button
-				class="tool o-layers"
-				class:active={layersOpen}
-				aria-expanded={layersOpen}
-				aria-controls="map-layers"
-				onclick={() => togglePanel('layers')}
-				title="Base map, weather, terrain and what's shown"
-				aria-label="Layers"
-			>
-				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
-					><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" /></svg
-				>
-			</button>
 			{#if viewport.desktop}
+				{@render layersButton()}
 				<button
 					class="tool"
 					class:active={measuring}
@@ -2184,6 +2172,27 @@
 				</div>
 			{/if}
 		</div>
+
+		{#snippet layersButton()}
+			<button
+				class="tool o-layers"
+				class:active={layersOpen}
+				aria-expanded={layersOpen}
+				aria-controls="map-layers"
+				onclick={() => togglePanel('layers')}
+				title={layersOpen ? 'Close Layers' : "Base map, weather, terrain and what's shown"}
+				aria-label="Layers"
+			>
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+					><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" /></svg
+				>
+			</button>
+		{/snippet}
+		<!-- Phones and tablets: Layers, the most used, on its own beside the tab bar, the
+		     easiest place to reach; it stays there while Layers is open, to close it. -->
+		{#if !viewport.desktop}
+			{@render layersButton()}
+		{/if}
 
 		{#if layersOpen}
 			<LayersSheet
@@ -2688,15 +2697,34 @@
 		display: grid;
 		gap: 8px;
 	}
-	/* Phones and tablets: the map's buttons at the bottom right, under the thumb. The
-	   lowest (Layers, the most used) is level with the row of tabs at the foot; when one
-	   of those controls is open, they rise above it. The compass on top, the zoom buttons
-	   left to pinch and double tap. Out of the way while the map panel is up. */
+	/* Phones and tablets: the map's buttons at the bottom right, under the thumb, bigger,
+	   and centred in the gap between the tab bar (220 px wide on the map, centred) and the
+	   edge. Layers, the most used, is level with the tab bar, the easiest place to reach;
+	   it stays put whatever opens above it. The rest stand in a column above it, the
+	   lowest level with the row of tabs at the foot, rising above any of those controls
+	   that is open. The compass on top, the zoom buttons left to pinch and double tap.
+	   The column is out of the way while the map panel is up. */
 	@media (max-width: 1099px) {
+		.wrap {
+			--tool: 48px;
+			--tool-right: clamp(4px, calc((100vw - 220px) / 4 - var(--tool) / 2), 40px);
+		}
+		.wrap .tool {
+			width: var(--tool);
+			height: var(--tool);
+			border-radius: 16px;
+		}
+		.wrap .tool svg {
+			width: 22px;
+			height: 22px;
+		}
+		.wrap .tool.three {
+			font-size: 0.92rem;
+		}
 		.tools {
 			top: auto;
 			left: auto;
-			right: 10px;
+			right: var(--tool-right);
 			bottom: calc(84px + env(safe-area-inset-bottom) + var(--dock-lift, 0px));
 			display: flex;
 			flex-direction: column;
@@ -2711,20 +2739,28 @@
 		.tools .o-locate {
 			order: 3;
 		}
-		.tools .o-layers {
-			order: 4;
+		.o-layers {
+			position: absolute;
+			z-index: 1000;
+			right: var(--tool-right);
+			bottom: calc(14px + env(safe-area-inset-bottom) + (56px - var(--tool)) / 2);
 		}
 		.map :global(.maplibregl-ctrl-top-left) {
 			top: auto;
 			left: auto;
-			right: 0;
+			right: var(--tool-right);
 			bottom: calc(
 				84px + env(safe-area-inset-bottom) + var(--dock-lift, 0px) + 8px + var(--tools-h, 0px)
 			);
 			transition: bottom var(--ease-slide);
 		}
 		.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group) {
-			margin: 0 10px 0 0;
+			margin: 0;
+			border-radius: 16px;
+		}
+		.map :global(.maplibregl-ctrl-top-left .maplibregl-ctrl-group button) {
+			width: var(--tool);
+			height: var(--tool);
 		}
 		.map :global(.maplibregl-ctrl-zoom-in),
 		.map :global(.maplibregl-ctrl-zoom-out) {
@@ -2737,14 +2773,20 @@
 		.wrap.sheet .map :global(.maplibregl-ctrl-top-left) {
 			visibility: hidden;
 		}
-		/* The row of tabs keeps clear of the buttons beside it (scrolling sideways if it
+		/* The row of tabs keeps clear of the column beside it (scrolling sideways if it
 		   has more tabs than fit). */
 		.dock :global(.docktabs) {
-			max-width: calc(100% - 112px);
+			max-width: calc(100% - 2 * (var(--tool-right) + var(--tool) - 4px));
 		}
 		.wrap .top,
 		.wrap .info {
 			left: 10px;
+		}
+	}
+	/* The narrowest phones: a little smaller, so Layers still fits beside the tab bar. */
+	@media (max-width: 359px) {
+		.wrap {
+			--tool: 42px;
 		}
 	}
 	.morewrap {
