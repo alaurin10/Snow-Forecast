@@ -43,7 +43,7 @@ test('sections are the page’s tabs on desktop, by click or 1–4', async ({ pa
 	await expect(page.locator('#rail').getByRole('tab')).toHaveCount(0);
 	const rects = await tabRects(page);
 	await page.keyboard.press('2');
-	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Models');
+	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Confidence');
 	await page.keyboard.press('4');
 	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Observed');
 	await tabs.getByRole('tab', { name: 'Forecast' }).click();
@@ -82,7 +82,7 @@ test('desktop: once the controls scroll away, a compact pill keeps the elevation
 
 	// Switching section from down here goes back up to the tabs.
 	await page.keyboard.press('2');
-	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Models');
+	await expect(tabs.getByRole('tab', { selected: true })).toHaveText('Confidence');
 	await expect.poll(async () => (await tabs.boundingBox())!.y).toBeGreaterThanOrEqual(0);
 	await expect(compact).toHaveCount(0);
 });

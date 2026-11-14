@@ -1,26 +1,31 @@
 <!--
-  The Backcountry tab: facts for planning a tour, side by side. Snow Watch never
-  scores whether a tour is safe; the avalanche center's forecast is shown as
-  published and linked.
+  The Backcountry tab, in the order a tour gets planned: the avalanche center's
+  bulletin as published, then the days ahead (what the weather does to the snowpack,
+  day by day), then where the wind is putting snow, then the weather for being out in.
+  Snow Watch never says whether a tour is safe: the one thing it grades is the weather
+  (see Outlook.svelte), and it says so.
 -->
 <script lang="ts">
 	import type { LoadState } from '../load';
-	import { hscroll } from '../hscroll';
 	import type { AvalancheView, Snapshot } from '../types.gen';
 	import { compass } from '../conditions';
-	import { dateOf, dayHour, weekday } from '../time';
-	import { elevation, snow, speed, temperature, water, type UnitSystem } from '../units';
+	import { dateOf, dayHour } from '../time';
+	import { elevation, snow, speed, type UnitSystem } from '../units';
 	import DangerPyramid from './DangerPyramid.svelte';
 	import LoadingRose from './LoadingRose.svelte';
+	import Outlook from './Outlook.svelte';
+	import TouringTable from './TouringTable.svelte';
 
 	interface Props {
 		snap: Snapshot;
 		avy: AvalancheView | null;
 		avyLoad?: LoadState;
 		units: UnitSystem;
+		/** Whether the app's own weather-stress grade is shown (the server's HAZARD_INDEX). */
+		graded?: boolean;
 	}
 
-	let { snap, avy, units, avyLoad = 'ready' }: Props = $props();
+	let { snap, avy, units, avyLoad = 'ready', graded = true }: Props = $props();
 
 	const today = $derived(dateOf(snap.now));
 	const bc = $derived(snap.backcountry ?? null);
@@ -34,199 +39,77 @@
 		});
 		return best as { i: number; v: number } | null;
 	});
-	const nights = $derived([...new Set((bc?.refreeze ?? []).map((n) => n.date))]);
-	const bandLabel = (b: string) => snap.bands.find((x) => x.band === b)?.label ?? b;
-	const sun = $derived(snap.sun.filter((d) => d.date >= today).slice(0, 3));
-	const dayName = (date: string) => (date === today ? 'Today' : weekday(date));
-	const clock = (iso: string | null) => {
-		if (!iso) return '–';
-		const h = Number(iso.slice(11, 13));
-		return `${h % 12 || 12}:${iso.slice(14, 16)} ${h < 12 ? 'AM' : 'PM'}`;
-	};
-	const hm = (s: number | null) =>
-		s === null
-			? '–'
-			: `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')} min`;
-	const rise = (m: number | null) =>
-		m === null ? '–' : `${m > 0 ? '+' : ''}${elevation(m, units)}`;
-	const tempRise = (c: number | null) => {
-		if (c === null) return '–';
-		const v = units === 'imperial' ? (c * 9) / 5 : c;
-		return `${v > 0 ? '+' : ''}${v.toFixed(0)}°${units === 'imperial' ? 'F' : 'C'}`;
-	};
+	const roses = $derived(
+		(bc?.rose ?? []).filter((r) => r.window === 'past72' || r.window === 'next48')
+	);
 </script>
 
 <div class="bc">
-	<section class="card wide">
-		<DangerPyramid view={avy} tz={snap.location.tz} {today} load={avyLoad} />
-	</section>
-
 	<section class="card">
-		<h2>Wind at ridge height</h2>
-		{#if ridge}
-			<p class="facts">
-				<span
-					><span class="k">Now</span>
-					<strong class="num">{speed(ridge.kmh[0], units)}</strong> from {compass(
-						ridge.dir[0]
-					)}</span
-				>
-				{#if ridgeMax}
-					<span
-						><span class="k">Strongest, next 48 h</span>
-						<strong class="num">{speed(ridgeMax.v, units)}</strong>
-						{compass(ridge.dir[ridgeMax.i])}, {dayHour(hours[ridgeMax.i])}</span
-					>
-				{/if}
-			</p>
-			<p class="faint small">
-				Free-air wind at {elevation(ridge.level_m, units)}, from the 850 and 700 hPa levels. It's
-				the dashed line on the hourly wind chart.
-			</p>
-		{:else}
-			<p class="muted small">No free-air wind in this run; the roses use the summit wind.</p>
-		{/if}
-		{#if bc}
-			<div class="roses">
-				{#each bc.rose.filter((r) => r.window === 'past72' || r.window === 'next48') as r (r.window)}
-					<LoadingRose rose={r} title={r.window === 'past72' ? 'Last 72 h' : 'Next 48 h'} {units} />
-				{/each}
-			</div>
-			<p class="faint small">
-				Wedges show where snow-carrying wind came from; it drifts onto the opposite (lee) slopes.
-			</p>
-		{/if}
+		<DangerPyramid view={avy} tz={snap.location.tz} {today} load={avyLoad} />
 	</section>
 
 	{#if bc}
 		<section class="card">
-			<h2>Storm snow and warming</h2>
-			<dl class="pairs">
-				<dt>New snow, last 72 h (summit)</dt>
-				<dd class="num">{snow(bc.storm.past72_cm, units)}</dd>
-				<dt>New snow, next 48 h (summit)</dt>
-				<dd class="num">{snow(bc.storm.next48_cm, units)}</dd>
-				<dt>Biggest freezing-level rise in 24 h</dt>
-				<dd>
-					<span class="num">{rise(bc.warming.fl_rise_m)}</span>
-					{#if bc.warming.fl_rise_at && (bc.warming.fl_rise_m ?? 0) > 0}<span class="muted">
-							by {dayHour(bc.warming.fl_rise_at)}</span
-						>{/if}
-				</dd>
-				<dt>Biggest warming in 24 h ({bandLabel('mid')})</dt>
-				<dd>
-					<span class="num">{tempRise(bc.warming.temp_rise_c)}</span>
-					{#if bc.warming.temp_rise_at && (bc.warming.temp_rise_c ?? 0) > 0}<span class="muted">
-							by {dayHour(bc.warming.temp_rise_at)}</span
-						>{/if}
-				</dd>
-				<dt>Rain on snow, next 48 h ({bandLabel('mid')})</dt>
-				<dd class="num">
-					{bc.warming.rain_on_snow_mm === null
-						? 'no snow on the ground'
-						: water(bc.warming.rain_on_snow_mm, units)}
-				</dd>
-			</dl>
+			<Outlook days={bc.outlook ?? []} {avy} {avyLoad} {today} {units} {graded} />
 		</section>
 
 		<section class="card">
-			<h2>Overnight refreeze</h2>
-			<div class="table-wrap" use:hscroll>
-				<table class="data">
-					<thead>
-						<tr>
-							<th></th>
-							{#each nights as d (d)}<th>{d === today ? 'Tonight' : weekday(d)}</th>{/each}
-						</tr>
-					</thead>
-					<tbody>
-						{#each ['summit', 'mid', 'base'] as b (b)}
-							<tr>
-								<th scope="row">{bandLabel(b)}</th>
-								{#each nights as d (d)}
-									{@const n = bc.refreeze.find((x) => x.band === b && x.date === d)}
-									<td>
-										<span class="rf rf-{(n?.status ?? 'Unknown').toLowerCase()}"
-											>{n?.status ?? '–'}</span
-										>
-										<span class="faint num low">{temperature(n?.low_c, units)}</span>
-									</td>
-								{/each}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+			<h2>Where the wind is putting snow</h2>
+			<div class="wind">
+				<div class="facts">
+					{#if ridge}
+						<div>
+							<span class="eyebrow">Ridge wind now</span>
+							<span class="big num">{speed(ridge.kmh[0], units)}</span>
+							<span class="muted small">from the {compass(ridge.dir[0])}</span>
+						</div>
+						{#if ridgeMax}
+							<div>
+								<span class="eyebrow">Strongest, next 48 h</span>
+								<span class="big num">{speed(ridgeMax.v, units)}</span>
+								<span class="muted small"
+									>{compass(ridge.dir[ridgeMax.i])}, {dayHour(hours[ridgeMax.i])}</span
+								>
+							</div>
+						{/if}
+					{/if}
+					<div>
+						<span class="eyebrow">New snow at the summit</span>
+						<span class="big num">{snow(bc.storm.past72_cm, units)}</span>
+						<span class="muted small"
+							>in the last 72 h · {snow(bc.storm.next48_cm, units)} in the next 48</span
+						>
+					</div>
+				</div>
+				<div class="roses">
+					{#each roses as r (r.window)}
+						<LoadingRose
+							rose={r}
+							title={r.window === 'past72' ? 'Last 72 h' : 'Next 48 h'}
+							{units}
+						/>
+					{/each}
+				</div>
 			</div>
 			<p class="faint small">
-				Good: a low of about 27 °F (−3 °C) or colder under a mostly clear sky. Partial: at or just
-				below freezing.
+				Wedges show where snow-carrying wind came from; it drifts onto the opposite (lee) slopes.
+				{#if ridge}
+					The wind is the free-air wind at {elevation(ridge.level_m, units)}, from the 850 and 700
+					hPa levels (the dashed line on the hourly wind chart).
+				{:else}
+					No free-air wind in this run; the roses use the summit wind.
+				{/if}
 			</p>
 		</section>
 
 		<section class="card">
-			<h2>Sky above treeline</h2>
-			<div class="table-wrap" use:hscroll>
-				<table class="data">
-					<thead>
-						<tr>
-							<th></th>
-							{#each bc.sky as s (s.date)}<th>{dayName(s.date)}</th>{/each}
-						</tr>
-					</thead>
-					<tbody>
-						<tr>
-							<th scope="row">High cloud</th>
-							{#each bc.sky as s (s.date)}<td class="num">{s.cloud_high ?? '–'}%</td>{/each}
-						</tr>
-						<tr>
-							<th scope="row">Mid cloud</th>
-							{#each bc.sky as s (s.date)}<td class="num">{s.cloud_mid ?? '–'}%</td>{/each}
-						</tr>
-						<tr>
-							<th scope="row">Low cloud</th>
-							{#each bc.sky as s (s.date)}<td class="num">{s.cloud_low ?? '–'}%</td>{/each}
-						</tr>
-						<tr>
-							<th scope="row">Lowest visibility</th>
-							{#each bc.sky as s (s.date)}
-								<td class="num"
-									>{s.vis_min_m === null
-										? '–'
-										: units === 'imperial'
-											? `${(s.vis_min_m / 1609).toFixed(s.vis_min_m < 1609 ? 1 : 0)} mi`
-											: `${(s.vis_min_m / 1000).toFixed(s.vis_min_m < 1000 ? 1 : 0)} km`}</td
-								>
-							{/each}
-						</tr>
-					</tbody>
-				</table>
-			</div>
-			<p class="faint small">Daytime averages at the summit.</p>
+			<h2>Touring weather</h2>
+			<TouringTable {snap} {units} />
 		</section>
 	{/if}
 
-	<section class="card">
-		<h2>Daylight</h2>
-		<div class="table-wrap" use:hscroll>
-			<table class="data">
-				<thead>
-					<tr><th></th><th>Sunrise</th><th>Sunset</th><th>Daylight</th></tr>
-				</thead>
-				<tbody>
-					{#each sun as d (d.date)}
-						<tr>
-							<th scope="row">{dayName(d.date)}</th>
-							<td class="num">{clock(d.sunrise)}</td>
-							<td class="num">{clock(d.sunset)}</td>
-							<td class="num">{hm(d.daylight_s)}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	</section>
-
-	<p class="faint small wide note">
+	<p class="faint small note">
 		Snow Watch doesn't judge whether a tour is safe. Read the avalanche center's forecast, and
 		decide in the field.
 	</p>
@@ -235,72 +118,55 @@
 <style>
 	.bc {
 		display: grid;
-		gap: 12px;
-	}
-	@media (min-width: 900px) {
-		.bc {
-			grid-template-columns: 1fr 1fr;
-		}
-		.wide {
-			grid-column: 1 / -1;
-		}
+		gap: 16px;
 	}
 	h2 {
-		margin: 0 0 8px;
+		margin: 0 0 10px;
 	}
 	.small {
 		font-size: 0.82rem;
 	}
+	.wind {
+		display: grid;
+		gap: 16px 28px;
+		align-items: center;
+	}
 	.facts {
 		display: grid;
-		gap: 4px;
-		margin: 0 0 6px;
+		gap: 14px;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 	}
-	.k {
-		display: inline-block;
-		min-width: 9.5em;
-		color: var(--text-2);
-		font-size: 0.85rem;
+	.facts > div {
+		display: grid;
+		gap: 1px;
+		align-content: start;
+	}
+	.big {
+		font-family: var(--font-num);
+		font-size: 1.5rem;
+		font-weight: 600;
+		line-height: 1.15;
+		letter-spacing: -0.02em;
 	}
 	.roses {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 8px;
-		margin-top: 8px;
 	}
-	.pairs {
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 6px 12px;
-		margin: 0;
-		font-size: 0.88rem;
-	}
-	.pairs dt {
-		color: var(--text-2);
-	}
-	.pairs dd {
-		margin: 0;
-		text-align: right;
-	}
-	.rf {
-		display: block;
-		font-weight: 600;
-	}
-	.low {
-		display: block;
-		font-size: 0.8rem;
-	}
-	.rf-good {
-		color: var(--snow);
-	}
-	.rf-partial {
-		color: var(--text);
-	}
-	.rf-none,
-	.rf-unknown {
-		color: var(--text-3);
+	@media (min-width: 900px) {
+		.wind {
+			grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+		}
+		.facts {
+			grid-template-columns: 1fr;
+		}
 	}
 	.note {
-		margin: 0;
+		margin: 0 4px;
+	}
+	@media (max-width: 640px) {
+		.bc {
+			gap: 12px;
+		}
 	}
 </style>

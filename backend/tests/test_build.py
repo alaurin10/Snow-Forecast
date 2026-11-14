@@ -60,6 +60,22 @@ def test_backcountry_ridge_and_days(loc_id: str) -> None:
         assert sum(rose.sectors) == pytest.approx(1, abs=0.01) or sum(rose.sectors) == 0
     assert len(bc.refreeze) == 9 and {n.band for n in bc.refreeze} == {"base", "mid", "summit"}
     assert len(bc.sky) == 3 and bc.storm.next48_cm is not None
+    # The outlook: today and the six days after it, each graded from its own facts.
+    today = snap.now[:10]
+    assert len(bc.outlook) == 7 and bc.outlook[0].date == today
+    assert [d.date for d in bc.outlook] == sorted({d.date for d in bc.outlook})
+    for d in bc.outlook:
+        lv = d.levels
+        assert all(0 <= v <= 3 for v in (lv.snow, lv.wind, lv.rain, lv.warm, d.stress))
+        assert d.stress >= max(lv.snow, lv.wind, lv.rain, lv.warm)
+        assert d.trend in ("rising", "steady", "easing")
+        assert [n.band for n in d.refreeze] == ["base", "mid", "summit"]
+        assert d.sky is not None and d.sky.date == d.date
+        assert (d.storm_cm or 0) >= (d.new_cm or 0) - 0.11  # 72 h includes the day
+        assert bool(d.loading) <= (d.wind_from is not None)
+    for a, b in zip(bc.outlook, bc.outlook[1:], strict=False):
+        want = "rising" if b.stress > a.stress else "easing" if b.stress < a.stress else "steady"
+        assert b.trend == want
     days = [p for p in snap.bands[1].periods if p.kind == "day"]
     assert [d.date for d in snap.days] == [p.date for p in days]
     resort = snap.location.kind == "resort"

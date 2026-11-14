@@ -9,7 +9,8 @@ import type { Snapshot } from '../../types.gen';
 import { crosshair } from '../../crosshair.svelte';
 import ForecastChart from '../ForecastChart.svelte';
 import ModelAgreement from '../ModelAgreement.svelte';
-import Exceedance from '../Exceedance.svelte';
+import ModelDays from '../ModelDays.svelte';
+import { dayReads } from '../../confidence';
 import TrendChart from '../TrendChart.svelte';
 import { pathPoints } from './marks';
 
@@ -70,24 +71,21 @@ describe.each([
 		expectMarksInside(container);
 	});
 
-	it('exceedance curve keeps marks in bounds', () => {
-		const { container } = render(Exceedance, {
-			props: {
-				title: 'Next 5 days',
-				members: band.windows['next5'].members_cm ?? [],
-				units: 'imperial',
-				width: 320
-			}
-		});
-		expectMarksInside(container);
+	it('the model dot plot keeps marks in bounds, wide and narrow', () => {
+		for (const width of [900, 340]) {
+			const { container } = render(ModelDays, {
+				props: { days: dayReads(snap.daily), models: snap.models, units: 'imperial', width }
+			});
+			expectMarksInside(container);
+			// One range bar per day with an ensemble: every day when wide, ten on a phone.
+			const bars = container.querySelectorAll('rect.band').length;
+			expect(bars).toBeLessThanOrEqual(width < 520 ? 10 : snap.daily.length);
+			cleanup();
+		}
 	});
 });
 
 it('empty states render without errors', () => {
-	const { container } = render(Exceedance, {
-		props: { title: 'Days 6–10', members: [], units: 'imperial', width: 300 }
-	});
-	expect(container.textContent).toContain('No ensemble data');
 	const t = render(TrendChart, { props: { runs: [], units: 'imperial', width: 300 } });
 	expect(t.container.textContent).toContain('two or more runs');
 });

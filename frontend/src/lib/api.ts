@@ -11,6 +11,7 @@ import type {
 	MapWindOut,
 	Me,
 	MetaOut,
+	NearbyOut,
 	ObsOut,
 	OverlayFile,
 	OverviewRow,
@@ -152,6 +153,10 @@ export async function getConcern(): Promise<ConcernOut | null> {
 
 export const getVerification = (id: string) =>
 	get<VerificationOut>(`/api/locations/${encodeURIComponent(id)}/verification`);
+
+/** The closest snow stations and recent field reports around a location. */
+export const getNearby = (id: string) =>
+	get<NearbyOut>(`/api/locations/${encodeURIComponent(id)}/nearby`);
 
 export const getStatus = () => get<StatusOut>('/api/status');
 

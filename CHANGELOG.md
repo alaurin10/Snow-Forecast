@@ -7,6 +7,45 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The Backcountry tab is reorganised around planning a tour**, top to bottom: the
+  avalanche center's bulletin as published (each problem now has a small rose showing
+  the aspects and elevations it lists, beside the ratings on wide screens); **Avalanche
+  weather, day by day**, a new week-long outlook; **Where the wind is putting snow**
+  (ridge wind now and at its strongest, summit snow, the two loading roses); and
+  **Touring weather**, one table with a column per day for the sky above treeline,
+  ridge wind, summit gusts and temperatures, the freezing level, the refreeze the night
+  before at each elevation, and daylight (it replaces four separate cards).
+- **New: Avalanche weather, day by day.** For today and the six days after it: the
+  published danger on the days the bulletin covers, then what the weather does to the
+  snowpack: new snow at the summit (and the 72 h total), sustained ridge wind and the
+  slopes it loads, rain onto snow and how high it reaches, the freezing level and hours
+  of thaw up top. Each factor and the day as a whole get a "weather stress" grade
+  (Little, Some, Strong, Very strong) with a rising or easing arrow, and a sentence sums
+  up the week ("Very strong weather stress Fri to Sun and Tue. Fri brings 11.8 in of new
+  snow and S wind to 34 mph loading N slopes."). It is an estimate from the forecast,
+  never a danger rating: it has its own words and colours (the map concern index's
+  blues to magenta, never the danger scale's), and always says it can't see buried weak
+  layers. The thresholds are in `config/forecast.yaml` (`backcountry: outlook_*`), and
+  `HAZARD_INDEX=off` hides the grade and keeps the facts.
+- **The Models tab is now Confidence**, built around one question: how sure is this
+  forecast? For the next 5 days and days 6–10 it gives high, medium or low confidence
+  with a sentence, the total and its likely range, and a line showing the range, the
+  forecast and where each model stands. Below: **the models day by day** (a dot per
+  model on each day with the ensemble range and the models' median, or the running
+  totals as before) with a table of every model's numbers; **chance of at least** each
+  amount as bars for both windows (replacing two step curves); **how the forecast has
+  changed** in words ("Up 8.4 in since 4 runs ago") over the chart and table; and the
+  **track record here**, which says how far off the app's forecast has been and which
+  source has been closest. It follows the chosen elevation. The Base, mid and summit
+  table moved to the Forecast tab.
+- **The Observed tab measures more**: the snow station adds the last 7 days and a chart
+  of new snow each day; **Measured against the forecast** charts each day's measured
+  snow beside the forecast made the evening before and says how it leans; **Snow
+  stations nearby** lists every station within about 37 mi, highest first, with the
+  location's own elevations slotted between them, so you can see how deep the snow is
+  at each height; and **Field reports nearby** lists recent Mountain Information Network
+  reports (in Canada, or wherever one is close). New endpoint:
+  `/api/locations/{id}/nearby`, read from the map's own station and report files.
 - **The map's buttons on phones are easier to reach one-handed.** They're bigger
   (48 px) and centred in the gap between the tab bar and the edge of the screen. Layers,
   the most used, sits on its own level with the tab bar, the easiest spot for a thumb,

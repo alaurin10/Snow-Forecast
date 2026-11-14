@@ -15,9 +15,9 @@ from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.maps.point import PointOut
 from snowwatch.maps.sat import SatOut
 from snowwatch.models import Location
-from snowwatch.observations import ObsOut
+from snowwatch.observations import ObsOut, ObsProps
 from snowwatch.overlays import AtesOut, OverlayFile
-from snowwatch.stations import StationsOut
+from snowwatch.stations import MapStation, StationsOut
 from snowwatch.verify import VerificationOut
 
 
@@ -169,6 +169,30 @@ class TrendOut(BaseModel):
     runs: list[TrendRun]  # oldest first
 
 
+class NearbyStation(BaseModel):
+    station: MapStation
+    distance_km: float  # from the location's mid band
+
+
+class NearbyReport(BaseModel):
+    report: ObsProps
+    distance_km: float
+
+
+class NearbyOut(BaseModel):
+    """What was measured and reported around a location (the Observed tab): the
+    closest snow stations and Avalanche Canada's recent field reports, both read from
+    the files the map's layers use."""
+
+    location_id: str
+    radius_km: float
+    stations_at: str | None  # when the stations were last read; None before the first time
+    stations: list[NearbyStation]  # nearest first
+    reports_at: str | None
+    reports_days: int | None  # how far back the reports go
+    reports: list[NearbyReport]  # newest first
+
+
 class RunOut(BaseModel):
     id: int
     kind: str
@@ -216,6 +240,9 @@ class MetaOut(BaseModel):
     powder_cm: float  # a powder-day alert: this much snow, night before plus the day
     storm_cm: float  # a storm alert: this much in 48 h
     snowfall_cm_per_mm: float  # Open-Meteo's fixed snow-to-water conversion
+    # Whether the app's own experimental estimates are shown (HAZARD_INDEX): the map's
+    # concern index and the Backcountry tab's weather-stress grade.
+    hazard_index: bool = True
 
 
 class ApiTypes(BaseModel):
@@ -247,5 +274,6 @@ class ApiTypes(BaseModel):
     avalanche: dict[str, AvalancheView]
     plan: PlanOut
     verification: VerificationOut
+    nearby: NearbyOut
     status: StatusOut
     meta: MetaOut

@@ -39,6 +39,31 @@ for (const path of PAGES) {
 	});
 }
 
+// Every section of a resort and of a backcountry zone: Confidence, Backcountry and
+// Observed each draw their own cards (and the Observed tab asks for nearby stations).
+const SECTIONS: [string, string, string][] = [
+	['whistler', 'Confidence', 'How sure is this forecast?'],
+	['whistler', 'Backcountry', 'Avalanche weather, day by day'],
+	['whistler', 'Observed', 'Snow stations nearby'],
+	['rainy', 'Backcountry', 'Touring weather'],
+	['rainy', 'Confidence', 'The models, day by day'],
+	['crystal', 'Observed', 'Measured against the forecast']
+];
+for (const [loc, tab, heading] of SECTIONS) {
+	test(`${loc} → ${tab} draws without errors or sideways scrolling`, async ({ page }) => {
+		const problems = watch(page);
+		await page.goto(`/location/${loc}`, { waitUntil: 'networkidle' });
+		await page.getByRole('tablist', { name: 'Sections' }).getByRole('tab', { name: tab }).click();
+		await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+		await page.waitForLoadState('networkidle');
+		const sideways = await page.evaluate(
+			() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+		);
+		expect(sideways).toBeLessThanOrEqual(1);
+		expect(problems).toEqual([]);
+	});
+}
+
 test('an unknown page and an unknown location say so', async ({ page }) => {
 	await page.goto('/no-such-page');
 	await expect(page.getByRole('heading', { name: 'There’s nothing here' })).toBeVisible();

@@ -72,7 +72,7 @@ skiday:
   flat_light_cloud_low_pct: 80
   very_cold_c: -18      # 0 °F high
 
-# Backcountry layer. Facts only: the app never rates whether a tour is safe.
+# Backcountry layer. The app never rates whether a tour is safe.
 backcountry:
   refreeze_good_c: -3        # Good: a low at or below this with a mostly clear night
   refreeze_partial_c: 0      # Partial: a low at or below freezing
@@ -80,6 +80,20 @@ backcountry:
   refreeze_clear_frac: 0.5
   rose_min_snow_cm: 2        # less new snow than this: "little new snow to move"
   rose_min_wind_kmh: 15
+  # The day-by-day "avalanche weather" outlook: how hard each day's weather pushes on
+  # the snowpack. Rules of thumb, not a danger rating. Each factor has three steps:
+  # the values where it becomes "some", "strong" and "very strong". The day's weather
+  # stress is its strongest factor, one step more when two are strong together.
+  outlook_days: 7
+  outlook_snow_cm: [10, 25, 40]    # new snow in the day at the summit (4, 10, 16 in)
+  outlook_storm_cm: [30, 50, 80]   # or over 72 h (12, 20, 31 in), whichever grades higher
+  outlook_wind_kmh: [25, 40, 60]   # ridge wind, the day's strongest 6 h (16, 25, 37 mph)
+  outlook_wind_thin_cm: 15         # with less snow than this in 72 h, drifting stays "some"
+  outlook_rain_mm: [1, 6, 20]      # rain onto snow at mid (0.04, 0.25, 0.8 in)
+  outlook_rise_c: [5, 8, 12]       # warming within 24 h at mid (9, 14, 22 °F)
+  outlook_thaw_h: [3, 8]           # hours above freezing at the summit: some, strong
+                                   # (a good refreeze the night before holds it at "some";
+                                   # no refreeze makes it one step more)
 
 # The Map page's radar and forecast pictures (see docs/MAP-PLAN.md).
 map:

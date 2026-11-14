@@ -199,6 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             powder_cm=cfg.flags.powder_cm,
             storm_cm=cfg.flags.storm_cm,
             snowfall_cm_per_mm=cfg.snowfall_cm_per_mm,
+            hazard_index=settings.hazard_index != "off",
         )
 
     @app.get("/api/precip")

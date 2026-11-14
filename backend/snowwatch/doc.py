@@ -248,12 +248,48 @@ class StormOut(BaseModel):
     next48_cm: float | None
 
 
+class OutlookLevels(BaseModel):
+    """How hard each weather factor pushes on the snowpack: 0 nothing, 1 some,
+    2 strong, 3 very strong (thresholds in config `backcountry:`)."""
+
+    snow: int  # new snow: the day's, or the 72 h total
+    wind: int  # drifting: sustained ridge wind with snow to move
+    rain: int  # rain onto snow
+    warm: int  # a sharp warm-up, or a thaw at the summit
+
+
+class OutlookDay(BaseModel):
+    """One calendar day of avalanche weather: what the forecast would do to the
+    snowpack, and the day's touring weather. Not a danger rating: it knows nothing of
+    the snowpack itself. Snow, wind, sky and the thaw are the summit's; rain, the
+    freezing level and warming are mid's."""
+
+    date: str
+    new_cm: float | None  # summit snowfall in the day (today: measured so far + forecast)
+    storm_cm: float | None  # summit snowfall over the 72 h to the end of the day
+    wind_kmh: float | None  # ridge wind, the mean of the day's strongest 6 h
+    wind_from: str | None  # e.g. "SW" or "SW–W"
+    loading: list[str] = []  # lee aspects, while there is recent snow to move
+    rain_mm: float | None  # rain at mid; None with no snow for it to fall on
+    rain_to_m: float | None  # the highest snow level while it rains
+    fl_max_m: float | None  # the day's highest freezing level
+    thaw_h: int  # hours above freezing at the summit
+    temp_rise_c: float | None  # the biggest 24 h warming that ends in the day (mid)
+    refreeze: list[RefreezeNight] = []  # the night before, per band
+    sky: SkyDay | None = None  # daytime cloud and visibility at the summit
+    levels: OutlookLevels
+    stress: int  # 0 little, 1 some, 2 strong, 3 very strong
+    trend: str | None  # rising, steady or easing against the day before
+
+
 class BackcountryOut(BaseModel):
     rose: list[RoseOut]
     warming: WarmingOut
     refreeze: list[RefreezeNight]
     sky: list[SkyDay]
     storm: StormOut
+    # Today and the days after it; empty in snapshots built before this existed.
+    outlook: list[OutlookDay] = []
 
 
 class Reason(BaseModel):

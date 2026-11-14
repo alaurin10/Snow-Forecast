@@ -87,6 +87,11 @@
 	--d5: #231f20;
 	--d-ink: #111111;
 	--d-ink-on-dark: #ffffff;
+	/* The app's own estimates (the Backcountry tab's weather stress; the map's concern
+	   index uses the same hues): blues to magenta, nothing like the danger scale. */
+	--stress-1: #4f86d4;
+	--stress-2: #7a52d6;
+	--stress-3: #c0177c;
 
 	/* Language: shape, type, motion. */
 	--radius: 24px;
