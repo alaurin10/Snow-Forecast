@@ -39,8 +39,11 @@ slr_bands:
   - {min_c: -3.333, ratio: 11, label: "Average"}
   - {min_c: -7.222, ratio: 14, label: "Light"}
   - {min_c: null, ratio: 17, label: "Dry & fluffy"}
-# Headline depth method: "raw" (model snowfall) or "slr" (ratio-adjusted).
-depth_method: raw
+# Headline depth method: "slr" (snow water × the ratio above, from the temperature
+# while it snows) or "raw" (Open-Meteo's 7:1 model snowfall). Every snow total the
+# app shows (bars, totals, ranges, model bars, flags, ratings, alerts) follows it;
+# the snapshot keeps both as snow_cm_raw / snow_cm_slr.
+depth_method: slr
 
 schedule:
   runs_utc: ["03:30", "09:30", "15:30", "21:30"]

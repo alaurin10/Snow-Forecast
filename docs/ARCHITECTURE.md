@@ -108,10 +108,23 @@ older than `STALE_AFTER_H` (12 h).
   median and is scaled so each period sums to its consensus.
 - **Ensembles**: running totals per system (GEFS, ECMWF ENS, GEPS); the pooled
   10–90% band stops where the shortest system ends, so no percentile line dips.
-- **Snow depth**: model snowfall uses a fixed 7:1 snow-to-water ratio. A
-  temperature-based ratio (8:1 heavy and wet to 17:1 dry) is computed alongside;
-  `depth_method` in `config/forecast.yaml` picks the headline one, and the
-  scorecard shows which has been closer.
+- **Snow depth**: the pipeline works in snow water and turns it into depth once,
+  with the headline method (`depth_method` in `config/forecast.yaml`, `slr` since
+  Nov 2026): each period's snow water × a ratio from the median temperature of its
+  snowing hours (8:1 heavy and wet to 17:1 dry); hours outside the periods (the past
+  24–72 h, days past the 20th period) use their own temperature's ratio. With nothing
+  snowing, and under `raw`, it is Open-Meteo's fixed 7:1. Every surfaced depth follows
+  it: the bars, hourly series and window totals (a window is the sum of its bars), the
+  ensemble ranges and member totals, each model's bar, Model agreement's daily rows, the
+  past 24 h, the Backcountry storm and loading rose, Plan-a-day, the ski-day rating,
+  flags and so push alerts, the overview and Calendar. The snapshot keeps the 7:1
+  figures as `*_raw` (and the ratio ones as `*_slr`). The map's snow totals use the same
+  ratio bands, so the map and the location pages agree.
+- **Trend and scorecard**: every run stores the consensus both ways in
+  `forecast_daily` (`cons` at 7:1, `cons_slr` temperature-based); the trend reads the
+  headline one, so changing `depth_method` shows no step, and the scorecard scores
+  both, marks the headline (`headline` in the response) and says which has been closer.
+  Each model's and the ensemble's records stay at their own 7:1.
 - **Bands**: everything is computed at base, mid and summit at each band's own
   coordinates; freezing level comes from the model or from the upper-air levels.
 - **Backcountry** (no safety judgement, with one bounded exception below): avalanche

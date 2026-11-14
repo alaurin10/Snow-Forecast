@@ -89,4 +89,18 @@ describe('scorecard', () => {
 		expect(container.textContent).toMatch(/temperature-based depth is closer/);
 		expectMarksInside(container);
 	});
+
+	it('labels the source the app’s totals use', () => {
+		const { getByText, container } = render(Scorecard, {
+			data: { ...scores(true), headline: 'cons_slr' },
+			units: 'imperial',
+			width: 380
+		});
+		const row = getByText('Consensus (temperature-based depth) · the app’s totals');
+		expect(row.closest('tr')?.classList.contains('hl')).toBe(true);
+		expect(
+			getByText('Consensus (model snowfall, 7:1)').closest('tr')?.classList.contains('hl')
+		).toBe(false);
+		expect(container.textContent).toMatch(/totals use the\s+temperature-based depth/);
+	});
 });

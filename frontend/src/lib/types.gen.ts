@@ -1097,9 +1097,10 @@ export interface ElevationOut {
  */
 export interface WindowOut {
 	ens: EnsStats | null;
+	ens_raw?: EnsStats | null;
 	ens_slr: EnsStats | null;
 	members_cm?: number[];
-	members_cm_slr?: number[];
+	members_cm_raw?: number[];
 	scale?: number | null;
 	snow_cm: number | null;
 	snow_cm_raw: number | null;
@@ -1266,6 +1267,7 @@ export interface TrendRun {
  */
 export interface VerificationOut {
 	band_elev_m: number;
+	headline?: string;
 	location_id: string;
 	n_days: number;
 	needs_days: number;

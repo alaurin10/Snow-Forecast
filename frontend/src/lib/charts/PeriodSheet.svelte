@@ -14,17 +14,25 @@
 		units: UnitSystem;
 		/** The ski-day rating for a resort's day period. */
 		day?: DayOut | null;
+		/** The snapshot's depth_method: what snow_cm (and every other depth) means. */
+		depthMethod?: string;
 		onclose: () => void;
 	}
 
-	let { period: p, bandLabel, units, day = null, onclose }: Props = $props();
-	// cm of snow per mm of water, from the server (0.7 cm/mm is 7:1).
-	let ratio = $state(7);
+	let { period: p, bandLabel, units, day = null, depthMethod = 'slr', onclose }: Props = $props();
+	// Open-Meteo's own snowfall ratio, from the server (0.7 cm/mm is 7:1).
+	let modelRatio = $state(7);
 	$effect(() => {
 		getMeta()
-			.then((m) => (ratio = Math.round(m.snowfall_cm_per_mm * 10)))
+			.then((m) => (modelRatio = Math.round(m.snowfall_cm_per_mm * 10)))
 			.catch(() => {}); // keep the usual 7:1
 	});
+	const bySlr = $derived(depthMethod === 'slr');
+	// The ratio the big number uses: the period's own, or the model's when it uses 7:1
+	// (or nothing snowed enough to set a ratio).
+	const shownRatio = $derived(bySlr && p.slr ? p.slr : modelRatio);
+	// The other way of turning the same snow water into depth, for the details.
+	const other = $derived(bySlr ? p.snow_cm_raw : p.snow_cm_slr);
 
 	const basis = $derived(
 		p.basis === 'ensemble'
@@ -46,9 +54,7 @@
 
 		<div class="big num">{snow(p.snow_cm, units)}</div>
 		<div class="muted">
-			{#if p.snow_cm_slr !== null && p.snow_cm_slr !== p.snow_cm}
-				{snow(p.snow_cm_slr, units)} with the snow-to-liquid ratio{p.slr ? ` (${p.slr}:1)` : ''} ·
-			{/if}
+			{#if p.snow_cm}at {shownRatio}:1 ·{/if}
 			{p.quality ?? 'no snow'}
 		</div>
 		{#if day?.rating}
@@ -60,6 +66,14 @@
 		{/if}
 
 		<dl>
+			{#if other !== null && other !== p.snow_cm}
+				<dt>
+					{bySlr
+						? `Model snowfall at ${modelRatio}:1`
+						: `With the snow ratio${p.slr ? ` (${p.slr}:1)` : ''}`}
+				</dt>
+				<dd class="num">{snow(other, units)}</dd>
+			{/if}
 			<dt>Ensemble 10–90%</dt>
 			<dd class="num">
 				{p.ens ? `${snow(p.ens.p10, units)} – ${snow(p.ens.p90, units)}` : '–'}{p.ens?.estimated
@@ -92,7 +106,13 @@
 			</tbody>
 		</table>
 		<p class="faint note">
-			Model snowfall uses a fixed {ratio}:1 snow-to-water ratio; colder, drier snow piles up deeper.
+			{#if bySlr}
+				Snow depth is the snow water times a ratio from the temperature while it snows: 8:1 near
+				freezing up to 17:1 in the cold, so colder, drier snow piles up deeper.
+			{:else}
+				Model snowfall uses a fixed {modelRatio}:1 snow-to-water ratio; colder, drier snow piles up
+				deeper.
+			{/if}
 		</p>
 	</div>
 </div>

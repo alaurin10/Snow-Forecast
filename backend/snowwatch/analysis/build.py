@@ -32,8 +32,8 @@ from snowwatch.analysis.series import (
     total,
 )
 from snowwatch.analysis.skiday import DayFacts, rate
-from snowwatch.analysis.slr import hourly_slr, period_ratio, ptype
-from snowwatch.config import ForecastConfig
+from snowwatch.analysis.slr import hourly_slr, period_ratio, ptype, ratio_for
+from snowwatch.config import ForecastConfig, SlrBand
 from snowwatch.doc import (
     Alert,
     BackcountryOut,
@@ -82,6 +82,56 @@ class DailyRecord:
     source: str
     snow_cm: float | None
     water_mm: float | None
+
+
+@dataclass(frozen=True)
+class Depth:
+    """Snow water (mm) to the headline snow depth (cm), per `depth_method`.
+
+    "slr": the temperature-based snow-to-liquid ratio. Forecast periods use their own
+    ratio (from the temperature while it snows); an hour outside every period (past
+    hours, days past the last period) uses the ratio for its own temperature.
+    "raw": Open-Meteo's fixed 7:1. With nothing snowing there is no ratio, and both
+    use 7:1. Every depth the snapshot surfaces goes through this, so totals, ranges,
+    model bars, flags and ratings all agree.
+    """
+
+    k: float  # Open-Meteo's cm of snow per mm of water (0.7)
+    slr: bool
+    bands: Sequence[SlrBand]
+
+    @classmethod
+    def of(cls, cfg: ForecastConfig) -> Depth:
+        return cls(cfg.snowfall_cm_per_mm, cfg.depth_method == "slr", cfg.slr_bands)
+
+    def factor(self, ratio: float | None) -> float:
+        """cm of snow per mm of water, for a period with this snow ratio."""
+        return ratio / 10 if self.slr and ratio else self.k
+
+    def cm(self, swe: float | None, ratio: float | None) -> float | None:
+        return None if swe is None else swe * self.factor(ratio)
+
+    def hour_factor(self, temp_c: float | None) -> float:
+        """cm per mm for an hour outside the periods, from its own temperature."""
+        return self.factor(None if temp_c is None else ratio_for(temp_c, self.bands)[0])
+
+    def from_snowfall(self, snowfall_cm: Hourly, temps: Hourly) -> Hourly:
+        """Open-Meteo's snowfall (7:1) as headline depth, hour by hour."""
+        return {
+            h: None if v is None else v / self.k * self.hour_factor(temps.get(h))
+            for h, v in snowfall_cm.items()
+        }
+
+
+def _period_factors(
+    periods: Sequence[Period], ratios: Sequence[tuple[float | None, str | None]], depth: Depth
+) -> dict[int, float]:
+    """Each forecast hour's cm per mm: its period's."""
+    return {
+        h: depth.factor(ratio)
+        for p, (ratio, _) in zip(periods, ratios, strict=True)
+        for h in p.hours
+    }
 
 
 def _swe(snowfall_cm: Hourly, cm_per_mm: float) -> Hourly:
@@ -183,6 +233,7 @@ def build_snapshot(
             f"{int(offset.total_seconds())} s vs {inputs.blend[1].utc_offset_s} s"
         )
     k = cfg.snowfall_cm_per_mm
+    depth = Depth.of(cfg)
     global_models = list(cfg.models.global_)
     short_models = cfg.short_range_for(loc.country)
     short_until = now_h + cfg.short_range_hours * 3600
@@ -327,11 +378,12 @@ def build_snapshot(
             tz,
             now_h,
             systems,
+            depth,
         )
         for i in range(3)
     ]
 
-    daily, records = _daily(loc, inputs, cfg, tz, now_h, systems, work[1], periods)
+    daily, records = _daily(loc, inputs, cfg, tz, now_h, systems, work[1], periods, depth)
     ridge_kmh, ridge_dir = ridge_wind(
         upper,
         loc.bands[2].elev_m,
@@ -348,9 +400,9 @@ def build_snapshot(
         else None
     )
     backcountry = _backcountry(
-        loc, inputs, cfg, tz, now_h, all_hours, periods, work, ridge_kmh, ridge_dir
+        loc, inputs, cfg, tz, now_h, all_hours, periods, work, ridge_kmh, ridge_dir, depth
     )
-    days = _days(loc, inputs, cfg, tz, now_h, periods, work, bands_out)
+    days = _days(loc, inputs, cfg, tz, now_h, periods, work, bands_out, depth)
     switch = next(
         (p for p, c in zip(periods, work[1].sw, strict=True) if c.basis == "ensemble"), None
     )
@@ -384,18 +436,33 @@ def build_snapshot(
         days=days,
         warnings=warnings,
     )
-    # Chance that 48 h (4 periods) bring a storm's worth of snow, from the members.
+    # Chance that 48 h (4 periods) bring a storm's worth of snow, from the members,
+    # each period's snow water at its headline ratio.
     chances: list[float | None] = []
     for j in range(max(0, min(10, len(periods)) - 3)):
-        hours = [h for p in periods[j : j + 4] for h in p.hours]
-        totals = ens.member_totals(members, hours)
+        ps = periods[j : j + 4]
+        factors = [depth.factor(ratio) for ratio, _ in work[1].ratios[j : j + 4]]
+        totals = _member_depths(members, ps, factors)
         chances.append(
-            sum(1 for t in totals if t * k >= cfg.flags.storm_cm) / len(totals)
+            sum(1 for t in totals if t >= cfg.flags.storm_cm) / len(totals)
             if len(totals) >= cfg.ensemble_min_members
             else None
         )
     snap.flags = compute_flags(snap, cfg.flags, chances)
     return snap, records
+
+
+def _member_depths(
+    members: Sequence[Hourly], periods: Sequence[Period], factors: Sequence[float]
+) -> list[float]:
+    """Each member's depth over the periods (period snow water × its cm per mm), for
+    the members that cover every hour."""
+    out = []
+    for m in members:
+        sums = [total(m, p.hours) for p in periods]
+        if all(v is not None for v in sums):
+            out.append(sum((v or 0.0) * f for v, f in zip(sums, factors, strict=True)))
+    return out
 
 
 def _past(series: Hourly, now_h: int, hours: int) -> list[int]:
@@ -418,19 +485,22 @@ def _backcountry(
     work: Mapping[int, _BandWork],
     ridge_kmh: Hourly,
     ridge_dir: Hourly,
+    depth: Depth,
 ) -> BackcountryOut:
     """Facts for touring (see docs/ARCHITECTURE.md). No safety judgement."""
-    k = cfg.snowfall_cm_per_mm
     bcfg = cfg.backcountry
     top, mid = work[2], work[1]
     blend_top = inputs.blend[2]
-    past_snow = blend_top.get("snowfall")
+    past_snow = depth.from_snowfall(blend_top.get("snowfall"), blend_top.get("temperature_2m"))
     past72 = _past(past_snow, now_h, 72)
     next48 = list(all_hours[:48])
     # Ridge wind where the free-air data has it, the summit's own wind otherwise.
     speed = _first(ridge_kmh, _first(top.wind[0], blend_top.get("wind_speed_10m")))
     direction = _first(ridge_dir, _first(top.wdir, blend_top.get("wind_direction_10m")))
-    future_snow = {h: None if v is None else v * k for h, v in top.hourly_sw.items()}
+    top_factor = _period_factors(periods, top.ratios, depth)
+    future_snow = {
+        h: None if v is None else v * top_factor.get(h, depth.k) for h, v in top.hourly_sw.items()
+    }
 
     # The first two are the Backcountry tab's; the rest feed the map's wind-effect layer.
     windows = (
@@ -458,10 +528,12 @@ def _backcountry(
     next72 = list(all_hours[:72])
     fl_rise = bc.max_rise(mid.fl[0], next72)
     t_rise = bc.max_rise(mid.temp[0], next72)
-    mid_past = inputs.blend[1].get("snowfall")
+    mid_past = depth.from_snowfall(
+        inputs.blend[1].get("snowfall"), inputs.blend[1].get("temperature_2m")
+    )
     recent = sum(mid_past.get(h) or 0.0 for h in _past(mid_past, now_h, 72))
-    depth = inputs.snotel.depth_cm if inputs.snotel else None
-    on_snow = (depth or 0) > 0 or recent >= 1.0
+    on_ground = inputs.snotel.depth_cm if inputs.snotel else None
+    on_snow = (on_ground or 0) > 0 or recent >= 1.0
     rain48 = bc.total_over(mid.hourly_liq, next48)
     warming = WarmingOut(
         fl_rise_m=r(fl_rise.amount, -1),
@@ -534,6 +606,7 @@ def _days(
     periods: Sequence[Period],
     work: Mapping[int, _BandWork],
     bands_out: Sequence[BandOut],
+    depth: Depth,
 ) -> list[DayOut]:
     """One row per day period: the Plan-a-day facts, and the rating for resorts."""
     scfg = cfg.skiday
@@ -541,7 +614,7 @@ def _days(
     mid_periods = {p.key: p for p in bands_out[1].periods}
     top_periods = {p.key: p for p in bands_out[2].periods}
     blend_mid = inputs.blend[1]
-    past_snow = blend_mid.get("snowfall")
+    past_snow = depth.from_snowfall(blend_mid.get("snowfall"), blend_mid.get("temperature_2m"))
     out: list[DayOut] = []
     for j, p in enumerate(periods):
         if p.kind != "day":
@@ -554,7 +627,8 @@ def _days(
             night_quality, night_cm = night.quality, night.snow_cm or 0.0
         else:
             # The night before is already past (today, morning or later): use the
-            # high-res model's snowfall from the evening before until now.
+            # high-res model's snowfall from the evening before until now, at the
+            # headline ratio.
             day_start = _local_hours(p.date, cfg.day_start_hour, cfg.day_start_hour + 1, tz)[0]
             before = range(day_start - 12 * 3600, min(now_h, p.hours[0]), 3600)
             got = [v for h in before if (v := past_snow.get(h)) is not None]
@@ -630,9 +704,10 @@ def _scaled_ens_mean(
 
 
 def _depth(swe: float | None, ratio: float | None, k: float) -> float | None:
+    """Temperature-based depth (whatever the headline): computed exactly as `Depth.cm`."""
     if swe is None:
         return None
-    return swe * ratio / 10 if ratio else swe * k
+    return swe * (ratio / 10 if ratio else k)
 
 
 def _band_out(
@@ -648,12 +723,12 @@ def _band_out(
     tz: ZoneInfo,
     now_h: int,
     systems: Mapping[str, Sequence[Hourly]],
+    depth: Depth,
 ) -> BandOut:
     band = loc.bands[i]
     k = cfg.snowfall_cm_per_mm
     min_m = cfg.ensemble_min_members
     offset = cfg.snow_level_offset_m
-    headline_slr = cfg.depth_method == "slr"
     pop = blend.get("precipitation_probability")
 
     period_ratio_of: dict[int, float | None] = {}
@@ -663,6 +738,7 @@ def _band_out(
         ratio, label = w.ratios[j]
         for h in p.hours:
             period_ratio_of[h] = ratio
+        cm_per_mm = depth.factor(ratio)  # this period's headline
         raw = None if c.value is None else c.value * k
         slr = _depth(c.value, ratio, k)
         temps = [v for h in p.hours if (v := w.temp[0].get(h)) is not None]
@@ -673,12 +749,14 @@ def _band_out(
         pops = [v for h in p.hours if (v := pop.get(h)) is not None]
         e: EnsStats | None
         if i == 1:
-            e = _ens_stats(period_members[j], k, min_m)
+            e = _ens_stats(period_members[j], cm_per_mm, min_m)
         else:
             mid_c = mid.sw[j].value
             e = None
             if mid_c and c.value is not None:
-                e = _ens_stats(period_members[j], k * c.value / mid_c, min_m, estimated=True)
+                e = _ens_stats(
+                    period_members[j], cm_per_mm * c.value / mid_c, min_m, estimated=True
+                )
         out_periods.append(
             PeriodOut(
                 key=p.key,
@@ -687,7 +765,7 @@ def _band_out(
                 label=p.label,
                 start=_iso(p.hours[0], tz),
                 hours=len(p.hours),
-                snow_cm=r(slr if headline_slr else raw),
+                snow_cm=r(depth.cm(c.value, ratio)),
                 snow_cm_raw=r(raw),
                 snow_cm_slr=r(slr),
                 swe_mm=r(c.value),
@@ -695,8 +773,8 @@ def _band_out(
                 rain_mm=r(lq.value),
                 basis=c.basis,
                 nmodels=c.nmodels,
-                models={m: r(None if v is None else v * k) for m, v in c.models.items()},
-                blend_cm=r(None if c.blend is None else c.blend * k),
+                models={m: r(depth.cm(v, ratio)) for m, v in c.models.items()},
+                blend_cm=r(depth.cm(c.blend, ratio)),
                 ens=e,
                 ptype=ptype(c.value or 0.0, lq.value or 0.0),
                 slr=ratio,
@@ -713,13 +791,12 @@ def _band_out(
 
     members = ens.pooled(systems)
     windows = {
-        name: _window(w, mid, periods, a, b, i, k, min_m, headline_slr, members)
+        name: _window(w, mid, periods, a, b, i, k, min_m, depth, members)
         for name, (a, b) in WINDOWS.items()
     }
 
     def hourly_depth(h: int) -> float | None:
-        sw = w.hourly_sw.get(h)
-        return _depth(sw, period_ratio_of.get(h) if headline_slr else None, k)
+        return depth.cm(w.hourly_sw.get(h), period_ratio_of.get(h))
 
     hours = list(shown)
     hourly = HourlyOut(
@@ -755,8 +832,9 @@ def _band_out(
 
     first24 = hours[:24]
     temps24 = [v for h in first24 if (v := w.temp[0].get(h)) is not None]
-    past = [h for h in blend.get("snowfall") if now_h - 24 * 3600 <= h < now_h]
-    last24 = sum(blend.get("snowfall").get(h) or 0.0 for h in past) if past else None
+    past_snow = depth.from_snowfall(blend.get("snowfall"), blend.get("temperature_2m"))
+    past = _past(past_snow, now_h, 24)
+    last24 = sum(past_snow.get(h) or 0.0 for h in past) if past else None
     stats = ElevationOut(
         temp_now_c=r(w.temp[0].get(now_h)),
         tmin24_c=r(min(temps24)) if temps24 else None,
@@ -790,49 +868,66 @@ def _window(
     i: int,
     k: float,
     min_m: int,
-    headline_slr: bool,
+    depth: Depth,
     members: Sequence[Hourly],
 ) -> WindowOut:
     ps = list(periods[a:b])
     if not ps:
-        return WindowOut(snow_cm=None, snow_cm_raw=None, snow_cm_slr=None, ens=None, ens_slr=None)
-    sw = [c.value for c in w.sw[a:b]]
-    ratios = [rt for rt, _ in w.ratios[a:b]]
-    have = [v for v in sw if v is not None]
-    raw = sum(have) * k if have else None
-    slr = sum(_depth(v, rt, k) or 0.0 for v, rt in zip(sw, ratios, strict=True)) if have else None
-    headline = slr if headline_slr else raw
-
-    # Ensemble members are fetched at mid. Their per-period totals use this
-    # band's snow ratios so the ratio-adjusted spread matches the consensus.
-    covering = [m for m in members if all(total(m, p.hours) is not None for p in ps)]
-    per_member = [[total(m, p.hours) or 0.0 for p in ps] for m in covering]
-    raw_m = sorted(sum(v) * k for v in per_member)
-    slr_m = sorted(
-        sum(_depth(v, rt, k) or 0.0 for v, rt in zip(vals, ratios, strict=True))
-        for vals in per_member
-    )
+        return WindowOut(
+            snow_cm=None, snow_cm_raw=None, snow_cm_slr=None, ens=None, ens_raw=None, ens_slr=None
+        )
+    raw, slr, headline = _window_totals(w, a, b, k, depth)
+    # Ensemble members are fetched at mid, so their totals use mid's snow ratios.
+    ratios = [rt for rt, _ in mid.ratios[a:b]]
+    raw_m = sorted(_member_depths(members, ps, [k] * len(ps)))
+    slr_m = sorted(_member_depths(members, ps, [rt / 10 if rt else k for rt in ratios]))
+    head_m = slr_m if depth.slr else raw_m
     if i == 1:
         return WindowOut(
             snow_cm=r(headline),
             snow_cm_raw=r(raw),
             snow_cm_slr=r(slr),
-            ens=_ens_stats(raw_m, 1.0, min_m),
+            ens=_ens_stats(head_m, 1.0, min_m),
+            ens_raw=_ens_stats(raw_m, 1.0, min_m),
             ens_slr=_ens_stats(slr_m, 1.0, min_m),
-            members_cm=[round(v, 1) for v in raw_m],
-            members_cm_slr=[round(v, 1) for v in slr_m],
+            members_cm=[round(v, 1) for v in head_m],
+            members_cm_raw=[round(v, 1) for v in raw_m],
         )
-    mid_have = [c.value for c in mid.sw[a:b] if c.value is not None]
-    mid_raw = sum(mid_have) * k
-    scale = raw / mid_raw if raw is not None and mid_raw > 0 else None
+    # Other bands scale the mid members by how this band's total compares with mid's,
+    # per depth method (`scale` is the headline's, for the browser's exceedance curve).
+    mid_tot = _window_totals(mid, a, b, k, depth)
+
+    def ratio(band: float | None, at_mid: float | None) -> float | None:
+        return band / at_mid if band is not None and at_mid else None
+
+    def scaled(values: Sequence[float], s: float | None) -> EnsStats | None:
+        return None if s is None else _ens_stats(values, s, min_m, estimated=True)
+
+    scale = ratio(headline, mid_tot[2])
     return WindowOut(
         snow_cm=r(headline),
         snow_cm_raw=r(raw),
         snow_cm_slr=r(slr),
-        ens=None if scale is None else _ens_stats(raw_m, scale, min_m, estimated=True),
-        ens_slr=None if scale is None else _ens_stats(slr_m, scale, min_m, estimated=True),
+        ens=scaled(head_m, scale),
+        ens_raw=scaled(raw_m, ratio(raw, mid_tot[0])),
+        ens_slr=scaled(slr_m, ratio(slr, mid_tot[1])),
         scale=None if scale is None else round(scale, 3),
     )
+
+
+def _window_totals(
+    w: _BandWork, a: int, b: int, k: float, depth: Depth
+) -> tuple[float | None, float | None, float | None]:
+    """A window's depth three ways: model snowfall (7:1), temperature-based, headline.
+    The headline is the sum of the periods' headline depths, as the bars show them."""
+    sw = [c.value for c in w.sw[a:b]]
+    ratios = [rt for rt, _ in w.ratios[a:b]]
+    if all(v is None for v in sw):
+        return None, None, None
+    pairs = list(zip(sw, ratios, strict=True))
+    raw = sum(v or 0.0 for v in sw) * k
+    slr = sum(_depth(v, rt, k) or 0.0 for v, rt in pairs)
+    return raw, slr, sum(depth.cm(v, rt) or 0.0 for v, rt in pairs)
 
 
 def _daily(
@@ -844,8 +939,13 @@ def _daily(
     systems: Mapping[str, Sequence[Hourly]],
     mid: _BandWork,
     periods: Sequence[Period],
+    depth: Depth,
 ) -> tuple[list[DailyRow], list[DailyRecord]]:
-    """15–16 days of per-model totals and ensemble running totals at mid."""
+    """15–16 days of per-model totals and ensemble running totals at mid.
+
+    The rows (Model agreement) are in headline depth; the records keep each source's
+    own depth for the scorecard: models and the ensemble at 7:1, the consensus both ways.
+    """
     k = cfg.snowfall_cm_per_mm
     models = cfg.models_for(loc.country)
     md = split_models(inputs.multi[1], models)
@@ -857,9 +957,23 @@ def _daily(
         by_day[local(h, tz).date().isoformat()].append(h)
     days = sorted(by_day)[:16]
     day_hours = [by_day[d] for d in days]
-    running = ens.running_totals(systems, day_hours, min_members=cfg.ensemble_min_members)
-    members = ens.pooled(systems)
     offset = cfg.snow_level_offset_m
+
+    # Headline cm per mm for every hour: its period's, or past the last period its own
+    # temperature's. Ensemble members are converted hour by hour before any totals.
+    in_period = _period_factors(periods, mid.ratios, depth)
+
+    def factor(h: int) -> float:
+        f = in_period.get(h)
+        return f if f is not None else depth.hour_factor(mid.temp[0].get(h))
+
+    def in_depth(series: Hourly) -> Hourly:
+        return {h: None if v is None else v * factor(h) for h, v in series.items()}
+
+    depth_systems = {s: [in_depth(m) for m in ms] for s, ms in systems.items()}
+    running = ens.running_totals(depth_systems, day_hours, min_members=cfg.ensemble_min_members)
+    members = ens.pooled(systems)
+    depth_members = ens.pooled(depth_systems)
 
     # The consensus per calendar day, from its hourly series: the same midnight-to-
     # midnight hours as the models above and the station's observations, so the
@@ -875,24 +989,26 @@ def _daily(
         day_models: dict[str, float | None] = {}
         for m, series in sw.items():
             v = total(series, hs)
-            day_models[m] = None if v is None else v * k
+            d_cm = None if v is None else sum((series[h] or 0.0) * factor(h) for h in hs)
+            day_models[m] = d_cm
             prev = cum[m]
-            cum[m] = None if v is None or prev is None else prev + v * k
+            cum[m] = None if d_cm is None or prev is None else prev + d_cm
             if v is not None:
                 wv = total(water.get(m, {}), hs)
                 records.append(DailyRecord(d, m, r(v * k), r(wv)))
         fls = [v for h in hs if (v := mid.fl[0].get(h)) is not None]
         day_ens = ens.stats(ens.member_totals(members, hs), cfg.ensemble_min_members)
+        day_ens_depth = ens.stats(ens.member_totals(depth_members, hs), cfg.ensemble_min_members)
         rows.append(
             DailyRow(
                 date=d,
                 hours=len(hs),
                 models={m: r(v) for m, v in day_models.items()},
                 models_cum={m: r(v) for m, v in cum.items()},
-                ens_cum={s: _daily_ens(st, k) for s, st in run.systems.items()},
-                pooled_cum=_daily_ens(run.pooled, k),
+                ens_cum={s: _daily_ens(st, 1.0) for s, st in run.systems.items()},
+                pooled_cum=_daily_ens(run.pooled, 1.0),
                 pooled_tail=run.tail,
-                ens_day=_daily_ens(day_ens, k),
+                ens_day=_daily_ens(day_ens_depth, 1.0),
                 snow_level_min_m=r(max(0.0, min(fls) - offset), 0) if fls else None,
             )
         )

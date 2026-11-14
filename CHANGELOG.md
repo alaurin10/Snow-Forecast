@@ -7,6 +7,17 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Snow totals use the temperature-based snow ratio.** The headline depth is the snow
+  water times a ratio from the temperature while it snows (8:1 near freezing, 11, 14,
+  up to 17:1 in the cold) instead of the models' fixed 7:1, which under-read every storm
+  colder than about −0.5 °C by up to 2.4×. Everything follows it: the bars and totals,
+  the ensemble ranges, each model's bar, Model agreement, the past 24 h, Plan a day and
+  the ski-day rating, the Backcountry storm, flags and push alerts, the overview and the
+  Calendar, so they match each other and the map's snow totals. The period details show
+  "at 14:1 · Light" under the big number and the models' 7:1 figure below; the forecast
+  scorecard marks which consensus the app's totals use. The trend chart reads the
+  matching stored consensus, so there is no step on the switch day. (`depth_method: slr`
+  in `config/forecast.yaml`; `raw` goes back.)
 - **The map's Layers sheet is redesigned**: every choice is a tile of the same size in a
   well, the chosen one raised (as the app's other switches), with "None" first in Weather
   and Terrain and the features shown as toggle tiles; shorter names ("Huts & passes",

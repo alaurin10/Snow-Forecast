@@ -97,6 +97,38 @@ def test_trend(client: TestClient) -> None:
     )
 
 
+def test_trend_follows_the_headline_depth(client: TestClient, conn: sqlite3.Connection) -> None:
+    """depth_method: slr, so the trend reads the temperature-based consensus records."""
+    t = client.get("/api/locations/whistler/trend").json()
+    last = t["runs"][-1]
+    stored = dict(
+        conn.execute(
+            "SELECT target_date, snow_cm FROM forecast_daily "
+            "WHERE location_id = 'whistler' AND run_id = ? AND source = 'cons_slr'",
+            (last["run_id"],),
+        ).fetchall()
+    )
+    assert stored and last["daily"] == stored
+
+
+def test_totals_agree_across_views(client: TestClient) -> None:
+    """One location's next-5-day total is the sum of its periods on the overview,
+    the calendar's rows and the location page."""
+    rows = client.get("/api/overview").json()
+    for loc_id in ("whistler", "crystal", "revelstoke"):
+        row = next(r for r in rows if r["id"] == loc_id)
+        snap = json.loads(client.get(f"/api/locations/{loc_id}").content)
+        assert snap["depth_method"] == "slr"
+        mid = snap["bands"][1]
+        total = sum(p["snow_cm"] or 0 for p in mid["periods"][:10])
+        assert row["next5_cm"] == mid["windows"]["next5"]["snow_cm"]
+        assert row["next5_cm"] == pytest.approx(total, abs=0.5)
+        assert [p["snow_cm"] for p in row["periods"]] == [p["snow_cm"] for p in mid["periods"]]
+        ens = mid["windows"]["next5"]["ens"]
+        if ens:
+            assert row["next5_p10_cm"] == ens["p10"] and row["next5_p90_cm"] == ens["p90"]
+
+
 def test_runs(client: TestClient) -> None:
     runs = client.get("/api/runs?limit=5").json()
     assert [r["id"] for r in runs] == [2, 1] and runs[0]["status"] == "ok"
@@ -275,4 +307,5 @@ def test_status_page(client: TestClient) -> None:
 def test_verification_endpoint(client: TestClient) -> None:
     body = client.get("/api/locations/crystal/verification").json()
     assert body["station"] == "642:WA:SNTL" and body["needs_days"] >= 1
+    assert body["headline"] == "cons_slr"
     assert client.get("/api/locations/nope/verification").status_code == 404

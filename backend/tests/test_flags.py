@@ -52,6 +52,24 @@ def test_storm_from_consensus_or_ensemble_chance() -> None:
     assert by_chance.value2 == 50  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize("loc", ["whistler", "crystal", "revelstoke"])
+def test_snow_flags_use_the_headline_depth(loc: str) -> None:
+    """With depth_method: slr, powder and storm flags (and so push alerts) carry the
+    same temperature-based totals as the bars and the Plan-a-day rows."""
+    s = fixture_snapshot(loc)
+    assert s.depth_method == "slr"
+    mid = s.bands[1].periods
+    days = {d.date: d for d in s.days}
+    for f in s.flags:
+        if f.type == "powder_day":
+            d = days[f.date or ""]
+            assert f.value == pytest.approx((d.overnight_cm or 0) + (d.day_cm or 0), abs=0.05)
+        if f.type == "storm_incoming":
+            j = next(i for i, p in enumerate(mid) if p.key == f.period_key)
+            assert f.value == pytest.approx(sum(p.snow_cm or 0 for p in mid[j : j + 4]), abs=0.05)
+    assert any(f.type == "powder_day" for f in fixture_snapshot("whistler").flags)
+
+
 def test_big_storm_is_a_warning() -> None:
     s = snap()
     for p in s.bands[1].periods[:4]:

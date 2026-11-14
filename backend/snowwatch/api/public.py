@@ -41,7 +41,7 @@ from snowwatch.locations import service
 from snowwatch.settings import Settings
 from snowwatch.store import repo
 from snowwatch.store.db import connect
-from snowwatch.verify import VerificationOut, verification
+from snowwatch.verify import VerificationOut, headline_source, verification
 
 CACHE = "public, max-age=300, stale-while-revalidate=3600"
 
@@ -373,16 +373,21 @@ def make_router() -> APIRouter:
         return Response(body, media_type="application/json", headers=headers)
 
     @router.get("/locations/{location_id}/trend", response_model=TrendOut)
-    def trend(location_id: str, conn: Conn, runs: int = Query(10, ge=1, le=40)) -> TrendOut:
+    def trend(
+        location_id: str, conn: Conn, request: Request, runs: int = Query(10, ge=1, le=40)
+    ) -> TrendOut:
         if service.get_location(conn, location_id) is None:
             raise HTTPException(404, f"unknown location {location_id!r}")
+        # Every run stores the consensus both ways, so the trend follows the headline
+        # depth method with no step on the day it changes.
+        source = headline_source(request.app.state.forecast_config)
         rows = conn.execute(
             "SELECT run_id, issued_at, target_date, snow_cm FROM forecast_daily "
-            "WHERE location_id = ? AND source = 'cons' AND run_id IN ("
+            "WHERE location_id = ? AND source = ? AND run_id IN ("
             "  SELECT DISTINCT run_id FROM forecast_daily WHERE location_id = ? "
             "  ORDER BY run_id DESC LIMIT ?"
             ") ORDER BY run_id, target_date",
-            (location_id, location_id, runs),
+            (location_id, source, location_id, runs),
         ).fetchall()
         by_run: dict[int, TrendRun] = {}
         for r in rows:
@@ -408,7 +413,9 @@ def make_router() -> APIRouter:
         if loc is None:
             raise HTTPException(404, f"unknown location {location_id!r}")
         cfg = request.app.state.forecast_config
-        return verification(conn, loc, swe_ratio=cfg.verify_swe_ratio)
+        return verification(
+            conn, loc, swe_ratio=cfg.verify_swe_ratio, headline=headline_source(cfg)
+        )
 
     @router.get("/status", response_model=StatusOut)
     def status(conn: Conn, request: Request) -> StatusOut:

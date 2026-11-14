@@ -1,8 +1,11 @@
 """The snapshot document: everything the UI shows for one location, built once per run.
 
 Metric units throughout (cm of snow, mm of water, °C, m, km/h); the browser
-converts. Times are local ISO strings with their UTC offset. Hourly data is
-columnar (one list per field) to keep the gzipped document small.
+converts. Snow depths are the headline depth (config `depth_method`: the
+temperature-based snow-to-liquid ratio, or Open-Meteo's fixed 7:1) unless a field
+says otherwise (`*_raw` is 7:1, `*_slr` the temperature-based ratio). Times are
+local ISO strings with their UTC offset. Hourly data is columnar (one list per
+field) to keep the gzipped document small.
 """
 
 from __future__ import annotations
@@ -39,9 +42,9 @@ class PeriodOut(BaseModel):
     rain_mm: float | None
     basis: str | None
     nmodels: int
-    models: dict[str, float | None]  # raw cm per model, None where a model has ended
+    models: dict[str, float | None]  # cm per model, None where a model has ended
     blend_cm: float | None
-    ens: EnsStats | None  # raw cm
+    ens: EnsStats | None
     ptype: str
     slr: float | None
     quality: str | None
@@ -55,15 +58,16 @@ class PeriodOut(BaseModel):
 
 
 class WindowOut(BaseModel):
-    snow_cm: float | None
+    snow_cm: float | None  # the sum of the periods' snow_cm
     snow_cm_raw: float | None
     snow_cm_slr: float | None
     ens: EnsStats | None
+    ens_raw: EnsStats | None = None
     ens_slr: EnsStats | None
     # Sorted member totals for exceedance curves (mid band only; other bands
     # multiply by `scale`).
     members_cm: list[float] = []
-    members_cm_slr: list[float] = []
+    members_cm_raw: list[float] = []
     scale: float | None = None
 
 
@@ -102,7 +106,7 @@ class ElevationOut(BaseModel):
     temp_now_c: float | None
     tmin24_c: float | None
     tmax24_c: float | None
-    last24_cm: float | None  # model snowfall over the past 24 h (high-res blend)
+    last24_cm: float | None  # snowfall over the past 24 h (high-res blend)
     next24_cm: float | None
     next5_cm: float | None
     d6_10_cm: float | None
@@ -128,7 +132,7 @@ class DailyEns(BaseModel):
 class DailyRow(BaseModel):
     date: str
     hours: int
-    models: dict[str, float | None]  # raw cm per model for the day
+    models: dict[str, float | None]  # cm per model for the day
     models_cum: dict[str, float | None]
     ens_cum: dict[str, DailyEns | None]  # per ensemble system, running total
     pooled_cum: DailyEns | None
@@ -240,7 +244,7 @@ class SkyDay(BaseModel):
 
 
 class StormOut(BaseModel):
-    past72_cm: float | None  # summit, model snowfall
+    past72_cm: float | None  # summit, high-res blend
     next48_cm: float | None
 
 
@@ -303,7 +307,7 @@ class Snapshot(BaseModel):
     run_id: int | None
     generated_at: str
     now: str
-    depth_method: str
+    depth_method: str  # what snow_cm means: "slr" (temperature-based ratio) or "raw" (7:1)
     models: list[str]
     ensembles: dict[str, int]  # system → member count
     basis_switch: str | None  # start of the first period that uses the ensemble mean
