@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The Overview's share image fits any number of locations.** It is now a table: the
+  day names once across the top, then a row per location with its name (on two lines
+  when it's long), the week's bars and the total, with the type sized to the number of
+  rows. Landscape images split into two columns past six locations. One image holds up
+  to 12 locations, the snowiest 12 by default, and a **Locations** picker in the share
+  sheet chooses which go in.
 - **The Backcountry tab is reorganised around planning a tour**, top to bottom: the
   avalanche center's bulletin as published (each problem now has a small rose showing
   the aspects and elevations it lists, beside the ratings on wide screens); **Avalanche
