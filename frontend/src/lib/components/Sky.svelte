@@ -1,45 +1,37 @@
 <!-- The backdrop behind every page: the weather now at the open location (or the first
-     location), drawn as a sky gradient, sun or moon glow, a few soft clouds, a ridgeline
-     and, when it is snowing, slow snow. It is fixed behind the page and changes only
-     when the scene changes, with a slow crossfade. Fixed themes replace it with a still
-     gradient. Motion "Subtle" and "Off" (and the device's reduce-motion setting) drop
-     the falling snow. -->
+     location), at this moment of the day. A sky gradient whose colours follow the weather
+     and the sun's height, the sun's halo along its arc (or the moon and stars at night),
+     soft clouds that move with the wind, a ridgeline, and on a canvas whatever falls:
+     rain, drizzle, snow, blowing snow, lightning. It changes with a slow crossfade.
+     Fixed themes replace it with a still gradient. Motion "Subtle" keeps the clouds but
+     drops what falls; "Off" (and the device's reduce-motion setting) stops everything.
+     It also hands the glass a hint of the sky's colour (--sky-key). -->
 <script lang="ts">
 	import { prefs } from '../prefs.svelte';
 	import { skyState } from '../skystate.svelte';
+	import { colorMode } from '../mode.svelte';
+	import { skyPaint } from '../skypaint';
+	import SkyParticles from './SkyParticles.svelte';
 
 	const sky = $derived(skyState.current);
-	const veil = $derived(sky.night && sky.scene !== 'night');
+	const dark = $derived(colorMode.dark);
+	const paint = $derived(skyPaint(sky, dark));
+	const live = $derived(prefs.themeFamily === 'sky');
 
-	// Deterministic "random" spread, so flakes don't jump on every render.
+	// The sun rises on the left and sets on the right, high at midday; after it sets, its
+	// glow lingers at the edge it went down at. The moon crosses the night sky.
+	const sunX = $derived(sky.night ? (sky.arc < 0.5 ? 94 : 6) : 8 + sky.arc * 84);
+	const sunY = $derived(sky.night ? 50 : 44 - 52 * Math.sin(Math.PI * sky.arc));
+	const moonX = $derived(10 + sky.arc * 80);
+	const moonY = $derived(28 - 16 * Math.sin(Math.PI * sky.arc));
+	// Clouds go by faster in wind.
+	const cloudDur = $derived(Math.max(18, Math.min(70, 70 - sky.wind * 1.1)));
+
+	// Deterministic "random" spread, so stars don't jump on every render.
 	const rnd = (i: number, salt: number) => {
 		const x = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
 		return x - Math.floor(x);
 	};
-	const flakeCount = $derived(
-		prefs.motion !== 'full'
-			? 0
-			: sky.scene === 'heavy'
-				? 60
-				: sky.scene === 'snow'
-					? 32
-					: sky.scene === 'mixed'
-						? 18
-						: 0
-	);
-	const flakes = $derived(
-		Array.from({ length: flakeCount }, (_, i) => {
-			const dur = (sky.scene === 'heavy' ? 14 : 22) + rnd(i, 1) * 10;
-			return {
-				left: `${(rnd(i, 2) * 110 - 5).toFixed(1)}%`,
-				size: `${(2 + rnd(i, 3) * 3.5).toFixed(1)}px`,
-				opacity: (0.5 + rnd(i, 4) * 0.45).toFixed(2),
-				dur: `${dur.toFixed(1)}s`,
-				delay: `-${(rnd(i, 5) * dur).toFixed(1)}s`,
-				drift: sky.scene === 'heavy' ? '120px' : '40px'
-			};
-		})
-	);
 	const stars = Array.from({ length: 46 }, (_, i) => ({
 		left: `${(rnd(i, 11) * 100).toFixed(1)}%`,
 		top: `${(rnd(i, 12) * 34).toFixed(1)}%`,
@@ -48,21 +40,58 @@
 		delay: `-${(rnd(i, 15) * 4).toFixed(1)}s`
 	}));
 
-	// Nothing moves while the tab is in the background.
+	// Nothing moves while the tab is in the background, or when asked not to.
 	let hidden = $state(false);
+	let reduced = $state(false);
 	$effect(() => {
 		const on = () => (hidden = document.hidden);
 		document.addEventListener('visibilitychange', on);
-		return () => document.removeEventListener('visibilitychange', on);
+		const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+		reduced = !!mq?.matches;
+		const onMq = (e: MediaQueryListEvent) => (reduced = e.matches);
+		mq?.addEventListener('change', onMq);
+		return () => {
+			document.removeEventListener('visibilitychange', on);
+			mq?.removeEventListener('change', onMq);
+		};
+	});
+	const falling = $derived(live && prefs.motion === 'full' && !reduced && !hidden);
+
+	// The glass takes a hint of the sky's colour (theme.css; Live Sky only).
+	$effect(() => {
+		const root = document.documentElement;
+		if (live) root.style.setProperty('--sky-key', paint.key);
+		else root.style.removeProperty('--sky-key');
 	});
 </script>
 
-<div class="sky" data-scene={sky.scene} class:veil class:paused={hidden} aria-hidden="true">
+<div
+	class="sky"
+	data-weather={sky.weather}
+	data-phase={sky.phase}
+	class:paused={hidden}
+	aria-hidden="true"
+	style:--k1={live ? paint.k1 : undefined}
+	style:--k2={live ? paint.k2 : undefined}
+	style:--k3={live ? paint.k3 : undefined}
+	style:--cloud={paint.cloud}
+	style:--cloud-o={paint.cloudO}
+	style:--glow={paint.glow}
+	style:--glow-o={paint.glowO.toFixed(3)}
+	style:--star-o={paint.starO.toFixed(3)}
+	style:--moon-o={paint.moonO.toFixed(3)}
+	style:--ridge1={live ? paint.ridge1 : undefined}
+	style:--ridge2={live ? paint.ridge2 : undefined}
+	style:--sun-x="{sunX.toFixed(2)}vw"
+	style:--sun-y="{sunY.toFixed(2)}vh"
+	style:--moon-x="{moonX.toFixed(2)}vw"
+	style:--moon-y="{moonY.toFixed(2)}vh"
+	style:--cloud-dur="{cloudDur.toFixed(0)}s"
+>
 	<div class="layer l3"></div>
 	<div class="layer l2"></div>
 	<div class="layer l1"></div>
 	<div class="weather">
-		<div class="glow"></div>
 		<div class="stars">
 			{#each stars as s, i (i)}<i
 					style:left={s.left}
@@ -73,13 +102,14 @@
 					style:animation-delay={s.delay}
 				></i>{/each}
 		</div>
+		<div class="moon"></div>
+		<div class="glow"></div>
 		<div class="clouds">
 			<span class="cl a"></span>
 			<span class="cl b"></span>
 			<span class="cl c"></span>
 			<span class="cl d"></span>
 		</div>
-		<div class="dusk"></div>
 	</div>
 	<svg class="ridge" viewBox="0 0 1440 320" preserveAspectRatio="none">
 		<path
@@ -91,17 +121,9 @@
 			d="M0 262 L120 215 L220 245 L340 180 L450 235 L560 200 L690 250 L800 190 L900 240 L1020 205 L1140 255 L1260 210 L1350 240 L1440 200 V320 H0Z"
 		/>
 	</svg>
-	<div class="flakes">
-		{#each flakes as f, i (i)}<i
-				style:left={f.left}
-				style:width={f.size}
-				style:height={f.size}
-				style:opacity={f.opacity}
-				style:animation-duration={f.dur}
-				style:animation-delay={f.delay}
-				style:--drift={f.drift}
-			></i>{/each}
-	</div>
+	{#if live}
+		<SkyParticles weather={sky.weather} wind={sky.wind} wdir={sky.wdir} {dark} active={falling} />
+	{/if}
 </div>
 
 <style>
@@ -111,18 +133,6 @@
 		z-index: -1;
 		overflow: hidden;
 		pointer-events: none;
-		/* Partly cloudy, the default. */
-		--k1: #62a8ea;
-		--k2: #a6d0f4;
-		--k3: #e6f1fa;
-		--cloud-o: 0.6;
-		--glow-o: 1;
-		--star-o: 0;
-		--glow: rgba(255, 248, 224, 0.95);
-		--cloud: rgba(255, 255, 255, 0.9);
-		--ridge1: rgba(255, 255, 255, 0.45);
-		--ridge2: rgba(255, 255, 255, 0.78);
-		--dusk: #3b3f8f;
 		--fade: 900ms ease;
 	}
 	.layer {
@@ -147,14 +157,35 @@
 		position: absolute;
 		transition: opacity var(--fade);
 	}
+	/* The sun's halo, centred on the sun's place; it moves a minute at a time. */
 	.glow {
-		right: 12%;
-		top: -12vh;
+		left: 0;
+		top: 0;
 		width: min(560px, 80vw);
 		aspect-ratio: 1;
 		border-radius: 50%;
 		background: radial-gradient(closest-side, var(--glow), transparent);
 		opacity: var(--glow-o);
+		transform: translate(calc(var(--sun-x) - 50%), calc(var(--sun-y) - 50%));
+		transition:
+			opacity var(--fade),
+			transform 2s ease;
+	}
+	.moon {
+		left: 0;
+		top: 0;
+		width: 44px;
+		height: 44px;
+		border-radius: 50%;
+		background: radial-gradient(circle at 38% 36%, #fffdf4 0%, #ece8d8 55%, #d6d2c2 100%);
+		box-shadow:
+			0 0 40px 12px rgba(255, 252, 235, 0.22),
+			0 0 120px 40px rgba(200, 210, 255, 0.1);
+		opacity: var(--moon-o);
+		transform: translate(calc(var(--moon-x) - 50%), calc(var(--moon-y) - 50%));
+		transition:
+			opacity var(--fade),
+			transform 2s ease;
 	}
 	.stars {
 		inset: 0;
@@ -175,7 +206,8 @@
 		border-radius: 50%;
 		background: var(--cloud);
 		filter: blur(36px);
-		animation: drift 60s ease-in-out infinite alternate;
+		transition: background-color var(--fade);
+		animation: drift var(--cloud-dur) ease-in-out infinite alternate;
 	}
 	.cl.a {
 		left: -6%;
@@ -188,7 +220,7 @@
 		top: 20%;
 		width: 40%;
 		height: 20%;
-		animation-duration: 80s;
+		animation-duration: calc(var(--cloud-dur) * 1.33);
 	}
 	.cl.c {
 		left: 66%;
@@ -201,15 +233,7 @@
 		top: 40%;
 		width: 52%;
 		height: 22%;
-		animation-duration: 74s;
-	}
-	.dusk {
-		inset: 0;
-		background: var(--dusk);
-		opacity: 0;
-	}
-	.sky.veil .dusk {
-		opacity: 0.4;
+		animation-duration: calc(var(--cloud-dur) * 1.23);
 	}
 	.ridge {
 		position: absolute;
@@ -227,25 +251,8 @@
 	.r2 {
 		fill: var(--ridge2);
 	}
-	.flakes {
-		position: absolute;
-		inset: 0;
-	}
-	.flakes i {
-		position: absolute;
-		top: -12px;
-		border-radius: 50%;
-		background: #ffffff;
-		box-shadow: 0 0 4px rgba(255, 255, 255, 0.7);
-		animation: fall linear infinite;
-	}
 	.sky.paused * {
 		animation-play-state: paused !important;
-	}
-	@keyframes fall {
-		to {
-			transform: translate3d(var(--drift), 105vh, 0);
-		}
 	}
 	@keyframes drift {
 		from {
@@ -264,146 +271,18 @@
 			opacity: 1;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.flakes {
-			display: none;
-		}
-	}
-
-	/* Scenes, light. */
-	.sky[data-scene='clear'] {
-		--k1: #4f9fec;
-		--k2: #93c8f6;
-		--k3: #dff0fc;
-		--cloud-o: 0;
-	}
-	.sky[data-scene='night'] {
-		--k1: #7f88d8;
-		--k2: #aeb0e6;
-		--k3: #e6dcf0;
-		--cloud-o: 0;
-		--star-o: 1;
-		--glow: rgba(255, 255, 255, 0.5);
-	}
-	.sky[data-scene='glow'] {
-		--k1: #8aa4e6;
-		--k2: #f1b9b5;
-		--k3: #ffe3c4;
-		--cloud-o: 0.25;
-		--glow: rgba(255, 196, 160, 0.9);
-	}
-	.sky[data-scene='overcast'] {
-		--k1: #9fb0c4;
-		--k2: #c2cedb;
-		--k3: #e6ebf1;
-		--cloud-o: 0.9;
-		--glow-o: 0;
-		--cloud: rgba(240, 243, 248, 0.85);
-	}
-	.sky[data-scene='snow'] {
-		--k1: #a9bcd6;
-		--k2: #cbd8e8;
-		--k3: #eef3f9;
-		--cloud-o: 0.8;
-		--glow-o: 0;
-	}
-	.sky[data-scene='heavy'] {
-		--k1: #b9c6da;
-		--k2: #d6dfeb;
-		--k3: #f4f7fb;
-		--cloud-o: 1;
-		--glow-o: 0;
-	}
-	.sky[data-scene='mixed'] {
-		--k1: #a3b3c9;
-		--k2: #c4cddc;
-		--k3: #e3e6ee;
-		--cloud-o: 0.9;
-		--glow-o: 0;
-		--cloud: rgba(240, 243, 248, 0.85);
-	}
-	.sky[data-scene='rain'] {
-		--k1: #8fa6b8;
-		--k2: #b3c4d0;
-		--k3: #dbe4ea;
-		--cloud-o: 0.9;
-		--glow-o: 0;
-		--cloud: rgba(240, 243, 248, 0.85);
-	}
-	.sky[data-scene='fog'] {
-		--k1: #c5cdd6;
-		--k2: #dde2e8;
-		--k3: #f1f3f5;
-		--cloud-o: 1;
-		--glow-o: 0;
-	}
-
-	/* Scenes, dark: deepened, never black. */
-	:global(:root[data-mode='dark']) .sky {
-		--k1: #1b4275;
-		--k2: #2d5f97;
-		--k3: #5584b3;
-		--glow: rgba(255, 226, 170, 0.35);
-		--cloud: rgba(170, 186, 216, 0.3);
-		--ridge1: rgba(52, 70, 108, 0.55);
-		--ridge2: rgba(30, 44, 74, 0.75);
-		--dusk: #070b1c;
-	}
-	:global(:root[data-mode='dark']) .sky.veil .dusk {
-		opacity: 0.5;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='clear'] {
-		--k1: #173f77;
-		--k2: #27609f;
-		--k3: #4a86bf;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='night'] {
-		--k1: #131a33;
-		--k2: #1d2a4f;
-		--k3: #34416e;
-		--glow: rgba(255, 255, 255, 0.5);
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='glow'] {
-		--k1: #232a52;
-		--k2: #6d4468;
-		--k3: #b9705c;
-		--glow: rgba(255, 196, 160, 0.9);
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='overcast'] {
-		--k1: #2a3446;
-		--k2: #3a475c;
-		--k3: #536178;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='snow'] {
-		--k1: #26324a;
-		--k2: #394966;
-		--k3: #566a8a;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='heavy'] {
-		--k1: #222c42;
-		--k2: #34425e;
-		--k3: #4d5f80;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='mixed'] {
-		--k1: #242f44;
-		--k2: #36445c;
-		--k3: #50607a;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='rain'] {
-		--k1: #1f2d3a;
-		--k2: #2f4252;
-		--k3: #4a6072;
-	}
-	:global(:root[data-mode='dark']) .sky[data-scene='fog'] {
-		--k1: #2c3440;
-		--k2: #3d4652;
-		--k3: #59626f;
-	}
 
 	/* Fixed themes: a still gradient, no weather. */
-	:global(:root[data-theme]) .sky .weather,
-	:global(:root[data-theme]) .sky .flakes {
+	:global(:root[data-theme]) .sky .weather {
 		display: none;
+	}
+	:global(:root[data-theme]) .sky {
+		--ridge1: rgba(255, 255, 255, 0.45);
+		--ridge2: rgba(255, 255, 255, 0.78);
+	}
+	:global(:root[data-theme][data-mode='dark']) .sky {
+		--ridge1: rgba(52, 70, 108, 0.55);
+		--ridge2: rgba(30, 44, 74, 0.75);
 	}
 	:global(:root[data-theme='alpenglow']) .sky {
 		--k1: #e7c3da;

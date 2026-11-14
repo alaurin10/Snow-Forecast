@@ -263,6 +263,16 @@ body {
 	min-width: 0;
 }
 
+/* Live Sky: the glass and the panels take a hint of the sky's colour (--sky-key, set by
+   the backdrop), so the weather reads even where content covers it. :where() keeps this
+   as weak as .glass itself, so components that set their own background still win. */
+:where(:root:not([data-theme])) .glass {
+	background: color-mix(in srgb, var(--glass) 88%, var(--sky-key, transparent));
+}
+:where(:root:not([data-theme])) .card {
+	background: color-mix(in srgb, var(--panel) 92%, var(--sky-key, transparent));
+}
+
 /* Where the device asks for less transparency, glass and panels go solid. */
 @media (prefers-reduced-transparency: reduce) {
 	.glass,

@@ -53,7 +53,9 @@
 	import { viewport } from '../../../lib/viewport.svelte';
 	import { sections, SECTION_NAMES, type Section } from '../../../lib/sections.svelte';
 	import { skyState } from '../../../lib/skystate.svelte';
-	import { skyOf, hourIndex, sceneIcon } from '../../../lib/sky';
+	import { hourIndex, sceneIcon } from '../../../lib/sky';
+	import { luminance, skyPaint } from '../../../lib/skypaint';
+	import { colorMode } from '../../../lib/mode.svelte';
 	import WxIcon from '../../../lib/components/WxIcon.svelte';
 	import DayList from '../../../lib/components/DayList.svelte';
 	import DaySheet from '../../../lib/charts/DaySheet.svelte';
@@ -146,12 +148,18 @@
 	$effect(() => {
 		sections.id = snap ? id : null;
 		sections.list = snap ? tabs : [];
-		skyState.page = snap ? skyOf(snap) : null;
+		// Once the clock runs past the forecast's hours, quietly fetch a newer one.
+		const current = id;
+		skyState.set('page', snap, () =>
+			getSnapshot(current, { fresh: true })
+				.then((s) => current === id && snap && (snap = s))
+				.catch(() => {})
+		);
 	});
 	$effect(() => () => {
 		sections.id = null;
 		sections.list = [];
-		skyState.page = null;
+		skyState.set('page', null);
 	});
 	const tab = $derived(sections.tab);
 	// Switching section (keys 1–4) from further down: back up to the tabs, so the new
@@ -179,9 +187,13 @@
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
 	const c = $derived(converters(units));
 	const storm = $derived(band ? nextStorm(band.periods) : null);
-	// The hour holding "now", for the current conditions.
-	const nowAt = $derived(band && snap ? hourIndex(band.hourly, snap.now) : 0);
+	// The hour holding "now", for the current conditions: it follows the clock, like the sky.
+	const nowAt = $derived(band && snap ? hourIndex(band.hourly, skyState.timeOf(snap)) : 0);
 	const sky = $derived(skyState.current);
+	// The pill's swatch: the backdrop's colours for this sky, with light lines when dark.
+	const dotPaint = $derived(skyPaint(sky, colorMode.dark));
+	const dotBg = $derived(`linear-gradient(180deg, ${dotPaint.k1}, ${dotPaint.k3})`);
+	const dotLight = $derived(luminance(dotPaint.k2) < 0.2);
 	// Open the period details for a time picked on the chart.
 	const pickTime = (t: string) => {
 		if (!band) return;
@@ -400,7 +412,11 @@
 					title={wxLine}
 					onclick={() => (wxOpen = !wxOpen)}
 				>
-					<span class="skydot" data-scene={sky.scene}
+					<span
+						class="skydot"
+						class:inklight={dotLight}
+						style:background={dotBg}
+						data-weather={sky.weather}
 						><WxIcon icon={sceneIcon(sky)} size={15} label={sky.label} /></span
 					>
 					<span class="ptemp num">{nowTemp}</span>
@@ -427,8 +443,12 @@
 				<h1>{snap.location.name}</h1>
 				<div class="pills">
 					<span class="pill glass" title="{snap.location.region} · {sky.label} now">
-						<span class="skydot" data-scene={sky.scene} aria-hidden="true"
-							><WxIcon icon={sceneIcon(sky)} size={14} label={sky.label} /></span
+						<span
+							class="skydot"
+							class:inklight={dotLight}
+							style:background={dotBg}
+							data-weather={sky.weather}
+							aria-hidden="true"><WxIcon icon={sceneIcon(sky)} size={14} label={sky.label} /></span
 						>
 						<span class="ptxt">{snap.location.region} · {sky.label} now</span>
 					</span>
@@ -808,8 +828,8 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	/* A swatch of the scene's sky (the same colours as the backdrop's top), with the
-	   weather's icon on it: dark lines on the light skies, light on the night sky. */
+	/* A swatch of the sky (the backdrop's own colours, set inline), with the weather's
+	   icon on it: dark lines on a light sky, light lines on a dark one. */
 	.skydot {
 		flex: 0 0 20px;
 		height: 20px;
@@ -818,38 +838,21 @@
 		border-radius: 50%;
 		background: linear-gradient(180deg, #62a8ea, #e6f1fa);
 		box-shadow: inset 0 0 0 1px var(--glass-border);
+		transition: background 900ms ease;
 		--text-2: #22324d;
 		--snow: #2f5fae;
 		--rain: #1f6f5a;
 	}
-	.skydot[data-scene='night'] {
+	.skydot.inklight {
 		--text-2: #f2f4ff;
-	}
-	.skydot[data-scene='clear'] {
-		background: linear-gradient(180deg, #4f9fec, #dff0fc);
-	}
-	.skydot[data-scene='night'] {
-		background: linear-gradient(180deg, #1d2a4f, #7f88d8);
-	}
-	.skydot[data-scene='glow'] {
-		background: linear-gradient(180deg, #8aa4e6, #ffe3c4);
-	}
-	.skydot[data-scene='overcast'],
-	.skydot[data-scene='fog'] {
-		background: linear-gradient(180deg, #9fb0c4, #e6ebf1);
-	}
-	.skydot[data-scene='snow'],
-	.skydot[data-scene='heavy'],
-	.skydot[data-scene='mixed'] {
-		background: linear-gradient(180deg, #a9bcd6, #f4f7fb);
-	}
-	.skydot[data-scene='rain'] {
-		background: linear-gradient(180deg, #8fa6b8, #dbe4ea);
+		--snow: #a8c8ff;
+		--rain: #8fd6c0;
 	}
 
 	/* --- Desktop and tablet --- */
+	/* A taller band of sky above the name, so the weather shows before the panels start. */
 	.lhead {
-		padding: 18px 4px 12px;
+		padding: 44px 4px 12px;
 	}
 	.lhead h1 {
 		font-size: 2.9rem;
