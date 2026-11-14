@@ -15,11 +15,15 @@ Notable changes to Snow Watch. The format follows
 - **The Layers sheet goes away with a swipe down** anywhere on it (it follows the
   finger, and springs back from a short pull), as well as with the Layers button, a tap
   on the map, or its ✕. A small handle at its top shows it can be swiped.
-- **The full screen chart is more compact.** The plot stops at about the height of the
-  chart in the page, so the cloud cover and chance of precipitation panel, the timeline
-  and the metrics sit higher; the lower panel is a little taller, so its scale is
-  readable. On a tall phone the range and view buttons at the foot sit higher, nearer
-  the thumb.
+- **The full screen chart has no blank space, and its controls are bigger.** The metric
+  cards are taller, with a line of detail under each value ("94% chance", "gusts
+  14 mph"); the timeline is taller, with each day's snow over its bar; the cloud cover and
+  chance of precipitation panel is taller, so its scale is readable; the range and view
+  buttons are taller, and sit a little higher on a tall phone. The plot takes what's
+  left, so it's shorter than before. Under the "All" view's last lane, only the day names
+  show (the dates were hidden behind the timeline).
+- **The map's More menu opens upwards** from its button, clear of the row of tabs at
+  the foot of the map, instead of down over it.
 - **Snow totals use the temperature-based snow ratio.** The headline depth is the snow
   water times a ratio from the temperature while it snows (8:1 near freezing, 11, 14,
   up to 17:1 in the cold) instead of the models' fixed 7:1, which under-read every storm

@@ -177,10 +177,14 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	expect(bar.y).toBeGreaterThanOrEqual(14);
 	const range = page.locator('.fsfoot').getByRole('group', { name: 'Time range' });
 	const rb = (await range.boundingBox())!;
-	// On a tall phone they sit higher, nearer the thumb; the plot is no taller than it
-	// needs to be, so the lower panel, the timeline and the metrics stay up too.
-	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(vp.height >= 760 ? 50 : 20);
-	expect((await plot.boundingBox())!.height).toBeLessThanOrEqual(292);
+	// On a tall phone they sit a little higher, nearer the thumb. No gap above them: the
+	// controls are big (the metric cards with a line of detail) and the plot takes the rest.
+	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(vp.height >= 760 ? 30 : 20);
+	const cards = (await full.getByRole('group', { name: 'Chart metric' }).boundingBox())!;
+	const foot = (await page.locator('.fsfoot').boundingBox())!;
+	expect(foot.y - (cards.y + cards.height)).toBeLessThan(30);
+	expect(cards.height).toBeGreaterThanOrEqual(60);
+	await expect(full.locator('.mcard').first().locator('.mone')).toBeVisible();
 	expect(rb.height).toBeGreaterThanOrEqual(40);
 	// The lower panel: cloud cover and the chance of precipitation.
 	await expect(full.locator('.lowcap')).toContainText('Chance of precipitation');
@@ -242,6 +246,9 @@ test('phones: Layers sits beside the tab bar, the other map buttons over it rise
 	const menu = page.getByRole('group', { name: 'More map tools' });
 	for (const name of ['Measure', 'Offline maps', 'About this map'])
 		await expect(menu.getByRole('button', { name })).toBeVisible();
+	// It opens upwards, clear of the row of tabs.
+	const mb = (await menu.boundingBox())!;
+	expect(mb.y + mb.height).toBeLessThanOrEqual((await tabsRow.boundingBox())!.y);
 	await page.mouse.click(60, 200);
 	await expect(menu).toHaveCount(0);
 	// The weather's controls opened: the column rises above the whole of them; Layers
