@@ -324,10 +324,16 @@
 					.map(([s, n]) => `${ENSEMBLE_NAMES[s] ?? s} (${n})`)
 					.join(', ') || 'no ensembles'}.
 			</p>
-			{#if band.windows['next5'].snow_cm_slr !== null && band.windows['next5'].snow_cm_slr !== band.windows['next5'].snow_cm}
+			{#if snap.depth_method === 'slr'}
 				<p class="muted small">
-					With a temperature-based snow-to-liquid ratio the next 5 days would be
-					<strong>{snow(band.windows['next5'].snow_cm_slr, units)}</strong>.
+					Snow totals turn the models' snow water into depth with a ratio from the temperature while
+					it snows (8:1 near freezing, up to 17:1 in the cold), so a cold storm reads deeper than
+					the models' own 7:1 snowfall{#if band.windows['next5'].snow_cm_raw !== null && band.windows['next5'].snow_cm_raw !== band.windows['next5'].snow_cm}
+						(next 5 days at 7:1: {snow(band.windows['next5'].snow_cm_raw, units)}){/if}.
+				</p>
+			{:else}
+				<p class="muted small">
+					Snow totals are the models' own snowfall, at a fixed 7:1 snow-to-water ratio.
 				</p>
 			{/if}
 			{#if Object.keys(snap.location.links).length}
@@ -758,6 +764,7 @@
 			bandLabel={band.label}
 			{units}
 			day={selectedDay}
+			depthMethod={snap?.depth_method}
 			onclose={() => (selected = null)}
 		/>
 	{/if}

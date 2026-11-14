@@ -4977,6 +4977,10 @@
         "band_elev_m": {
           "type": "number"
         },
+        "headline": {
+          "default": "cons",
+          "type": "string"
+        },
         "location_id": {
           "type": "string"
         },
@@ -5262,6 +5266,17 @@
             }
           ]
         },
+        "ens_raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnsStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "ens_slr": {
           "anyOf": [
             {
@@ -5279,7 +5294,7 @@
           },
           "type": "array"
         },
-        "members_cm_slr": {
+        "members_cm_raw": {
           "default": [],
           "items": {
             "type": "number"

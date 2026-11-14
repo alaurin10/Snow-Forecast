@@ -153,3 +153,75 @@ def test_consensus_records_cover_calendar_days() -> None:
     k = config().snowfall_cm_per_mm
     for d in full_days:
         assert cons[d].snow_cm == pytest.approx(by_day[d] * k, abs=0.15)
+
+
+def _slr_snapshot(loc_id: str) -> Snapshot:
+    assert config().depth_method == "slr"  # the shipped setting
+    return fixture_snapshot(loc_id)
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
+def test_every_total_is_the_sum_of_headline_periods(loc_id: str) -> None:
+    """With depth_method: slr, every depth the snapshot surfaces is in the
+    temperature-based depth, and every total is the sum of its periods' bars."""
+    snap = _slr_snapshot(loc_id)
+    assert snap.depth_method == "slr"
+    for band in snap.bands:
+        ps = band.periods
+        for p in ps:
+            assert p.snow_cm == p.snow_cm_slr, (band.band, p.key)
+            if p.swe_mm and p.snow_cm and p.swe_mm >= 2:
+                # The bar is the period's snow water at its own ratio.
+                f = p.snow_cm / p.swe_mm
+                expected = (p.slr / 10) if p.slr else config().snowfall_cm_per_mm
+                assert f == pytest.approx(expected, rel=0.06, abs=0.05), (band.band, p.key)
+        for name, (a, b) in (("next5", (0, 10)), ("d6_10", (10, 20))):
+            w = band.windows[name]
+            total = sum(p.snow_cm or 0 for p in ps[a:b])
+            assert w.snow_cm == pytest.approx(total, abs=0.05 * (b - a)), (band.band, name)
+            assert w.snow_cm == w.snow_cm_slr
+            assert w.ens == w.ens_slr
+        assert band.stats.next5_cm == band.windows["next5"].snow_cm
+        assert band.stats.d6_10_cm == band.windows["d6_10"].snow_cm
+    mid = snap.bands[1].windows["next5"]
+    if mid.ens is not None:
+        assert mid.members_cm == sorted(mid.members_cm)
+        assert mid.ens.p50 is not None
+        assert min(mid.members_cm) <= mid.ens.p50 <= max(mid.members_cm)
+    # Days (ski-day ratings, powder flags) are built from the same bars.
+    days = [p for p in snap.bands[1].periods if p.kind == "day"]
+    assert [d.day_cm for d in snap.days] == [p.snow_cm for p in days]
+    # The Backcountry storm total is the summit's hourly headline depth.
+    bc = snap.backcountry
+    assert bc is not None and bc.storm.next48_cm is not None
+    top = snap.bands[2].hourly
+    assert bc.storm.next48_cm == pytest.approx(sum(v or 0 for v in top.snow_cm[:48]), abs=0.3)
+
+
+@pytest.mark.parametrize("loc_id", ["whistler", "crystal"])
+def test_depth_method_switches_every_depth(loc_id: str) -> None:
+    """The same inputs built under raw and slr: snow water is identical, and every
+    depth follows the method (cold snow piles up deeper than 7:1)."""
+    loc, inputs = seed()[loc_id], fixture_inputs(loc_id)
+    raw_cfg = config().model_copy(update={"depth_method": "raw"})
+    raw, raw_recs = build_snapshot(loc, inputs, raw_cfg, captured_at())
+    slr, slr_recs = build_snapshot(loc, inputs, config(), captured_at())
+    assert raw.depth_method == "raw"
+    for rb, sb in zip(raw.bands, slr.bands, strict=True):
+        assert [p.swe_mm for p in rb.periods] == [p.swe_mm for p in sb.periods]
+        assert [p.snow_cm for p in rb.periods] == [p.snow_cm_raw for p in sb.periods]
+        assert rb.windows["next5"].snow_cm == sb.windows["next5"].snow_cm_raw
+        assert rb.windows["next5"].ens == sb.windows["next5"].ens_raw
+        assert rb.windows["next5"].ens == rb.windows["next5"].ens_raw
+    # The records are the same either way: the scorecard and trend pick a source.
+    assert raw_recs == slr_recs
+    if loc_id == "whistler":  # a cold storm
+        w_raw, w_slr = raw.bands[2].windows["next5"], slr.bands[2].windows["next5"]
+        assert w_slr.snow_cm is not None and w_raw.snow_cm is not None
+        assert w_slr.snow_cm > w_raw.snow_cm
+        assert slr.bands[1].stats.next24_cm is not None
+        # Model agreement and the ensemble range grow with it.
+        assert slr.daily[4].pooled_cum is not None and raw.daily[4].pooled_cum is not None
+        assert (slr.daily[4].pooled_cum.p90 or 0) > (raw.daily[4].pooled_cum.p90 or 0)
+        cum = [(slr.daily[4].models_cum.get(m), raw.daily[4].models_cum.get(m)) for m in raw.models]
+        assert any(a > b for a, b in cum if a is not None and b is not None)

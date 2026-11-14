@@ -6,9 +6,10 @@ For each day d with observations:
 - the forecast is the one from the last run issued before d began (local time),
   so every score is a 1-day lead.
 
-Sources compared: the consensus (raw model depth and snow-ratio depth), the
-ensemble median and each model. Stations sit at their own elevation, which can
-differ from the mid band, so scores show bias as much as skill.
+Sources compared: the consensus (model snowfall at 7:1, `cons`, and the
+temperature-based snow ratio, `cons_slr`; `headline` names the one the app shows),
+the ensemble median and each model (both at 7:1). Stations sit at their own
+elevation, which can differ from the mid band, so scores show bias as much as skill.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
+from snowwatch.config import ForecastConfig
 from snowwatch.models import Location
 
 BIG_DAY_CM = 7.62  # 3 in
@@ -48,6 +50,7 @@ class VerificationPair(BaseModel):
 
 class VerificationOut(BaseModel):
     location_id: str
+    headline: str = "cons"  # the consensus source the app's snow totals use
     station: str | None
     station_name: str | None
     station_elev_m: float | None
@@ -58,6 +61,11 @@ class VerificationOut(BaseModel):
     needs_days: int
     rows: list[VerificationRow]
     pairs: list[VerificationPair]
+
+
+def headline_source(cfg: ForecastConfig) -> str:
+    """The `forecast_daily` consensus source that matches the snapshot's headline depth."""
+    return "cons_slr" if cfg.depth_method == "slr" else "cons"
 
 
 def _observed(
@@ -111,7 +119,11 @@ def _order(source: str) -> tuple[int, str]:
 
 
 def verification(
-    conn: sqlite3.Connection, loc: Location, *, swe_ratio: float = 10.0
+    conn: sqlite3.Connection,
+    loc: Location,
+    *,
+    swe_ratio: float = 10.0,
+    headline: str = "cons",
 ) -> VerificationOut:
     tz = ZoneInfo(loc.tz or "UTC")
     mid = loc.band("mid")
@@ -152,6 +164,7 @@ def verification(
     recent = days[-PAIR_DAYS:]
     return VerificationOut(
         location_id=loc.id,
+        headline=headline,
         station=station,
         station_name=meta["name"] if meta else None,
         station_elev_m=meta["elev_m"] if meta else None,

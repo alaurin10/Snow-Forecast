@@ -28,11 +28,14 @@
 	const bigDay = $derived(units === 'imperial' ? '3 in' : '8 cm');
 
 	const NAMES: Record<string, string> = {
-		cons: 'Consensus (model snowfall)',
+		cons: 'Consensus (model snowfall, 7:1)',
 		cons_slr: 'Consensus (temperature-based depth)',
-		ens_p50: 'Ensemble median'
+		ens_p50: 'Ensemble median (7:1)'
 	};
-	const name = (s: string) => NAMES[s] ?? MODEL_NAMES[s] ?? s;
+	// The consensus the app's snow totals use (the server's depth_method).
+	const headline = $derived(data?.headline ?? 'cons');
+	const name = (s: string) =>
+		`${NAMES[s] ?? MODEL_NAMES[s] ?? s}${s === headline ? ' · the app’s totals' : ''}`;
 	const signed = (cm: number | null | undefined) => {
 		const v = c.snow(cm ?? null);
 		if (v === null) return '–';
@@ -63,7 +66,9 @@
 			.paddingInner(0.25)
 	);
 	const obs = $derived(pairs.map((p) => c.snow(p.observed_cm)));
-	const fc = $derived(pairs.map((p) => c.snow(p.cons_cm)));
+	const fc = $derived(
+		pairs.map((p) => c.snow(headline === 'cons_slr' ? p.cons_slr_cm : p.cons_cm))
+	);
 	const y = $derived(
 		scaleLinear()
 			.domain([0, maxOf([...obs, ...fc], units === 'imperial' ? 2 : 5)])
@@ -99,7 +104,10 @@
 			{#if better}<strong>Model snowfall vs temperature-based depth: {better}.</strong>{/if}
 		</p>
 		<p class="faint small key">
-			{c.snowUnit} per day. Bias: forecast minus observed. Error: the average miss. Big days ({bigDay}
+			{c.snowUnit} per day. The app's snow totals use the
+			{headline === 'cons_slr' ? 'temperature-based depth' : 'model snowfall'}; models and the
+			ensemble are their own 7:1 snowfall. Bias: forecast minus observed. Error: the average miss.
+			Big days ({bigDay}
 			or more): caught / missed / false alarms.
 		</p>
 		<div class="table-wrap" use:hscroll>
@@ -115,7 +123,7 @@
 				</thead>
 				<tbody>
 					{#each data.rows as r (r.source)}
-						<tr class:hl={r.source === 'cons' || r.source === 'cons_slr'}>
+						<tr class:hl={r.source === headline}>
 							<th scope="row">{name(r.source)}</th>
 							<td class="num">{signed(r.bias_cm)}</td>
 							<td class="num">{num(r.mae_cm)}</td>

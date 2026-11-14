@@ -135,9 +135,14 @@ docker compose run --rm worker snowwatch owner logout-all
 **Webcams:** Manage → Edit a location → Add a webcam. The page link opens when
 tapped; an optional `https://` image link that updates shows a thumbnail.
 
-**Snow depth method:** after a couple of weeks, open a location with a snow
-station → Observed → Forecast scorecard. If the temperature-based depth is closer
-at most locations, set `depth_method: slr` in `config/forecast.yaml`.
+**Snow depth method:** snow totals use the temperature-based snow ratio
+(`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1
+snowfall, set `depth_method: raw` and restart the worker; the next forecast run (or
+`docker compose run --rm worker snowwatch rebuild`, which rebuilds them now from the
+cached responses)
+switches every total. The trend chart has no step either way, since each run stores
+both. Open a location with a snow station → Observed → Forecast scorecard to see
+which has been closer.
 
 **Logs:** `docker compose logs -f worker` and `docker compose logs -f api` (one
 JSON object per line).

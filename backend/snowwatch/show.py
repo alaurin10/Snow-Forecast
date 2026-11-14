@@ -58,7 +58,7 @@ def render(snap: Snapshot, band: str = "mid") -> str:
     for name, title in (("next5", "Next 5 days"), ("d6_10", "Days 6–10")):
         w = b.windows[name]
         lines.append(
-            f"{title}: {_in(w.snow_cm)} in (ratio-adjusted {_in(w.snow_cm_slr)} in), "
+            f"{title}: {_in(w.snow_cm)} in (model snowfall at 7:1 {_in(w.snow_cm_raw)} in), "
             f"ensemble 10–90%: {_range(w.ens)} in"
         )
     s = b.stats
@@ -67,13 +67,13 @@ def render(snap: Snapshot, band: str = "mid") -> str:
         f"last 24 h {_in(s.last24_cm)} in · next 24 h {_in(s.next24_cm)} in",
         "",
     ]
-    head = f"{'Period':14s} {'Snow':>5s} {'SLR':>5s} {'Type':5s} {'Basis':8s}"
+    head = f"{'Period':14s} {'Snow':>5s} {'7:1':>5s} {'Type':5s} {'Basis':8s}"
     head += "".join(f" {SHORT.get(m, m)[:6]:>6s}" for m in models)
     head += f" {'Ens 10-90':>10s} {'Hi/Lo°F':>8s} {'SnowLvl':>8s} {'Gust':>5s}"
     lines += [head, "-" * len(head)]
     for p in b.periods:
         row = (
-            f"{p.label:14s} {_in(p.snow_cm):>5s} {_in(p.snow_cm_slr):>5s} {p.ptype:5s} "
+            f"{p.label:14s} {_in(p.snow_cm):>5s} {_in(p.snow_cm_raw):>5s} {p.ptype:5s} "
             f"{(p.basis or '–'):8s}"
         )
         row += "".join(f" {_in(p.models.get(m)) if m in p.models else '':>6s}" for m in models)
