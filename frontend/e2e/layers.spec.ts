@@ -202,17 +202,24 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();
 });
 
-test('phones: the map buttons sit bottom right on the dock, with the rarer ones under More', async ({
+test('phones: the map buttons sit bottom right, level with the tabs, and rise over an open control', async ({
 	page
 }, info) => {
 	test.skip(info.project.name !== 'phone', 'the buttons move on phones and tablets');
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const vp = page.viewportSize()!;
-	const layers = (await page.getByRole('button', { name: 'Layers' }).boundingBox())!;
-	const tabs = (await page.getByRole('group', { name: 'Map controls' }).boundingBox())!;
+	const layersBtn = page.getByRole('button', { name: 'Layers' });
+	const tabsRow = page.getByRole('group', { name: 'Map controls' });
+	const weather = tabsRow.getByRole('button', { name: /^Weather: / });
+	// Everything folded: the lowest button level with the row of tabs, beside it.
+	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
+	await expect(weather).toHaveAttribute('aria-pressed', 'false');
+	await page.waitForTimeout(500);
+	const layers = (await layersBtn.boundingBox())!;
+	const tabs = (await tabsRow.boundingBox())!;
 	expect(layers.x + layers.width).toBeGreaterThan(vp.width - 20);
-	expect(layers.y + layers.height).toBeLessThan(tabs.y);
-	expect(layers.y).toBeGreaterThan(vp.height / 2);
+	expect(Math.abs(layers.y + layers.height - (tabs.y + tabs.height))).toBeLessThan(4);
+	expect(layers.x).toBeGreaterThan(tabs.x + tabs.width);
 	// No zoom buttons (pinch, double tap); the compass stays.
 	await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
 	await expect(page.locator('.maplibregl-ctrl-compass')).toBeVisible();
@@ -224,14 +231,15 @@ test('phones: the map buttons sit bottom right on the dock, with the rarer ones 
 		await expect(menu.getByRole('button', { name })).toBeVisible();
 	await page.mouse.click(60, 200);
 	await expect(menu).toHaveCount(0);
-	// Folded, then the weather's controls opened: the buttons rise with them.
-	const weather = page.getByRole('button', { name: /^Weather: / });
-	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
-	await expect(weather).toHaveAttribute('aria-pressed', 'false');
-	await page.waitForTimeout(400);
-	const folded = (await page.getByRole('button', { name: 'Layers' }).boundingBox())!.y;
+	// The weather's controls opened: the buttons rise above the whole of them.
 	await weather.click();
+	const panel = page.getByRole('group', { name: 'Weather type' });
+	await expect(panel).toBeVisible();
 	await expect
-		.poll(async () => (await page.getByRole('button', { name: 'Layers' }).boundingBox())!.y)
-		.toBeLessThan(folded - 30);
+		.poll(async () => {
+			const b = (await layersBtn.boundingBox())!;
+			const p = (await panel.boundingBox())!;
+			return b.y + b.height <= p.y;
+		})
+		.toBe(true);
 });

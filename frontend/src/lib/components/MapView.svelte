@@ -2027,7 +2027,7 @@
 	class:sheet={!!target && !viewport.desktop}
 	style:--fill-top="{fillTop}px"
 	style:--map-inset="{inset}px"
-	style:--dock-h="{dockH}px"
+	style:--dock-lift="{openDock ? dockH + 10 : 0}px"
 	style:--tools-h="{toolsH}px"
 	style:--map-drop="{radar && viewport.desktop && railUi.folded ? RAIL_FOLDED_DROP : 0}px"
 	style:--map-panel="{radar && viewport.desktop && target ? 370 : 0}px"
@@ -2688,16 +2688,16 @@
 		display: grid;
 		gap: 8px;
 	}
-	/* Phones and tablets: the map's buttons at the bottom right, under the thumb, sitting
-	   on the controls at the foot (and rising with them); the compass on top, the zoom
-	   buttons left to pinch and double tap; Layers, the most used, lowest. Out of the way
-	   while the map panel is up. */
+	/* Phones and tablets: the map's buttons at the bottom right, under the thumb. The
+	   lowest (Layers, the most used) is level with the row of tabs at the foot; when one
+	   of those controls is open, they rise above it. The compass on top, the zoom buttons
+	   left to pinch and double tap. Out of the way while the map panel is up. */
 	@media (max-width: 1099px) {
 		.tools {
 			top: auto;
 			left: auto;
 			right: 10px;
-			bottom: calc(84px + env(safe-area-inset-bottom) + var(--dock-h, 0px) + 14px);
+			bottom: calc(84px + env(safe-area-inset-bottom) + var(--dock-lift, 0px));
 			display: flex;
 			flex-direction: column;
 			transition: bottom var(--ease-slide);
@@ -2719,7 +2719,7 @@
 			left: auto;
 			right: 0;
 			bottom: calc(
-				84px + env(safe-area-inset-bottom) + var(--dock-h, 0px) + 22px + var(--tools-h, 0px)
+				84px + env(safe-area-inset-bottom) + var(--dock-lift, 0px) + 8px + var(--tools-h, 0px)
 			);
 			transition: bottom var(--ease-slide);
 		}
@@ -2736,6 +2736,11 @@
 		.wrap.sheet .tools,
 		.wrap.sheet .map :global(.maplibregl-ctrl-top-left) {
 			visibility: hidden;
+		}
+		/* The row of tabs keeps clear of the buttons beside it (scrolling sideways if it
+		   has more tabs than fit). */
+		.dock :global(.docktabs) {
+			max-width: calc(100% - 112px);
 		}
 		.wrap .top,
 		.wrap .info {

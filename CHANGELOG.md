@@ -28,8 +28,8 @@ Notable changes to Snow Watch. The format follows
   tab folds it, leaving just the row. The open tab is remembered in this browser. The
   Recent satellite controls are one row, with the longer story behind an (i).
 - **Phones and tablets: the map's buttons are at the bottom right**, under the thumb,
-  sitting on the controls at the foot and rising with them when one opens: Layers
-  lowest, then your location, 3D and a More menu (Measure, Offline maps, About this
+  the lowest level with the row of tabs at the foot (just above the tab bar), rising
+  above a control when one opens: Layers lowest, then your location, 3D and a More menu (Measure, Offline maps, About this
   map), with the compass on top. The zoom buttons are gone there (pinch, or double tap),
   leaving the top of the map clear. Desktop keeps its column at the top left.
 - **Desktop: with the rail folded, its button heads the map's column of buttons**, the
