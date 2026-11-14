@@ -13,7 +13,8 @@
 	import type { OverviewRow } from '../lib/types.gen';
 	import ShareButton from '../lib/share/ShareButton.svelte';
 	import { paint } from '../lib/share/canvas';
-	import { drawOverviewCard } from '../lib/share/overviewCard';
+	import { defaultShareIds, drawOverviewCard, OVERVIEW_MAX } from '../lib/share/overviewCard';
+	import LocationPicker from '../lib/share/LocationPicker.svelte';
 	import { viewport } from '../lib/viewport.svelte';
 	import { stormCycles, type StormCycle } from '../lib/stormcycles';
 	import LocationDaySheet from '../lib/components/LocationDaySheet.svelte';
@@ -59,6 +60,12 @@
 		// "My order" is the order set on the Manage page, which is how the rows arrive.
 		return prefs.sort === 'snow' ? [...out].sort((a, b) => b.total - a.total) : out;
 	});
+	// The locations in the share image: the snowiest that fit, until some are picked.
+	let sharePick = $state<string[] | null>(null);
+	const shareDefaults = $derived(defaultShareIds(rows ?? [], DAYS));
+	const shareIds = $derived(new Set(sharePick ?? shareDefaults));
+	const shareable = $derived(list.filter((x) => x.r.run_id != null));
+	const shareRows = $derived(shareable.filter((x) => shareIds.has(x.r.id)).map((x) => x.r));
 	// One scale for every row, so bars compare across locations.
 	const barMax = $derived(Math.max(5, ...list.flatMap((x) => x.days.map((d) => d.cm))));
 	// The avalanche column only when some location has a rating to show.
@@ -104,11 +111,28 @@
 					drawOverviewCard(
 						ctx,
 						shape,
-						{ rows: rows ?? [], units: prefs.units, days: DAYS, generatedAt: latest },
+						{ rows: shareRows, units: prefs.units, days: DAYS, generatedAt: latest },
 						p
 					)
 				)}
-		/>
+		>
+			{#snippet options()}
+				{#if shareable.length > 1}
+					<LocationPicker
+						items={shareable.map((x) => ({
+							id: x.r.id,
+							name: x.r.name,
+							total: `${snowNum(x.total, prefs.units)} ${c.snowUnit}`
+						}))}
+						picked={shareable.filter((x) => shareIds.has(x.r.id)).map((x) => x.r.id)}
+						max={OVERVIEW_MAX}
+						defaults={shareDefaults}
+						defaultsLabel={shareable.length > OVERVIEW_MAX ? `Snowiest ${OVERVIEW_MAX}` : 'All'}
+						onchange={(ids) => (sharePick = ids)}
+					/>
+				{/if}
+			{/snippet}
+		</ShareButton>
 	{/if}
 </header>
 
