@@ -7,6 +7,19 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The map's buttons on phones are easier to reach one-handed.** They're bigger
+  (48 px) and centred in the gap between the tab bar and the edge of the screen. Layers,
+  the most used, sits on its own level with the tab bar, the easiest spot for a thumb,
+  and stays there while its sheet is open, so the same button closes it. The others
+  (location, 3D, More, the compass) stand in a column above it.
+- **The Layers sheet goes away with a swipe down** anywhere on it (it follows the
+  finger, and springs back from a short pull), as well as with the Layers button, a tap
+  on the map, or its ✕. A small handle at its top shows it can be swiped.
+- **The full screen chart is more compact.** The plot stops at about the height of the
+  chart in the page, so the cloud cover and chance of precipitation panel, the timeline
+  and the metrics sit higher; the lower panel is a little taller, so its scale is
+  readable. On a tall phone the range and view buttons at the foot sit higher, nearer
+  the thumb.
 - **Snow totals use the temperature-based snow ratio.** The headline depth is the snow
   water times a ratio from the temperature while it snows (8:1 near freezing, 11, 14,
   up to 17:1 in the cold) instead of the models' fixed 7:1, which under-read every storm

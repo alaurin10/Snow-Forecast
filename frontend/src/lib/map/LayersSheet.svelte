@@ -6,6 +6,10 @@
   Every choice is a tile of the same size in a well, the chosen one raised (colour only,
   so nothing moves); "None" comes first. Each section's (i) says, in one line, what the
   chosen option is; the long version is in the map's About panel.
+
+  On phones and tablets it's a sheet at the foot of the map: a swipe down anywhere on it,
+  a tap on the map above it, or the Layers button (beside the tab bar, under the thumb)
+  puts it away, as well as its ✕.
 -->
 <script lang="ts">
 	import {
@@ -15,6 +19,7 @@
 		type MapOverlay,
 		type MapWeather
 	} from '../prefs.svelte';
+	import { swipeClose } from '../swipeclose';
 
 	interface Props {
 		/** Slope and aspect need the terrain worker (missing on old browsers). */
@@ -200,6 +205,7 @@
 		}
 	]);
 	const SHADES = ['off', 'light', 'strong'] as const;
+	let body = $state<HTMLElement>();
 
 	/** Which sections' (i) lines are open. */
 	let info = $state<Record<string, boolean>>({});
@@ -247,8 +253,15 @@
 	</button>
 {/snippet}
 
-<div class="sheet" role="dialog" aria-label="Map layers" id="map-layers">
+<div
+	class="sheet"
+	role="dialog"
+	aria-label="Map layers"
+	id="map-layers"
+	use:swipeClose={{ onclose, scroller: () => body, media: '(max-width: 1099px)' }}
+>
 	<header>
+		<span class="grab" aria-hidden="true"></span>
 		<div class="names">
 			<span class="eyebrow">Map</span>
 			<strong class="title">Layers</strong>
@@ -256,7 +269,7 @@
 		<button class="hbtn" onclick={onclose} aria-label="Close">✕</button>
 	</header>
 
-	<div class="body">
+	<div class="body" bind:this={body}>
 		<section aria-label="Base map">
 			<div class="shead">
 				<h4 class="eyebrow">Base map</h4>
@@ -372,12 +385,16 @@
 		overflow: hidden;
 	}
 	header {
+		position: relative;
 		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 4px;
 		padding: 10px 8px 8px 14px;
 		border-bottom: 1px solid var(--border);
+	}
+	.grab {
+		display: none;
 	}
 	.names {
 		flex: 1;
@@ -504,8 +521,21 @@
 			border-radius: 18px;
 		}
 		header {
-			padding-top: 8px;
+			padding-top: 14px;
 			padding-bottom: 6px;
+		}
+		/* A handle that says the sheet can be swiped down. */
+		.grab {
+			display: block;
+			position: absolute;
+			top: 5px;
+			left: 50%;
+			width: 36px;
+			height: 4px;
+			margin-left: -18px;
+			border-radius: 2px;
+			background: var(--text-3);
+			opacity: 0.45;
 		}
 		.body {
 			gap: 10px;
