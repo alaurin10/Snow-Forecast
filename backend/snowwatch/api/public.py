@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import gzip
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from snowwatch import avalanche
+from snowwatch import avalanche, observations, stations
 from snowwatch import avalanche_zones as zones
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
 from snowwatch.api.models import (
@@ -23,6 +24,9 @@ from snowwatch.api.models import (
     LocationSummary,
     MapWindLocation,
     MapWindOut,
+    NearbyOut,
+    NearbyReport,
+    NearbyStation,
     OverviewPeriod,
     OverviewRow,
     PlanDate,
@@ -37,6 +41,7 @@ from snowwatch.api.models import (
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import Snapshot
+from snowwatch.geo import haversine_km
 from snowwatch.locations import service
 from snowwatch.settings import Settings
 from snowwatch.store import repo
@@ -67,6 +72,14 @@ CONCERN_CAPTION = (
     "Doesn't show runouts or slopes above you."
 )
 
+# Around a location (the Observed tab): how far to look, and how many to list.
+NEARBY_KM = 60.0
+NEARBY_STATIONS = 8
+NEARBY_REPORTS = 8
+# The map's station and report files as last read: path → (file time, parsed).
+_stations_cache: dict[str, tuple[float, stations.StationsOut | None]] = {}
+_obs_cache: dict[str, tuple[float, observations.ObsOut | None]] = {}
+
 # Decoded snapshots, by location: (run_id, snapshot). A newer run replaces the entry.
 _snapshots: dict[str, tuple[int, Snapshot]] = {}
 
@@ -89,6 +102,21 @@ def latest_snapshots(conn: sqlite3.Connection) -> dict[str, Snapshot]:
             _snapshots[loc_id] = cached = (run_id, snap)
         out[loc_id] = cached[1]
     return out
+
+
+def _cached[T](
+    cache: dict[str, tuple[float, T | None]], path: Path, read: Callable[[Path], T | None]
+) -> T | None:
+    """A file parsed once per change (its modification time), or None while it is missing."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    hit = cache.get(str(path))
+    if hit is None or hit[0] != mtime:
+        hit = (mtime, read(path))
+        cache[str(path)] = hit
+    return hit[1]
 
 
 def danger_for(v: AvalancheView | None, day: str | None) -> DangerChip:
@@ -139,6 +167,8 @@ def make_router() -> APIRouter:
     router = APIRouter(prefix="/api")
     _snapshots.clear()  # a new app may point at a different database
     _zones_cache.clear()
+    _stations_cache.clear()
+    _obs_cache.clear()
 
     @router.get("/locations", response_model=list[LocationSummary])
     def locations(conn: Conn, response: Response) -> list[LocationSummary]:
@@ -415,6 +445,45 @@ def make_router() -> APIRouter:
         cfg = request.app.state.forecast_config
         return verification(
             conn, loc, swe_ratio=cfg.verify_swe_ratio, headline=headline_source(cfg)
+        )
+
+    @router.get("/locations/{location_id}/nearby", response_model=NearbyOut)
+    def nearby(location_id: str, conn: Conn, request: Request, response: Response) -> NearbyOut:
+        """The closest snow stations and recent field reports (local files only)."""
+        loc = service.get_location(conn, location_id)
+        if loc is None:
+            raise HTTPException(404, f"unknown location {location_id!r}")
+        settings: Settings = request.app.state.settings
+        mid = loc.band("mid")
+
+        def km(lat: float, lon: float) -> float:
+            return round(haversine_km(mid.lat, mid.lon, lat, lon), 1)
+
+        st = _cached(_stations_cache, settings.stations_path, stations.read)
+        near = sorted(
+            (
+                NearbyStation(station=s, distance_km=d)
+                for s in (st.stations if st else [])
+                if (d := km(s.lat, s.lon)) <= NEARBY_KM
+            ),
+            key=lambda x: x.distance_km,
+        )
+        obs = _cached(_obs_cache, settings.obs_path, observations.read)
+        reports = []
+        for f in obs.features if obs else []:
+            xy = f.geometry.get("coordinates") or []
+            if len(xy) >= 2 and (d := km(float(xy[1]), float(xy[0]))) <= NEARBY_KM:
+                reports.append(NearbyReport(report=f.properties, distance_km=d))
+        reports.sort(key=lambda x: x.report.time, reverse=True)
+        response.headers["Cache-Control"] = CACHE
+        return NearbyOut(
+            location_id=loc.id,
+            radius_km=NEARBY_KM,
+            stations_at=st.generated_at if st else None,
+            stations=near[:NEARBY_STATIONS],
+            reports_at=obs.generated_at if obs else None,
+            reports_days=obs.days if obs else None,
+            reports=reports[:NEARBY_REPORTS],
         )
 
     @router.get("/status", response_model=StatusOut)

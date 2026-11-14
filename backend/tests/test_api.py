@@ -92,6 +92,9 @@ def test_meta_reports_version_and_thresholds(settings: Settings) -> None:
     assert body["version"] == __version__ and body["commit"] == "abc1234"
     assert body["powder_cm"] == 15 and body["storm_cm"] == 30
     assert body["open_meteo_daily_budget"] == 10_000
+    assert body["hazard_index"] is True
+    off = s.model_copy(update={"hazard_index": "off"})
+    assert TestClient(create_app(off)).get("/api/meta").json()["hazard_index"] is False
 
 
 def test_requests_get_an_id(settings: Settings) -> None:

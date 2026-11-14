@@ -1,6 +1,6 @@
 <!-- One location. Desktop and tablet: the name on the sky with its conditions, then the
      sections' tabs and the elevation, the outlook card, and the section (Forecast,
-     Models, Backcountry, Observed; keys 1–4 switch them too). On every screen, once the
+     Confidence, Backcountry, Observed; keys 1–4 switch them too). On every screen, once the
      elevation picker has scrolled away, a compact one (numbers only) stays at the top
      right, or stacked in the empty margin beside the page on wide windows. Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
@@ -8,12 +8,21 @@
 	import { safeHref } from '../../../lib/links';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError, getAvalanche, getSnapshot, getTrend, getVerification } from '../../../lib/api';
+	import {
+		ApiError,
+		getAvalanche,
+		getMeta,
+		getNearby,
+		getSnapshot,
+		getTrend,
+		getVerification
+	} from '../../../lib/api';
 	import { prefs, type BandName } from '../../../lib/prefs.svelte';
 	import { crosshair } from '../../../lib/crosshair.svelte';
 	import type {
 		AvalancheView,
 		Flag,
+		NearbyOut,
 		PeriodOut,
 		Snapshot,
 		TrendOut,
@@ -33,15 +42,11 @@
 	import ForecastChart from '../../../lib/charts/ForecastChart.svelte';
 	import type { Range } from '../../../lib/charts/forecast';
 	import PeriodGrid from '../../../lib/components/PeriodGrid.svelte';
-	import ModelAgreement from '../../../lib/charts/ModelAgreement.svelte';
-	import Exceedance from '../../../lib/charts/Exceedance.svelte';
-	import TrendChart from '../../../lib/charts/TrendChart.svelte';
 	import PeriodSheet from '../../../lib/charts/PeriodSheet.svelte';
 	import BandTable from '../../../lib/components/BandTable.svelte';
 	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
-	import StationPanel from '../../../lib/observed/StationPanel.svelte';
-	import Scorecard from '../../../lib/observed/Scorecard.svelte';
-	import TrendDays from '../../../lib/components/TrendDays.svelte';
+	import ConfidenceTab from '../../../lib/confidence/ConfidenceTab.svelte';
+	import ObservedTab from '../../../lib/observed/ObservedTab.svelte';
 	import Webcams from '../../../lib/components/Webcams.svelte';
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
@@ -81,8 +86,18 @@
 	let avy = $state<AvalancheView | null>(null);
 	let scores = $state<VerificationOut | null>(null);
 
+	let nearby = $state<NearbyOut | null>(null);
+	// Whether the app's own estimates show (the server's HAZARD_INDEX); on until it says not.
+	let graded = $state(true);
+
 	let avyLoad = $state<LoadState>('loading');
 	let scoresLoad = $state<LoadState>('loading');
+	let nearbyLoad = $state<LoadState>('loading');
+	$effect(() => {
+		getMeta()
+			.then((m) => (graded = m.hazard_index !== false))
+			.catch(() => {});
+	});
 
 	$effect(() => {
 		const current = id;
@@ -98,8 +113,10 @@
 		shareDaysPick = null;
 		scores = null;
 		avy = null;
+		nearby = null;
 		avyLoad = 'loading';
 		scoresLoad = 'loading';
+		nearbyLoad = 'loading';
 		tableDate = null;
 		chartDate = null;
 		crosshair.reset();
@@ -129,6 +146,13 @@
 				scoresLoad = 'ready';
 			})
 			.catch(() => live && (scoresLoad = 'error'));
+		getNearby(current)
+			.then((n) => {
+				if (!live) return;
+				nearby = n;
+				nearbyLoad = 'ready';
+			})
+			.catch(() => live && (nearbyLoad = 'error'));
 		getAvalanche()
 			.then((all) => {
 				if (!live) return;
@@ -141,8 +165,8 @@
 
 	const tabs = $derived<Section[]>(
 		snap?.location.kind === 'backcountry'
-			? ['forecast', 'backcountry', 'models', 'observed']
-			: ['forecast', 'models', 'backcountry', 'observed']
+			? ['forecast', 'backcountry', 'confidence', 'observed']
+			: ['forecast', 'confidence', 'backcountry', 'observed']
 	);
 	// The rail shows this location's sections; the sky shows its weather now.
 	$effect(() => {
@@ -177,13 +201,6 @@
 		snap ? (snap.bands.find((b) => b.band === prefs.band) ?? snap.bands[1]) : null
 	);
 	const units = $derived<UnitSystem>(prefs.units);
-	const mid = $derived(snap?.bands[1] ?? null);
-	const membersFor = (name: string): number[] => {
-		if (!snap || !band || !mid) return [];
-		const m = mid.windows[name]?.members_cm ?? [];
-		const scale = band.band === 'mid' ? 1 : (band.windows[name]?.scale ?? null);
-		return scale === null ? [] : m.map((v) => v * scale);
-	};
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
 	const c = $derived(converters(units));
 	const storm = $derived(band ? nextStorm(band.periods) : null);
@@ -320,6 +337,15 @@
 					</li>
 				{/each}
 			</ul>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet elevationsCard()}
+	{#if snap}
+		<section class="card">
+			<h2>Base, mid and summit</h2>
+			<BandTable bands={snap.bands} {units} />
 		</section>
 	{/if}
 {/snippet}
@@ -666,6 +692,7 @@
 						onhourly={(date, start) => (hourlyDay = { date, start })}
 					/>
 				</section>
+				{@render elevationsCard()}
 				{@render headsUpCard()}
 				{@render aboutCard()}
 				<Webcams cams={snap.location.webcams ?? []} />
@@ -714,6 +741,7 @@
 						onhoverdate={(d) => (tableDate = d)}
 					/>
 				</section>
+				{@render elevationsCard()}
 				<div class="extras">
 					{@render headsUpCard()}
 					{@render aboutCard()}
@@ -721,51 +749,12 @@
 				<Webcams cams={snap.location.webcams ?? []} />
 			{/if}
 		</div>
-	{:else if tab === 'models'}
-		<div class="stackcol">
-			<section class="card">
-				<ModelAgreement daily={snap.daily} models={snap.models} {units} />
-			</section>
-			<h2 class="section">Chance of at least each amount</h2>
-			<div class="two">
-				<section class="card">
-					<Exceedance
-						title="Next 5 days"
-						members={membersFor('next5')}
-						{units}
-						estimated={band.band !== 'mid'}
-					/>
-				</section>
-				<section class="card">
-					<Exceedance
-						title="Days 6–10"
-						members={membersFor('d6_10')}
-						{units}
-						estimated={band.band !== 'mid'}
-					/>
-				</section>
-			</div>
-			<section class="card">
-				<TrendChart runs={trend?.runs ?? []} {units} />
-				<TrendDays runs={trend?.runs ?? []} {units} />
-			</section>
-			<section class="card">
-				<h2>Base, mid and summit</h2>
-				<BandTable bands={snap.bands} {units} />
-			</section>
-		</div>
+	{:else if tab === 'confidence'}
+		<ConfidenceTab {snap} {band} {trend} {scores} {scoresLoad} {units} />
 	{:else if tab === 'backcountry'}
-		<BackcountryTab {snap} {avy} {units} {avyLoad} />
+		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} />
 	{:else}
-		<div class="stackcol">
-			<StationPanel
-				station={snap.snotel ?? null}
-				bandLabel={snap.bands[1].label}
-				bandElev={snap.bands[1].elev_m}
-				{units}
-			/>
-			<Scorecard data={scores} {units} load={scoresLoad} />
-		</div>
+		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} />
 	{/if}
 
 	{#if hourlyDay}
@@ -1138,15 +1127,6 @@
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
 		align-items: start;
 	}
-	.two {
-		display: grid;
-		gap: 16px;
-	}
-	@media (min-width: 768px) {
-		.two {
-			grid-template-columns: 1fr 1fr;
-		}
-	}
 	.heads h2 {
 		margin: 0 0 8px;
 	}
@@ -1217,10 +1197,6 @@
 	.thin {
 		padding-top: 8px;
 		padding-bottom: 8px;
-	}
-	.section {
-		font-size: 1rem;
-		margin: 4px 4px -6px;
 	}
 
 	/* --- Phones --- */

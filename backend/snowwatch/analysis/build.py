@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from snowwatch.analysis import backcountry as bc
@@ -45,6 +45,8 @@ from snowwatch.doc import (
     EnsStats,
     HourlyOut,
     LocationMeta,
+    OutlookDay,
+    OutlookLevels,
     PeriodOut,
     Reason,
     RefreezeNight,
@@ -585,7 +587,148 @@ def _backcountry(
         past72_cm=r(sum(past_snow.get(h) or 0.0 for h in past72)) if past72 else None,
         next48_cm=r(bc.total_over(future_snow, next48)),
     )
-    return BackcountryOut(rose=roses, warming=warming, refreeze=refreeze, sky=sky, storm=storm)
+    outlook = _outlook(
+        loc,
+        inputs,
+        cfg,
+        tz,
+        now_h,
+        work,
+        snow=_first(future_snow, past_snow),
+        mid_snow=mid_past,
+        speed=speed,
+        direction=direction,
+        on_snow=on_snow,
+        depth=depth,
+        periods=periods,
+    )
+    return BackcountryOut(
+        rose=roses, warming=warming, refreeze=refreeze, sky=sky, storm=storm, outlook=outlook
+    )
+
+
+def _outlook(
+    loc: Location,
+    inputs: ForecastInputs,
+    cfg: ForecastConfig,
+    tz: ZoneInfo,
+    now_h: int,
+    work: Mapping[int, _BandWork],
+    *,
+    snow: Hourly,
+    mid_snow: Hourly,
+    speed: Hourly,
+    direction: Hourly,
+    on_snow: bool,
+    depth: Depth,
+    periods: Sequence[Period],
+) -> list[OutlookDay]:
+    """Avalanche weather for today and the days after it (see `analysis/backcountry.py`).
+
+    Each day is a whole calendar day: the forecast where there is one, the
+    high-resolution model's last three days behind it, so today counts the snow that
+    has already fallen and has a day before to rise or ease against.
+    """
+    bcfg = cfg.backcountry
+    mid = work[1]
+    blend_top, blend_mid = inputs.blend[2], inputs.blend[1]
+    temps = [_first(work[i].temp[0], inputs.blend[i].get("temperature_2m")) for i in range(3)]
+    clouds = [_first(work[i].cloud, inputs.blend[i].get("cloud_cover")) for i in range(3)]
+    rain = _first(mid.hourly_liq, _add(blend_mid.get("rain"), blend_mid.get("showers")))
+    fl = _first(mid.fl[0], blend_mid.get("freezing_level_height"))
+    snow_level = {
+        h: None if v is None else max(0.0, v - cfg.snow_level_offset_m) for h, v in fl.items()
+    }
+    mid_factor = _period_factors(periods, mid.ratios, depth)
+    mid_all = _first(
+        {
+            h: None if v is None else v * mid_factor.get(h, depth.k)
+            for h, v in mid.hourly_sw.items()
+        },
+        mid_snow,
+    )
+    today = local(now_h, tz).date()
+    out: list[OutlookDay] = []
+    before: int | None = None
+    for offset in range(-1, bcfg.outlook_days):
+        day = today + timedelta(days=offset)
+        hours = sorted(set(_local_hours(day, 0, 24, tz)))
+        if sum(1 for h in hours if temps[2].get(h) is not None) < 12:
+            continue  # yesterday may be missing; the far end of the forecast stops mid-day
+        night = sorted(
+            {
+                *_local_hours(day - timedelta(days=1), cfg.night_start_hour, 24, tz),
+                *_local_hours(day, 0, cfg.day_start_hour, tz),
+            }
+        )
+        frozen = [bc.refreeze(night, temps[i], clouds[i], bcfg) for i in range(3)]
+        fallen = sum(mid_all.get(h) or 0.0 for h in mid_all if h <= hours[-1])
+        facts = bc.day_weather(
+            hours,
+            snow_cm=snow,
+            speed_kmh=speed,
+            direction=direction,
+            rain_mm=rain,
+            snow_level_m=snow_level,
+            fl_m=fl,
+            temp_top_c=temps[2],
+            temp_mid_c=temps[1],
+            refreeze_status=None if frozen[2].status == "Unknown" else frozen[2].status,
+            on_snow=on_snow or fallen >= 1.0,
+            cfg=bcfg,
+        )
+        levels = bc.factor_levels(facts, bcfg)
+        score = bc.stress(levels)
+        if offset >= 0:
+            sk = bc.sky(
+                hours,
+                {
+                    "low": blend_top.get("cloud_cover_low"),
+                    "mid": blend_top.get("cloud_cover_mid"),
+                    "high": blend_top.get("cloud_cover_high"),
+                },
+                blend_top.get("visibility"),
+                blend_top.get("is_day"),
+            )
+            out.append(
+                OutlookDay(
+                    date=day.isoformat(),
+                    new_cm=r(facts.new_cm),
+                    storm_cm=r(facts.storm_cm),
+                    wind_kmh=r(facts.wind_kmh, 0),
+                    wind_from=facts.wind_from,
+                    loading=facts.loading,
+                    rain_mm=r(facts.rain_mm),
+                    rain_to_m=r(facts.rain_to_m, -1),
+                    fl_max_m=r(facts.fl_max_m, -1),
+                    thaw_h=facts.thaw_h,
+                    temp_rise_c=r(facts.temp_rise_c),
+                    refreeze=[
+                        RefreezeNight(
+                            date=(day - timedelta(days=1)).isoformat(),
+                            band=loc.bands[i].band,
+                            status=f.status,
+                            low_c=f.low_c,
+                            clear_frac=f.clear_frac,
+                        )
+                        for i, f in enumerate(frozen)
+                    ],
+                    sky=SkyDay(
+                        date=day.isoformat(),
+                        cloud_low=sk.cloud_low,
+                        cloud_mid=sk.cloud_mid,
+                        cloud_high=sk.cloud_high,
+                        vis_min_m=sk.vis_min_m,
+                    ),
+                    levels=OutlookLevels(
+                        snow=levels.snow, wind=levels.wind, rain=levels.rain, warm=levels.warm
+                    ),
+                    stress=score,
+                    trend=bc.tendency(before, score),
+                )
+            )
+        before = score
+    return out
 
 
 def _local_hours(day: date, start: int, end: int, tz: ZoneInfo) -> list[int]:

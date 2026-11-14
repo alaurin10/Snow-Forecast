@@ -1,11 +1,11 @@
-// The open location's sections (Forecast, Models, Backcountry, Observed). The location
-// page owns them and shows them as its tabs on every screen; the shell's keys 1–4 pick
-// one, and the rail marks which location is open. All read and set the same state.
-export type Section = 'forecast' | 'models' | 'backcountry' | 'observed';
+// The open location's sections (Forecast, Confidence, Backcountry, Observed). The
+// location page owns them and shows them as its tabs on every screen; the shell's keys
+// 1–4 pick one, and the rail marks which location is open. All read and set the same state.
+export type Section = 'forecast' | 'confidence' | 'backcountry' | 'observed';
 
 export const SECTION_NAMES: Record<Section, string> = {
 	forecast: 'Forecast',
-	models: 'Models',
+	confidence: 'Confidence',
 	backcountry: 'Backcountry',
 	observed: 'Observed'
 };

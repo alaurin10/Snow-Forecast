@@ -141,7 +141,7 @@ snowfall, set `depth_method: raw` and restart the worker; the next forecast run 
 `docker compose run --rm worker snowwatch rebuild`, which rebuilds them now from the
 cached responses)
 switches every total. The trend chart has no step either way, since each run stores
-both. Open a location with a snow station → Observed → Forecast scorecard to see
+both. Open a location with a snow station → Confidence → Track record here to see
 which has been closer.
 
 **Logs:** `docker compose logs -f worker` and `docker compose logs -f api` (one

@@ -21,6 +21,7 @@ export interface ApiTypes {
 	map_wind: MapWindOut;
 	me: Me;
 	meta: MetaOut;
+	nearby: NearbyOut;
 	observations: ObsOut;
 	overlay_files: OverlayFile[];
 	overview: OverviewRow[];
@@ -557,11 +558,58 @@ export interface Me {
  */
 export interface MetaOut {
 	commit: string | null;
+	hazard_index?: boolean;
 	open_meteo_daily_budget: number;
 	powder_cm: number;
 	snowfall_cm_per_mm: number;
 	storm_cm: number;
 	version: string;
+}
+/**
+ * What was measured and reported around a location (the Observed tab): the
+ * closest snow stations and Avalanche Canada's recent field reports, both read from
+ * the files the map's layers use.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "NearbyOut".
+ */
+export interface NearbyOut {
+	location_id: string;
+	radius_km: number;
+	reports: NearbyReport[];
+	reports_at: string | null;
+	reports_days: number | null;
+	stations: NearbyStation[];
+	stations_at: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "NearbyReport".
+ */
+export interface NearbyReport {
+	distance_km: number;
+	report: ObsProps;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsProps".
+ */
+export interface ObsProps {
+	id: string;
+	images: number;
+	kinds: string[];
+	region: string;
+	time: string;
+	title: string;
+	url: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "NearbyStation".
+ */
+export interface NearbyStation {
+	distance_km: number;
+	station: MapStation;
 }
 /**
  * Recent field reports in the map's box.
@@ -586,19 +634,6 @@ export interface ObsFeature {
 	};
 	properties: ObsProps;
 	type?: 'Feature';
-}
-/**
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "ObsProps".
- */
-export interface ObsProps {
-	id: string;
-	images: number;
-	kinds: string[];
-	region: string;
-	time: string;
-	title: string;
-	url: string | null;
 }
 /**
  * One location on the Overview and Calendar pages (mid band).
@@ -933,11 +968,52 @@ export interface Alert {
  * via the `definition` "BackcountryOut".
  */
 export interface BackcountryOut {
+	outlook?: OutlookDay[];
 	refreeze: RefreezeNight[];
 	rose: RoseOut[];
 	sky: SkyDay[];
 	storm: StormOut;
 	warming: WarmingOut;
+}
+/**
+ * One calendar day of avalanche weather: what the forecast would do to the
+ * snowpack, and the day's touring weather. Not a danger rating: it knows nothing of
+ * the snowpack itself. Snow, wind, sky and the thaw are the summit's; rain, the
+ * freezing level and warming are mid's.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OutlookDay".
+ */
+export interface OutlookDay {
+	date: string;
+	fl_max_m: number | null;
+	levels: OutlookLevels;
+	loading?: string[];
+	new_cm: number | null;
+	rain_mm: number | null;
+	rain_to_m: number | null;
+	refreeze?: RefreezeNight[];
+	sky?: SkyDay | null;
+	storm_cm: number | null;
+	stress: number;
+	temp_rise_c: number | null;
+	thaw_h: number;
+	trend: string | null;
+	wind_from: string | null;
+	wind_kmh: number | null;
+}
+/**
+ * How hard each weather factor pushes on the snowpack: 0 nothing, 1 some,
+ * 2 strong, 3 very strong (thresholds in config `backcountry:`).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OutlookLevels".
+ */
+export interface OutlookLevels {
+	rain: number;
+	snow: number;
+	warm: number;
+	wind: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

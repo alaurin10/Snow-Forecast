@@ -19,12 +19,20 @@ snow stations measured, and the official avalanche rating.
   agreement, outliers flagged, and how the forecast changed over the last runs.
 - **Overview, calendar and map**: where and when the snow is, storm cycles, a
   radar and forecast precipitation map with ski runs and 3D terrain.
-- **Backcountry**: avalanche danger exactly as published (hidden once expired),
-  ridge-height wind and loading, warming, rain on snow, refreeze, daylight.
-  Snow Watch never says whether terrain is safe.
+- **Backcountry**: avalanche danger exactly as published (hidden once expired), with
+  each problem's aspects and elevations drawn; a week of "avalanche weather" day by day
+  (new snow, drifting, rain, warming, and how hard the weather pushes on the snowpack,
+  labelled as an estimate); where the wind is loading snow; and touring weather (sky,
+  ridge wind, refreeze, daylight) in one table. Snow Watch never says whether terrain
+  is safe.
+- **Confidence**: how sure the forecast is, in plain words, for the next 5 days and
+  days 6–10: the likely range, where each model stands, the models day by day, the
+  chance of each amount, how the forecast moved over the last runs, and how it has
+  done here.
 - **Resort days**: a Powder / Great / Good / Fair / Poor rating with its reasons.
-- **Snow stations**: SNOTEL and BC snow pillows, and a scorecard of how the
-  forecast did against them.
+- **Observed**: the location's snow station (depth, new snow each day, snow water),
+  measured snow against the forecast, the stations around it by elevation, and recent
+  field reports (Avalanche Canada's Mountain Information Network).
 - **Works like an app**: installs to the home screen, works offline with the last
   forecast and saved map areas, optional push alerts for powder days and storms.
 - **Accessible**: keyboard and screen-reader friendly, light and dark themes,
@@ -71,7 +79,7 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
 | `TILES_MAX_MB` | `2000` | Disk cap for the map tile cache |
 | `PUSH_MAX_SUBSCRIPTIONS` | `500` | Most devices with alerts on |
-| `HAZARD_INDEX` | `on` | The map's experimental avalanche concern index, for every visitor (each browser accepts its warning once); `off` hides it |
+| `HAZARD_INDEX` | `on` | The app's own experimental estimates: the map's avalanche concern index (each browser accepts its warning once) and the Backcountry tab's weather-stress grade; `off` hides both for every visitor |
 
 Forecast models, thresholds and the schedule are in
 [`config/forecast.yaml`](config/forecast.yaml); the approximate treeline bands the map's

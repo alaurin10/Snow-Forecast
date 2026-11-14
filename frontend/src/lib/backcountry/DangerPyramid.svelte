@@ -10,6 +10,7 @@
 	import { dangerWord } from '../conditions';
 	import { weekday } from '../time';
 	import type { LoadState } from '../load';
+	import ProblemRose from './ProblemRose.svelte';
 
 	interface Props {
 		view: AvalancheView | null;
@@ -93,42 +94,51 @@
 		</header>
 
 		{#if status === 'current' && doc}
-			<div class="days">
-				{#each doc.days ?? [] as d (d.date)}
-					<figure class="pyramid">
-						<figcaption>{dayName(d.date)}</figcaption>
-						{#each TIERS as t (t.key)}
-							{@const lvl = d[t.key]}
-							<div class="tier">
-								<span class="tname">{t.name}</span>
-								<span class="bar danger d{lvl ?? 0}" style="width: {t.width}%"
-									>{lvl ?? '–'} · {dangerWord(lvl)}</span
-								>
-							</div>
-						{/each}
-					</figure>
-				{/each}
-			</div>
-			{#if doc.problems?.length}
-				<h3>Avalanche problems</h3>
-				<ul class="problems">
-					{#each doc.problems ?? [] as p, i (i)}
-						<li>
-							<strong>{p.name}</strong>
-							<span class="muted">
-								{[
-									p.likelihood,
-									p.size ? `size ${p.size}` : null,
-									p.aspects?.length ? p.aspects.join(' ') : null,
-									p.elevations?.length ? p.elevations.join(', ') : null
-								]
-									.filter(Boolean)
-									.join(' · ')}
-							</span>
-						</li>
+			<div class="bulletin">
+				<div class="days">
+					{#each doc.days ?? [] as d (d.date)}
+						<figure class="pyramid">
+							<figcaption>{dayName(d.date)}</figcaption>
+							{#each TIERS as t (t.key)}
+								{@const lvl = d[t.key]}
+								<div class="tier">
+									<span class="tname">{t.name}</span>
+									<span class="bar danger d{lvl ?? 0}" style="width: {t.width}%"
+										>{lvl ?? '–'} · {dangerWord(lvl)}</span
+									>
+								</div>
+							{/each}
+						</figure>
 					{/each}
-				</ul>
-			{/if}
+				</div>
+				{#if doc.problems?.length}
+					<div class="probwrap">
+						<h3>Avalanche problems</h3>
+						<ul class="problems">
+							{#each doc.problems ?? [] as p, i (i)}
+								<li>
+									{#if p.aspects?.length}
+										<ProblemRose aspects={p.aspects} elevations={p.elevations ?? []} />
+									{/if}
+									<span class="ptext">
+										<strong>{p.name}</strong>
+										<span class="muted">
+											{[
+												p.likelihood,
+												p.size ? `size ${p.size}` : null,
+												p.aspects?.length ? p.aspects.join(' ') : null,
+												p.elevations?.length ? p.elevations.join(', ') : null
+											]
+												.filter(Boolean)
+												.join(' · ')}
+										</span>
+									</span>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			</div>
 			{#if doc.summary}
 				<blockquote class="summary">{doc.summary}</blockquote>
 			{/if}
@@ -187,10 +197,24 @@
 	.small {
 		font-size: 0.85rem;
 	}
+	.bulletin {
+		display: grid;
+		gap: 14px 28px;
+	}
+	/* Wide: the ratings on the left, the problems beside them. */
+	@media (min-width: 1000px) {
+		.bulletin:has(.probwrap) {
+			grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+			align-items: start;
+		}
+	}
 	.days {
 		display: grid;
 		gap: 14px;
 		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	}
+	.probwrap h3 {
+		margin-top: 0;
 	}
 	.pyramid {
 		margin: 0;
@@ -223,10 +247,21 @@
 	}
 	.problems {
 		margin: 0;
-		padding-left: 18px;
+		padding: 0;
+		list-style: none;
 		font-size: 0.85rem;
 		display: grid;
-		gap: 3px;
+		gap: 8px;
+	}
+	.problems li {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+	}
+	.ptext {
+		display: grid;
+		min-width: 0;
 	}
 	.summary {
 		margin: 10px 0 6px;

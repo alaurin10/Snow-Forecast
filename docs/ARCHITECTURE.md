@@ -58,7 +58,7 @@ backend/snowwatch/
 frontend/src/
   routes/     overview, location/[id], map, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
-              backcountry/ observed/ manage/ share/ + small helpers
+              backcountry/ confidence/ observed/ manage/ share/ + small helpers
               railui.svelte.ts (the desktop rail folded or open over the full-window map)
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend,
@@ -127,16 +127,22 @@ older than `STALE_AFTER_H` (12 h).
   Each model's and the ensemble's records stay at their own 7:1.
 - **Bands**: everything is computed at base, mid and summit at each band's own
   coordinates; freezing level comes from the model or from the upper-air levels.
-- **Backcountry** (no safety judgement, with one bounded exception below): avalanche
-  danger exactly as published and hidden once expired, ridge-height wind, a
-  snow-loading rose, warming, rain on snow, refreeze, cloud above treeline, daylight.
+- **Backcountry** (no safety judgement, with two bounded exceptions below): avalanche
+  danger exactly as published and hidden once expired (each listed problem's aspects
+  and elevations redrawn as a small rose), ridge-height wind, a snow-loading rose,
+  warming, rain on snow, refreeze, cloud above treeline, daylight, and a day-by-day
+  outlook (`backcountry.outlook`, today and six days on, whole calendar days with the
+  high-res model's past days behind them): each day's summit new snow and 72 h total,
+  sustained ridge wind and the slopes it loads, rain onto snow and how high it reaches,
+  the freezing level, hours of thaw at the summit, warming in 24 h, and the refreeze the
+  night before at each band.
   The map's Sun & shade and Wind effect layers are estimates from the shape of the
   terrain (and, for wind, the nearest location's loading rose), labelled as such; they
   describe sun and likely drifting, not stability. Its danger zones are the centers'
   ratings as published, in their colours; its Avalanche problems layer only redraws
   what a bulletin lists (aspects and elevation bands) on the terrain, with treeline
   numbers that are labelled approximate.
-- **The one exception: the map's concern index.** An experimental, app-computed
+- **Exception one: the map's concern index.** An experimental, app-computed
   estimate per slope: `(published danger for the band + wind + sun) × slope × match`
   (`frontend/src/lib/map/terrain/concern.ts`, numbers in `config/forecast.yaml` →
   `terrain:`), drawn in four relative classes in a palette unlike the danger scale's,
@@ -147,14 +153,36 @@ older than `STALE_AFTER_H` (12 h).
   the caption
   "Experimental estimate from the bulletin and terrain shape. Not a forecast. Doesn't
   show runouts or slopes above you." The Inspector shows every factor for a spot.
+- **Exception two: the outlook's weather stress.** Each outlook day grades four factors
+  0–3 (new snow, drifting, rain onto snow, warming) on rule-of-thumb thresholds
+  (`config/forecast.yaml` → `backcountry: outlook_*`, `analysis/backcountry.py`): new
+  snow on the day's or the 72 h total, drifting only with recent snow to move, warming
+  from a sharp 24 h rise or a summit thaw (held at 1 after a good refreeze, one more
+  after none). The day's stress is its strongest factor, one more when two are strong
+  together, with a rising / steady / easing trend. It grades the weather, not the
+  snowpack, and is never a danger rating: it uses its own words (Little, Some, Strong,
+  Very strong) and the concern index's blue-to-magenta hues, never the danger scale's,
+  shows the published danger beside it only for days the bulletin covers, and always
+  carries "An estimate from the forecast, not a danger rating … buried weak layers stay
+  dangerous through quiet weather." `HAZARD_INDEX=off` (`hazard_index` in `/api/meta`)
+  hides the grade and leaves the facts.
 - **Ski-day rating** for resorts: Powder, Great, Good, Fair or Poor, with the
   reasons, from new snow, snow quality, rain, summit gusts, cloud and temperature.
 - **Flags**: powder day, storm incoming, model outlier, low confidence, rain on
   snow, snow-level crossing, wind hold, wind loading, rapid warming, refreeze,
   NWS alert, avalanche danger 4+. Thresholds live in `config/forecast.yaml`.
-- **Trend and scorecard**: each run keeps per-day totals; the Models tab shows how
-  the forecast moved over the last runs, and the scorecard compares the forecast
-  made before each day with what the snow station measured, by calendar day.
+- **Confidence** (the browser, `frontend/src/lib/confidence.ts`): high, medium or low
+  for each window from the ensembles' 10–90% range against the consensus (agreement
+  within 5 cm is always high; small totals are judged against 10 cm), falling back to
+  the models' lowest and highest when there is no ensemble; how the consensus moved
+  between the newest run and the oldest of the last five, over the days both cover.
+- **Trend and scorecard**: each run keeps per-day totals; the Confidence tab shows how
+  the forecast moved over the last runs and each source's track record, and the
+  Observed tab charts the forecast made before each day against what the snow station
+  measured, by calendar day.
+- **Nearby** (`/api/locations/{id}/nearby`): the stations within 60 km and Avalanche
+  Canada's field reports from the last two weeks, read from the files the map's layers
+  use (no upstream calls), for the Observed tab.
 
 ## Storage and retention
 
@@ -193,8 +221,10 @@ and recorded by name. Nightly (`store/retention.py`):
   own index and a fixed list of GIBS layers), `nosniff`,
   frame denial, a referrer policy, a permissions policy, and HSTS in production.
 - **Links** shown to visitors must be http(s); bad upstream links are dropped.
-- **The concern index** (`HAZARD_INDEX`): when it is off, `GET /api/map/concern`
-  answers 404, so the map has nothing to work it out with and doesn't offer it.
+- **The app's estimates** (`HAZARD_INDEX`): when it is off, `GET /api/map/concern`
+  answers 404, so the map has nothing to work out the concern index with and doesn't
+  offer it, and `/api/meta` says `hazard_index: false`, so the Backcountry tab shows the
+  outlook's facts without the weather-stress grade.
 - **Privacy**: no analytics; the owner's contact email goes only to NWS, which
   asks for it; viewers' settings and positions stay in their browsers.
 

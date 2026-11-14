@@ -441,6 +441,13 @@
     },
     "BackcountryOut": {
       "properties": {
+        "outlook": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OutlookDay"
+          },
+          "type": "array"
+        },
         "refreeze": {
           "items": {
             "$ref": "#/$defs/RefreezeNight"
@@ -2352,6 +2359,10 @@
             }
           ]
         },
+        "hazard_index": {
+          "default": true,
+          "type": "boolean"
+        },
         "open_meteo_daily_budget": {
           "type": "integer"
         },
@@ -2377,6 +2388,102 @@
         "snowfall_cm_per_mm"
       ],
       "title": "MetaOut",
+      "type": "object"
+    },
+    "NearbyOut": {
+      "description": "What was measured and reported around a location (the Observed tab): the\nclosest snow stations and Avalanche Canada's recent field reports, both read from\nthe files the map's layers use.",
+      "properties": {
+        "location_id": {
+          "type": "string"
+        },
+        "radius_km": {
+          "type": "number"
+        },
+        "reports": {
+          "items": {
+            "$ref": "#/$defs/NearbyReport"
+          },
+          "type": "array"
+        },
+        "reports_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reports_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stations": {
+          "items": {
+            "$ref": "#/$defs/NearbyStation"
+          },
+          "type": "array"
+        },
+        "stations_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "location_id",
+        "radius_km",
+        "stations_at",
+        "stations",
+        "reports_at",
+        "reports_days",
+        "reports"
+      ],
+      "title": "NearbyOut",
+      "type": "object"
+    },
+    "NearbyReport": {
+      "properties": {
+        "distance_km": {
+          "type": "number"
+        },
+        "report": {
+          "$ref": "#/$defs/ObsProps"
+        }
+      },
+      "required": [
+        "report",
+        "distance_km"
+      ],
+      "title": "NearbyReport",
+      "type": "object"
+    },
+    "NearbyStation": {
+      "properties": {
+        "distance_km": {
+          "type": "number"
+        },
+        "station": {
+          "$ref": "#/$defs/MapStation"
+        }
+      },
+      "required": [
+        "station",
+        "distance_km"
+      ],
+      "title": "NearbyStation",
       "type": "object"
     },
     "ObsFeature": {
@@ -2487,6 +2594,180 @@
         "url"
       ],
       "title": "ObsProps",
+      "type": "object"
+    },
+    "OutlookDay": {
+      "description": "One calendar day of avalanche weather: what the forecast would do to the\nsnowpack, and the day's touring weather. Not a danger rating: it knows nothing of\nthe snowpack itself. Snow, wind, sky and the thaw are the summit's; rain, the\nfreezing level and warming are mid's.",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "fl_max_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "levels": {
+          "$ref": "#/$defs/OutlookLevels"
+        },
+        "loading": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "new_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_to_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "refreeze": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RefreezeNight"
+          },
+          "type": "array"
+        },
+        "sky": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkyDay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "storm_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stress": {
+          "type": "integer"
+        },
+        "temp_rise_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thaw_h": {
+          "type": "integer"
+        },
+        "trend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wind_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wind_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "new_cm",
+        "storm_cm",
+        "wind_kmh",
+        "wind_from",
+        "rain_mm",
+        "rain_to_m",
+        "fl_max_m",
+        "thaw_h",
+        "temp_rise_c",
+        "levels",
+        "stress",
+        "trend"
+      ],
+      "title": "OutlookDay",
+      "type": "object"
+    },
+    "OutlookLevels": {
+      "description": "How hard each weather factor pushes on the snowpack: 0 nothing, 1 some,\n2 strong, 3 very strong (thresholds in config `backcountry:`).",
+      "properties": {
+        "rain": {
+          "type": "integer"
+        },
+        "snow": {
+          "type": "integer"
+        },
+        "warm": {
+          "type": "integer"
+        },
+        "wind": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "snow",
+        "wind",
+        "rain",
+        "warm"
+      ],
+      "title": "OutlookLevels",
       "type": "object"
     },
     "OverlayFile": {
@@ -5517,6 +5798,9 @@
     "meta": {
       "$ref": "#/$defs/MetaOut"
     },
+    "nearby": {
+      "$ref": "#/$defs/NearbyOut"
+    },
     "observations": {
       "$ref": "#/$defs/ObsOut"
     },
@@ -5593,6 +5877,7 @@
     "avalanche",
     "plan",
     "verification",
+    "nearby",
     "status",
     "meta"
   ],

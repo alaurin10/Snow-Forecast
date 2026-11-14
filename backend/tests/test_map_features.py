@@ -389,6 +389,73 @@ def test_api_serves_stations_and_reports_gzipped(client: TestClient, settings: S
     assert r.json()["features"] == []
 
 
+def test_nearby_lists_close_stations_and_reports(
+    client: TestClient, settings: Settings, conn: sqlite3.Connection
+) -> None:
+    from snowwatch.locations.service import import_yaml
+    from snowwatch.settings import REPO_ROOT
+
+    import_yaml(conn, REPO_ROOT / "config" / "seed-locations.yaml", max_locations=25)
+    conn.commit()
+    assert client.get("/api/locations/nowhere/nearby").status_code == 404
+    # Before the worker's first fetch: empty, not an error.
+    empty = client.get("/api/locations/snoqualmie/nearby").json()
+    assert empty["stations"] == [] and empty["reports"] == []
+    assert empty["stations_at"] is None and empty["reports_at"] is None
+
+    def station(sid: str, lat: float, lon: float) -> stations.MapStation:
+        return stations.MapStation(
+            id=sid,
+            name=sid,
+            network="snotel",
+            lat=lat,
+            lon=lon,
+            elev_m=1200,
+            obs_time=None,
+            depth_cm=50,
+            change24_cm=5,
+            daily=[],
+        )
+
+    settings.stations_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.stations_path.write_text(
+        stations.StationsOut(
+            generated_at="2026-11-12T18:00:00+00:00",
+            stations=[
+                station("far", 45.0, -121.4),  # Oregon
+                station("near", 47.45, -121.42),
+                station("nearest", 47.42, -121.41),
+            ],
+        ).model_dump_json()
+    )
+
+    def report(rid: str, lat: float, lon: float, time: str) -> observations.ObsFeature:
+        return observations.ObsFeature(
+            geometry={"type": "Point", "coordinates": [lon, lat]},
+            properties=observations.ObsProps(
+                id=rid, title=rid, time=time, region="x", kinds=["quick"], images=0, url=None
+            ),
+        )
+
+    settings.obs_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.obs_path.write_text(
+        observations.ObsOut(
+            generated_at="2026-11-12T18:00:00+00:00",
+            days=14,
+            features=[
+                report("old", 47.4, -121.4, "2026-11-01T19:00+00:00"),
+                report("new", 47.5, -121.5, "2026-11-11T19:00+00:00"),
+                report("away", 51.3, -117.1, "2026-11-12T19:00+00:00"),
+            ],
+        ).model_dump_json()
+    )
+    body = client.get("/api/locations/snoqualmie/nearby").json()
+    assert [s["station"]["id"] for s in body["stations"]] == ["nearest", "near"]
+    assert body["stations"][0]["distance_km"] < body["stations"][1]["distance_km"] < 60
+    assert [r["report"]["id"] for r in body["reports"]] == ["new", "old"]
+    assert body["reports_days"] == 14 and body["radius_km"] == 60
+
+
 def test_owner_manages_ates_files(client: TestClient, settings: Settings) -> None:
     assert client.get("/api/overlays/ates.geojson").status_code == 404
     # Visitors can't add files.

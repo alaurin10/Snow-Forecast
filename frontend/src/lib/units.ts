@@ -32,8 +32,6 @@ export function converters(units: UnitSystem) {
 		heightUnit: imp ? 'ft' : 'm',
 		speedUnit: imp ? 'mph' : 'km/h',
 		freezing: imp ? 32 : 0,
-		// Exceedance marks: 1, 6 and 12 in, or 2, 15 and 30 cm.
-		snowMarks: imp ? [1, 6, 12] : [2, 15, 30],
 		snowDigits: imp ? 1 : 0,
 		waterDigits: imp ? 2 : 1
 	};
