@@ -2792,10 +2792,12 @@
 	.morewrap {
 		position: relative;
 	}
+	/* Beside the More button, opening upwards from its foot, clear of the row of tabs
+	   and any open control below. */
 	.moremenu {
 		position: absolute;
 		right: calc(100% + 8px);
-		top: 0;
+		bottom: 0;
 		z-index: 2;
 		display: grid;
 		min-width: 190px;

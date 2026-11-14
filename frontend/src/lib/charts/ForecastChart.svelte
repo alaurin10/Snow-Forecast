@@ -1052,6 +1052,7 @@
 				>
 				<span class="mval num">{phone ? k.chip : k.value}</span>
 				<span class="msub">{k.sub}</span>
+				{#if fullscreen}<span class="mone">{k.sub.split(' · ')[0]}</span>{/if}
 			</button>
 		{/each}
 	</div>
@@ -1214,7 +1215,7 @@
 				<span class="tlwin" style:left={timeline.left} style:width={timeline.width}></span>
 				{#each days as d, k (d.date)}
 					<span class="tlday" class:in={k >= timeline.startDay && k <= timeline.endDay}>
-						{#if !phone}<b class="num">{d.amount}</b>{/if}
+						{#if !phone || fullscreen}<b class="num">{d.amount}</b>{/if}
 						<i class="k-{d.kind}" style:height="{d.h * 0.24}px"></i>
 						<small>{phone ? d.short : d.name}</small>
 					</span>
@@ -1392,7 +1393,7 @@
 		/* Clear of the notch and the rounded corners, whether or not the phone reports them.
 		   On a tall screen the controls at the foot sit higher, nearer the thumb. */
 		padding: calc(env(safe-area-inset-top) + 14px) calc(env(safe-area-inset-right) + 6px)
-			calc(env(safe-area-inset-bottom) + clamp(20px, 100dvh - 700px, 56px))
+			calc(env(safe-area-inset-bottom) + clamp(20px, 100dvh - 700px, 32px))
 			calc(env(safe-area-inset-left) + 6px);
 		background: var(--surface);
 		color: var(--text);
@@ -1418,7 +1419,7 @@
 		flex: 1;
 	}
 	.fsfoot .seg button {
-		height: 40px;
+		height: 44px;
 		padding: 0 14px;
 		font-size: 0.88rem;
 	}
@@ -1513,10 +1514,10 @@
 		flex: 1 1 auto;
 		min-height: 60px;
 	}
-	/* The one chart is no taller than it needs to be, so the lower panel, the timeline and
-	   the metrics stay up within reach; any room left over is above the controls. */
+	/* The one chart takes the height left over by the controls, which are big enough to
+	   hit easily, up to a point on the tallest screens. */
 	.fc.fullscreen:not(.lane) .plotrow {
-		max-height: 290px;
+		max-height: 340px;
 	}
 	.fc.fullscreen .plot,
 	.fc.fullscreen .plotrow .yaxis {
@@ -1543,6 +1544,17 @@
 		gap: 1px;
 		border-radius: 12px;
 	}
+	/* Upright on a phone, bigger, with a line of detail under the value. */
+	.fc.fullscreen.phone .mcard {
+		min-width: 92px;
+		max-width: 132px;
+		height: 64px;
+		padding: 5px 10px;
+		border-radius: 12px;
+	}
+	.fc.fullscreen:not(.phone) .mone {
+		display: none;
+	}
 	.fc.fullscreen .mval {
 		font-size: 0.98rem;
 	}
@@ -1552,6 +1564,15 @@
 	}
 	.fc.fullscreen .mtxt.short {
 		display: inline;
+	}
+	/* Under the value, the first part of its detail: "94% chance", "gusts 25 mph". */
+	.mone {
+		font-size: 0.68rem;
+		line-height: 1.2;
+		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.fc.fullscreen .tltrack {
 		height: 46px;
@@ -1563,7 +1584,27 @@
 	}
 	.fc.fullscreen.phone .lplot,
 	.fc.fullscreen.phone .yaxis.lowaxis {
-		height: 56px;
+		height: 68px;
+	}
+	/* The timeline, taller, with each day's snow over its bar. */
+	.fc.fullscreen.phone .tltrack {
+		height: 70px;
+	}
+	.fc.fullscreen.phone .tlstep {
+		height: 68px;
+	}
+	/* A short window (a browser's own bars showing): the plot keeps its share. */
+	@media (max-height: 720px) {
+		.fc.fullscreen.phone .lplot,
+		.fc.fullscreen.phone .yaxis.lowaxis {
+			height: 52px;
+		}
+		.fc.fullscreen.phone .tltrack {
+			height: 58px;
+		}
+		.fc.fullscreen.phone .tlstep {
+			height: 56px;
+		}
 	}
 	.fc.fullscreen.phone .lower .yaxis {
 		display: block;
@@ -1620,6 +1661,10 @@
 	}
 	.fc.lane .plotrow {
 		min-height: 40px;
+	}
+	/* The day names alone under the last lane: the timeline under them has the rest. */
+	.fc.lane .xaxis small {
+		display: none;
 	}
 	.lanehead {
 		display: flex;
