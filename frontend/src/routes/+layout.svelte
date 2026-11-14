@@ -25,7 +25,8 @@
 	import { railUi } from '../lib/railui.svelte';
 	import { sections } from '../lib/sections.svelte';
 	import { skyState } from '../lib/skystate.svelte';
-	import { skyOf } from '../lib/sky';
+	import { darkPhase } from '../lib/sky';
+	import { colorMode, saveSkyDark } from '../lib/mode.svelte';
 	import { snowNum } from '../lib/units';
 	import { getHealth, getOverview, getSnapshot, type Health } from '../lib/api';
 	import type { OverviewRow } from '../lib/types.gen';
@@ -39,18 +40,22 @@
 	let palette = $state(false);
 
 	// Colour mode, theme family and motion live on <html> (static/theme-init.js sets
-	// them before the app starts; this keeps them in step with Settings and the device).
-	let systemDark = $state(
-		typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
-	);
+	// them before the app starts; this keeps them in step with Settings, the device and,
+	// in Auto with Live Sky, the sky: dark from dusk until dawn).
 	$effect(() => {
 		const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
 		if (!mq) return;
-		const on = (e: MediaQueryListEvent) => (systemDark = e.matches);
+		const on = (e: MediaQueryListEvent) => (colorMode.systemDark = e.matches);
 		mq.addEventListener('change', on);
 		return () => mq.removeEventListener('change', on);
 	});
-	const dark = $derived(prefs.theme === 'dark' || (prefs.theme === 'auto' && systemDark));
+	const dark = $derived(colorMode.dark);
+	// The sky's clock: every minute, so an open tab goes from day to dusk to night.
+	$effect(() => skyState.watch());
+	// Night or not, for the next start (theme-init.js), from a real forecast only.
+	$effect(() => {
+		if (skyState.home || skyState.page) saveSkyDark(darkPhase(skyState.live.phase));
+	});
 	$effect(() => {
 		const root = document.documentElement;
 		root.dataset.mode = dark ? 'dark' : 'light';
@@ -87,10 +92,13 @@
 			.then((r) => {
 				rows = r;
 				const first = r.find((x) => x.run_id != null);
-				if (first)
-					getSnapshot(first.id)
-						.then((s) => (skyState.home = skyOf(s)))
+				if (!first) return;
+				// Once the clock runs past its hours, the sky asks for a newer forecast.
+				const load = (fresh: boolean) =>
+					getSnapshot(first.id, { fresh })
+						.then((s) => skyState.set('home', s, () => load(true)))
 						.catch(() => {});
+				load(false);
 			})
 			.catch(() => {});
 	});

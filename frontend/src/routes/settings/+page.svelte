@@ -14,6 +14,8 @@
 	import type { MetaOut, RunOut } from '../../lib/types.gen';
 	import AlertsSettings from '../../lib/components/AlertsSettings.svelte';
 	import { APP_VERSION, outOfDate, shortCommit } from '../../lib/version';
+	import { PHASE_LABEL, PREVIEW_SKIES, WEATHER_LABEL } from '../../lib/sky';
+	import { skyState } from '../../lib/skystate.svelte';
 
 	let health = $state<Health | null>(null);
 	let runs = $state<RunOut[]>([]);
@@ -45,7 +47,7 @@
 		);
 	});
 	const themes: [Theme, string][] = [
-		['auto', 'Match device'],
+		['auto', 'Auto'],
 		['light', 'Light'],
 		['dark', 'Dark']
 	];
@@ -61,6 +63,32 @@
 		['subtle', 'Subtle'],
 		['off', 'Off']
 	];
+	// Live Sky preview: step through the skies (or play them), then back to the live one.
+	let previewAt = $state<number | null>(null);
+	let playing = $state(false);
+	const previewing = $derived(previewAt !== null ? PREVIEW_SKIES[previewAt] : null);
+	$effect(() => {
+		skyState.preview = previewing;
+	});
+	$effect(() => () => (skyState.preview = null));
+	$effect(() => {
+		if (!playing) return;
+		const t = setInterval(() => step(1), 3000);
+		return () => clearInterval(t);
+	});
+	function step(by: number) {
+		const n = PREVIEW_SKIES.length;
+		previewAt = previewAt === null ? (by > 0 ? 0 : n - 1) : (previewAt + by + n) % n;
+	}
+	function stopPreview() {
+		playing = false;
+		previewAt = null;
+	}
+	const previewText = $derived(
+		previewing
+			? `${WEATHER_LABEL[previewing.weather]} · ${PHASE_LABEL[previewing.phase]}`
+			: 'The sky now'
+	);
 	const bands: [BandName, string][] = [
 		['base', 'Base'],
 		['mid', 'Mid'],
@@ -110,6 +138,26 @@
 				{/each}
 			</div>
 		</div>
+		{#if prefs.themeFamily === 'sky'}
+			<div class="row">
+				<span id="preview-label">Preview the sky</span>
+				<div class="preview" role="group" aria-labelledby="preview-label">
+					<button class="btn small pstep" onclick={() => step(-1)} aria-label="Previous sky"
+						>‹</button
+					>
+					<span class="ptext" aria-live="polite" title={previewText}>{previewText}</span>
+					<button class="btn small pstep" onclick={() => step(1)} aria-label="Next sky">›</button>
+					<!-- Play; while playing, Stop; after stepping by hand, back to Live. -->
+					<button
+						class="btn small pplay"
+						aria-pressed={playing}
+						onclick={() =>
+							playing || previewAt !== null ? stopPreview() : ((playing = true), step(1))}
+						>{playing ? 'Stop' : previewAt !== null ? 'Live' : 'Play'}</button
+					>
+				</div>
+			</div>
+		{/if}
 		<div class="row">
 			<span>Motion</span>
 			<div class="seg" role="group" aria-label="Motion">
@@ -121,8 +169,9 @@
 			</div>
 		</div>
 		<p class="faint small hint">
-			Subtle keeps the slow clouds but drops the falling snow. Off stops all movement. Your device’s
-			reduce-motion setting always wins.
+			Auto follows your device and, with Live Sky, turns dark from dusk until dawn. Subtle motion
+			keeps the slow clouds but drops the falling rain and snow and the lightning. Off stops all
+			movement. Your device’s reduce-motion setting always wins.
 		</p>
 	</section>
 
@@ -359,5 +408,30 @@
 	}
 	.hint {
 		margin: -4px 0 0;
+	}
+	/* Fixed widths, so nothing moves as the preview's words change. */
+	.preview {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
+	.pstep {
+		width: 36px;
+		padding: 0;
+		justify-content: center;
+	}
+	.pplay {
+		width: 56px;
+		padding: 0;
+		justify-content: center;
+	}
+	.ptext {
+		width: 14ch;
+		font-size: 0.85rem;
+		text-align: center;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 </style>

@@ -252,7 +252,8 @@
 		justify-content: space-between;
 		align-items: flex-end;
 		gap: 12px;
-		padding: 18px 4px 14px;
+		/* A taller band of sky above the heading, so the weather shows. */
+		padding: 44px 4px 14px;
 	}
 	.date {
 		font-size: 0.86rem;
