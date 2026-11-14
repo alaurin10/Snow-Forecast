@@ -123,8 +123,12 @@ test('a station, a glacier and bare ground open the same panel in the same place
 	await expect(page.locator('[data-map-panel]')).toHaveCount(0);
 
 	// Zoomed out too: the spot first, the glacier a chip after it.
-	await page.getByRole('button', { name: 'Zoom out' }).click();
-	await page.getByRole('button', { name: 'Zoom out' }).click();
+	// Phones have no zoom buttons (pinch, or double tap): the keyboard's minus key.
+	// One level at a time, each finished before the next, so it lands two levels out.
+	await page.locator('.maplibregl-canvas').focus();
+	await page.keyboard.press('Minus');
+	await pin(page);
+	await page.keyboard.press('Minus');
 	p = await pin(page);
 	await page.mouse.click(p.x, p.y + (0.0165 * PX_LAT) / 4);
 	await expect(page.getByRole('dialog', { name: 'This spot · Test Glacier' })).toBeVisible();

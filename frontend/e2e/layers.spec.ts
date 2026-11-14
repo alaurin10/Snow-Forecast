@@ -169,15 +169,27 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	expect(sh).toBeLessThanOrEqual(ch + 1);
 	const plot = full.locator('.plot');
 	expect(await plot.evaluate((e) => getComputedStyle(e).touchAction)).toBe('none');
-	expect((await plot.boundingBox())!.height).toBeGreaterThan(300);
+	expect((await plot.boundingBox())!.height).toBeGreaterThan(250);
 	await expect(full.getByRole('group', { name: 'Chart metric' })).toBeVisible();
 	await expect(full.getByRole('slider', { name: 'Days the chart shows' })).toBeVisible();
+	// Clear of the edges: room at the top, the controls at the foot above the corners.
+	const bar = (await page.locator('.fsbar').boundingBox())!;
+	expect(bar.y).toBeGreaterThanOrEqual(14);
+	const range = page.locator('.fsfoot').getByRole('group', { name: 'Time range' });
+	const rb = (await range.boundingBox())!;
+	expect(vp.height - (rb.y + rb.height)).toBeGreaterThanOrEqual(20);
+	expect(rb.height).toBeGreaterThanOrEqual(40);
+	// The lower panel: cloud cover and the chance of precipitation.
+	await expect(full.locator('.lowcap')).toContainText('Chance of precipitation');
+	await expect(full.locator('.lplot')).toBeVisible();
 
-	// All: four lanes on one time axis; reading one reads them all.
+	// All: every measure, six lanes on one time axis; reading one reads them all.
 	await page.getByRole('button', { name: 'All', exact: true }).click();
 	const lanes = full.locator('.fc.lane:not(.tlonly)');
-	await expect(lanes).toHaveCount(4);
-	await expect(full.locator('.lanehead:visible')).toHaveCount(4);
+	await expect(lanes).toHaveCount(6);
+	await expect(full.locator('.lanehead:visible')).toHaveCount(6);
+	for (const name of ['Cloud cover', 'Snow ratio'])
+		await expect(full.locator('.lanehead:visible', { hasText: name })).toHaveCount(1);
 	const time = full.locator('.ltime:visible');
 	const before = await time.textContent();
 	const wind = (await lanes.nth(2).locator('.plot').boundingBox())!;
@@ -188,4 +200,46 @@ test('phones: the forecast chart opens truly full screen, with an "All" view, an
 	await page.keyboard.press('Escape');
 	await expect(full).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Full screen chart' })).toBeFocused();
+});
+
+test('phones: the map buttons sit bottom right, level with the tabs, and rise over an open control', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'phone', 'the buttons move on phones and tablets');
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	const vp = page.viewportSize()!;
+	const layersBtn = page.getByRole('button', { name: 'Layers' });
+	const tabsRow = page.getByRole('group', { name: 'Map controls' });
+	const weather = tabsRow.getByRole('button', { name: /^Weather: / });
+	// Everything folded: the lowest button level with the row of tabs, beside it.
+	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
+	await expect(weather).toHaveAttribute('aria-pressed', 'false');
+	await page.waitForTimeout(500);
+	const layers = (await layersBtn.boundingBox())!;
+	const tabs = (await tabsRow.boundingBox())!;
+	expect(layers.x + layers.width).toBeGreaterThan(vp.width - 20);
+	expect(Math.abs(layers.y + layers.height - (tabs.y + tabs.height))).toBeLessThan(4);
+	expect(layers.x).toBeGreaterThan(tabs.x + tabs.width);
+	// No zoom buttons (pinch, double tap); the compass stays.
+	await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
+	await expect(page.locator('.maplibregl-ctrl-compass')).toBeVisible();
+	// The rarer tools behind More; a tap on the map closes it.
+	await expect(page.getByRole('button', { name: 'Offline maps' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'More map tools' }).click();
+	const menu = page.getByRole('group', { name: 'More map tools' });
+	for (const name of ['Measure', 'Offline maps', 'About this map'])
+		await expect(menu.getByRole('button', { name })).toBeVisible();
+	await page.mouse.click(60, 200);
+	await expect(menu).toHaveCount(0);
+	// The weather's controls opened: the buttons rise above the whole of them.
+	await weather.click();
+	const panel = page.getByRole('group', { name: 'Weather type' });
+	await expect(panel).toBeVisible();
+	await expect
+		.poll(async () => {
+			const b = (await layersBtn.boundingBox())!;
+			const p = (await panel.boundingBox())!;
+			return b.y + b.height <= p.y;
+		})
+		.toBe(true);
 });

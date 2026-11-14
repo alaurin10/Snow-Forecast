@@ -27,6 +27,11 @@ Notable changes to Snow Watch. The format follows
   shade, the avalanche problems). Choosing a layer opens its controls; a tap on the open
   tab folds it, leaving just the row. The open tab is remembered in this browser. The
   Recent satellite controls are one row, with the longer story behind an (i).
+- **Phones and tablets: the map's buttons are at the bottom right**, under the thumb,
+  the lowest level with the row of tabs at the foot (just above the tab bar), rising
+  above a control when one opens: Layers lowest, then your location, 3D and a More menu (Measure, Offline maps, About this
+  map), with the compass on top. The zoom buttons are gone there (pinch, or double tap),
+  leaving the top of the map clear. Desktop keeps its column at the top left.
 - **Desktop: with the rail folded, its button heads the map's column of buttons**, the
   same size, with the zoom and the rest stacked under it.
 - **A double tap on a phone only zooms.** A tap on the map waits a moment (about a fifth
@@ -122,14 +127,16 @@ Notable changes to Snow Watch. The format follows
 ### Added
 - **Full screen forecast chart on phones and tablets**: an expand button opens the chart
   over the whole screen (the browser's own full screen where it offers one, as on
-  Android; edge to edge on iPhone), with nothing to scroll: a bar with the place, the
-  range (1–10 days) and the view, the chart filling the rest, the metrics as one row of
-  chips and the day timeline always there. "All" stacks snow, temperature, wind and
-  freezing level on one time axis (two by two with the phone on its side); reading any
-  of them reads them all, each lane saying its value at that time. It opens and closes
-  where the chart in the page is, and follows the phone's turn rather than forcing one.
-  In the page, a touch on the chart picks sideways (read it) or up and down (scroll)
-  after its first few pixels.
+  Android; edge to edge on iPhone), clear of the notch and the rounded corners, with
+  nothing to scroll: the place at the top, the chart, the cloud cover and chance of
+  precipitation under it, the metrics as one row of chips, the day timeline, and the
+  range (1–10 days) and the view in a bar at the foot, under the thumb. "All" stacks
+  every measure on one time axis (snow and rain, temperature, wind, cloud cover,
+  freezing level and snow ratio; three by two with the phone on its side, where the
+  range and view move up beside the title); reading any of them reads them all, each
+  lane saying its value at that time. It opens and closes where the chart in the page
+  is, and follows the phone's turn rather than forcing one. In the page, a touch on the
+  chart picks sideways (read it) or up and down (scroll) after its first few pixels.
 - **View a location on the map.** A Map button on each location page opens the map
   centred on it, close in and flat, with its popup open (`/map?loc=<id>`); the popup's
   "Open forecast →" goes back.

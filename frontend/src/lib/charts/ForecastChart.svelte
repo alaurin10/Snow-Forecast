@@ -818,8 +818,8 @@
 	const canExpand = $derived(!viewport.desktop && !embedded && !fullscreen);
 	/** Full screen: the one chart, or every lane stacked ("All"). */
 	let fsView = $state<'chart' | 'all'>('chart');
-	const ALL_LANES: Metric[] = ['precip', 'temp', 'wind', 'fl'];
-	/** A phone on its side: the lanes two by two. */
+	const ALL_LANES: Metric[] = ['precip', 'temp', 'wind', 'cloud', 'fl', 'slr'];
+	/** A phone on its side: the lanes three across, two down. */
 	let sideways = $state(false);
 	$effect(() => {
 		if (!expanded || typeof matchMedia === 'undefined') return;
@@ -1147,6 +1147,12 @@
 			{/if}
 		</div>
 	</div>
+	{#if fullscreen && !lane}
+		<div class="lowcap" aria-hidden="true">
+			<span><i class="sw cloud-sw"></i>Cloud cover</span>
+			<span><i class="sw pop-sw"></i>Chance of precipitation</span>
+		</div>
+	{/if}
 	<div class="lower" aria-hidden="true">
 		<div class="yaxis left lowaxis">
 			{#each [0, 50, 100] as v (v)}<span style:top="{100 - v}%">{v}%</span>{/each}
@@ -1278,19 +1284,6 @@
 				{#if place || band.label}<span>{[place?.name, band.label].filter(Boolean).join(' · ')}</span
 					>{/if}
 			</div>
-			<div class="seg fsrange" role="group" aria-label="Time range">
-				{#each ranges as r (r)}
-					<button aria-pressed={R === r} onclick={() => pickRange(r)}>{r}d</button>
-				{/each}
-			</div>
-			<div class="seg" role="group" aria-label="View">
-				<button aria-pressed={fsView === 'chart'} onclick={() => (fsView = 'chart')}>Chart</button>
-				<button
-					aria-pressed={fsView === 'all'}
-					onclick={() => (fsView = 'all')}
-					title="Snow, temperature, wind and freezing level, stacked">All</button
-				>
-			</div>
 		</header>
 		<div
 			class="fsbody"
@@ -1323,7 +1316,7 @@
 						fullscreen
 						lane
 						first={i === 0}
-						last={sideways ? i >= 2 : i === ALL_LANES.length - 1}
+						last={sideways ? i >= 3 : i === ALL_LANES.length - 1}
 					/>
 				{/each}
 				<ForecastChart
@@ -1339,6 +1332,22 @@
 				/>
 			{/if}
 		</div>
+		<!-- Under the thumb: the range and the view. -->
+		<footer class="fsfoot">
+			<div class="seg fsrange" role="group" aria-label="Time range">
+				{#each ranges as r (r)}
+					<button aria-pressed={R === r} onclick={() => pickRange(r)}>{r}d</button>
+				{/each}
+			</div>
+			<div class="seg" role="group" aria-label="View">
+				<button aria-pressed={fsView === 'chart'} onclick={() => (fsView = 'chart')}>Chart</button>
+				<button
+					aria-pressed={fsView === 'all'}
+					onclick={() => (fsView = 'all')}
+					title="Every measure, stacked on one time axis">All</button
+				>
+			</div>
+		</footer>
 	</div>
 {/if}
 
@@ -1379,8 +1388,9 @@
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;
-		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-			env(safe-area-inset-left);
+		/* Clear of the notch and the rounded corners, whether or not the phone reports them. */
+		padding: calc(env(safe-area-inset-top) + 14px) calc(env(safe-area-inset-right) + 6px)
+			calc(env(safe-area-inset-bottom) + 20px) calc(env(safe-area-inset-left) + 6px);
 		background: var(--surface);
 		color: var(--text);
 	}
@@ -1388,9 +1398,29 @@
 		flex: none;
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 8px 10px;
+		gap: 10px;
+		padding: 6px 10px 12px;
 		border-bottom: 1px solid var(--border);
+	}
+	/* The range and the view, big enough to hit with a thumb. */
+	.fsfoot {
+		flex: none;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 12px 10px 0;
+		border-top: 1px solid var(--border);
+	}
+	.fsfoot .fsrange {
+		flex: 1;
+	}
+	.fsfoot .seg button {
+		height: 40px;
+		padding: 0 14px;
+		font-size: 0.88rem;
+	}
+	.fsfoot .fsrange button {
+		flex: 1;
 	}
 	.fsclose {
 		flex: none;
@@ -1420,12 +1450,39 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	.fsbar .seg {
-		flex: none;
-	}
-	.fsbar .seg button {
-		font-size: 0.76rem;
-		padding: 4px 9px;
+	/* A phone on its side: little height, so the range and view go up beside the title,
+	   and the lower panel steps aside. */
+	@media (orientation: landscape) and (max-height: 500px) {
+		.fsx {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-rows: auto minmax(0, 1fr);
+			padding-top: calc(env(safe-area-inset-top) + 8px);
+			padding-bottom: calc(env(safe-area-inset-bottom) + 10px);
+		}
+		.fsbar {
+			grid-row: 1;
+			grid-column: 1;
+		}
+		.fsfoot {
+			grid-row: 1;
+			grid-column: 2;
+			padding: 6px 10px 12px;
+			border-top: 0;
+			border-bottom: 1px solid var(--border);
+		}
+		.fsfoot .seg button {
+			height: 34px;
+			font-size: 0.8rem;
+		}
+		.fsbody {
+			grid-row: 2;
+			grid-column: 1 / -1;
+		}
+		.fc.fullscreen .lower,
+		.lowcap {
+			display: none !important;
+		}
 	}
 	.fsbody {
 		flex: 1;
@@ -1444,7 +1501,7 @@
 		gap: 8px;
 	}
 	.fc.fullscreen .top,
-	.fc.fullscreen .lower,
+	.fc.lane .lower,
 	.fc.fullscreen .legend,
 	.fc.fullscreen .tlnote {
 		display: none;
@@ -1491,6 +1548,34 @@
 	.fc.fullscreen .tltrack {
 		height: 46px;
 	}
+	/* The lower panel (cloud cover, chance of precipitation), with its scale and a key. */
+	.fc.fullscreen .lplot,
+	.fc.fullscreen .yaxis.lowaxis {
+		height: 64px;
+	}
+	.fc.fullscreen.phone .lower .yaxis {
+		display: block;
+		width: 38px;
+	}
+	.fc.fullscreen.phone .lower .yaxis.right {
+		width: 24px;
+	}
+	.lowcap {
+		display: flex;
+		gap: 14px;
+		margin-bottom: -4px;
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: var(--text-3);
+	}
+	.fc.phone .lowcap {
+		order: 4;
+	}
+	.lowcap span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+	}
 	/* "All": every lane stacked on one time axis, each with its value at the time read;
 	   sideways, two by two. The timeline once, across the foot. */
 	.fsbody.all {
@@ -1498,7 +1583,7 @@
 	}
 	.fsbody.all.sideways {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto;
 		column-gap: 14px;
 	}
