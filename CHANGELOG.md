@@ -7,6 +7,15 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Push alerts come as one digest per forecast update** instead of one notification
+  per location. The title sums it up ("Powder at 3 spots: Alta 14 in Wed"), the body
+  has a line per location (the top three, then "+2 more"), and each digest replaces
+  the last one rather than piling up. A powder day inside a storm shows on the storm's
+  line, and avalanche alerts found in the same run join the digest.
+- **Fewer repeat alerts.** Powder days and storms alert once they're within 5 days
+  (not 10). A flag that drops out and comes back within a day, or a storm whose start
+  moves by a day, doesn't alert again; an event already sent alerts again only if it
+  grows by half and at least 4 in (10 cm), or becomes a warning.
 - **The Overview's share image fits any number of locations.** It is now a table: the
   day names once across the top, then a row per location with its name (on two lines
   when it's long), the week's bars and the total, with the type sized to the number of

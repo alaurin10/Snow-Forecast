@@ -104,3 +104,24 @@ def test_worker_healthcheck(settings: Settings, monkeypatch: pytest.MonkeyPatch)
     old = time.time() - 600
     os.utime(settings.heartbeat_path, (old, old))
     assert cli.main(["healthcheck", "worker"]) == 1
+
+
+def test_avalanche_alerts_join_the_runs_digest(
+    env: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from snowwatch import push
+    from snowwatch.doc import Flag
+    from snowwatch.store.db import connect
+
+    s = env.model_copy(update={"vapid_public_key": "pub", "vapid_private_key": "priv"})
+    cli.main(["init"])
+    conn = connect(s.database)
+    powder = push.Alert(Flag(type="powder_day", severity="notice", date="2026-12-05", value=20))
+    avy = push.Alert(Flag(type="avalanche_danger", severity="warning", date="2026-12-05", value=4))
+    monkeypatch.setattr(push, "alertable_flags", lambda *a, **k: {"crystal": ("Crystal", [powder])})
+    calls: list[push.Found] = []
+    monkeypatch.setattr(push, "notify", lambda c, st, found: calls.append(dict(found)) or 1)
+    Worker(s, config())._notify(conn, 1, {"crystal": ("Crystal", [avy]), "rainy": ("Rainy", [avy])})
+    (found,) = calls  # one send for the run, both kinds together
+    assert [a.flag.type for a in found["crystal"][1]] == ["powder_day", "avalanche_danger"]
+    assert list(found) == ["crystal", "rainy"]

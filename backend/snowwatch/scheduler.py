@@ -98,11 +98,13 @@ class Worker:
                 len(results),
                 fetcher.total_weight,
             )
-            self._avalanche(conn, fetcher)
-            self._notify(conn, run_id)
+            avalanche_alerts = self._avalanche(conn, fetcher)
+            self._notify(conn, run_id, avalanche_alerts)
 
-    def _notify(self, conn: sqlite3.Connection, run_id: int) -> None:
-        """Push alerts for flags first raised in this run. Never fails the run."""
+    def _notify(
+        self, conn: sqlite3.Connection, run_id: int, extra: push.Found | None = None
+    ) -> None:
+        """One push digest for this run's new alerts (plus `extra`). Never fails the run."""
         if not push.enabled(self.settings):
             return
         try:
@@ -112,14 +114,19 @@ class Worker:
                 snap = repo.latest_snapshot(conn, loc_id)
                 if snap is not None and snap.run_id == run_id:
                     snaps.append((loc_id, name, snap))
-            sent = push.notify(conn, self.settings, push.new_flags_for_run(conn, run_id, snaps))
+            found = push.alertable_flags(conn, run_id, snaps)
+            for loc_id, (name, alerts) in (extra or {}).items():
+                found.setdefault(loc_id, (name, []))[1].extend(alerts)
+            sent = push.notify(conn, self.settings, found)
             if sent:
                 log.info("sent %d push alerts", sent)
         except Exception:
             log.exception("push alerts failed")
 
-    def _avalanche(self, conn: sqlite3.Connection, fetcher: Fetcher) -> None:
-        """Avalanche forecasts. A failure is logged and never fails the run."""
+    def _avalanche(self, conn: sqlite3.Connection, fetcher: Fetcher) -> push.Found:
+        """Avalanche forecasts. Returns new High or Extreme ratings to alert, for the
+        caller to send. A failure is logged and never fails the run."""
+        found: push.Found = {}
         try:
             locs = list_locations(conn)
             memo: avalanche.Memo = {}
@@ -134,11 +141,12 @@ class Worker:
                     today = datetime.now(ZoneInfo(loc.tz or "UTC")).date().isoformat()
                     if v is not None and v.status == "current":
                         levels[loc.id] = (loc.name, v.today_max, today)
-                push.notify(conn, self.settings, push.avalanche_alerts(conn, levels))
+                found = push.avalanche_alerts(conn, levels)
             repo.save_source_status(conn, fetcher.sources)
             fetcher.sources.clear()
         except Exception:
             log.exception("avalanche refresh failed")
+        return found
 
     def _avalanche_zones(
         self, fetcher: Fetcher, locs: list[Location], memo: avalanche.Memo
@@ -159,7 +167,13 @@ class Worker:
 
     def refresh_avalanche(self) -> None:
         with self.lock, self._fetcher() as fetcher:
-            self._avalanche(connect(self.settings.database), fetcher)
+            conn = connect(self.settings.database)
+            found = self._avalanche(conn, fetcher)
+            if found:
+                try:
+                    push.notify(conn, self.settings, found)
+                except Exception:
+                    log.exception("push alerts failed")
 
     def process_jobs(self) -> None:
         if not self.lock.acquire(blocking=False):
@@ -180,11 +194,11 @@ class Worker:
                                 ensembles=None,
                                 spacing_s=0,
                             )
-                        self._notify(conn, run_id)
                         failed = [e for r in results if not r.ok for e in r.errors]
                         error = "; ".join(failed) or None
                         with self._fetcher() as fetcher:
-                            self._avalanche(conn, fetcher)
+                            avalanche_alerts = self._avalanche(conn, fetcher)
+                        self._notify(conn, run_id, avalanche_alerts)
                     elif job["kind"] == "lookups":
                         self.refresh_lookups(locked=True)
                     else:
