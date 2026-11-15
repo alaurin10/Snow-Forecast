@@ -447,7 +447,7 @@ export function contourColor(dark: boolean) {
 	return dark ? 'rgba(255,240,220,0.55)' : 'rgba(255,245,230,0.7)';
 }
 
-function contourLayers(dark: boolean, units: UnitSystem, on: boolean): LayerSpecification[] {
+export function contourLayers(dark: boolean, units: UnitSystem, on: boolean): LayerSpecification[] {
 	const unit = units === 'imperial' ? ' ft' : ' m';
 	return [
 		{

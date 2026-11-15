@@ -166,6 +166,7 @@ export async function downloadArea(
 	const shared = sharedUrls(origin);
 	const all = [...shared, ...topo, ...dem];
 	const cache = await caches.open(OFFLINE_CACHE);
+	tellServiceWorker();
 	const p: Progress = { done: 0, total: all.length, bytes: 0, failed: 0 };
 	/** Elevation tiles the source doesn't have (open water, or finer than the area's data). */
 	let absent = 0;
@@ -239,7 +240,16 @@ export async function removeArea(id: string): Promise<void> {
 	const { topo, dem } = areaUrls(gone.lat, gone.lon, origin);
 	const all = [...topo, ...dem, ...legacyDemUrls(gone.lat, gone.lon)];
 	await Promise.all(all.filter((u) => !keep.has(u)).map((u) => cache.delete(u)));
-	if (!Object.keys(areas).length) await caches.delete(OFFLINE_CACHE);
+	if (!Object.keys(areas).length) {
+		await caches.delete(OFFLINE_CACHE);
+		tellServiceWorker();
+	}
+}
+
+/** The service worker sends map tiles past itself while no area is saved: tell it when
+ *  that changes (src/service-worker.ts). */
+function tellServiceWorker() {
+	navigator.serviceWorker?.controller?.postMessage({ type: 'offline-maps' });
 }
 
 export function formatBytes(n: number): string {

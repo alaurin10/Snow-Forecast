@@ -7,6 +7,23 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The map does less wasted work** (performance pass, part 2; nothing it shows changes):
+  - Radar pictures and satellite tiles reach the map as soon as they arrive. They used
+    to wait until a copy was written to the offline cache, which is now written in the
+    background, pruned to two days, and cleared of radar frames the newest timeline no
+    longer lists.
+  - With no area saved for offline use, map tiles skip the service worker altogether.
+  - The map's code starts downloading alongside the forecast list, and the map no longer
+    waits for the contour library (contours appear when it arrives).
+  - On phones, radar waits for Play instead of starting by itself.
+  - Avalanche zones are sent to the map again only when they change (not every 5
+    minutes), and so are stations, field reports and ATES areas (not on every switch or
+    theme change).
+  - Hovering over a measured line's profile moves only its dot.
+  - Refreshes pause while the app is in the background, and catch up when it's back.
+  - The Live Sky backdrop rests behind the full-screen map.
+  - A radar frame asked for twice at once is decoded once; frame downloads stop when
+    you leave the map.
 - **Push alerts come as one digest per forecast update** instead of one notification
   per location. The title sums it up ("Powder at 3 spots: Alta 14 in Wed"), the body
   has a line per location (the top three, then "+2 more"), and each digest replaces

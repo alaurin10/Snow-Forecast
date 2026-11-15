@@ -4,14 +4,18 @@
 //   old) when offline. Owner endpoints (/api/me, /api/auth, /api/admin) are never
 //   cached: they depend on who is signed in. Nor are the map's tap-for-numbers answers
 //   (/api/map/point): every tap is a new spot.
+//   The copy is written in the background, so the page never waits for it; entries past
+//   2 days, and precipitation pictures the newest index no longer names, are pruned.
 // - Map tiles, terrain, label fonts and ski runs saved for offline use (Map → offline
 //   maps; see lib/offlineMaps.ts) are answered from that cache first. Other map tiles
-//   go straight to the network: they are many and big, and the server caches them.
+//   go straight to the network: they are many and big, and the server caches them. With
+//   no area saved (most visitors), tiles don't pass through the service worker at all.
 // - Page loads go to the network first (so a new version shows up) and fall back to
 //   the cached app shell only when the network is unreachable.
 /// <reference lib="webworker" />
 import { self } from '$app/service-worker';
 import { assets, immutable } from '$app/manifest';
+import { precipFiles, route } from './lib/swRoute';
 
 const shellFiles = [
 	'/',
@@ -24,14 +28,18 @@ const API = 'api-v2'; // v1 also held map tiles; dropped on activate
 const API_MAX_AGE_MS = 2 * 24 * 3600 * 1000;
 // Keep in step with OFFLINE_CACHE in lib/offlineMaps.ts.
 const OFFLINE = 'offline-maps-v1';
-const PRIVATE = ['/api/me', '/api/auth/', '/api/admin/', '/api/push/'];
-// A tap on the map asks for its own spot each time: not worth keeping for offline use.
-const UNCACHED = ['/api/map/point'];
-// Elevation tiles: Mapterhorn, and AWS (older saved areas, and the fallback).
-const DEM_HOSTS: Record<string, string> = {
-	'tiles.mapterhorn.com': '/',
-	's3.amazonaws.com': '/elevation-tiles-prod/terrarium/'
-};
+/** Prune the API cache by age at most this often. */
+const PRUNE_EVERY_MS = 3600 * 1000;
+
+/** Whether any map area is saved for offline use; null until the first check. */
+let saved: boolean | null = null;
+const checkSaved = () =>
+	caches.has(OFFLINE).then(
+		(has) => (saved = has),
+		() => (saved = null)
+	);
+void checkSaved();
+let prunedAt = 0;
 
 function hash(s: string): string {
 	let h = 0;
@@ -48,7 +56,10 @@ self.addEventListener('install', (event: ExtendableEvent) => {
 });
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
-	if ((event.data as { type?: string } | null)?.type === 'skip-waiting') void self.skipWaiting();
+	const type = (event.data as { type?: string } | null)?.type;
+	if (type === 'skip-waiting') void self.skipWaiting();
+	// An area was saved or removed (lib/offlineMaps.ts).
+	if (type === 'offline-maps') event.waitUntil(checkSaved());
 });
 
 self.addEventListener('activate', (event: ExtendableEvent) => {
@@ -61,20 +72,50 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 				)
 			)
 			.then(() => self.clients.claim())
+			.then(() => pruneOld())
 	);
 });
 
-async function apiFirst(request: Request): Promise<Response> {
+/** Drop API answers older than the 2 days they may be used for offline. */
+async function pruneOld() {
+	prunedAt = Date.now();
+	const cache = await caches.open(API);
+	for (const req of await cache.keys()) {
+		const res = await cache.match(req);
+		const at = Number(res?.headers.get('x-sw-cached-at') ?? 0);
+		if (Date.now() - at > API_MAX_AGE_MS) await cache.delete(req);
+	}
+}
+
+/** Drop precipitation pictures the newest index no longer names: frame names change
+ *  with every rebuild, so they would otherwise pile up for two days. */
+async function prunePrecip(index: Response) {
+	const keep = precipFiles(await index.json());
+	if (!keep.size) return;
+	const cache = await caches.open(API);
+	for (const req of await cache.keys()) {
+		const path = new URL(req.url).pathname;
+		if (path.startsWith('/api/precip/') && !keep.has(path.slice('/api/precip/'.length)))
+			await cache.delete(req);
+	}
+}
+
+/** Keep a copy of a good answer for offline use, without holding up the page. */
+async function keep(request: Request, copy: Response) {
+	const headers = new Headers(copy.headers);
+	headers.set('x-sw-cached-at', String(Date.now()));
+	const body = await copy.blob();
+	const cache = await caches.open(API);
+	await cache.put(request, new Response(body, { status: copy.status, headers }));
+	if (new URL(request.url).pathname === '/api/precip') await prunePrecip(new Response(body));
+	if (Date.now() - prunedAt > PRUNE_EVERY_MS) await pruneOld();
+}
+
+async function apiFirst(event: FetchEvent): Promise<Response> {
+	const { request } = event;
 	try {
 		const res = await fetch(request);
-		if (res.ok && res.type === 'basic') {
-			const copy = res.clone();
-			const headers = new Headers(copy.headers);
-			headers.set('x-sw-cached-at', String(Date.now()));
-			const body = await copy.blob();
-			const cache = await caches.open(API);
-			await cache.put(request, new Response(body, { status: copy.status, headers }));
-		}
+		if (res.ok && res.type === 'basic') event.waitUntil(keep(request, res.clone()).catch(() => {}));
 		return res;
 	} catch {
 		const cached = await caches.match(request, { cacheName: API });
@@ -120,25 +161,18 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 	const { request } = event;
 	if (request.method !== 'GET') return;
 	const url = new URL(request.url);
-	const demPath = DEM_HOSTS[url.host];
-	if (demPath && url.pathname.startsWith(demPath)) {
-		event.respondWith(savedFirst(request));
-		return;
-	}
-	if (url.origin !== self.location.origin) return;
-	if (url.pathname.startsWith('/api/tiles/') || url.pathname.startsWith('/api/glyphs/')) {
-		event.respondWith(savedFirst(request));
-	} else if (url.pathname.startsWith('/api/osm/')) {
-		event.respondWith(networkThenSaved(request));
-	} else if ([...PRIVATE, ...UNCACHED].some((p) => url.pathname.startsWith(p))) {
-		return; // straight to the network, never cached
-	} else if (url.pathname.startsWith('/api/')) {
-		event.respondWith(apiFirst(request));
-	} else if (request.mode === 'navigate') {
-		event.respondWith(pageNetworkFirst(request));
-	} else if (shellFiles.includes(url.pathname)) {
+	const how = route(url, self.location.origin, {
+		navigate: request.mode === 'navigate',
+		shell: shellFiles.includes(url.pathname),
+		saved
+	});
+	if (how === 'saved') event.respondWith(savedFirst(request));
+	else if (how === 'network-then-saved') event.respondWith(networkThenSaved(request));
+	else if (how === 'api') event.respondWith(apiFirst(event));
+	else if (how === 'page') event.respondWith(pageNetworkFirst(request));
+	else if (how === 'shell')
 		event.respondWith(caches.match(request, { cacheName: SHELL }).then((r) => r ?? fetch(request)));
-	}
+	// 'network': not answered here, so the browser goes straight to the network.
 });
 
 // Push alerts (W3C Web Push). The server sends {title, body, url, tag}. Each run's

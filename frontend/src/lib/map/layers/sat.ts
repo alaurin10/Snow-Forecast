@@ -12,7 +12,9 @@ const HANDOVER_MS = 6000;
 
 /** The ids of the satellite layers drawn now, bottom first. */
 export function recentLayers(map: MlMap): string[] {
-	return (map.getStyle()?.layers ?? []).map((l) => l.id).filter((id) => id.startsWith(PREFIX));
+	// getLayersOrder, not getStyle: the style would copy every source's data (zones,
+	// stations) just to read the ids.
+	return map.getLayersOrder().filter((id) => id.startsWith(PREFIX));
 }
 
 function remove(map: MlMap, id: string) {
