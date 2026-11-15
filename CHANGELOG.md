@@ -207,6 +207,12 @@ Notable changes to Snow Watch. The format follows
   every 30, snow totals hourly. Its memory limit is now 1.5 GB.
 
 ### Added
+- **The map's memory is measured on every change.** A new browser test (`e2e/perf.spec.ts`)
+  opens the map on the phone profile with radar playing, pans and zooms with the slope
+  overlay on, then turns on 3D, and records each browser process's memory, the JS heap,
+  and how long the map and its first radar frame take to appear. It fails if the page's
+  own process passes 520 MB (today ~430 MB at its peak; the aim is 300 MB). The e2e server
+  now serves a day of generated precipitation frames, so the timeline plays in tests.
 - **Full screen forecast chart on phones and tablets**: an expand button opens the chart
   over the whole screen (the browser's own full screen where it offers one, as on
   Android; edge to edge on iPhone), clear of the notch and the rounded corners, with

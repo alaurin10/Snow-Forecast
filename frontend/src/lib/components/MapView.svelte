@@ -1476,6 +1476,7 @@
 
 	/** Put the wanted picture on screen; the old one stays until the new one is decoded. */
 	let showToken = 0;
+	let firstFrame = false;
 	async function show() {
 		if (!map || !timeline) return;
 		const want = pick ?? current;
@@ -1490,6 +1491,10 @@
 		if (token !== showToken || !overlay) return;
 		overlay.draw(want.file, bmp);
 		shown = want.file;
+		if (bmp && !firstFrame) {
+			firstFrame = true;
+			performance.mark('map:frame');
+		}
 		// Have the next one decoded before it's asked for.
 		const next = looping ? frames[(frame + 1) % count] : undefined;
 		if (next) void store.bitmap(next);
@@ -1831,6 +1836,8 @@
 			});
 			map.on('load', () => {
 				if (cancelled) return;
+				// Read by e2e/perf.spec.ts, and in DevTools on a phone.
+				performance.mark('map:load');
 				// Credits start folded to their (i) button, which opens them.
 				el?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 				zoom = map!.getZoom();

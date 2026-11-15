@@ -383,8 +383,10 @@ New `frontend/src/lib/map/terrain/`:
 - Animated layers are single pictures swapped on one canvas; at most 4 decoded at once (as now).
 - First load fetches radar, nowcast and 48 h only (~2–3 MB); the rest on demand.
 - Terrain tiles: < 5 ms each in the worker; mosaic jobs one at a time, cancellable, 768² on phones.
-- Budget: ≤ 300 MB in headless Chrome on the iPhone profile during playback, 3D pan and one
-  terrain overlay (today ~220 MB). Add this as an e2e measurement.
+- Budget: ≤ 300 MB in headless Chrome on the phone profile during playback, 3D pan and one
+  terrain overlay, counted as the page's own (renderer) process. Measured by
+  `frontend/e2e/perf.spec.ts` since the performance pass (see "Performance pass notes"):
+  ~430 MB at its peak in Nov 2026; the test fails above 520 MB until the aim is reached.
 - Server: worker ≤ 1.5 GB; api tile rendering reads memory-mapped grids. Map data on disk
   stays under ~3 GB plus the existing tile cache cap (`TILES_MAX_MB`).
 
@@ -975,6 +977,53 @@ What shipped, and where it differs from the plan above:
   its outline); stations are point measurements, often in clearings; field reports are
   unchecked and sparse early in the season (two in the 30 days to 12 Nov 2026); ATES
   ratings are only as current as the owner's files.
+
+## Performance pass notes (started 15 Nov 2026)
+
+A pass over the map's speed and memory, one PR at a time, each measured against the one
+before. Owner's rule: a full-featured map comes before speed. Nothing removes a feature,
+lowers detail or limits 3D (80° tilt, lidar detail, every overlay draped in 3D, full-size
+pictures); the map does the same work with less waste. Accepted visible changes: radar no
+longer starts playing by itself on phones or in 3D, and the Live Sky backdrop pauses
+behind the map.
+
+**PR 1, measuring (done).** `frontend/e2e/perf.spec.ts`, phone profile (Pixel 7):
+1. Open `/map?loc=rainy` with the slope overlay on.
+2. Play radar for 4 s.
+3. Pan three times and zoom in and out.
+4. Turn on 3D and pan once.
+
+It launches its own Chromium to read every process's proportional set size from `/proc`,
+sampled every 250 ms. It reads the JS heap through CDP. It times the map's `load` and its
+first radar frame from `performance.mark('map:load')` and `performance.mark('map:frame')`,
+which `MapView.svelte` sets, so the same numbers can be read in DevTools on a real phone.
+The e2e server (`e2e/serve.sh`) now writes 37 precipitation frames at the real size
+(1700×1970: 10 radar, 3 nowcast, 24 hourly) with `e2e/precip_fixture.py`. Base map and
+elevation tiles still come from their upstream servers.
+
+Baseline, 15 Nov 2026 (headless Chromium, SwiftShader, this repo's cloud container):
+
+| Step | Whole browser | Page process | GPU process |
+|---|---|---|---|
+| Blank page | 161 MB | 48 MB | 25 MB |
+| Map open, slope on | 471–506 MB | 271 MB | 111 MB |
+| Radar playing | 697–708 MB | 381 MB | 133 MB |
+| Panned and zoomed | 704–738 MB | 409 MB | 151 MB |
+| 3D, panned | 824 MB | 359 MB | 299 MB |
+| Peak | 934–957 MB | 405–431 MB | 322–372 MB |
+
+The JS heap peaks at only 12–15 MB, so the memory is in decoded pictures, canvases,
+worker caches and GPU textures, not in JavaScript objects. The map's `load` takes about
+1.8 s and the first radar frame about 3.6 s.
+
+Under SwiftShader the GPU process holds what a phone keeps in GPU memory. It grows most with
+3D (draped textures) and isn't in the budget. To repeat the measurement by hand on a real
+phone, use remote DevTools: the Performance panel with 4× CPU throttling while panning,
+pinching and playing; the Memory panel; and the two marks in the Timings track.
+
+**Still to do:** PR 2, quick wins (service worker, startup, playback, data sent again); PR 3,
+fewer tiles and cheaper layers; PR 4, terrain worker throughput; PR 5, optional, playback
+memory and backend bytes. Each records its numbers here.
 
 ## Files
 
