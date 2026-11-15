@@ -89,8 +89,10 @@ For each active location (`pipeline.run_all`), 20 s apart to stay polite:
 2. **Build** (`analysis/build.py`) one snapshot document, described below.
 3. **Store**: the gzipped snapshot (newest 8 kept), per-day totals for the trend
    and scorecard, observations, and when each flag was first raised.
-4. **After the run**: avalanche forecasts, then push alerts for flags first
-   raised in this run.
+4. **After the run**: avalanche forecasts, then one push digest per subscribed
+   device covering every location with something new (`push.py`): a powder day or
+   storm alerts once when it comes within 5 days, and again only if it grows a lot;
+   `push_log` keeps flickering flags and storms that shift by a day quiet.
 
 A location that fails keeps its last good snapshot. A run always ends `ok`,
 `partial` or `failed`; runs and jobs interrupted by a restart are marked failed

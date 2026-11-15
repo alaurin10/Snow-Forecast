@@ -156,7 +156,8 @@
 		<p class="small muted">Push alerts aren't set up on the server yet.</p>
 	{:else}
 		<p class="small muted">
-			Get a notification when a powder day or storm first shows up in the forecast.
+			One notification per forecast update, covering all your locations: powder days and storms in
+			the next 5 days, and again only if one gets much bigger.
 		</p>
 		<fieldset>
 			<legend>Send me</legend>

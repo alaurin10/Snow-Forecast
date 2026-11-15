@@ -76,10 +76,16 @@ def test_prune_old_jobs_and_flags(conn: sqlite3.Connection) -> None:
             "INSERT INTO jobs (kind, created_at, status) VALUES ('pull', ?, 'done')",
             (iso(NOW - timedelta(days=200)),),
         )
+        conn.executemany(
+            "INSERT INTO push_log (location_id, type, date, last_seen_at) "
+            "VALUES ('testhill', 'powder_day', ?, ?)",
+            [("old", iso(NOW - timedelta(days=120))), ("new", iso(NOW - timedelta(days=1)))],
+        )
     out = retention.prune(conn, now=NOW)
     keys = {r[0] for r in conn.execute("SELECT key FROM flag_log")}
     assert keys == {"b", NOW.date().isoformat()}
     assert out["jobs"] == 1
+    assert [r[0] for r in conn.execute("SELECT date FROM push_log")] == ["new"]
 
 
 def test_recover_interrupted_runs_and_jobs(conn: sqlite3.Connection) -> None:

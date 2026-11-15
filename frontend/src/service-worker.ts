@@ -141,7 +141,8 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 	}
 });
 
-// Push alerts (W3C Web Push). The server sends {title, body, url, tag}.
+// Push alerts (W3C Web Push). The server sends {title, body, url, tag}. Each run's
+// digest has the same tag, so it replaces the last one; `renotify` still alerts.
 interface PushPayload {
 	title?: string;
 	body?: string;
@@ -156,15 +157,16 @@ self.addEventListener('push', (event: PushEvent) => {
 	} catch {
 		data = { title: event.data?.text() };
 	}
-	event.waitUntil(
-		self.registration.showNotification(data.title ?? 'Snow Watch', {
-			body: data.body ?? '',
-			tag: data.tag,
-			icon: '/icons/icon-192.png',
-			badge: '/icons/icon-192.png',
-			data: { url: data.url ?? '/' }
-		})
-	);
+	// `renotify` is in the spec but not in TypeScript's NotificationOptions.
+	const options: NotificationOptions & { renotify?: boolean } = {
+		body: data.body ?? '',
+		tag: data.tag,
+		renotify: !!data.tag,
+		icon: '/icons/icon-192.png',
+		badge: '/icons/icon-192.png',
+		data: { url: data.url ?? '/' }
+	};
+	event.waitUntil(self.registration.showNotification(data.title ?? 'Snow Watch', options));
 });
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {

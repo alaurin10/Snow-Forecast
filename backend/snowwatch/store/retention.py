@@ -6,6 +6,7 @@
 - runs, jobs: finished ones older than HISTORY_DAYS go, unless a stored forecast
   still refers to the run.
 - flag_log: flags last raised more than HISTORY_DAYS ago.
+- push_log: alerted events last seen more than HISTORY_DAYS ago.
 - obs_daily: observations older than FORECAST_DAYS.
 
 Snapshots (newest 8 per location), avalanche forecasts, the raw cache and map
@@ -53,6 +54,9 @@ def prune(conn: sqlite3.Connection, *, now: datetime | None = None) -> dict[str,
             "DELETE FROM flag_log WHERE (type = 'avalanche_danger' AND key < ?) "
             "OR (type != 'avalanche_danger' AND last_run < ?)",
             (history_day, first_recent_run or 0),
+        ).rowcount
+        out["push_log"] = conn.execute(
+            "DELETE FROM push_log WHERE last_seen_at < ?", (history,)
         ).rowcount
         out["jobs"] = conn.execute(
             "DELETE FROM jobs WHERE status IN ('done', 'failed') AND created_at < ?", (history,)

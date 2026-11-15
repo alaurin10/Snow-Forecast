@@ -8,7 +8,9 @@ import os
 import sqlite3
 import threading
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -18,8 +20,9 @@ from snowwatch import push
 from snowwatch.api.app import create_app
 from snowwatch.doc import Flag
 from snowwatch.locations import service
-from snowwatch.push import SubscribeIn
+from snowwatch.push import Alert, SubscribeIn
 from snowwatch.settings import Settings
+from snowwatch.store.db import MIGRATIONS_DIR
 from tests.helpers import SEED, fixture_snapshot
 
 PUBLIC, PRIVATE = push.generate_keys()
@@ -159,7 +162,15 @@ def powder(date: str = "2026-12-05", cm: float = 23.0) -> Flag:
     return Flag(type="powder_day", severity="notice", date=date, value=cm, first_run=7)
 
 
-def test_only_matching_types_and_locations_one_message_each(
+def storm(date: str = "2026-12-04", cm: float = 40.0, severity: str = "notice") -> Flag:
+    return Flag(type="storm_incoming", severity=severity, date=date, value=cm)
+
+
+def alerts(*flags: Flag) -> list[Alert]:
+    return [Alert(f) for f in flags]
+
+
+def test_one_digest_per_subscription_with_its_types_and_locations(
     on: Settings, conn: sqlite3.Connection
 ) -> None:
     push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
@@ -169,71 +180,222 @@ def test_only_matching_types_and_locations_one_message_each(
             {"subscription": sub_json(2), "locations": ["rainy"], "units": "metric"}
         ),
     )
-    storm = Flag(type="storm_incoming", severity="notice", date="2026-12-04", value=40.0)
     wind = Flag(type="wind_hold", severity="notice", date="2026-12-04", value=80.0)
     fake = FakeSender()
     sent = push.notify(
         conn,
         on,
-        {"crystal": ("Crystal", [powder(), storm, wind]), "rainy": ("Rainy", [storm])},
+        {
+            "crystal": ("Crystal", alerts(powder("2026-12-08"), storm(), wind)),
+            "rainy": ("Rainy", alerts(storm(cm=30.0))),
+        },
         fake,
     )
-    assert sent == 3
-    by = {(e, m["url"]): m for e, m in fake.sent}
-    crystal = by[("https://fcm.googleapis.com/fcm/send/1", "/location/crystal")]
-    # wind_hold isn't in the default types; both others are in one notification.
-    assert crystal["title"] == "Crystal: Powder day Sat, 9 in; storm from Fri: 16 in in 48 h"
-    rainy_metric = by[("https://fcm.googleapis.com/fcm/send/2", "/location/rainy")]
-    assert rainy_metric["title"] == "Rainy: Storm from Fri: 40 cm in 48 h"
-    assert ("https://fcm.googleapis.com/fcm/send/2", "/location/crystal") not in by
+    assert sent == 2  # one notification each, however many locations
+    by = dict(fake.sent)
+    everything = by["https://fcm.googleapis.com/fcm/send/1"]
+    # wind_hold isn't in the default types; the snowiest location comes first.
+    assert everything["title"] == "Snow at 2 spots: Crystal 16 in from Fri"
+    assert everything["body"] == (
+        "Crystal: storm from Fri: 16 in in 48 h; powder day Tue, 9 in\n"
+        "Rainy: storm from Fri: 12 in in 48 h"
+    )
+    assert everything["url"] == "/" and everything["tag"] == push.DIGEST_TAG
+    rainy_only = by["https://fcm.googleapis.com/fcm/send/2"]
+    assert rainy_only["title"] == "Rainy: Storm from Fri: 30 cm in 48 h"
+    assert rainy_only["url"] == "/location/rainy"
+
+
+def test_digest_lines_are_capped() -> None:
+    items = [(f"loc{i}", f"Spot {i}", alerts(powder(cm=10.0 + i))) for i in range(6)]
+    msg = push.digest(items, "metric")
+    assert msg["title"] == "Powder at 6 spots: Spot 5 15 cm Sat"
+    lines = msg["body"].split("\n")
+    assert lines == [
+        "Spot 5: powder day Sat, 15 cm",
+        "Spot 4: powder day Sat, 14 cm",
+        "Spot 3: powder day Sat, 13 cm",
+        "+3 more",
+    ]
+    # Avalanche danger is a warning: it leads, and the digest is just "Alerts".
+    avy = Flag(type="avalanche_danger", severity="warning", date="2026-12-05", value=4.0)
+    mixed = push.digest([("a", "A", alerts(powder())), ("b", "B", alerts(avy))], "metric")
+    assert mixed["title"] == "Alerts at 2 spots: B avalanche danger High"
+
+
+def test_powder_day_inside_a_storm_is_folded_into_it() -> None:
+    msg = push.digest(
+        [("crystal", "Crystal", alerts(powder("2026-12-05"), powder("2026-12-06", 18), storm()))],
+        "imperial",
+    )
+    assert msg["title"] == "Crystal: Storm from Fri: 16 in in 48 h (powder Sat)"
+    assert msg["body"] == "Tap to see the forecast."
+    up = push.digest([("c", "C", [Alert(storm(cm=60.0), was=40.0)])], "metric")
+    assert up["title"] == "C: Storm from Fri, now 60 cm in 48 h"
 
 
 def test_gone_subscriptions_are_removed(on: Settings, conn: sqlite3.Connection) -> None:
     push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
-    push.notify(conn, on, {"crystal": ("Crystal", [powder()])}, FakeSender(410))
+    push.notify(conn, on, {"crystal": ("Crystal", alerts(powder()))}, FakeSender(410))
     assert push.subscriptions(conn) == []
 
 
 def test_repeated_failures_remove_a_subscription(on: Settings, conn: sqlite3.Connection) -> None:
     push.subscribe(conn, SubscribeIn.model_validate({"subscription": sub_json(1)}))
     for _ in range(push.MAX_FAILURES - 1):
-        push.notify(conn, on, {"crystal": ("Crystal", [powder()])}, FakeSender(500))
+        push.notify(conn, on, {"crystal": ("Crystal", alerts(powder()))}, FakeSender(500))
     assert len(push.subscriptions(conn)) == 1
-    push.notify(conn, on, {"crystal": ("Crystal", [powder()])}, FakeSender(500))
+    push.notify(conn, on, {"crystal": ("Crystal", alerts(powder()))}, FakeSender(500))
     assert push.subscriptions(conn) == []
 
 
-def test_new_flags_skip_a_locations_first_run(conn: sqlite3.Connection) -> None:
-    service.import_yaml(conn, SEED, max_locations=25)
-    snap = fixture_snapshot("whistler").model_copy(deep=True)
-    snap.flags = [powder().model_copy(update={"first_run": 2})]
+T0 = datetime(2026, 11, 4, 4, tzinfo=UTC)
 
-    def run(run_id: int) -> None:
-        with conn:
-            conn.execute(
+
+class Runs:
+    """Forecast runs for Whistler (whose forecast starts 2026-11-04), 6 h apart."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        service.import_yaml(conn, SEED, max_locations=25)
+        self.conn = conn
+        self.n = 0
+        self.t = T0
+        self.snap = fixture_snapshot("whistler").model_copy(deep=True)
+
+    def __call__(self, *flags: Flag, after_h: float = 6) -> dict[str, list[tuple[str, Any]]]:
+        self.n += 1
+        self.t += timedelta(hours=after_h)
+        with self.conn:
+            self.conn.execute(
                 "INSERT INTO runs (id, kind, started_at, status) VALUES (?, 'full', 'x', 'ok')",
-                (run_id,),
+                (self.n,),
             )
-            conn.execute(
+            self.conn.execute(
                 "INSERT INTO snapshots (location_id, run_id, created_at, doc_gz) "
                 "VALUES ('whistler', ?, 'x', x'00')",
-                (run_id,),
+                (self.n,),
             )
+        self.snap.flags = [f.model_copy() for f in flags]
+        found = push.alertable_flags(
+            self.conn, self.n, [("whistler", "Whistler", self.snap)], now=self.t
+        )
+        return {
+            loc: [(a.flag.type + " " + (a.flag.date or ""), a.was) for a in al]
+            for loc, (_, al) in found.items()
+        }
 
-    run(2)
-    assert push.new_flags_for_run(conn, 2, [("whistler", "Whistler", snap)]) == {}
-    run(1)  # an earlier forecast exists now
-    out = push.new_flags_for_run(conn, 2, [("whistler", "Whistler", snap)])
-    assert list(out) == ["whistler"]
-    snap.flags[0].first_run = 1  # raised before: not new
-    assert push.new_flags_for_run(conn, 2, [("whistler", "Whistler", snap)]) == {}
+
+def test_a_locations_first_forecast_alerts_nothing(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    assert run(powder("2026-11-06")) == {}
+    assert run(powder("2026-11-06")) == {}  # taken as known
+    assert run(powder("2026-11-06"), powder("2026-11-07")) == {
+        "whistler": [("powder_day 2026-11-07", None)]
+    }
+
+
+def test_a_flickering_flag_alerts_once_a_day_at_most(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    p = powder("2026-11-06", 16)
+    assert run(p) == {"whistler": [("powder_day 2026-11-06", None)]}
+    assert run() == {}  # dropped below the threshold…
+    assert run(p) == {}  # …and back within a day: the same powder day
+    assert run() == {}
+    assert run(p, after_h=26) == {"whistler": [("powder_day 2026-11-06", None)]}
+
+
+def test_a_storm_whose_start_moves_a_day_is_the_same_storm(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    assert run(storm("2026-11-05")) == {"whistler": [("storm_incoming 2026-11-05", None)]}
+    assert run(storm("2026-11-06")) == {}
+    dates = [r[0] for r in conn.execute("SELECT date FROM push_log WHERE type = 'storm_incoming'")]
+    assert dates == ["2026-11-06"]
+    assert run(storm("2026-11-08")) == {"whistler": [("storm_incoming 2026-11-08", None)]}
+
+
+def test_an_event_alerts_again_only_when_it_grows_a_lot(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    assert run(storm("2026-11-05", 30)) == {"whistler": [("storm_incoming 2026-11-05", None)]}
+    assert run(storm("2026-11-05", 36)) == {}  # +20%
+    assert run(storm("2026-11-05", 48)) == {"whistler": [("storm_incoming 2026-11-05", 30.0)]}
+    assert run(storm("2026-11-05", 50, "warning")) == {
+        "whistler": [("storm_incoming 2026-11-05", 48.0)]
+    }
+    assert run(storm("2026-11-05", 52, "warning")) == {}
+
+
+def test_a_powder_day_inside_a_storm_already_sent_stays_quiet(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    assert run(storm("2026-11-05")) == {"whistler": [("storm_incoming 2026-11-05", None)]}
+    assert run(storm("2026-11-05"), powder("2026-11-06")) == {}
+    # Both new in the same run: both go (the digest folds them into one line).
+    assert run(storm("2026-11-08"), powder("2026-11-09"), after_h=30) == {
+        "whistler": [("storm_incoming 2026-11-08", None), ("powder_day 2026-11-09", None)]
+    }
+
+
+def test_only_powder_days_and_storms_within_five_days(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    far = powder("2026-11-11")  # 7 days after the forecast's first day
+    assert run(far) == {}
+    run.snap.days[0].date = "2026-11-06"  # two days later, it's 5 days out
+    assert run(far) == {"whistler": [("powder_day 2026-11-11", None)]}
+    assert run(far) == {}
+
+
+def test_flags_logged_before_push_log_count_as_sent(conn: sqlite3.Connection) -> None:
+    run = Runs(conn)
+    run()
+    with conn:
+        conn.execute(
+            "INSERT INTO push_log (location_id, type, date, value, severity, alerted_at, "
+            "last_seen_at) VALUES ('whistler', 'powder_day', '2026-11-06', NULL, NULL, ?, ?)",
+            (T0.isoformat(), T0.isoformat()),
+        )
+    assert run(powder("2026-11-06", 16)) == {}
+    assert run(powder("2026-11-06", 30)) == {"whistler": [("powder_day 2026-11-06", 16.0)]}
+
+
+def test_migration_seeds_push_log_from_flag_log(tmp_path: Path) -> None:
+    from snowwatch.store.db import connect, migrate
+
+    db = connect(tmp_path / "db.sqlite")
+    names = sorted(p.stem for p in MIGRATIONS_DIR.glob("*.sql"))
+    for name in names:
+        if name >= "006":
+            break
+        db.executescript((MIGRATIONS_DIR / f"{name}.sql").read_text())
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations "
+            "(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO schema_migrations VALUES (?, 'x')", (name,))
+    service.import_yaml(db, SEED, max_locations=25)
+    with db:
+        db.execute(
+            "INSERT INTO runs (id, kind, started_at, status) "
+            "VALUES (3, 'full', '2026-11-04T03:30:00+00:00', 'ok')"
+        )
+        db.executemany(
+            "INSERT INTO flag_log (location_id, type, key, first_run, last_run) "
+            "VALUES ('whistler', ?, ?, 3, 3)",
+            [("powder_day", "2026-11-06"), ("model_outlier", "gfs")],
+        )
+    assert migrate(db) == ["006_push_log"]
+    rows = [tuple(r) for r in db.execute("SELECT type, date, last_seen_at FROM push_log")]
+    assert rows == [("powder_day", "2026-11-06", "2026-11-04T03:30:00+00:00")]
 
 
 def test_avalanche_alert_once_per_day(conn: sqlite3.Connection) -> None:
     service.import_yaml(conn, SEED, max_locations=25)
     levels = {"rainy": ("Rainy", 4, "2026-12-05"), "crystal": ("Crystal", 3, "2026-12-05")}
     first = push.avalanche_alerts(conn, levels)
-    assert list(first) == ["rainy"] and first["rainy"][1][0].value == 4
+    assert list(first) == ["rainy"] and first["rainy"][1][0].flag.value == 4
     assert push.avalanche_alerts(conn, levels) == {}
 
 
