@@ -35,4 +35,6 @@ mkdir -p "$data/osm"
 cat >"$data/osm/ski.geojson" <<'JSON'
 {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[-120.745,48.5],[-120.725,48.5],[-120.725,48.508],[-120.745,48.508],[-120.745,48.5]]]},"properties":{"kind":"glacier","name":"Test Glacier","osm":"w1"}}]}
 JSON
+# Precipitation frames at the real size, so the timeline plays (e2e/perf.spec.ts).
+uv run --frozen python "$here/precip_fixture.py" "$data/precip"
 exec uv run --frozen uvicorn --factory snowwatch.api.app:production_app --port 8019
