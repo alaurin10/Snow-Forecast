@@ -193,7 +193,8 @@ interface Got {
 	missing?: boolean;
 }
 
-class Lru<V> {
+/** A small least-recently-used map. */
+export class Lru<V> {
 	private m = new Map<string, V>();
 	constructor(private max: number) {}
 	get(k: string): V | undefined {
@@ -212,6 +213,11 @@ class Lru<V> {
 	get size() {
 		return this.m.size;
 	}
+	/** The first entry (most recent first) that passes `test`, marked as just used. */
+	find(test: (v: V) => boolean): V | undefined {
+		for (const [k, v] of [...this.m].reverse()) if (test(v)) return this.get(k);
+		return undefined;
+	}
 }
 
 export interface DemOptions {
@@ -219,13 +225,28 @@ export interface DemOptions {
 	fetch?: typeof fetch;
 	/** Decoded tiles kept (about 1 MB each). */
 	maxTiles?: number;
+	/** Files kept as downloaded (a few hundred KB each). */
+	maxFiles?: number;
 	online?: () => boolean;
 }
 
+/** What a request that was called off rejects with. */
+export function aborted(): DOMException {
+	return new DOMException('Aborted', 'AbortError');
+}
+
+/** Work shared by everyone who asked for it; called off when they all have. */
+interface Shared {
+	p: Promise<unknown>;
+	ctl: AbortController;
+	/** Askers who can still call it off (Infinity once one asked without a signal). */
+	waiters: number;
+}
+
 export class DemCache {
-	private got = new Lru<Got>(96);
+	private got: Lru<Got>;
 	private elevs: Lru<Elev>;
-	private pending = new Map<string, Promise<unknown>>();
+	private pending = new Map<string, Shared>();
 	private fails = 0;
 	/** Using the AWS tiles instead of Mapterhorn. */
 	fallback = false;
@@ -237,16 +258,58 @@ export class DemCache {
 		this.decode = o.decode;
 		this.fetcher = o.fetch ?? ((...a) => fetch(...a));
 		this.elevs = new Lru<Elev>(o.maxTiles ?? 40);
+		this.got = new Lru<Got>(o.maxFiles ?? 96);
 		this.online = o.online ?? (() => true);
 	}
 
-	private once<T>(key: string, make: () => Promise<T>): Promise<T> {
-		let p = this.pending.get(key) as Promise<T> | undefined;
-		if (!p) {
-			p = make().finally(() => this.pending.delete(key));
-			this.pending.set(key, p);
+	/**
+	 * One run of `make` per key at a time, shared by everyone who asks meanwhile. An
+	 * asker's `signal` rejects their own promise at once; the work itself (its download)
+	 * stops only when every asker has called it off, and then nothing is cached.
+	 */
+	private once<T>(
+		key: string,
+		make: (signal: AbortSignal) => Promise<T>,
+		signal?: AbortSignal
+	): Promise<T> {
+		if (signal?.aborted) return Promise.reject(aborted());
+		let sh = this.pending.get(key);
+		if (!sh) {
+			const ctl = new AbortController();
+			const entry: Shared = { p: Promise.resolve(), ctl, waiters: 0 };
+			entry.p = make(ctl.signal).finally(() => {
+				if (this.pending.get(key) === entry) this.pending.delete(key);
+			});
+			this.pending.set(key, (sh = entry));
 		}
-		return p;
+		const p = sh.p as Promise<T>;
+		if (!signal) {
+			sh.waiters = Infinity;
+			return p;
+		}
+		const entry = sh;
+		entry.waiters++;
+		return new Promise<T>((resolve, reject) => {
+			const off = () => {
+				if (--entry.waiters <= 0) {
+					entry.ctl.abort();
+					// A new asker starts afresh rather than joining work being called off.
+					if (this.pending.get(key) === entry) this.pending.delete(key);
+				}
+				reject(aborted());
+			};
+			signal.addEventListener('abort', off, { once: true });
+			p.then(
+				(v) => {
+					signal.removeEventListener('abort', off);
+					resolve(v);
+				},
+				(e) => {
+					signal.removeEventListener('abort', off);
+					reject(e);
+				}
+			);
+		});
 	}
 
 	private failed() {
@@ -254,22 +317,36 @@ export class DemCache {
 	}
 
 	/** One tile as the upstream has it. */
-	private source(z: number, x: number, y: number): Promise<Got> {
+	private source(z: number, x: number, y: number, signal?: AbortSignal): Promise<Got> {
 		const key = `${this.fallback ? 'a' : 'm'}${z}/${x}/${y}`;
 		const have = this.got.get(key);
 		if (have) return Promise.resolve(have);
-		return this.once(`g${key}`, async () => {
-			const got = this.fallback ? await this.fromAws(z, x, y) : await this.fromMapterhorn(z, x, y);
-			this.got.set(key, got);
-			return got;
-		});
+		return this.once(
+			`g${key}`,
+			async (sig) => {
+				const got = this.fallback
+					? await this.fromAws(z, x, y, sig)
+					: await this.fromMapterhorn(z, x, y, sig);
+				// Called off: not an answer, so nothing is kept (and it isn't a failure).
+				if (sig.aborted) throw aborted();
+				this.got.set(key, got);
+				return got;
+			},
+			signal
+		);
 	}
 
-	private async fromMapterhorn(z: number, x: number, y: number): Promise<Got> {
+	private async fromMapterhorn(
+		z: number,
+		x: number,
+		y: number,
+		signal?: AbortSignal
+	): Promise<Got> {
 		let res: Response;
 		try {
-			res = await this.fetcher(mapterhornUrl(z, x, y), { mode: 'cors' });
+			res = await this.fetcher(mapterhornUrl(z, x, y), { mode: 'cors', signal });
 		} catch {
+			if (signal?.aborted) throw aborted();
 			this.failed();
 			return { missing: true };
 		}
@@ -287,13 +364,14 @@ export class DemCache {
 	}
 
 	/** The same tile from four AWS 256 px tiles one zoom deeper. */
-	private async fromAws(z: number, x: number, y: number): Promise<Got> {
+	private async fromAws(z: number, x: number, y: number, signal?: AbortSignal): Promise<Got> {
 		if (z + 1 > 15) return { missing: true };
 		try {
 			const quads = await Promise.all(
 				[0, 1, 2, 3].map(async (i) => {
 					const res = await this.fetcher(awsUrl(z + 1, 2 * x + (i % 2), 2 * y + (i >> 1)), {
-						mode: 'cors'
+						mode: 'cors',
+						signal
 					});
 					if (!res.ok) throw new Error(String(res.status));
 					const px = await this.decode(await res.blob());
@@ -308,24 +386,32 @@ export class DemCache {
 				size: quads[0].w * 2
 			};
 		} catch {
+			if (signal?.aborted) throw aborted();
 			return { missing: true };
 		}
 	}
 
-	/** Elevations for a tile, filled in from coarser tiles where it doesn't exist. */
-	elev(z: number, x: number, y: number): Promise<Elev> {
+	/**
+	 * Elevations for a tile, filled in from coarser tiles where it doesn't exist.
+	 * `signal` calls it off for this asker (see `once`).
+	 */
+	elev(z: number, x: number, y: number, signal?: AbortSignal): Promise<Elev> {
 		const key = `${z}/${x}/${y}`;
 		const have = this.elevs.get(key);
 		if (have) return Promise.resolve(have);
-		return this.once(`e${key}`, async () => {
-			const e = await this.build(z, x, y);
-			this.elevs.set(key, e);
-			return e;
-		});
+		return this.once(
+			`e${key}`,
+			async (sig) => {
+				const e = await this.build(z, x, y, sig);
+				this.elevs.set(key, e);
+				return e;
+			},
+			signal
+		);
 	}
 
-	private async build(z: number, x: number, y: number): Promise<Elev> {
-		const got = await this.source(z, x, y);
+	private async build(z: number, x: number, y: number, signal: AbortSignal): Promise<Elev> {
+		const got = await this.source(z, x, y, signal);
 		if (got.bytes) {
 			const px = await this.decode(new Blob([got.bytes]));
 			return { data: decodeTerrarium(px), size: px.width, srcZ: z };
@@ -333,7 +419,7 @@ export class DemCache {
 		if (got.elev) return { data: got.elev, size: got.size!, srcZ: z };
 		if (got.sea) return seaTile(z);
 		if (z === 0) throw new Error('no elevation');
-		const parent = await this.elev(z - 1, x >> 1, y >> 1);
+		const parent = await this.elev(z - 1, x >> 1, y >> 1, signal);
 		if (parent.sea) return seaTile(parent.srcZ);
 		return {
 			data: upsample(parent.data, parent.size, x & 1, y & 1),
@@ -346,24 +432,35 @@ export class DemCache {
 	 * A tile for MapLibre's raster-dem source: the original file when the upstream has
 	 * it (MapLibre decodes it), otherwise filled-in numbers to encode.
 	 */
-	async demTile(z: number, x: number, y: number): Promise<{ bytes: ArrayBuffer } | Elev> {
-		const got = await this.source(z, x, y);
+	async demTile(
+		z: number,
+		x: number,
+		y: number,
+		signal?: AbortSignal
+	): Promise<{ bytes: ArrayBuffer } | Elev> {
+		const got = await this.source(z, x, y, signal);
 		if (got.bytes) return { bytes: got.bytes };
-		return this.elev(z, x, y);
+		return this.elev(z, x, y, signal);
 	}
 
 	/** The tile and its eight neighbours, for edge-aware analysis. */
-	async around(z: number, x: number, y: number): Promise<{ grid: Float32Array; elev: Elev }> {
+	async around(
+		z: number,
+		x: number,
+		y: number,
+		signal?: AbortSignal
+	): Promise<{ grid: Float32Array; elev: Elev }> {
 		const n = 2 ** z;
 		const tiles = await Promise.all(
 			[-1, 0, 1].flatMap((dy) =>
 				[-1, 0, 1].map((dx) => {
 					const ty = y + dy;
 					if (ty < 0 || ty >= n) return Promise.resolve(null);
-					return this.elev(z, (x + dx + n) % n, ty).catch(() => null);
+					return this.elev(z, (x + dx + n) % n, ty, signal).catch(() => null);
 				})
 			)
 		);
+		if (signal?.aborted) throw aborted();
 		const mid = tiles[4];
 		if (!mid) throw new Error('no elevation');
 		const size = mid.size;

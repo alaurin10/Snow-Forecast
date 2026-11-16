@@ -43,6 +43,17 @@ Notable changes to Snow Watch. The format follows
   - The first two forecast hours fade from the last radar nowcast into the model, so the
     hand-over between the two is gradual; tapping the map gives the same mix.
   - The key shows each type's colours as a continuous strip.
+- **3D terrain and overlay tiles no longer wait for the sun and wind layers**
+  (performance pass, part 4; nothing the map shows changes):
+  - The slow whole-view layers (Sun & shade, Wind effect, the concern index) work in a
+    second background worker, started the first time one is opened, so elevation and
+    slope tiles don't queue behind them.
+  - Switching the overlay between slope, aspect and avalanche problems recolours the
+    tiles already worked out instead of working them out again.
+  - Panning back, nudging the map, or setting the date or wind back reuses the sun hours
+    and wind effect already worked out for that view.
+  - Downloads for tiles that have scrolled away are stopped, and a cancelled sun or wind
+    picture stops within a fraction of a second.
 - **The map fetches and draws less that you can't see** (performance pass, part 3;
   nothing it shows changes):
   - The Esri base map stops at the zoom where OpenTopoMap has covered it, and weather

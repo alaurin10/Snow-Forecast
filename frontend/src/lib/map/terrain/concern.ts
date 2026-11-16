@@ -175,6 +175,45 @@ export function concernAt(s: Spot, inp: ConcernInputs, p: ConcernParams): Concer
 	};
 }
 
+/**
+ * `concernAt(…).cls` alone, for the painting loop: the same arithmetic without building
+ * the factors for every pixel. `sector` is the aspect's index into SECTORS.
+ */
+export function concernCls(
+	elev: number,
+	slope: number,
+	sector: number,
+	wind: number | null,
+	sunHours: number | null,
+	inp: ConcernInputs,
+	p: ConcernParams
+): number {
+	const band = bandOf(elev, inp.treeline);
+	const base = inp.danger[band];
+	if (base == null) return -1;
+	const name = SECTORS[sector];
+	let match = p.matchNone;
+	if (inp.problems.length) {
+		match = p.matchOther;
+		for (const pr of inp.problems)
+			if (
+				(!pr.aspects.length || pr.aspects.includes(name)) &&
+				(!pr.bands.length || pr.bands.includes(band))
+			) {
+				match = p.matchListed;
+				break;
+			}
+	}
+	let w = 0;
+	if (inp.wind && wind != null) {
+		if (wind >= p.windEffect && inp.windLoading) w = p.windLoaded;
+		else if (wind <= -p.windEffect) w = p.windScoured;
+	}
+	const sun =
+		inp.sun && sunHours != null && sunHours >= p.sunHours && SUNNY.includes(name) ? p.sun : 0;
+	return concernClass((base + w + sun) * slopeFactor(slope, p.slope) * match, p.classes);
+}
+
 /** The classes as drawn. Blues to magenta: nothing like the danger scale's colours. */
 export const CONCERN_CLASSES = [
 	{ label: 'Lower', color: '#9fc3d9', alpha: 110 },

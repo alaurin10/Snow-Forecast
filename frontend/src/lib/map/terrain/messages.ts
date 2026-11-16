@@ -30,12 +30,23 @@ export interface ConcernJob {
 	windScale: number;
 	/** Today at the place, when sunny slopes count. */
 	sunDate: Ymd | null;
-	/** The forecast zone's polygons ([lon, lat] rings): nothing is drawn outside it. */
-	zone: number[][][][];
+	/** The forecast zone (sent with a `zone` message first): nothing is drawn outside it. */
+	zone: string;
 }
 
 export type WorkerRequest =
-	| { id: number; type: 'init'; maxTiles: number }
+	| {
+			id: number;
+			type: 'init';
+			/** Decoded elevation tiles kept. */
+			maxTiles: number;
+			/** Elevation files kept as downloaded. */
+			maxFiles?: number;
+			/** Overlay tiles whose slope and aspect are kept. */
+			overlayTiles?: number;
+			/** Views kept per whole-view layer. */
+			keepViews?: number;
+	  }
 	| { id: number; type: 'dem'; z: number; x: number; y: number }
 	| {
 			id: number;

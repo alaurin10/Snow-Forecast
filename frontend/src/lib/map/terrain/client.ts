@@ -2,7 +2,7 @@
 //   dem://{z}/{x}/{y}                 elevation for 3D, hillshade and elevation bands
 //   terrain://{mode}/{z}/{x}/{y}?…    the slope, aspect and matching-terrain overlays
 import type { AddProtocolAction } from 'maplibre-gl';
-import type { MatchParams, Sector, TerrainMode } from './analysis';
+import { SECTORS, type MatchParams, type Sector, type TerrainMode } from './analysis';
 import type { Bounds } from './grid';
 import type { ConcernJob, PointFacts, WorkerRequest, WorkerResponse } from './messages';
 import type { SunFacts } from './shade';
@@ -22,10 +22,20 @@ type Body = WorkerRequest extends infer R
 		: never
 	: never;
 
+/** How much a worker keeps (see the `init` message). */
+export interface WorkerSizes {
+	maxTiles: number;
+	maxFiles?: number;
+	overlayTiles?: number;
+	keepViews?: number;
+}
+
 export class TerrainClient {
 	private worker: Worker;
 	private next = 1;
 	private waiting = new Map<number, Pending>();
+	/** Zones told to the worker, oldest first, as it keeps them (the newest six). */
+	private zones = new Map<string, unknown>();
 
 	/** Workers, OffscreenCanvas and ImageBitmap: every browser from 2023 on. */
 	static supported(): boolean {
@@ -41,7 +51,7 @@ export class TerrainClient {
 		}
 	}
 
-	constructor(maxTiles: number) {
+	constructor(sizes: WorkerSizes) {
 		this.worker = new Worker(new URL('./analysis.worker.ts', import.meta.url), { type: 'module' });
 		this.worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
 			const r = ev.data;
@@ -55,7 +65,7 @@ export class TerrainClient {
 			if (r.ok) p.resolve(r);
 			else p.reject(new Error(r.error));
 		};
-		this.ask({ type: 'init', maxTiles }).catch(() => {});
+		this.ask({ type: 'init', ...sizes }).catch(() => {});
 	}
 
 	private post(body: Body): { id: number; done: Promise<WorkerResponse & { ok: true }> } {
@@ -68,13 +78,21 @@ export class TerrainClient {
 	}
 
 	ask(body: Body, signal?: AbortSignal): Promise<WorkerResponse & { ok: true }> {
+		if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
 		const { id, done } = this.post(body);
-		signal?.addEventListener('abort', () => {
+		if (!signal) return done;
+		const off = () => {
 			const p = this.waiting.get(id);
 			if (!p || !this.waiting.delete(id)) return;
 			this.worker.postMessage({ type: 'cancel', id: this.next++, target: id });
 			p.reject(new DOMException('Aborted', 'AbortError'));
-		});
+		};
+		signal.addEventListener('abort', off, { once: true });
+		// Settled: the listener goes, so a signal shared by many asks doesn't gather them.
+		void done.then(
+			() => signal.removeEventListener('abort', off),
+			() => signal.removeEventListener('abort', off)
+		);
 		return done;
 	}
 
@@ -101,8 +119,16 @@ export class TerrainClient {
 		};
 	}
 
-	/** Tell the worker a zone's polygons, so tiles that name it are drawn only inside it. */
-	setZone(zone: string, polys: number[][][][]) {
+	/**
+	 * Tell the worker a zone's polygons, so tiles and concern jobs that name it are drawn
+	 * only inside it. Sent again only when `token` (the zone's geometry, say) changes or
+	 * the worker has let it go.
+	 */
+	setZone(zone: string, polys: number[][][][], token: unknown = polys) {
+		if (this.zones.has(zone) && this.zones.get(zone) === token) return;
+		this.zones.delete(zone);
+		this.zones.set(zone, token);
+		while (this.zones.size > 6) this.zones.delete(this.zones.keys().next().value!);
 		this.ask({ type: 'zone', zone, polys }).catch(() => {});
 	}
 
@@ -137,25 +163,54 @@ export class TerrainClient {
 }
 
 let client: TerrainClient | null = null;
+let jobs: TerrainClient | null = null;
 let registered = false;
-/** Maps using the worker now (see `retainTerrain`). */
+/** Maps using the workers now (see `retainTerrain`). */
 let users = 0;
 
-/** The page's terrain worker while a map holds it (created on first use), else null. */
+const phone = () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 700px)').matches;
+
+/**
+ * The page's tile worker while a map holds it (created on first use), else null: elevation
+ * and overlay tiles, taps and profiles.
+ */
 export function terrainClient(): TerrainClient | null {
 	if (!users || !TerrainClient.supported()) return null;
-	if (!client) {
-		const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 700px)').matches;
-		client = new TerrainClient(phone ? 28 : 48);
-	}
+	client ??= phone()
+		? new TerrainClient({ maxTiles: 28, overlayTiles: 8 })
+		: new TerrainClient({ maxTiles: 48, overlayTiles: 24 });
 	return client;
 }
 
 /**
- * A map holds the terrain worker while it's open (from before it's made). Call the
- * function returned when it closes: when no map holds it, the worker stops and its decoded
- * tiles (tens of MB) are freed, rather than lasting the rest of the visit on pages without
- * a map, and anything that finishes late gets no worker. The next map starts a fresh one.
+ * The page's job worker while a map holds it, else null: the whole-view layers (shade,
+ * sun hours, wind, concern), which can take half a second or more, so tiles never queue
+ * behind them. Made the first time one is asked for. It keeps fewer elevation tiles and
+ * files: it keeps the views' grids instead.
+ */
+export function jobsClient(): TerrainClient | null {
+	if (!users || !TerrainClient.supported()) return null;
+	jobs ??= phone()
+		? new TerrainClient({ maxTiles: 16, maxFiles: 24, keepViews: 1 })
+		: new TerrainClient({ maxTiles: 32, maxFiles: 48, keepViews: 2 });
+	return jobs;
+}
+
+/**
+ * A zone's polygons to the tile worker, and to the job worker if it's running (see
+ * `TerrainClient.setZone`). A concern job tells the job worker itself.
+ */
+export function sendZone(zone: string, polys: number[][][][], token: unknown) {
+	terrainClient()?.setZone(zone, polys, token);
+	jobs?.setZone(zone, polys, token);
+}
+
+/**
+ * A map holds the terrain workers while it's open (from before it's made). Call the
+ * function returned when it closes: when no map holds them, the workers stop and their
+ * decoded tiles (tens of MB) are freed, rather than lasting the rest of the visit on pages
+ * without a map, and anything that finishes late gets no worker. The next map starts
+ * fresh ones.
  */
 export function retainTerrain(): () => void {
 	users++;
@@ -163,9 +218,10 @@ export function retainTerrain(): () => void {
 	return () => {
 		if (!held) return;
 		held = false;
-		if (--users > 0 || !client) return;
-		client.shutdown();
-		client = null;
+		if (--users > 0) return;
+		client?.shutdown();
+		jobs?.shutdown();
+		client = jobs = null;
 	};
 }
 
@@ -186,11 +242,27 @@ async function blank(): Promise<ImageBitmap> {
  * one rule per `;`, its aspects before the colon and its elevation ranges after.
  */
 export function matchQuery(m: MatchParams, zone?: string): string {
-	const rules = m.rules
-		.map(
-			(r) =>
-				`${r.aspects.join('.')}:${r.ranges.map(([lo, hi]) => `${Math.round(lo)}_${Math.round(hi)}`).join(',')}`
+	// The same terrain however the rules are listed, so the overlay's tiles are asked for
+	// again only when what they show changes: aspects in compass order, ranges sorted and
+	// joined where they touch, rules sorted and without repeats.
+	const rules = [
+		...new Set(
+			m.rules.map((r) => {
+				const aspects = SECTORS.filter((s) => r.aspects.includes(s));
+				const ranges = r.ranges
+					.map(([lo, hi]) => [Math.round(lo), Math.round(hi)] as [number, number])
+					.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+				const merged: [number, number][] = [];
+				for (const [lo, hi] of ranges) {
+					const last = merged[merged.length - 1];
+					if (last && lo <= last[1]) last[1] = Math.max(last[1], hi);
+					else merged.push([lo, hi]);
+				}
+				return `${aspects.join('.')}:${merged.map(([lo, hi]) => `${lo}_${hi}`).join(',')}`;
+			})
 		)
+	]
+		.sort()
 		.join(';');
 	const q = new URLSearchParams({ s: String(m.slopeMin), r: rules });
 	if (zone) q.set('zone', zone);
