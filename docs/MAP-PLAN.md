@@ -1246,17 +1246,50 @@ taken here, so it stays open.
 - Memory is within noise. The kept slope and aspect add about 6 MB on phones, and the job
   worker costs nothing until a whole-view layer is opened.
 
-**Still to do.**
+**PR 5, server bytes (done 16 Nov 2026).** This ends the performance pass.
 
-*PR 5, optional, after measuring: playback memory and backend bytes.*
-- Size `DECODED` by device: 4 on phones; on desktop the whole loop within about 150 MB.
-- A smaller precipitation canvas on phones, if it looks the same at phone zooms.
-- In 3D, `releaseAllRTT` at most once per animation frame.
-- Backend:
-  - gzip `/api/precip` and the JSON routes (a `GZipMiddleware` with a minimum size, or
-    the `json_file()` helper in `api/app.py`);
-  - don't write empty snow tiles to disk (`maps/tiles_render.py`); serve a shared empty
-    tile.
+*Compressed answers* (`api/app.py`).
+- Starlette's `GZipMiddleware`, at level 6, for answers over 1 KB.
+  - It covers JSON (the precipitation index, the overview, forecasts, wind) and the
+    app's own scripts and styles.
+  - Pictures (PNG, WebP) and answers `json_file()` has already compressed pass through
+    untouched.
+- It sits inside the logging and security-header middleware. That middleware streams
+  every body, and a streamed body is compressed however small.
+- Behind Cloudflare Tunnel the edge already compresses for visitors. But the bytes leave
+  the home server as sent, over the home connection's upload, which this cuts.
+- Measured on the e2e server:
+
+| Answer | Before | Now |
+|---|---|---|
+| A location's forecast (`/api/locations/rainy`) | 181 KB | 29 KB |
+| The overview | 20.2 KB | 1.9 KB |
+| The precipitation index (fixture, 37 frames) | 7.5 KB | 1.1 KB |
+| Map wind | 6.8 KB | 0.9 KB |
+| The app's scripts and styles, all | 2.28 MB | 0.67 MB |
+
+*Empty snow tiles* (`maps/tiles_render.py`).
+- A tile with no snow (outside the box, a valley, the sea) is the same picture everywhere
+  (`EMPTY`). It is no longer written as a file.
+- The process remembers which tiles were empty (`known_empty`, at most 200,000
+  addresses, oldest forgotten first). An empty tile is neither drawn again nor counted
+  against the drawing rate limit.
+
+*Not done, after measuring.*
+- **More decoded frames on desktop.** Playback loops over the whole timeline, more than
+  60 frames at about 13 MB each, which is far beyond 150 MB. With fewer kept than the
+  loop, a least-recently-used cache misses on every step of a loop, and the next frame
+  is already decoded ahead (`show`). A bigger cache would only cost memory.
+- **A smaller precipitation canvas on phones.** At radar zooms (to 13) one picture pixel
+  already covers many screen pixels, so half the canvas would be visibly softer. The
+  owner's rule for the pass keeps pictures full size.
+- **`releaseAllRTT` once a frame.** The per-frame calls already come from MapLibre's
+  `render` event, once a frame. Another call before the next frame only walks the tiles:
+  the costly redraw of the draped textures happens once a frame however often it's
+  asked for. Merging the calls could leave a fade's last frame stale.
+
+**Still open after the pass:** the DEM pyramid (PR 4), and a check on a real phone of 3D
+with Sun hours on (PR 4, "Measured").
 
 ## Radar look notes (done 16 Nov 2026)
 

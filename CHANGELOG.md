@@ -43,6 +43,12 @@ Notable changes to Snow Watch. The format follows
   - The first two forecast hours fade from the last radar nowcast into the model, so the
     hand-over between the two is gradual; tapping the map gives the same mix.
   - The key shows each type's colours as a continuous strip.
+- **The server sends far fewer bytes** (performance pass, part 5):
+  - Forecasts, the overview, the radar timeline and the app's own code go out
+    compressed: a location's forecast is about a sixth of its old size, the app's code
+    under a third. Pictures are sent as before.
+  - Snow-total tiles with no snow aren't stored any more: they're all the same clear
+    picture.
 - **3D terrain and overlay tiles no longer wait for the sun and wind layers**
   (performance pass, part 4; nothing the map shows changes):
   - The slow whole-view layers (Sun & shade, Wind effect, the concern index) work in a
