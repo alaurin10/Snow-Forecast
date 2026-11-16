@@ -75,6 +75,20 @@ async function mark(page: Page, name: string) {
 	return page.evaluate((n) => Math.round(performance.getEntriesByName(n)[0].startTime), name);
 }
 
+/** How long drawing a frame for the view took (map:draw, precipOverlay.ts): the median
+ *  and the slowest, in ms. */
+async function drawTimes(page: Page) {
+	const ms = await page.evaluate(() =>
+		performance.getEntriesByName('map:draw').map((m) => m.duration)
+	);
+	ms.sort((a, b) => a - b);
+	return {
+		frames_drawn: ms.length,
+		draw_median_ms: round(ms[Math.floor(ms.length / 2)] ?? 0),
+		draw_max_ms: round(ms[ms.length - 1] ?? 0)
+	};
+}
+
 /** Drag the map by (dx, dy) in a few steps, from the middle of the screen. */
 async function drag(page: Page, dx: number, dy: number) {
 	const vp = page.viewportSize()!;
@@ -176,6 +190,7 @@ test('the map stays within its memory budget on a phone', async ({ baseURL }, in
 			peak_mb: Object.fromEntries(Object.entries(peak).map(([k, v]) => [k, round(v)])),
 			after_step_mb: Object.fromEntries(Object.entries(steps).map(([k, v]) => [k, mb(v)])),
 			js_heap_peak_mb: round(heapPeak),
+			...(await drawTimes(page)),
 			map_load_ms: load,
 			first_frame_ms: frame
 		};

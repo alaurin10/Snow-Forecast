@@ -7,6 +7,21 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Smoother radar on the map.** Precipitation is now drawn the way the best weather apps
+  draw it: storms with smooth, sharp outlines and colour running continuously inside, at
+  any zoom, rather than six flat steps stretched into blurred pixels:
+  - Radar arrives from Environment Canada as numbers rather than coloured bands, and the
+    server sends the map numbers too.
+  - The app smooths those numbers and colours them on the phone's graphics chip, at the
+    screen's own resolution, for the part of the map on screen. Frames take less memory
+    than the coloured pictures did, and draw in about 10 ms.
+  - The model forecasts are smoothed where they used to show their grid cells, and the
+    borders between snow, mix and rain follow the weather, not blocks.
+  - Frames fade into one another as the radar plays or the slider moves (in 3D too), and
+    steps through 6- and 12-minute radar more quickly than through hourly forecast.
+  - The first two forecast hours fade from the last radar nowcast into the model, so the
+    hand-over between the two is gradual; tapping the map gives the same mix.
+  - The key shows each type's colours as a continuous strip.
 - **The map does less wasted work** (performance pass, part 2; nothing it shows changes):
   - Radar pictures and satellite tiles reach the map as soon as they arrive. They used
     to wait until a copy was written to the offline cache, which is now written in the

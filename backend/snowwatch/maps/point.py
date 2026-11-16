@@ -28,13 +28,17 @@ from pydantic import BaseModel
 from snowwatch.analysis.backcountry import BackcountryConfig, loading_rose
 from snowwatch.doc import RoseOut
 from snowwatch.maps import bins
-from snowwatch.maps.palette import RATE_BANDS
+from snowwatch.maps.palette import FINE, FINE_KIND, FINE_VALUE, NONE, RATE_BANDS, rate_band
 from snowwatch.maps.region import merc_x, merc_y
 
 HOUR = 3600
 PROBE_STEP = 4  # every 4th pixel each way (~6 km over the West box); render.py writes them
 KIND_NAMES: dict[int, Literal["snow", "mix", "rain"]] = {1: "snow", 2: "mix", 3: "rain"}
 ROSE_WINDOWS = (("next24", 24), ("next72", 72))
+# The forecast frames this soon after the last nowcast frame are shown mixed with it,
+# fading from the nowcast to the model (frontend/src/lib/radar.ts, HANDOVER_S), so taps
+# give the same mix.
+HANDOVER_S = 2 * HOUR
 RIDGE_NEAR_S = 3 * HOUR  # a precipitation frame takes the ridge wind this close in time
 
 
@@ -139,6 +143,27 @@ class Probes:
         return np.atleast_1d(np.asarray(arr[..., r, c], dtype=np.float32))
 
 
+def handover_weight(t: float, last_t: float) -> float:
+    """How much of the last nowcast frame shows in a forecast frame at t: 1 at the
+    nowcast's end, falling to 0 HANDOVER_S later."""
+    if t <= last_t:
+        return 0.0
+    return max(0.0, 1 - (t - last_t) / HANDOVER_S)
+
+
+def _fine_rate(probes: Probes, f: dict[str, Any]) -> tuple[int, float] | None:
+    """A fine-palette frame's type and rate at the point ((NONE, 0) where dry); None for
+    a frame on the older palette, or without a probe."""
+    if f.get("palette") != FINE:
+        return None
+    cell = probes.cell(str(f.get("file", "")))
+    if cell is None:
+        return None
+    i = int(cell[0])
+    code = int(FINE_KIND[i])
+    return (code, float(FINE_VALUE[i])) if code != NONE else (NONE, 0.0)
+
+
 def _num(v: float | None, digits: int = 1) -> float | None:
     if v is None or not math.isfinite(v):
         return None
@@ -186,13 +211,28 @@ def probe(
     row, col = px
     probes = Probes(precip_dir, row, col)
 
-    for f in sorted(index.get("frames", []), key=lambda f: f.get("t", 0)):
-        cell = probes.cell(str(f.get("file", "")))
-        if cell is None:
-            continue
-        band = RATE_BANDS.get(int(cell[0]))
+    timeline = sorted(index.get("frames", []), key=lambda f: f.get("t", 0))
+    # The last nowcast frame (or radar, without one): where the hand-over starts.
+    last = next((f for f in reversed(timeline) if f.get("kind") == "nowcast"), None) or next(
+        (f for f in reversed(timeline) if f.get("kind") == "radar"), None
+    )
+    last_rate = _fine_rate(probes, last) if last is not None else None
+    for f in timeline:
         kind = f.get("kind") or ("radar" if f.get("past") else "forecast")
         span = int(f.get("span_h", 1 if kind == "forecast" else 0))
+        rate = _fine_rate(probes, f)
+        if rate is not None:
+            code, value = rate
+            w = handover_weight(f["t"], last["t"]) if last and kind == "forecast" else 0.0
+            if w > 0 and last_rate is not None:
+                code = last_rate[0] if w * last_rate[1] > (1 - w) * value else code
+                value = w * last_rate[1] + (1 - w) * value
+            band = rate_band(code, value)
+        else:
+            cell = probes.cell(str(f.get("file", "")))
+            if cell is None:
+                continue
+            band = RATE_BANDS.get(int(cell[0]))
         if band is None:
             out.rates.append(
                 PointRate(t=f["t"], kind=kind, span_h=span, type=None, low=None, high=None)

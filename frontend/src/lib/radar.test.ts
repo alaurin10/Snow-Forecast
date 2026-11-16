@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	frameLabel,
+	frameMs,
 	frameSource,
+	handover,
+	HANDOVER_S,
 	loadTimeline,
 	RAMPS,
 	rampTop,
@@ -223,5 +226,45 @@ describe('loadTimeline errors', () => {
 			frames: []
 		});
 		await expect(loadTimeline()).rejects.toMatchObject({ kind: 'building' });
+	});
+});
+
+describe('handover', () => {
+	const fr = (t: number, kind: Frame['kind']): Frame => ({
+		t,
+		past: kind === 'radar',
+		file: `${kind}${t}.png`,
+		south: '',
+		kind,
+		span_h: kind === 'forecast' ? 1 : 0,
+		src: {}
+	});
+	const H = 3600;
+	const frames = [
+		fr(0, 'radar'),
+		fr(720, 'nowcast'),
+		fr(720 + H, 'forecast'),
+		fr(720 + 2 * H, 'forecast')
+	];
+	it('fades the first forecast hours from the last nowcast frame', () => {
+		expect(handover(frames, 2)).toEqual({ from: 1, weight: 0.5 });
+		expect(handover(frames, 3)).toBeNull(); // two hours on: the model alone
+		expect(handover(frames, 0)).toBeNull();
+		expect(handover(frames, 1)).toBeNull();
+		expect(HANDOVER_S).toBe(2 * H);
+	});
+	it('starts from the last radar frame when there is no nowcast', () => {
+		const noNowcast = [fr(0, 'radar'), fr(H / 2, 'forecast')];
+		expect(handover(noNowcast, 1)).toEqual({ from: 0, weight: 0.75 });
+	});
+});
+
+describe('frameMs', () => {
+	it('is quicker through radar than through the forecast', () => {
+		expect(frameMs(360)).toBe(300);
+		expect(frameMs(720)).toBe(300);
+		expect(frameMs(3600)).toBe(450);
+		expect(frameMs(3 * 3600)).toBe(550);
+		expect(frameMs(6 * 3600)).toBe(650);
 	});
 });

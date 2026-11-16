@@ -23,6 +23,8 @@ from snowwatch.maps.palette import (
     RAIN_T,
     SNOW,
     SNOW_T,
+    decode_indices,
+    fine_values,
     hex_rgb,
     paint_typed,
 )
@@ -465,6 +467,18 @@ def picture(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGBA"))
 
 
+def rates(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """A frame on the fine palette back to its rates and types."""
+    idx = decode_indices(path.read_bytes())
+    assert idx is not None
+    return fine_values(idx)
+
+
+def near(value: float, want: float) -> bool:
+    """Within the fine palette's step (~8%) of `want`."""
+    return abs(value - want) <= 0.08 * want
+
+
 def test_forecast_runs_to_ten_days(tmp_path: Path, monkeypatch: Any) -> None:
     region = box_region(44, -125, 54, -110, 30)
     net = ModelsNet()
@@ -482,13 +496,16 @@ def test_forecast_runs_to_ten_days(tmp_path: Path, monkeypatch: Any) -> None:
     assert [f["t"] - T0 for f in six] == [h * H for h in range(90, 241, 6)]
     assert {f["src"]["south"] for f in three} == {"nbm"}  # also NBM's block ending at 48 h
     assert six[-1]["src"] == {"north": "gdps", "south": "nbm"}
-    # In Canada the model's 0.6 mm/h of snow; in the US NBM's 1 mm/h (a darker blue),
-    # with nothing but those two shades down the column: no gap or third colour at the join.
+    # In Canada the model's 0.6 mm/h of snow; in the US NBM's 1 mm/h, running smoothly
+    # from one to the other down the column: no gap, no other type, nothing out of range.
     for f in (six[0], three[0]):
-        img = picture(tmp_path / f["file"])
-        assert tuple(img[0, 5, :3]) == snow[1] and tuple(img[-1, 5, :3]) == snow[2]
-        column = {tuple(px[:3]) for px in img[:, 5]}
-        assert column == {snow[1], snow[2]} and img[..., 3].min() == 255
+        assert f["palette"] == "fine"
+        value, kind = rates(tmp_path / f["file"])
+        assert near(float(value[0, 5]), 0.6) and near(float(value[-1, 5]), 1.0)
+        column = value[:, 5]
+        assert (kind == SNOW_T).all()
+        assert column.min() >= 0.6 * 0.92 and column.max() <= 1.0 * 1.08
+        assert (np.diff(column) >= -0.01).all()  # rises north to south, never dips
     assert "RDPS_10km_FreezingRain-Accum-3h" in net.coverages
     assert "RDPS_10km_Precip-Accum3h" in net.coverages  # the other half of NBM's block
     assert "RDPS_10km_Snow-Accum1h" not in net.coverages  # HRDPS covers the box: no fill
@@ -523,8 +540,8 @@ def test_hourly_frames_fade_from_hrdps_into_the_fill(tmp_path: Path, monkeypatch
     ix = Renderer(tmp_path, net, now=lambda: T0 + 600).forecast(region)
     first = next(f for f in ix["frames"] if f["span_h"] == 1)
     assert first["src"] == {"north": "hrdps", "south": "rdps"}
-    img = picture(tmp_path / first["file"])
-    assert {tuple(px) for px in img.reshape(-1, 4)} == {(*snow[1], 255)}
+    value, kind = rates(tmp_path / first["file"])
+    assert len(np.unique(value)) == 1 and near(float(value[0, 0]), 0.6) and (kind == SNOW_T).all()
     assert "RDPS_10km_Snow-Accum1h" in net.coverages
 
 

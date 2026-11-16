@@ -47,7 +47,9 @@
 	import { RAIL_FOLDED_DROP, RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
 		frameLabel,
+		frameMs,
 		frameSource,
+		handover,
 		loadTimeline,
 		PrecipError,
 		RADAR_GAPS,
@@ -1495,9 +1497,19 @@
 	let overlay: PrecipLayer | null = null;
 	$effect(() => {
 		const o = weatherOpacity(weather);
-		if (ready && map?.getLayer(PrecipLayer.ID))
-			map.setPaintProperty(PrecipLayer.ID, 'raster-opacity', o);
+		if (ready && map) overlay?.setOpacity(o);
 	});
+	const stillMotion =
+		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+	/** How long the picture on screen fades into the next: within a playing frame's time,
+	 *  a little for a slider step, none when asked for less motion. */
+	function fadeMs(): number {
+		if (stillMotion) return 0;
+		if (!playing || !looping) return 180;
+		const a = frames[frame];
+		const b = frames[(frame + 1) % count];
+		return Math.min(260, 0.6 * frameMs(a && b && b.t > a.t ? b.t - a.t : 3600));
+	}
 
 	/** Put the wanted picture on screen; the old one stays until the new one is decoded. */
 	let showToken = 0;
@@ -1507,14 +1519,24 @@
 		const want = pick ?? current;
 		if (!on || !want) {
 			++showToken;
-			overlay?.draw(null, null);
+			overlay?.draw(null, null, stillMotion ? 0 : 150);
 			shown = null;
 			return;
 		}
 		const token = ++showToken;
-		const bmp = await store.bitmap(want);
+		// Radar's first forecast hours fade from the last nowcast frame (radar.ts).
+		const h = weather === 'radar' && looping ? handover(frames, frame) : null;
+		const [bmp, under] = await Promise.all([
+			store.bitmap(want),
+			h ? store.bitmap(frames[h.from]) : null
+		]);
 		if (token !== showToken || !overlay) return;
-		overlay.draw(want.file, bmp);
+		// A fine frame holds numbers: without the index's key to them it can't be shown.
+		const fine = (want as Frame).palette === 'fine';
+		if (fine && !timeline.fine) return;
+		const blend =
+			fine && under && h ? { file: frames[h.from].file, bmp: under, weight: h.weight } : null;
+		overlay.draw(want.file, bmp, fadeMs(), blend, fine ? 'fine' : 'picture');
 		shown = want.file;
 		if (bmp && !firstFrame) {
 			firstFrame = true;
@@ -1591,7 +1613,9 @@
 			const tl = await loadTimeline();
 			loadError = null;
 			// The pictures' box only changes when locations do.
-			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
+			const sameBox =
+				timeline &&
+				JSON.stringify([timeline.bounds, timeline.fine]) === JSON.stringify([tl.bounds, tl.fine]);
 			const next = weatherView(tl, weather, prefs.mapWind);
 			timeline = tl;
 			store.keepOnly([...tl.frames, ...tl.totals, ...Object.values(tl.layers).flat()]);
@@ -1607,7 +1631,8 @@
 					tl.width,
 					tl.height,
 					weatherOpacity(weather),
-					PRECIP_BEFORE
+					PRECIP_BEFORE,
+					tl.fine
 				);
 			}
 			void show();
@@ -1644,8 +1669,9 @@
 		let loops = 0;
 		let id: ReturnType<typeof setTimeout>;
 		const tick = () => {
-			const radarish = frames[frame]?.kind !== 'forecast';
-			id = setTimeout(tick, radarish ? 300 : 450);
+			const a = frames[frame];
+			const b = frames[(frame + 1) % count];
+			id = setTimeout(tick, frameMs(a && b && b.t > a.t ? b.t - a.t : 3600));
 			if (hold > 0) return void hold--;
 			const next = (frame + 1) % count;
 			if ((waiting || !store.has(frames[next])) && waits++ < 10) return;
@@ -1679,7 +1705,7 @@
 			bounds: tl.bounds,
 			opacity: weatherOpacity('totals'),
 			beforeId: PRECIP_BEFORE,
-			pictureId: PrecipLayer.ID
+			pictureIds: PrecipLayer.IDS
 		});
 	});
 

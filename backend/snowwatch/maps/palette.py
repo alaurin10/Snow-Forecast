@@ -245,11 +245,182 @@ def encode(indexed: np.ndarray) -> bytes:
 
 
 def decode_indices(data: bytes) -> np.ndarray | None:
-    """A palette PNG we wrote back to its indices (None if it isn't one)."""
+    """A palette (or, for fine frames, grayscale) PNG we wrote back to its indices (None
+    if it isn't one)."""
     try:
         im = Image.open(io.BytesIO(data))
-        if im.mode != "P":
+        if im.mode not in ("P", "L"):
             return None
         return np.asarray(im)
     except (OSError, ValueError):
         return None
+
+
+# ---- Precipitation frames: the fine palette ----------------------------------------
+#
+# Radar, nowcast and forecast frames carry numbers, not colours: each pixel is an index
+# meaning a type and a rate (each type's rates in many small log steps), written as a
+# grayscale PNG (gray = index). The browser smooths those numbers and colours them at the
+# screen's own resolution (frontend/src/lib/map/precipGl.ts), so storms have smooth,
+# sharp outlines and continuous colour at any zoom, rather than a stretched picture's
+# blurred pixels. The index describes the steps (`fine_spec`), so the browser needs no
+# copy of them. Frames drawn this way say so (`palette: "fine"`); older ones are palette
+# PNGs on PALETTE. FINE_PALETTE/FINE_ALPHA give the same colours here (tests, previews).
+
+FINE = "fine"
+FINE_FROM = 0.03  # mm of water an hour: the lightest drawn, faintly
+FINE_SOLID = 0.15  # fully opaque from here
+# Type code → (ramp, number of steps, top of the last step). Steps ~16% apart (mix ~30%,
+# a short ramp of two colours): smooth to the eye once the map blends neighbouring
+# pixels, and half the file of 7% steps.
+FINE_RAMPS: list[tuple[int, list[tuple[float, str]], int, float]] = [
+    (SNOW_T, SNOW, 36, 6.0),
+    (MIX_T, MIX, 20, 6.0),
+    (RAIN_T, RAIN, 72, 60.0),
+]
+
+
+def _to_oklab(c: RGB) -> np.ndarray:
+    """sRGB to OKLab (Ottosson, 2020): mixing there keeps colours bright and clean, where
+    mixing sRGB values passes through muddy shades (dark green to yellow via olive)."""
+    lin = np.array([((v / 255 + 0.055) / 1.055) ** 2.4 if v > 10 else v / 255 / 12.92 for v in c])
+    m1 = np.array(
+        [
+            [0.4122214708, 0.5363325363, 0.0514459929],
+            [0.2119034982, 0.6806995451, 0.1073969566],
+            [0.0883024619, 0.2817188376, 0.6299787005],
+        ]
+    )
+    m2 = np.array(
+        [
+            [0.2104542553, 0.7936177850, -0.0040720468],
+            [1.9779984951, -2.4285922050, 0.4505937099],
+            [0.0259040371, 0.7827717662, -0.8086757660],
+        ]
+    )
+    out: np.ndarray = m2 @ np.cbrt(m1 @ lin)
+    return out
+
+
+def _from_oklab(lab: np.ndarray) -> RGB:
+    m2 = np.array(
+        [
+            [1.0, 0.3963377774, 0.2158037573],
+            [1.0, -0.1055613458, -0.0638541728],
+            [1.0, -0.0894841775, -1.2914855480],
+        ]
+    )
+    m1 = np.array(
+        [
+            [4.0767416621, -3.3077115913, 0.2309699292],
+            [-1.2684380046, 2.6097574011, -0.3413193965],
+            [-0.0041960863, -0.7034186147, 1.7076147010],
+        ]
+    )
+    lin = np.clip(m1 @ (m2 @ lab) ** 3, 0, 1)
+    srgb = [1.055 * v ** (1 / 2.4) - 0.055 if v > 0.0031308 else 12.92 * v for v in lin]
+    return round(srgb[0] * 255), round(srgb[1] * 255), round(srgb[2] * 255)
+
+
+def _ramp_rgb(ramp: list[tuple[float, str]], value: float) -> RGB:
+    """A ramp's colour at `value`, running smoothly (in log value, mixed in OKLab) from stop
+    to stop; the first stop's colour below it, the last's above it."""
+    lows = [low for low, _ in ramp]
+    cols = [hex_rgb(c) for _, c in ramp]
+    if value <= lows[0]:
+        return cols[0]
+    if value >= lows[-1]:
+        return cols[-1]
+    for i in range(len(lows) - 1):
+        if lows[i] <= value < lows[i + 1]:
+            f = (np.log(value) - np.log(lows[i])) / (np.log(lows[i + 1]) - np.log(lows[i]))
+            a, b = _to_oklab(cols[i]), _to_oklab(cols[i + 1])
+            return _from_oklab(a + (b - a) * f)
+    return cols[-1]
+
+
+def _fine_tables() -> tuple[list[RGB], bytes, np.ndarray, np.ndarray, dict[int, tuple[int, int]]]:
+    rgb: list[RGB] = [(0, 0, 0)]
+    alpha = [0]
+    kind = np.zeros(256, np.uint8)
+    value = np.full(256, np.nan, np.float32)
+    offsets: dict[int, tuple[int, int]] = {}
+    for code, ramp, n, top in FINE_RAMPS:
+        offsets[code] = (len(rgb), n)
+        edges = np.geomspace(FINE_FROM, top, n + 1)
+        for i in range(n):
+            v = float(np.sqrt(edges[i] * edges[i + 1]))
+            kind[len(rgb)] = code
+            value[len(rgb)] = v
+            rgb.append(_ramp_rgb(ramp, v))
+            a = np.clip(np.log(v / FINE_FROM) / np.log(FINE_SOLID / FINE_FROM), 0, 1)
+            alpha.append(round(255 * (0.25 + 0.75 * a)))
+    rgb += [(0, 0, 0)] * (256 - len(rgb))
+    alpha += [0] * (256 - len(alpha))
+    return rgb, bytes(alpha), kind, value, offsets
+
+
+FINE_PALETTE, FINE_ALPHA, FINE_KIND, FINE_VALUE, _FINE_AT = _fine_tables()
+
+
+def fine_index(amount: np.ndarray, kind: np.ndarray) -> np.ndarray:
+    """Rates (mm of water an hour) and type codes to the fine palette's indices; below
+    FINE_FROM, NaN, or without a type, clear (0)."""
+    out = np.zeros(amount.shape, np.uint8)
+    a = np.nan_to_num(amount, nan=0.0)
+    for code, _, n, top in FINE_RAMPS:
+        sel = (kind == code) & (a >= FINE_FROM)
+        if not sel.any():
+            continue
+        start, _ = _FINE_AT[code]
+        step = np.floor(np.log(a[sel] / FINE_FROM) / np.log(top / FINE_FROM) * n)
+        out[sel] = (np.clip(step, 0, n - 1) + start).astype(np.uint8)
+    return out
+
+
+def fine_values(indexed: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """A fine-palette frame back to rates (0 where clear) and type codes."""
+    return np.nan_to_num(FINE_VALUE[indexed], nan=0.0), FINE_KIND[indexed]
+
+
+def encode_fine(indexed: np.ndarray) -> bytes:
+    """Fine-palette indices as a grayscale PNG (gray = index), for the browser to colour."""
+    buf = io.BytesIO()
+    Image.fromarray(indexed, "L").save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def preview_fine(indexed: np.ndarray) -> np.ndarray:
+    """Fine-palette indices as RGBA, coloured as the steps are (for tests and previews;
+    the map colours them in the browser, smoothly)."""
+    pal = np.array([(*c, a) for c, a in zip(FINE_PALETTE, FINE_ALPHA, strict=True)], np.uint8)
+    out: np.ndarray = pal[indexed]
+    return out
+
+
+def fine_spec() -> dict[str, object]:
+    """The fine steps as the index describes them to the browser: each type's first
+    index, number of steps and top rate, the lightest rate drawn and where it's solid."""
+    names = {SNOW_T: "snow", MIX_T: "mix", RAIN_T: "rain"}
+    return {
+        "from": FINE_FROM,
+        "solid": FINE_SOLID,
+        "ramps": [
+            {"type": names[code], "start": _FINE_AT[code][0], "steps": n, "top": top}
+            for code, _, n, top in FINE_RAMPS
+        ],
+    }
+
+
+def rate_band(code: int, value: float) -> tuple[int, float, float] | None:
+    """A typed rate to its step on the type's ramp: (type, lower bound, upper bound, NaN
+    for the top step), as RATE_BANDS gives for PALETTE frames. None below the ramp's first
+    step (drawn faintly, but too light to call wet)."""
+    ramp = {SNOW_T: SNOW, MIX_T: MIX, RAIN_T: RAIN}.get(code)
+    if ramp is None or not value >= ramp[0][0]:
+        return None
+    for j, (low, _) in enumerate(ramp):
+        high = ramp[j + 1][0] if j + 1 < len(ramp) else float("nan")
+        if not value >= high:  # also true for the top step's NaN
+            return code, float(low), high
+    return None

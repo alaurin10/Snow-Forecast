@@ -4,14 +4,15 @@
 The composite includes the US NEXRAD radars, at 1 km every 6 minutes, 16.9–67.2°N.
 For each time we ask GeoMet for three pictures over the whole region:
 
-  RADAR_1KM_RRAI           rate if it's rain (mm/h), drawn on our RAIN ramp by our SLD
-  RADAR_1KM_RSNO           rate if it's snow (cm/h ≈ mm of water/h), on our SNOW ramp
+  RADAR_1KM_RRAI           rate if it's rain (mm/h), coded by our SLD (geomet.code_sld)
+  RADAR_1KM_RSNO           rate if it's snow (cm/h ≈ mm of water/h), coded the same way
   Radar_1km_SfcPrecipType  the type (12 classes), in GeoMet's own style
 
-and combine them: snow pixels take the snow colour, rain pixels the rain colour, mixed
-and freezing pixels the MIX ramp by the rain rate. The type product leaves the lightest
-echoes unclassified, so an echo without a type takes the nearest type within a few
-kilometres, then the forecast's type for that hour, else rain.
+and combine them into a rate and a type per pixel: snow pixels take the snow rate, rain
+pixels the rain rate, mixed and freezing pixels the rain rate (the snow rate where only
+the snow picture has echo); the renderer paints them (palette.fine_index). The type
+product leaves the lightest echoes unclassified, so an echo without a type takes the
+nearest type within a few kilometres, then the forecast's type for that hour, else rain.
 
 The nowcast (`…PrecipRate-Extrapolation`) moves the latest echoes forward with no growth
 or decay, and is typed by the latest observed type picture.
@@ -25,19 +26,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from snowwatch.maps.geomet import Net, capabilities_dims, geomet_map, parse_times, sld, ts_iso
-from snowwatch.maps.palette import (
-    MIX,
-    MIX_T,
-    NONE,
-    RAIN,
-    RAIN_T,
-    RGB,
-    SNOW,
-    SNOW_T,
-    hex_rgb,
-    rgb_mask,
+from snowwatch.maps.geomet import (
+    Net,
+    capabilities_dims,
+    code_rates,
+    code_sld,
+    geomet_map,
+    parse_times,
+    ts_iso,
 )
+from snowwatch.maps.palette import MIX_T, NONE, RAIN_T, SNOW_T, hex_rgb
 from snowwatch.maps.region import Region, spread
 
 log = logging.getLogger("snowwatch.precip")
@@ -85,11 +83,6 @@ _TYPE_RGB = np.array([hex_rgb(c) for c, _ in TYPE_COLORS], np.int32)
 _TYPE_CODE = np.array([k for _, k in TYPE_COLORS], np.uint8)
 _TYPE_TOLERANCE = 3 * 24**2  # squared RGB distance: a legend colour, give or take
 
-# A rain colour (our RAIN ramp) to the MIX colour for the same rate.
-_MIX_FOR_RAIN: list[tuple[RGB, RGB]] = [
-    (hex_rgb(c), hex_rgb(MIX[-1][1] if low >= MIX[-1][0] else MIX[0][1])) for low, c in RAIN
-]
-
 
 def classify_types(img: np.ndarray | None) -> np.ndarray | None:
     """GeoMet's type picture to codes (none, snow, mix, rain) by nearest legend colour."""
@@ -126,25 +119,25 @@ def compose(
     snow: np.ndarray | None,
     types: np.ndarray | None,
     fallback: np.ndarray | None = None,
-) -> np.ndarray | None:
-    """One typed picture from the rain-rate and snow-rate pictures and the type codes."""
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """One rate (mm of water an hour, 0 where dry) and type per pixel from the rain and
+    snow rates (geomet.code_rates) and the type codes."""
     if rain is None and snow is None:
         return None
     shape = (rain if rain is not None else snow).shape  # type: ignore[union-attr]
-    blank = np.zeros(shape, np.uint8)
+    blank = np.zeros(shape, np.float32)
     rain = blank if rain is None else rain
     snow = blank if snow is None else snow
-    rain_on, snow_on = rain[..., 3] > 0, snow[..., 3] > 0
+    rain_on, snow_on = rain > 0, snow > 0
     kind = fill_types(types, rain_on | snow_on, fallback)
-    out = np.zeros(shape, np.uint8)
+    amount = np.zeros(shape, np.float32)
     is_snow, is_rain, is_mix = kind == SNOW_T, kind == RAIN_T, kind == MIX_T
-    out[is_snow & snow_on] = snow[is_snow & snow_on]
-    out[is_rain & rain_on] = rain[is_rain & rain_on]
-    # Mixed: the MIX colour for the rain rate; light where only the snow picture has echo.
-    out[is_mix & snow_on & ~rain_on] = (*hex_rgb(MIX[0][1]), 255)
-    for rain_rgb, mix_rgb in _MIX_FOR_RAIN:
-        out[is_mix & rgb_mask(rain, rain_rgb)] = (*mix_rgb, 255)
-    return out
+    amount[is_snow] = snow[is_snow]
+    amount[is_rain] = rain[is_rain]
+    # Mixed: the rain rate; the snow rate where only the snow picture has echo.
+    amount[is_mix] = np.where(rain_on, rain, snow)[is_mix]
+    kind = np.where(amount > 0, kind, NONE).astype(np.uint8)
+    return amount, kind
 
 
 # ---- Which times ------------------------------------------------------------------
@@ -212,16 +205,16 @@ def _pictures(
 
 def draw_radar(
     net: Net, t: int, type_t: int | None, region: Region, fallback: np.ndarray | None
-) -> np.ndarray | None:
-    """One observed frame. None if GeoMet sent neither rate picture."""
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """One observed frame: rate and type. None if GeoMet sent neither rate picture."""
     jobs: list[Job] = [
-        (RRAI, sld(RRAI, RAIN), ts_iso(t)),
-        (RSNO, sld(RSNO, SNOW), ts_iso(t)),
+        (RRAI, code_sld(RRAI), ts_iso(t)),
+        (RSNO, code_sld(RSNO), ts_iso(t)),
     ]
     if type_t is not None:
         jobs.append((TYPE, None, ts_iso(type_t)))
     pics = _pictures(net, jobs, region)
-    rain, snow = pics[0], pics[1]
+    rain, snow = code_rates(pics[0]), code_rates(pics[1])
     if rain is None or snow is None:
         return None  # half a picture would show the wrong type: skip this scan
     types = classify_types(pics[2]) if type_t is not None else None
@@ -242,14 +235,15 @@ def draw_nowcast(
     types: np.ndarray | None,
     region: Region,
     fallback: np.ndarray | None,
-) -> np.ndarray | None:
-    """One nowcast frame from the extrapolated rain and snow rates."""
-    rain, snow = _pictures(
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """One nowcast frame (rate and type) from the extrapolated rain and snow rates."""
+    pics = _pictures(
         net,
-        [(NOW_RAIN, sld(NOW_RAIN, RAIN), ts_iso(t)), (NOW_SNOW, sld(NOW_SNOW, SNOW), ts_iso(t))],
+        [(NOW_RAIN, code_sld(NOW_RAIN), ts_iso(t)), (NOW_SNOW, code_sld(NOW_SNOW), ts_iso(t))],
         region,
         {"dim_reference_time": ref} if ref else None,
     )
+    rain, snow = code_rates(pics[0]), code_rates(pics[1])
     if rain is None or snow is None:
         return None
     return compose(rain, snow, types, fallback)

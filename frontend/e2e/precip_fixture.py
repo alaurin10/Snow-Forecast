@@ -9,15 +9,14 @@ drift east. Written fresh each run (no binaries in git).
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
 
+from snowwatch.maps.palette import RAIN_T, SNOW_T, encode_fine, fine_index, fine_spec
 from snowwatch.maps.region import WEST, box_region
 
 WIDTH = 1700  # config/forecast.yaml map.width
@@ -27,7 +26,8 @@ FORECAST = 24  # hourly
 
 
 def picture(region, step: int) -> bytes:
-    """Two bands of precipitation and a cell, moved a little east each step."""
+    """Two bands of precipitation and a cell, moved a little east each step, drawn the way
+    the server draws frames (palette.fine_index on the fine palette)."""
     h, w = region.height, region.width
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     dx = step * 9.0
@@ -35,17 +35,9 @@ def picture(region, step: int) -> bytes:
     band1 *= 0.5 + 0.5 * np.sin((ys + dx) / 70.0) ** 2
     band2 = np.exp(-(((xs - 900 - dx) * 0.7 - (ys - 1300) * 0.7) ** 2) / (2 * 60.0**2))
     cell = np.exp(-((xs - 1200 - dx) ** 2 + (ys - 500) ** 2) / (2 * 120.0**2))
-    v = np.clip(band1 + 0.8 * band2 + cell, 0, 1)
-    rgba = np.zeros((h, w, 4), np.uint8)
-    on = v > 0.12
-    snow = ys < 900  # north: snow, south: rain
-    rgba[..., 0] = np.where(snow, 200, 40)
-    rgba[..., 1] = np.where(snow, 220, 140)
-    rgba[..., 2] = 255
-    rgba[..., 3] = np.where(on, (80 + 175 * v).astype(np.uint8), 0)
-    buf = io.BytesIO()
-    Image.fromarray(rgba, "RGBA").save(buf, "PNG", compress_level=1)
-    return buf.getvalue()
+    rate = (np.clip(band1 + 0.8 * band2 + cell, 0, 1) ** 2 * 6).astype(np.float32)  # mm/h
+    kind = np.where(ys < 900, SNOW_T, RAIN_T).astype(np.uint8)  # north: snow, south: rain
+    return encode_fine(fine_index(rate, kind))
 
 
 def main(out: Path) -> None:
@@ -74,6 +66,7 @@ def main(out: Path) -> None:
                 "kind": kind,
                 "span_h": span,
                 "src": src,
+                "palette": "fine",
             }
         )
     index = {
@@ -88,6 +81,7 @@ def main(out: Path) -> None:
         "totals": [],
         "layers": {},
         "attribution": [],
+        "fine": fine_spec(),
     }
     (out / "index.json").write_text(json.dumps(index))
 

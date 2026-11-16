@@ -43,7 +43,6 @@ from PIL import Image
 from snowwatch.config import SlrBand
 from snowwatch.maps import bins, grib, terrain_totals, totals
 from snowwatch.maps.blend import (
-    WET_MM,
     Layer,
     Mosaic,
     feather,
@@ -55,17 +54,23 @@ from snowwatch.maps.blend import (
 from snowwatch.maps.files import save_npy, write_atomic
 from snowwatch.maps.geomet import Net, iso_ts, prune_wcs_cache, ts_iso
 from snowwatch.maps.palette import (
+    FINE,
+    FINE_FROM,
+    FINE_KIND,
     decode_indices,
     encode,
+    encode_fine,
+    fine_index,
+    fine_spec,
     index_ramp,
     kinds_of,
     paint_total,
-    paint_typed,
     repaint,
     snap,
 )
 from snowwatch.maps.point import PROBE_STEP
 from snowwatch.maps.region import Region, stitch
+from snowwatch.maps.smooth import soften
 from snowwatch.maps.sources import hrrr, nbm, radar_eccc, rainviewer, rdps_gdps
 from snowwatch.maps.sources.nbm import Nbm
 from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run, run_of
@@ -75,6 +80,19 @@ log = logging.getLogger("snowwatch.precip")
 HOUR = 3600
 INDEX_VERSION = 2
 RETIRE_S = 15 * 60  # how long a file that left the index stays on disk
+# Precipitation frames drawn on the fine palette: in each frame's key, so frames drawn
+# the old way are drawn again rather than reused.
+FINE_KEY = "f3"
+# How much each source is softened before it is painted (smooth.py), in pixels (~1.5 km).
+# The browser smooths every frame's rates as it colours them (frontend
+# src/lib/map/precipGl.ts), so radar's own detail is kept; HRRR and NBM, copied from the
+# nearest 2.5–3 km cell, lose their ~2 px blocks here. GeoMet's models arrive interpolated.
+RADAR_SIGMA = 0.0
+GRIB_SIGMA = 1.2
+# Radar's types come from a coarser product, and echoes it leaves untyped take the
+# nearest type within ~12 km (filled pixel by pixel, in diamonds): their borders are
+# rounded off over a few pixels.
+RADAR_KIND_SIGMA = 4.0
 
 DOMAIN_LAYER = HRDPS.precip  # drawn solid, it shows where HRDPS has data
 # Splitting NBM's 6-hour amount between two 3-hour frames follows RDPS's split, softened
@@ -122,6 +140,8 @@ class FrameOut:
     span_h: int = 1
     # Which source drew the north (Canada) and south (US) parts.
     src: dict[str, str] = field(default_factory=dict)
+    # "fine" for frames on palette.FINE_PALETTE; "" for the older PALETTE.
+    palette: str = ""
 
     @classmethod
     def load(cls, d: dict[str, Any]) -> FrameOut:
@@ -351,6 +371,8 @@ class Renderer:
             "frames": [asdict(f) for f in frames],
             "totals": [asdict(t) for t in sorted(totals, key=lambda t: (t.window, t.hours))],
             "layers": {k: {"frames": [asdict(f) for f in v]} for k, v in layers.items()},
+            # How to read frames with `palette: "fine"` (palette.fine_spec).
+            "fine": fine_spec(),
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
         }
 
@@ -371,6 +393,24 @@ class Renderer:
             self._write_probe(name, probe_sample(indexed))
         else:
             self._write_probe(name, probe_sample(values).astype(np.float16))
+        return name
+
+    def _save_precip(
+        self,
+        amount: np.ndarray,
+        kind: np.ndarray,
+        prefix: str,
+        sigma: float = 0.0,
+        kind_sigma: float | None = None,
+    ) -> str:
+        """A precipitation frame (rates and types) softened by `sigma` pixels (types by
+        `kind_sigma`) and drawn on the fine palette, with its probe (the palette indices)."""
+        amount, kind = soften(amount, kind, sigma, kind_sigma)
+        indexed = fine_index(amount, kind)
+        data = encode_fine(indexed)
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        self._store(name, data)
+        self._write_probe(name, probe_sample(indexed))
         return name
 
     def _save_ramp(
@@ -477,7 +517,10 @@ class Renderer:
             idx = decode_indices((self.dir / ahead[0].file).read_bytes())
         except OSError:
             return None
-        return None if idx is None else kinds_of(idx)
+        if idx is None:
+            return None
+        out: np.ndarray = FINE_KIND[idx] if ahead[0].palette == FINE else kinds_of(idx)
+        return out
 
     def radar(self, region: Region) -> dict[str, Any]:
         """Observed radar for the last 3 hours and the next 72 minutes' nowcast."""
@@ -499,17 +542,16 @@ class Renderer:
         src = {"north": "radar-eccc", "south": "radar-eccc"}
         for t in p.radar:
             type_t = radar_eccc.type_time(t, p.types)
-            key = f"eccc|{t}|{type_t}|{region.key}"
+            key = f"eccc|{FINE_KEY}|{t}|{type_t}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
                 continue
-            img = radar_eccc.draw_radar(self.net, t, type_t, region, fallback)
-            if img is None:
+            got = radar_eccc.draw_radar(self.net, t, type_t, region, fallback)
+            if got is None:
                 continue
-            out.append(
-                FrameOut(t, True, self._save(img, region, f"r{t}"), key, "", "radar", 0, src)
-            )
+            name = self._save_precip(*got, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA)
+            out.append(FrameOut(t, True, name, key, "", "radar", 0, src, FINE))
         if not out or not p.nowcast:
             return out
         latest = max(f.t for f in out)
@@ -517,19 +559,18 @@ class Renderer:
         types: np.ndarray | None = None
         src = {"north": "nowcast-eccc", "south": "nowcast-eccc"}
         for t in p.nowcast:
-            key = f"now|{p.nowcast_ref}|{t}|{type_t}|{region.key}"
+            key = f"now|{FINE_KEY}|{p.nowcast_ref}|{t}|{type_t}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
                 continue
             if types is None:
                 types = radar_eccc.type_codes(self.net, type_t, region)
-            img = radar_eccc.draw_nowcast(self.net, t, p.nowcast_ref, types, region, fallback)
-            if img is None:
+            got = radar_eccc.draw_nowcast(self.net, t, p.nowcast_ref, types, region, fallback)
+            if got is None:
                 continue
-            out.append(
-                FrameOut(t, False, self._save(img, region, f"n{t}"), key, "", "nowcast", 0, src)
-            )
+            name = self._save_precip(*got, f"n{t}", RADAR_SIGMA, RADAR_KIND_SIGMA)
+            out.append(FrameOut(t, False, name, key, "", "nowcast", 0, src, FINE))
         return out
 
     def _radar_rainviewer(self, region: Region, prev: dict[str, FrameOut]) -> list[FrameOut]:
@@ -598,11 +639,10 @@ class Renderer:
             self._weights[key] = weight
         return weight
 
-    @staticmethod
-    def _paint(m: Mosaic) -> np.ndarray:
-        """Colours, once, after blending."""
-        wet = np.nan_to_num(m.amount, nan=0.0) >= WET_MM
-        return paint_typed(m.amount, fill_kinds(m.kind, wet))
+    def _precip(self, m: Mosaic, prefix: str) -> str:
+        """Colours, once, after blending: every pixel drawn has a type."""
+        wet = np.nan_to_num(m.amount, nan=0.0) >= FINE_FROM
+        return self._save_precip(m.amount, fill_kinds(m.kind, wet), prefix)
 
     # ---- Forecast -----------------------------------------------------------------
 
@@ -645,7 +685,7 @@ class Renderer:
                 south = ("nbm", us.run, us.lead(t))
             south_key = ":".join(map(str, south)) if south else "none"
             fill_key = f"rdps:{fill.ref}" if fill is not None and t in fill.times else "none"
-            key = f"fb|{t}|{hrdps.ref}|{south_key}|{fill_key}|{region.key}"
+            key = f"fb|{FINE_KEY}|{t}|{hrdps.ref}|{south_key}|{fill_key}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 frames.append(had)
@@ -679,7 +719,8 @@ class Renderer:
                     kind = "nbm"
             if kind and got is not None:
                 w = self._domain_weight(kind, region, got[0])
-                layers.append(Layer(kind, got[0], w, got[1]))
+                rate, k = soften(got[0], got[1], GRIB_SIGMA)
+                layers.append(Layer(kind, rate, w, k))
                 left = left * (1 - w)
             # RDPS covers everything: it takes whatever the finer models leave.
             filled = False
@@ -691,8 +732,8 @@ class Renderer:
             src = {"north": "hrdps", "south": kind or ("rdps" if filled else "")}
             if filled and kind:
                 src["fill"] = "rdps"
-            name = self._save(self._paint(mosaic(layers)), region, f"f{t}")
-            return FrameOut(t, False, name, key, kind, "forecast", 1, src)
+            name = self._precip(mosaic(layers), f"f{t}")
+            return FrameOut(t, False, name, key, kind, "forecast", 1, src, FINE)
 
         if todo:
             # Two frames at a time (the sources are the slow part; more costs worker
@@ -769,7 +810,7 @@ class Renderer:
                 if 0 < end <= nbm.LAST_H:
                     block = end
             south_key = f"nbm:{us.run}:{block}" if us is not None and block else "none"
-            key = f"fy|{t}|{span_h}|{run.model.name}:{run.ref}|{south_key}|{region.key}"
+            key = f"fy|{FINE_KEY}|{t}|{span_h}|{run.model.name}:{run.ref}|{south_key}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 return had
@@ -787,12 +828,13 @@ class Renderer:
                         rate = apcp * self._share(run, t, block_end, north.total, region) / span_h
                     else:
                         rate = apcp / nbm.BLOCK_H
+                    rate, k = soften(rate, k, GRIB_SIGMA)
                     layers.append(Layer("nbm", rate, self._us_weight(region, apcp), k))
                     kind = "nbm"
             layers.append(Layer(run.model.name, north.rate, 1.0, north.kind))
             src = {"north": run.model.name, "south": kind or run.model.name}
-            name = self._save(self._paint(mosaic(layers)), region, f"f{t}")
-            return FrameOut(t, False, name, key, kind, "forecast", span_h, src)
+            name = self._precip(mosaic(layers), f"f{t}")
+            return FrameOut(t, False, name, key, kind, "forecast", span_h, src, FINE)
 
         with ThreadPoolExecutor(2) as pool:
             for i, frame in enumerate(pool.map(job, plan), 1):

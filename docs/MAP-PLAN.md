@@ -1086,6 +1086,76 @@ phone that doesn't press it stays at the "open" figure.
 fewer tiles and cheaper layers; PR 4, terrain worker throughput; PR 5, optional, playback
 memory and backend bytes. Each records its numbers here.
 
+## Radar look notes (done 16 Nov 2026)
+
+Asked for by the owner during the performance pass. Radar looked pixelated and jumped at
+the radar → nowcast → forecast joins; the owner then pointed at Apple Maps' radar (smooth,
+sharp storm outlines, continuous colour) as the aim. Owner's choices:
+- frames fade on screen, and the first forecast hours are blended with the nowcast;
+- this comes before performance PRs 3–5;
+- the app must not get slower.
+
+**First attempt, not kept.** Colouring continuously on the server (a fine palette, OKLab,
+light blurs) removed the steps. But a 1.5 km-a-pixel picture stretched by the map still
+shows blurred pixels zoomed in: the colours have to be chosen after smoothing, at the
+screen's resolution.
+
+**Numbers instead of bands.** Radar and nowcast are asked for with a coded SLD
+(`geomet.code_sld`, 100 log-spaced intervals). `radar_eccc.compose` returns a rate and a
+type per pixel.
+
+**Frames as numbers.**
+- Every precipitation frame is written as an index per pixel (type and rate:
+  `palette.fine_index`, 36/20/72 log steps) in a grayscale PNG. The index's `fine`
+  describes the steps (`palette.fine_spec`).
+- Softening before writing (`maps/smooth.py`: three box blurs round the wet area,
+  0.04–0.07 s a frame):
+  - HRRR and NBM by 1.2 px (their nearest-cell blocks);
+  - radar's types by 4 px (GeoMet's coarser type picture, filled into untyped echoes in
+    diamonds);
+  - radar's rates not at all.
+- About 110–125 KB a busy radar frame (57 KB in six colour steps). Frame keys gained `f3`.
+  `point.py` and `_forecast_types` read either kind of frame.
+
+**Coloured on the GPU** (`frontend/src/lib/map/precipGl.ts`). A WebGL 2 program, for each
+pixel of a view-sized picture:
+- reads the 4×4 frame pixels round it, smoothed with a cubic B-spline (no overshoot);
+- turns each index into a rate through a lookup texture, and adds the rates up;
+- picks the type most present;
+- colours from a 256-step ramp per type (the `RAMPS` stops mixed in OKLab), with
+  `fwidth` anti-aliasing at the outline and alpha rising from 0.03 to 0.15 mm/h.
+
+`PrecipLayer` draws only the view plus a 25% margin, at the screen's pixel density (at
+most 8 picture pixels to a frame pixel). It redraws on `moveend`, and drapes in 3D as
+before. Other weather layers' pictures are cropped and scaled the same way.
+
+**Hand-over.** The first 2 forecast hours are mixed with the last nowcast frame as
+numbers, in the same program (`radar.ts` `handover`, `HANDOVER_S`). Taps give the same mix
+(`point.py`).
+
+**Fades.** Two canvas sources with a `raster-opacity` transition (≤ 260 ms; none with
+reduced motion). Play speed follows the time step (`frameMs`).
+
+**Legend.** The key is a gradient.
+
+Measured with `e2e/perf.spec.ts` (headless Chromium, the GPU emulated in software):
+
+| | PR 2 | Radar look |
+|---|---|---|
+| Page process, peak | 383–387 MB | 358–364 MB |
+| GPU process, peak | 341–366 MB | 343–369 MB |
+| Drawing a frame (median, slowest) | — | 9.8 ms, 62–67 ms (3D) |
+| First frame | 3.5–3.7 s | 2.3–2.4 s |
+
+**Known limits.**
+- Panning further than the 25% margin shows the edge until the map stops.
+- In a tilted 3D view the picture spreads its pixels to the horizon, so the near ground
+  gets fewer.
+- Snow/mix/rain borders are only as good as GeoMet's type picture, and keep some straight
+  edges from its fill.
+- The hand-over mixes two pictures, so a storm the model places differently fades out in
+  one place and in at the other.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

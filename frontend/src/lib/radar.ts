@@ -9,6 +9,7 @@
 // northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
 // RDPS) and 6-hourly to 10 days (Canadian GDPS) in Canada, with NOAA's National Blend in
 // the US. The server blends the sources as numbers, so there are no joins to see.
+import type { FineSpec } from './map/precipGl';
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -92,6 +93,8 @@ export interface Frame {
 	 * (`south`), e.g. "hrdps", "nbm", and one filling in where neither reaches (`fill`).
 	 */
 	src: { north?: string; south?: string; fill?: string };
+	/** "fine": the picture holds numbers (Timeline.fine says how to read them). */
+	palette?: string;
 }
 
 /** Forecast snow over a window: Canada's models north of 49°N, NOAA's blend south of it. */
@@ -147,6 +150,8 @@ export interface PrecipIndex {
 	attribution?: string[];
 	/** The other weather layers by name (from milestone 7 of the map). */
 	layers?: Record<string, { frames?: Partial<LayerFrame>[] }>;
+	/** How frames with `palette: "fine"` read: numbers, coloured here (map/precipGl.ts). */
+	fine?: FineSpec;
 }
 
 export interface Timeline {
@@ -165,6 +170,8 @@ export interface Timeline {
 	attribution: string[];
 	/** The other weather layers by name, each in time order (snowfall by window). */
 	layers: Record<string, LayerFrame[]>;
+	/** How fine frames read, when the server draws them that way. */
+	fine: FineSpec | null;
 }
 
 const ORDER: Record<FrameKind, number> = { radar: 0, nowcast: 1, forecast: 2 };
@@ -228,6 +235,7 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		extendedFrom,
 		totals,
 		attribution: Array.isArray(ix.attribution) ? ix.attribution : [],
+		fine: ix.fine && Array.isArray(ix.fine.ramps) ? ix.fine : null,
 		layers
 	};
 }
@@ -278,6 +286,38 @@ export async function loadTimeline(): Promise<Timeline> {
 }
 
 export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
+
+/**
+ * The forecast frames this soon after the last nowcast frame (or radar, without one) are
+ * shown mixed with it, fading from the nowcast to the model, so the hand-over between the
+ * two sources is gradual rather than a jump. Taps give the same mix (keep in step with
+ * HANDOVER_S in backend/snowwatch/maps/point.py).
+ */
+export const HANDOVER_S = 2 * 3600;
+
+/** The hand-over for the frame at `i`: which frame shows under it, and how much of it
+ *  (1 at the nowcast's end, falling to 0 HANDOVER_S later); null for none. */
+export function handover(frames: Frame[], i: number): { from: number; weight: number } | null {
+	const f = frames[i];
+	if (!f || f.kind !== 'forecast') return null;
+	let from = -1;
+	for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'nowcast') from = j;
+	if (from < 0) for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'radar') from = j;
+	if (from < 0 || f.t <= frames[from].t) return null;
+	const weight = 1 - (f.t - frames[from].t) / HANDOVER_S;
+	return weight > 0 ? { from, weight } : null;
+}
+
+/** How long a frame stays on screen while playing, by the time to the next one: quick
+ *  through 6- and 12-minute radar, slower through hourly and 3- and 6-hourly forecast,
+ *  so the weather moves at a steadier pace. */
+export function frameMs(stepS: number): number {
+	const min = stepS / 60;
+	if (min <= 12) return 300;
+	if (min <= 60) return 450;
+	if (min <= 180) return 550;
+	return 650;
+}
 
 // ---- Labels ------------------------------------------------------------------
 

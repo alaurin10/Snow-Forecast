@@ -62,6 +62,10 @@
 	}: Props = $props();
 
 	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
+	const rampGradient = (r: (typeof legendRamps)[number]) =>
+		`linear-gradient(90deg, color-mix(in srgb, ${r.steps[0].color} 35%, transparent), ${r.steps
+			.map((s) => s.color)
+			.join(', ')})`;
 	const frames = $derived(view.frames);
 	const count = $derived(frames.length);
 	const pct = (i: number) => (count > 1 ? (i / (count - 1)) * 100 : 0);
@@ -279,9 +283,14 @@
 				{#each legendRamps as r (r.kind)}
 					<span class="kind">
 						<span class="name">{r.label}</span>
-						<span class="ramp" aria-hidden="true">
-							{#each r.steps as s (s.from)}<i style:background={s.color}></i>{/each}
-						</span>
+						<!-- The pictures run smoothly between these colours, so the key does too
+						     (fading in from the lightest rates). -->
+						<span
+							class="ramp"
+							aria-hidden="true"
+							style:width="{r.steps.length * 9}px"
+							style:background={rampGradient(r)}
+						></span>
 						<span class="top">{rampTop(r, units)}</span>
 					</span>
 				{/each}
@@ -594,9 +603,6 @@
 		border-radius: 3px;
 		overflow: hidden;
 		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
-	}
-	.ramp i {
-		width: 9px;
 	}
 	/* Phones: keep the key to one line; the amounts are in the info panel. */
 	@media (max-width: 480px) {
