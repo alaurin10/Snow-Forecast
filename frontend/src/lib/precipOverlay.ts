@@ -3,11 +3,27 @@
 // The server draws each frame as one picture over the locations' region (see
 // ../radar.ts). Here we download them all once, keep them compressed (a couple of MB for
 // the whole timeline), and decode only the frame on screen and its neighbours. Showing a
-// frame draws the part of it on screen into a view-sized picture: radar, nowcast and
-// forecast frames carry numbers, coloured on the GPU at the screen's resolution
-// (map/precipGl.ts); the other layers' pictures are cropped and scaled.
-import type { CanvasSource, Map as MlMap } from 'maplibre-gl';
-import { PrecipGl, type FineSpec, type FrameRect } from './map/precipGl';
+// frame is one texture upload into the map's own WebGL context (a custom layer): radar,
+// nowcast and forecast frames carry numbers, smoothed and coloured on the GPU at the
+// screen's resolution (map/precipGl.ts); the other layers' pictures are drawn as they are.
+import type {
+	CanvasSource,
+	CustomLayerInterface,
+	ExpressionSpecification,
+	Map as MlMap
+} from 'maplibre-gl';
+import {
+	colorize,
+	fineLut,
+	FRAGMENT,
+	opacityAt,
+	PREP_FRAGMENT,
+	PREP_VERTEX,
+	rampTexels,
+	RATE_TOP,
+	VERTEX,
+	type FineSpec
+} from './map/precipGl';
 import { frameUrl, RAMPS } from './radar';
 
 /** Anything with a picture file under /api/precip/: a frame or a snow total. */
@@ -134,54 +150,78 @@ export interface Blend {
 /** What a picture is: numbers to colour (`fine`), or a picture to show as it is. */
 export type PicKind = 'fine' | 'picture';
 
-type Corners = [[number, number], [number, number], [number, number], [number, number]];
+const mercY = (lat: number) =>
+	0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
+const mercX = (lon: number) => 0.5 + lon / 360;
 
-const mercY = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
-const latOf = (y: number) => (360 / Math.PI) * Math.atan(Math.exp(y)) - 90;
-
-/** How far past the view the picture reaches, each way (a share of the view): a short
- *  pan shows no edge before the picture is redrawn for the new view. */
-const MARGIN = 0.25;
-/** Most picture pixels per frame pixel when zoomed far in (outlines are already smooth). */
-const MAX_DENSITY = 8;
-/** Most pixels across either way. */
-const MAX_SIDE = 4096;
+/** One of the two frames the layer holds: the one on screen and the one fading out. */
+interface Slot {
+	file: string | null;
+	kind: PicKind;
+	/** The hand-over frame's share (fine frames). */
+	underW: number;
+}
 
 /**
- * The precipitation in two MapLibre canvas sources, one over the other, each a picture of
- * the view (and a margin) rather than of the whole region, redrawn when the map stops
- * moving. A new frame is drawn into the one not showing, which then fades in over `fade`
- * ms while the other fades out: the GPU does the fade (a paint transition). It drapes over
- * 3D terrain like the base map.
+ * The precipitation (or another weather layer's picture) over the pictures' box.
+ *
+ * Flat, it's a MapLibre custom layer: a new frame is uploaded into the slot not on screen,
+ * which then fades in over `fade` ms while the other fades out, all on the GPU. In 3D the
+ * map drapes ordinary pictures over the terrain (a custom layer drawn into terrain tiles
+ * keeps MapLibre redrawing them), so there each frame is coloured on the CPU into a canvas
+ * source instead: the fine palette's steps, blended by the map, without fades.
  */
 export class PrecipLayer {
-	/** The two layers' ids; `ID` is the lower one, which other layers are placed by. */
+	/** The flat layer's id (other layers are placed by it); IDS for code that handles each. */
 	static readonly ID = 'precip';
-	static readonly IDS = ['precip', 'precip-b'] as const;
-	private canvases: HTMLCanvasElement[] = [];
-	private ctxs: CanvasRenderingContext2D[] = [];
-	/** Which of the two shows the frame on screen. */
-	private front = 0;
+	static readonly ID_3D = 'precip-3d';
+	static readonly IDS = ['precip', 'precip-3d'] as const;
 	private shown: string | null = null;
-	private opacity: unknown;
-	/** When the fade under way ends (performance.now()), or 0. */
-	private fadeEnds = 0;
-	private onRender: (() => void) | null = null;
-	private gl: PrecipGl | null = null;
-	private glFailed = false;
-	/** What's on screen, to draw again for a new view. */
-	private current: {
+	private opacity: ExpressionSpecification | number;
+	private slots: Slot[] = [
+		{ file: null, kind: 'picture', underW: 0 },
+		{ file: null, kind: 'picture', underW: 0 }
+	];
+	/** Which slot is on screen (fading in). */
+	private front = 1;
+	private fadeStart = 0;
+	private fadeMs = 0;
+	private fadeTimer = 0;
+	/** Uploads waiting for the next draw (there's a GL context then). */
+	private pending: { slot: number; bmp: ImageBitmap; kind: PicKind } | null = null;
+	private pendingUnder: { file: string; bmp: ImageBitmap } | null = null;
+	private underFile: string | null = null;
+	private gl: WebGL2RenderingContext | null = null;
+	private prog: WebGLProgram | null = null;
+	private prep: WebGLProgram | null = null;
+	private buf: WebGLBuffer | null = null;
+	private quad: WebGLBuffer | null = null;
+	/** The two slots' prepared frames (or pictures), and a framebuffer onto each. */
+	private slotTex: WebGLTexture[] = [];
+	private fbo: WebGLFramebuffer[] = [];
+	/** The frame as decoded, the hand-over frame, the index lookup, the ramps. */
+	private srcTex: WebGLTexture | null = null;
+	private underTex: WebGLTexture | null = null;
+	private lutTex: WebGLTexture | null = null;
+	private rampTex: WebGLTexture | null = null;
+	private uni: Record<string, WebGLUniformLocation | null> = {};
+	private puni: Record<string, WebGLUniformLocation | null> = {};
+	private region: [number, number, number, number];
+	private bounds: [[number, number], [number, number]];
+	private beforeId: string | undefined;
+	/** The 3D picture (made the first time 3D is on), and the hand-over frame's pixels. */
+	private canvas3d: HTMLCanvasElement | null = null;
+	private under3d: { file: string; px: Uint8ClampedArray } | null = null;
+	/** What's on screen, to show again when 3D goes on or off. */
+	private last: {
 		file: string | null;
-		kind: PicKind;
 		bmp: ImageBitmap | null;
 		under: Blend | null;
-	} = { file: null, kind: 'picture', bmp: null, under: null };
-	private onMoveEnd = () => this.redraw();
-	private readonly mx0: number;
-	private readonly mx1: number;
-	private readonly my0: number;
-	private readonly my1: number;
-	/** Milliseconds the last frame took to draw (for e2e/perf.spec.ts and DevTools). */
+		kind: PicKind;
+	} = { file: null, bmp: null, under: null, kind: 'picture' };
+	private onTerrain = () => this.switched();
+	private layer: CustomLayerInterface & { terrainTileRevision: number };
+	/** Milliseconds the last frame took to hand over and upload (perf.spec.ts, DevTools). */
 	lastDrawMs = 0;
 
 	constructor(
@@ -193,137 +233,119 @@ export class PrecipLayer {
 		beforeId?: string,
 		private spec: FineSpec | null = null
 	) {
-		this.opacity = opacity;
+		this.opacity = opacity as ExpressionSpecification;
+		this.beforeId = beforeId;
 		const [[south, west], [north, east]] = bounds;
-		this.mx0 = west;
-		this.mx1 = east;
-		this.my0 = mercY(north);
-		this.my1 = mercY(south);
-		const coordinates = this.corners({ x0: 0, y0: 0, x1: width, y1: height });
-		PrecipLayer.IDS.forEach((id, i) => {
-			const canvas = document.createElement('canvas');
-			canvas.width = canvas.height = 1;
-			this.canvases.push(canvas);
-			this.ctxs.push(canvas.getContext('2d')!);
-			map.addSource(id, { type: 'canvas', canvas, animate: false, coordinates });
-			map.addLayer(
-				{
-					id,
-					type: 'raster',
-					source: id,
-					paint: {
-						'raster-opacity': (i === this.front ? opacity : 0) as number,
-						'raster-opacity-transition': { duration: 0, delay: 0 },
-						'raster-fade-duration': 0,
-						'raster-resampling': 'linear'
-					}
-				},
-				// Each under `beforeId`, so the second lands just above the first.
-				beforeId
-			);
-		});
-		map.on('moveend', this.onMoveEnd);
-		map.on('resize', this.onMoveEnd);
+		this.region = [mercX(west), mercY(north), mercX(east), mercY(south)];
+		this.bounds = bounds;
+		this.layer = {
+			id: PrecipLayer.ID,
+			type: 'custom',
+			renderingMode: '2d',
+			terrainTileRevision: 0,
+			onAdd: (_map, gl) => this.setup(gl),
+			onRemove: (_map, gl) => this.teardown(gl),
+			render: (gl, args) => {
+				// In 3D the canvas picture (draped) shows instead.
+				if (this.map.getTerrain?.()) return;
+				const m = args.defaultProjectionData.mainMatrix;
+				this.paint(gl, m instanceof Float32Array ? m : new Float32Array(m));
+			}
+		};
+		map.addLayer(this.layer, beforeId);
+		map.on('terrain', this.onTerrain);
+		if (map.getTerrain?.()) this.switched();
 	}
 
 	get showing() {
 		return this.shown;
 	}
 
-	/** The pictures' opacity (by zoom), for whichever layer is showing. */
+	/** The pictures' opacity (by zoom). */
 	setOpacity(opacity: unknown) {
-		this.opacity = opacity;
-		const id = PrecipLayer.IDS[this.front];
-		if (this.map.getLayer(id)) this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
+		this.opacity = opacity as ExpressionSpecification;
+		if (this.map.getLayer(PrecipLayer.ID_3D))
+			this.map.setPaintProperty(PrecipLayer.ID_3D, 'raster-opacity', opacity as number);
+		this.changed();
 	}
 
-	/** Frame pixels → the corners of that rectangle on the map. */
-	private corners(r: FrameRect): Corners {
-		const lon = (x: number) => this.mx0 + ((this.mx1 - this.mx0) * x) / this.width;
-		const lat = (y: number) => latOf(this.my0 + ((this.my1 - this.my0) * y) / this.height);
-		return [
-			[lon(r.x0), lat(r.y0)],
-			[lon(r.x1), lat(r.y0)],
-			[lon(r.x1), lat(r.y1)],
-			[lon(r.x0), lat(r.y1)]
-		];
+	/** 3D went on or off: show the picture on screen the other way. */
+	private switched() {
+		const on = !!this.map.getTerrain?.();
+		if (on) this.ensure3d();
+		if (this.map.getLayer(PrecipLayer.ID_3D))
+			this.map.setLayoutProperty(PrecipLayer.ID_3D, 'visibility', on ? 'visible' : 'none');
+		const { file, bmp, under, kind } = this.last;
+		if (bmp && !bmp.width) return; // freed: the next frame will show
+		this.draw(file, bmp, 0, under, kind);
 	}
 
-	/** The part of the frame in view (and the margin), and the picture's size for it; null
-	 *  when none of the frame is in view. */
-	private view(): { rect: FrameRect; w: number; h: number } | null {
-		const b = this.map.getBounds();
-		const fx = (lon: number) => ((lon - this.mx0) / (this.mx1 - this.mx0)) * this.width;
-		const fy = (lat: number) => ((mercY(lat) - this.my0) / (this.my1 - this.my0)) * this.height;
-		let x0 = fx(b.getWest());
-		let x1 = fx(b.getEast());
-		let y0 = fy(Math.min(85, b.getNorth()));
-		let y1 = fy(Math.max(-85, b.getSouth()));
-		const mx = (x1 - x0) * MARGIN;
-		const my = (y1 - y0) * MARGIN;
-		x0 = Math.max(0, Math.floor(x0 - mx));
-		x1 = Math.min(this.width, Math.ceil(x1 + mx));
-		y0 = Math.max(0, Math.floor(y0 - my));
-		y1 = Math.min(this.height, Math.ceil(y1 + my));
-		if (x1 <= x0 || y1 <= y0) return null;
-		// As many pixels as the screen shows across the same stretch, no more than
-		// MAX_DENSITY a frame pixel.
-		const c = this.map.getCanvas();
-		const viewW = Math.max(1, fx(b.getEast()) - fx(b.getWest()));
-		const perPx = Math.min(MAX_DENSITY, c.width / viewW);
-		let w = Math.max(1, Math.round((x1 - x0) * perPx));
-		let h = Math.max(1, Math.round((y1 - y0) * perPx));
-		const shrink = Math.min(1, MAX_SIDE / Math.max(w, h));
-		w = Math.max(1, Math.round(w * shrink));
-		h = Math.max(1, Math.round(h * shrink));
-		return { rect: { x0, y0, x1, y1 }, w, h };
+	private ensure3d() {
+		if (this.canvas3d) return;
+		const canvas = document.createElement('canvas');
+		canvas.width = this.width;
+		canvas.height = this.height;
+		this.canvas3d = canvas;
+		const [[south, west], [north, east]] = this.bounds;
+		this.map.addSource(PrecipLayer.ID_3D, {
+			type: 'canvas',
+			canvas,
+			animate: false,
+			coordinates: [
+				[west, north],
+				[east, north],
+				[east, south],
+				[west, south]
+			]
+		});
+		this.map.addLayer(
+			{
+				id: PrecipLayer.ID_3D,
+				type: 'raster',
+				source: PrecipLayer.ID_3D,
+				paint: {
+					'raster-opacity': this.opacity as number,
+					'raster-fade-duration': 0,
+					'raster-resampling': 'linear'
+				}
+			},
+			this.beforeId
+		);
 	}
 
-	/** Paint the current picture into layer `i` for the view; false when nothing to show. */
-	private paint(i: number): boolean {
-		const { kind, bmp, under, file } = this.current;
-		const v = this.view();
-		const canvas = this.canvases[i];
-		const ctx = this.ctxs[i];
+	/** A frame into the 3D picture: a picture as it is, a fine frame coloured here. */
+	private draw3d(bmp: ImageBitmap | null, under: Blend | null, kind: PicKind) {
+		const canvas = this.canvas3d;
+		if (!canvas) return;
 		const t0 = performance.now();
-		if (!v || !bmp || !file) {
-			canvas.width = canvas.height = 1;
-			ctx.clearRect(0, 0, 1, 1);
-		} else {
-			if (canvas.width !== v.w || canvas.height !== v.h) {
-				canvas.width = v.w;
-				canvas.height = v.h;
-			} else ctx.clearRect(0, 0, v.w, v.h);
-			const gl = kind === 'fine' ? this.renderer() : null;
-			// A freed bitmap can't be uploaded; one already on the GPU needn't be.
-			if (gl && (bmp.width || gl.holds(0) === file)) {
-				gl.hold(0, file, bmp);
-				if (under && (under.bmp.width || gl.holds(1) === under.file))
-					gl.hold(1, under.file, under.bmp);
-				gl.render(v.rect, v.w, v.h, under?.weight ?? 0);
-				ctx.drawImage(gl.canvas, 0, 0);
-			} else if (bmp.width) {
-				const { x0, y0, x1, y1 } = v.rect;
-				ctx.imageSmoothingQuality = 'high';
-				ctx.drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, v.w, v.h);
+		const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		if (bmp && bmp.width) {
+			ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+			if (kind === 'fine' && this.spec) {
+				const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+				let underPx: Uint8ClampedArray | null = null;
+				if (under && under.weight > 0) {
+					if (this.under3d?.file !== under.file && under.bmp.width) {
+						ctx.drawImage(under.bmp, 0, 0, canvas.width, canvas.height);
+						this.under3d = {
+							file: under.file,
+							px: ctx.getImageData(0, 0, canvas.width, canvas.height).data
+						};
+					}
+					underPx = this.under3d?.file === under.file ? this.under3d.px : null;
+				}
+				colorize(img.data, this.spec, RAMPS, underPx, under?.weight ?? 0);
+				ctx.putImageData(img, 0, 0);
 			}
 		}
-		const src = this.map.getSource(PrecipLayer.IDS[i]) as CanvasSource | undefined;
-		if (v) src?.setCoordinates(this.corners(v.rect));
-		// play() marks it changed and asks for a repaint; pause() uploads it right away.
+		const src = this.map.getSource(PrecipLayer.ID_3D) as CanvasSource | undefined;
 		src?.play();
 		src?.pause();
-		this.lastDrawMs = performance.now() - t0;
-		// Read by e2e/perf.spec.ts, and in DevTools on a phone.
+		const terrain = this.map.terrain;
+		if (terrain) terrain.tileManager.releaseAllRTT();
+		this.map.triggerRepaint();
 		performance.measure?.('map:draw', { start: t0 });
-		return !!v;
-	}
-
-	private renderer(): PrecipGl | null {
-		if (this.gl || this.glFailed || !this.spec) return this.gl;
-		this.gl = PrecipGl.create(this.spec, RAMPS, this.width, this.height);
-		this.glFailed = !this.gl;
-		return this.gl;
 	}
 
 	/**
@@ -337,77 +359,295 @@ export class PrecipLayer {
 		under: Blend | null = null,
 		kind: PicKind = 'picture'
 	) {
-		const back = 1 - this.front;
-		const [idFront, idBack] = [PrecipLayer.IDS[this.front], PrecipLayer.IDS[back]];
-		if (!this.map.getLayer(idFront) || !this.map.getLayer(idBack)) return;
-		// A fade still under way: the layer it fades out is about to be drawn into, so it
-		// goes at once rather than showing the new picture before its turn.
-		this.setFade(idBack, 0, 0);
-		this.current = { file, kind, bmp, under: under && under.weight > 0 ? under : null };
-		this.paint(back);
+		const t0 = performance.now();
+		this.last = { file, bmp, under, kind };
 		this.shown = file;
-		this.setFade(idBack, this.opacity, fade);
-		this.setFade(idFront, 0, fade);
-		this.front = back;
-		this.redrape(fade);
-	}
-
-	/** The picture on screen, drawn again for the view (the map has stopped moving). */
-	redraw() {
-		if (!this.current.file) return;
-		// A fine frame's numbers are on the GPU; another picture needs its bitmap, which
-		// may have been freed (then it stays as it is until the next frame).
-		if (this.current.kind === 'picture' && !this.current.bmp?.width) return;
-		this.paint(this.front);
-		this.redrape(0);
-	}
-
-	private setFade(id: string, opacity: unknown, ms: number) {
-		this.map.setPaintProperty(id, 'raster-opacity-transition', { duration: ms, delay: 0 });
-		this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
-	}
-
-	/**
-	 * In 3D, MapLibre drapes layers over the terrain from a cached texture per terrain
-	 * tile, redrawn when an image source changes but not a canvas source or a fade.
-	 * Without this, the frame on screen stays the same while the slider moves: the cache
-	 * is dropped now and on every frame drawn until the fade ends.
-	 */
-	private redrape(fade: number) {
-		const terrain = this.map.terrain;
-		if (!terrain) return;
-		terrain.tileManager.releaseAllRTT();
-		this.map.triggerRepaint();
-		if (fade <= 0) return;
-		this.fadeEnds = performance.now() + fade + 50;
-		if (this.onRender) return;
-		this.onRender = () => {
-			const t = this.map.terrain;
-			if (t) t.tileManager.releaseAllRTT();
-			if (performance.now() >= this.fadeEnds && this.onRender) {
-				this.map.off('render', this.onRender);
-				this.onRender = null;
-				// One last redraw, at the fade's end.
-				if (t) {
-					t.tileManager.releaseAllRTT();
-					this.map.triggerRepaint();
-				}
-			}
+		if (this.map.getTerrain?.()) {
+			this.draw3d(bmp, under, kind);
+			this.lastDrawMs = performance.now() - t0;
+			return;
+		}
+		const back = 1 - this.front;
+		const fine = kind === 'fine' && !!this.spec;
+		this.slots[back] = {
+			file: bmp ? file : null,
+			kind: fine ? 'fine' : 'picture',
+			underW: fine && under ? under.weight : 0
 		};
-		this.map.on('render', this.onRender);
+		if (bmp) this.pending = { slot: back, bmp, kind: fine ? 'fine' : 'picture' };
+		if (fine && under && under.file !== this.underFile)
+			this.pendingUnder = { file: under.file, bmp: under.bmp };
+		this.front = back;
+		this.shown = file;
+		this.fadeStart = performance.now();
+		this.fadeMs = fade;
+		this.animate();
+		this.lastDrawMs = performance.now() - t0;
+	}
+
+	/** Repaint (and redrape in 3D) on every frame until the fade ends. */
+	private animate() {
+		globalThis.cancelAnimationFrame?.(this.fadeTimer);
+		const step = () => {
+			this.changed();
+			if (performance.now() - this.fadeStart < this.fadeMs)
+				this.fadeTimer = requestAnimationFrame(step);
+		};
+		step();
+	}
+
+	private changed() {
+		this.layer.terrainTileRevision++;
+		this.map.triggerRepaint();
+	}
+
+	private setup(gl: WebGL2RenderingContext) {
+		this.gl = gl;
+		const program = (vs: string, fs: string, names: string[]) => {
+			const shader = (type: number, src: string) => {
+				const sh = gl.createShader(type)!;
+				gl.shaderSource(sh, src);
+				gl.compileShader(sh);
+				if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
+					throw new Error(gl.getShaderInfoLog(sh) ?? 'shader');
+				return sh;
+			};
+			const prog = gl.createProgram()!;
+			gl.attachShader(prog, shader(gl.VERTEX_SHADER, vs));
+			gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, fs));
+			gl.linkProgram(prog);
+			if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+				throw new Error(gl.getProgramInfoLog(prog) ?? 'program');
+			const uni: Record<string, WebGLUniformLocation | null> = {};
+			for (const n of names) uni[n] = gl.getUniformLocation(prog, n);
+			return { prog, uni };
+		};
+		const draw = program(VERTEX, FRAGMENT, [
+			'u_matrix',
+			'u_region',
+			'u_tex0',
+			'u_tex1',
+			'u_ramp',
+			'u_size',
+			'u_mode',
+			'u_t',
+			'u_opacity',
+			'u_rtop',
+			'u_lfrom',
+			'u_lsolid',
+			'u_ltop'
+		]);
+		this.prog = draw.prog;
+		this.uni = draw.uni;
+		const prep = program(PREP_VERTEX, PREP_FRAGMENT, [
+			'u_src',
+			'u_under',
+			'u_lut',
+			'u_size',
+			'u_under_w',
+			'u_rtop'
+		]);
+		this.prep = prep.prog;
+		this.puni = prep.uni;
+		const [x0, y0, x1, y1] = this.region;
+		this.buf = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+		gl.bufferData(
+			gl.ARRAY_BUFFER,
+			new Float32Array([x0, y0, x1, y0, x0, y1, x1, y1]),
+			gl.STATIC_DRAW
+		);
+		this.quad = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+		const texture = (filter: number) => {
+			const t = gl.createTexture()!;
+			gl.bindTexture(gl.TEXTURE_2D, t);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA8,
+				1,
+				1,
+				0,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				new Uint8Array(4)
+			);
+			return t;
+		};
+		// Each slot: a frame-sized texture, blended between pixels, with a framebuffer.
+		for (let i = 0; i < 2; i++) {
+			const t = texture(gl.LINEAR);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA8,
+				this.width,
+				this.height,
+				0,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				null
+			);
+			const fb = gl.createFramebuffer()!;
+			const was = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, was);
+			this.slotTex.push(t);
+			this.fbo.push(fb);
+		}
+		this.srcTex = texture(gl.NEAREST);
+		this.underTex = texture(gl.NEAREST);
+		this.lutTex = texture(gl.NEAREST);
+		this.rampTex = texture(gl.LINEAR);
+		const spec = this.spec;
+		if (spec) {
+			gl.bindTexture(gl.TEXTURE_2D, this.lutTex);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, 256, 1, 0, gl.RG, gl.FLOAT, fineLut(spec));
+			gl.bindTexture(gl.TEXTURE_2D, this.rampTex);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA8,
+				256,
+				3,
+				0,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				rampTexels(spec, RAMPS)
+			);
+		}
+	}
+
+	private teardown(gl: WebGL2RenderingContext) {
+		for (const t of [...this.slotTex, this.srcTex, this.underTex, this.lutTex, this.rampTex])
+			if (t) gl.deleteTexture(t);
+		for (const f of this.fbo) gl.deleteFramebuffer(f);
+		for (const b of [this.buf, this.quad]) if (b) gl.deleteBuffer(b);
+		for (const p of [this.prog, this.prep]) if (p) gl.deleteProgram(p);
+		this.slotTex = [];
+		this.fbo = [];
+		this.prog = this.prep = null;
+		this.gl = null;
+	}
+
+	/** A decoded picture into a texture as it is (the fast way). Pictures are premultiplied
+	 *  and blended between pixels; a fine frame's numbers are read one by one. */
+	private upload(gl: WebGL2RenderingContext, t: WebGLTexture, bmp: ImageBitmap, kind: PicKind) {
+		gl.bindTexture(gl.TEXTURE_2D, t);
+		gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+		gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, kind === 'picture');
+		gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+		gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+	}
+
+	/** A new frame into its slot: a picture as it is; a fine frame's numbers read once, at
+	 *  its own resolution, into rates and type shares the drawing can blend. */
+	private prepare(gl: WebGL2RenderingContext) {
+		const job = this.pending;
+		this.pending = null;
+		if (this.pendingUnder) {
+			if (this.pendingUnder.bmp.width) {
+				this.upload(gl, this.underTex!, this.pendingUnder.bmp, 'fine');
+				this.underFile = this.pendingUnder.file;
+			}
+			this.pendingUnder = null;
+		}
+		if (!job || !job.bmp.width) return; // freed before it could be shown
+		const t0 = performance.now();
+		if (job.kind === 'picture') {
+			this.upload(gl, this.slotTex[job.slot], job.bmp, 'picture');
+		} else {
+			this.upload(gl, this.srcTex!, job.bmp, 'fine');
+			// Into the slot's framebuffer, then back to whatever the map was drawing into.
+			const fb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+			const vp = gl.getParameter(gl.VIEWPORT) as Int32Array;
+			const blend = gl.isEnabled(gl.BLEND);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[job.slot]);
+			gl.viewport(0, 0, this.width, this.height);
+			gl.disable(gl.BLEND);
+			gl.useProgram(this.prep);
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+			const loc = gl.getAttribLocation(this.prep!, 'a_pos');
+			gl.enableVertexAttribArray(loc);
+			gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+			const u = this.puni;
+			const bind = (unit: number, tex: WebGLTexture, name: string) => {
+				gl.activeTexture(gl.TEXTURE0 + unit);
+				gl.bindTexture(gl.TEXTURE_2D, tex);
+				gl.uniform1i(u[name], unit);
+			};
+			bind(0, this.srcTex!, 'u_src');
+			bind(1, this.underTex!, 'u_under');
+			bind(2, this.lutTex!, 'u_lut');
+			gl.uniform2f(u.u_size, this.width, this.height);
+			gl.uniform1f(u.u_under_w, this.underFile ? this.slots[job.slot].underW : 0);
+			gl.uniform1f(u.u_rtop, RATE_TOP);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+			gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+			if (blend) gl.enable(gl.BLEND);
+		}
+		// A frame's cost on the main thread: upload and preparation (e2e/perf.spec.ts).
+		performance.measure?.('map:draw', { start: t0 });
+	}
+
+	private paint(gl: WebGL2RenderingContext, matrix: Float32Array) {
+		if (!this.prog) return;
+		if (this.pending || this.pendingUnder) this.prepare(gl);
+		const t = this.fadeMs > 0 ? Math.min(1, (performance.now() - this.fadeStart) / this.fadeMs) : 1;
+		const [b, f] = [this.slots[1 - this.front], this.slots[this.front]];
+		if (!f.file && (t >= 1 || !b.file)) return;
+		const opacity = opacityAt(this.opacity, this.map.getZoom());
+		if (opacity <= 0) return;
+		const u = this.uni;
+		gl.useProgram(this.prog);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+		const loc = gl.getAttribLocation(this.prog, 'a_pos');
+		gl.enableVertexAttribArray(loc);
+		gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+		gl.uniformMatrix4fv(u.u_matrix, false, matrix);
+		gl.uniform4f(u.u_region, ...this.region);
+		const bind = (unit: number, tex: WebGLTexture, name: string) => {
+			gl.activeTexture(gl.TEXTURE0 + unit);
+			gl.bindTexture(gl.TEXTURE_2D, tex);
+			gl.uniform1i(u[name], unit);
+		};
+		const mode = (s: Slot) => (s.kind === 'fine' ? 0 : 1);
+		// The slot fading out is "0", the one on screen "1"; an empty one on screen means
+		// fading the old one out to clear.
+		const outOnly = !f.file;
+		bind(0, this.slotTex[1 - this.front], 'u_tex0');
+		bind(1, this.slotTex[outOnly ? 1 - this.front : this.front], 'u_tex1');
+		bind(2, this.rampTex!, 'u_ramp');
+		gl.uniform2f(u.u_size, this.width, this.height);
+		gl.uniform2i(u.u_mode, mode(b), mode(outOnly ? b : f));
+		gl.uniform1f(u.u_t, !b.file || outOnly ? 1 : t);
+		gl.uniform1f(u.u_opacity, outOnly ? opacity * (1 - t) : opacity);
+		gl.uniform1f(u.u_rtop, RATE_TOP);
+		if (this.spec) {
+			const top = (k: string) => Math.log(this.spec!.ramps.find((r) => r.type === k)?.top ?? 10);
+			gl.uniform1f(u.u_lfrom, Math.log(this.spec.from));
+			gl.uniform1f(u.u_lsolid, Math.log(this.spec.solid));
+			gl.uniform3f(u.u_ltop, top('snow'), top('mix'), top('rain'));
+		}
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	}
 
 	remove() {
-		if (this.onRender) this.map.off('render', this.onRender);
-		this.onRender = null;
-		this.map.off('moveend', this.onMoveEnd);
-		this.map.off('resize', this.onMoveEnd);
-		for (const id of PrecipLayer.IDS) {
-			if (this.map.getLayer(id)) this.map.removeLayer(id);
-			if (this.map.getSource(id)) this.map.removeSource(id);
-		}
-		for (const c of this.canvases) c.width = c.height = 0;
-		this.gl?.destroy();
-		this.gl = null;
+		globalThis.cancelAnimationFrame?.(this.fadeTimer);
+		this.map.off('terrain', this.onTerrain);
+		for (const id of PrecipLayer.IDS) if (this.map.getLayer(id)) this.map.removeLayer(id);
+		if (this.map.getSource(PrecipLayer.ID_3D)) this.map.removeSource(PrecipLayer.ID_3D);
+		if (this.canvas3d) this.canvas3d.width = this.canvas3d.height = 0;
+		this.canvas3d = null;
+		this.under3d = null;
 	}
 }

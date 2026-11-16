@@ -1156,6 +1156,44 @@ Measured with `e2e/perf.spec.ts` (headless Chromium, the GPU emulated in softwar
 - The hand-over mixes two pictures, so a storm the model places differently fades out in
   one place and in at the other.
 
+### Radar look, follow-up (16 Nov 2026)
+
+On a phone the first GPU version was slow (the slider no longer kept up), and the
+nowcast's last frames washed the West green.
+
+**Green wash.** GeoMet's nowcast reads 0.042 mm/h over 74% of the box (its floor). The
+fine palette now starts at 0.1 mm/h, as the old six steps did; `FINE_SOLID` is 0.25.
+
+**Slow slider.** Colouring every screen pixel from the 4×4 frame pixels round it costs 32
+to 128 reads a pixel. Done on every map frame, that's more than a phone's GPU can keep up
+with while panning or playing. Each frame also went through a picture copy and a second
+upload. It's now a MapLibre custom layer in the map's own WebGL context:
+- **Once a frame:** an upload and a pass at the frame's resolution
+  (`precipGl.PREP_FRAGMENT`), writing √(rate/64) and the snow, mix and rain shares into an
+  RGBA texture.
+- **Every map frame:** a cubic B-spline from four bilinear reads of that texture
+  (`FRAGMENT`), then the colour. That's about as costly as a raster layer.
+- **Fades:** the two slots mix in the same pass. None while the slider is dragged, so
+  scrubbing follows the finger.
+- **No moveend redraw and no edge while panning.** The layer covers the whole box.
+
+**3D.** MapLibre's experimental `renderToTerrainTile` drapes a custom layer, but in tests
+the layer stopped being drawn after a frame change. So in 3D the frame is coloured on the
+CPU (`precipGl.colorize`: a table lookup per pixel, or a mix with the hand-over frame) into
+a canvas source, which the map drapes as before: the fine steps, blended by the map,
+without fades.
+
+**Files.** Fine frames are lossless WebP (exact, ~18% smaller: ~95 KB for a busy scan;
+0.4 s to write). Frame keys gained `f4`.
+
+**Measured** (`e2e/perf.spec.ts`, headless): page process peak 330–347 MB; a frame's upload
+and preparation ~10 ms.
+
+**Still to do:**
+- The 3D colouring could move to a worker (an OffscreenCanvas), off the main thread.
+- The emulated GPU here can't say how a real phone does: try playback and the slider on a
+  phone, flat and in 3D.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

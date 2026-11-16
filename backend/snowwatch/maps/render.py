@@ -55,6 +55,7 @@ from snowwatch.maps.files import save_npy, write_atomic
 from snowwatch.maps.geomet import Net, iso_ts, prune_wcs_cache, ts_iso
 from snowwatch.maps.palette import (
     FINE,
+    FINE_EXT,
     FINE_FROM,
     FINE_KIND,
     decode_indices,
@@ -82,7 +83,7 @@ INDEX_VERSION = 2
 RETIRE_S = 15 * 60  # how long a file that left the index stays on disk
 # Precipitation frames drawn on the fine palette: in each frame's key, so frames drawn
 # the old way are drawn again rather than reused.
-FINE_KEY = "f3"
+FINE_KEY = "f4"
 # How much each source is softened before it is painted (smooth.py), in pixels (~1.5 km).
 # The browser smooths every frame's rates as it colours them (frontend
 # src/lib/map/precipGl.ts), so radar's own detail is kept; HRRR and NBM, copied from the
@@ -408,7 +409,7 @@ class Renderer:
         amount, kind = soften(amount, kind, sigma, kind_sigma)
         indexed = fine_index(amount, kind)
         data = encode_fine(indexed)
-        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         self._store(name, data)
         self._write_probe(name, probe_sample(indexed))
         return name

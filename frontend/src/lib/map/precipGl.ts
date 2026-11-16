@@ -1,114 +1,176 @@
-// Precipitation coloured at the screen's resolution, on the GPU.
+// Precipitation drawn by the GPU, in the map's own WebGL context (a MapLibre custom
+// layer: ../precipOverlay.ts), at the screen's resolution.
 //
 // The server sends radar, nowcast and forecast frames as numbers: a grayscale PNG whose
 // gray is an index meaning a type and a rate (backend/snowwatch/maps/palette.py, the
-// index's `fine`). Here a small WebGL program reads the frame around each screen pixel,
-// smooths the rates (a cubic B-spline over 4×4 frame pixels, rates in mm/h, dry as 0),
-// takes the type most present, and only then picks the colour. So a storm's outline is a
-// smooth curve drawn sharp at any zoom, and the colour runs continuously inside, where a
-// coloured picture stretched by the map shows blurred pixels.
-//
-// It draws one view-sized picture (the part of the frame on screen, a margin round it),
-// which the map lays over the ground like any picture, draped in 3D too. A second frame
-// can be mixed in (the hand-over from the nowcast), as numbers, at its weight.
+// index's `fine`). When a frame arrives, one pass at its own resolution turns each pixel
+// into numbers the GPU can blend (rate and type shares). Then for each screen pixel, on
+// every map frame, four blended reads give a cubic B-spline of those numbers (dry as 0),
+// the type most present, and only then the colour: storms get smooth, sharp outlines and
+// continuous colour at any zoom, for about the cost of an ordinary picture layer. Each
+// frame is one upload and one small pass; pans, zooms and fades are cheap.
+// The other weather layers' pictures (already coloured) are drawn as they are, smoothly.
+// In 3D, `colorize` colours a frame on the CPU for a picture the map drapes.
+import type { ExpressionSpecification } from 'maplibre-gl';
 import type { PrecipKind, Ramp } from '../radar';
 
 /** How fine frames' indices read (the index's `fine`, from palette.fine_spec). */
 export interface FineSpec {
-	/** The lightest rate drawn (mm of water an hour), faintly. */
+	/** The lightest rate drawn (mm of water an hour). */
 	from: number;
 	/** Fully opaque from this rate. */
 	solid: number;
 	ramps: { type: PrecipKind; start: number; steps: number; top: number }[];
 }
 
-/** A rectangle of the frame, in frame pixels (x right, y down). */
-export interface FrameRect {
-	x0: number;
-	y0: number;
-	x1: number;
-	y1: number;
-}
-
 const KINDS: PrecipKind[] = ['snow', 'mix', 'rain'];
 
-const VERTEX = `#version 300 es
+/** The region's corners in mercator units (0–1, y down) give `v_uv` across the region. */
+export const VERTEX = `#version 300 es
+in vec2 a_pos;
+uniform mat4 u_matrix;
+uniform vec4 u_region;
+out vec2 v_uv;
+void main() {
+	v_uv = (a_pos - u_region.xy) / (u_region.zw - u_region.xy);
+	gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
+}`;
+
+/** A full-texture quad, for preparing a frame at its own resolution. */
+export const PREP_VERTEX = `#version 300 es
 in vec2 a_pos;
 out vec2 v_uv;
 void main() {
-	v_uv = a_pos * 0.5 + 0.5;
-	gl_Position = vec4(a_pos, 0.0, 1.0);
+	v_uv = vec2(a_pos.x, 1.0 - a_pos.y);
+	gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-const FRAGMENT = `#version 300 es
+/**
+ * Once per frame, at the frame's resolution: each pixel's index read as a rate and a type
+ * (with the hand-over frame mixed in at its weight), written as numbers the GPU can blend
+ * between pixels: r = √(rate / u_rtop), g, b, a = how much of it is snow, mix, rain.
+ */
+export const PREP_FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
-uniform sampler2D u_frame;
+uniform sampler2D u_src;
 uniform sampler2D u_under;
 uniform highp sampler2D u_lut;
-uniform sampler2D u_ramp;
-uniform vec4 u_rect;
 uniform vec2 u_size;
 uniform float u_under_w;
+uniform float u_rtop;
+in vec2 v_uv;
+out vec4 o;
+
+void add(in sampler2D tex, ivec2 c, float w, inout float rate, inout vec3 kinds) {
+	int idx = int(texelFetch(tex, c, 0).r * 255.0 + 0.5);
+	vec2 kv = texelFetch(u_lut, ivec2(idx, 0), 0).rg;
+	rate += w * kv.y;
+	int k = int(kv.x + 0.5);
+	if (k > 0) kinds[k - 1] += w;
+}
+
+void main() {
+	ivec2 c = clamp(ivec2(v_uv * u_size), ivec2(0), ivec2(u_size) - 1);
+	float rate = 0.0;
+	vec3 kinds = vec3(0.0);
+	add(u_src, c, 1.0 - u_under_w, rate, kinds);
+	if (u_under_w > 0.0) add(u_under, c, u_under_w, rate, kinds);
+	o = vec4(sqrt(min(rate, u_rtop) / u_rtop), kinds);
+}`;
+
+/**
+ * Every map frame: the two prepared frames (the one fading in, `1`, over the one fading
+ * out, `0`, at `u_t`). A fine frame is read with a cubic B-spline (four blended reads),
+ * its rate and type shares smooth between pixels, and only then coloured, so outlines
+ * are smooth and sharp at any zoom. A picture (mode 1) is drawn as it is. Out:
+ * premultiplied colour, as MapLibre blends custom layers.
+ */
+export const FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D u_tex0;
+uniform sampler2D u_tex1;
+uniform sampler2D u_ramp;
+uniform vec2 u_size;
+uniform ivec2 u_mode;
+uniform float u_t;
+uniform float u_opacity;
+uniform float u_rtop;
 uniform float u_lfrom;
 uniform float u_lsolid;
 uniform vec3 u_ltop;
 in vec2 v_uv;
 out vec4 o;
 
-// Cubic B-spline weights for the four pixels round a point (no overshoot, so rates never
-// go below 0 or above their neighbours).
-vec4 bspline(float t) {
-	float t2 = t * t;
-	float t3 = t2 * t;
-	return vec4(
-		(1.0 - t) * (1.0 - t) * (1.0 - t),
-		3.0 * t3 - 6.0 * t2 + 4.0,
-		-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0,
-		t3
-	) / 6.0;
+// A cubic B-spline from four bilinear reads (Sigg & Hadwiger, GPU Gems 2, ch. 20).
+vec4 bspline(in sampler2D tex) {
+	vec2 p = v_uv * u_size - 0.5;
+	vec2 i = floor(p);
+	vec2 f = p - i;
+	vec2 f2 = f * f;
+	vec2 f3 = f2 * f;
+	vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+	vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+	vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+	vec2 w3 = f3 / 6.0;
+	vec2 g0 = w0 + w1;
+	vec2 g1 = w2 + w3;
+	vec2 h0 = (i - 0.5 + w1 / g0) / u_size;
+	vec2 h1 = (i + 1.5 + w3 / g1) / u_size;
+	vec4 a = texture(tex, vec2(h0.x, h0.y));
+	vec4 b = texture(tex, vec2(h1.x, h0.y));
+	vec4 c = texture(tex, vec2(h0.x, h1.y));
+	vec4 d = texture(tex, vec2(h1.x, h1.y));
+	return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
 }
 
-void gather(in sampler2D tex, ivec2 b, vec4 wx, vec4 wy, float share, inout float rate, inout vec3 kinds) {
-	ivec2 hi = ivec2(u_size) - 1;
-	for (int j = 0; j < 4; j++) {
-		for (int i = 0; i < 4; i++) {
-			ivec2 c = clamp(b + ivec2(i - 1, j - 1), ivec2(0), hi);
-			int idx = int(texelFetch(tex, c, 0).r * 255.0 + 0.5);
-			vec2 kv = texelFetch(u_lut, ivec2(idx, 0), 0).rg;
-			float w = wx[i] * wy[j] * share;
-			rate += w * kv.y;
-			int k = int(kv.x + 0.5);
-			if (k > 0) kinds[k - 1] += w;
-		}
-	}
-}
-
-void main() {
-	vec2 p = vec2(mix(u_rect.x, u_rect.z, v_uv.x), mix(u_rect.w, u_rect.y, v_uv.y)) - 0.5;
-	vec2 fl = floor(p);
-	ivec2 b = ivec2(fl);
-	vec4 wx = bspline(p.x - fl.x);
-	vec4 wy = bspline(p.y - fl.y);
-	float rate = 0.0;
-	vec3 kinds = vec3(0.0);
-	gather(u_frame, b, wx, wy, 1.0 - u_under_w, rate, kinds);
-	if (u_under_w > 0.0) gather(u_under, b, wx, wy, u_under_w, rate, kinds);
+vec4 fine(in sampler2D tex) {
+	vec4 v = bspline(tex);
+	float rate = v.r * v.r * u_rtop;
 	float lr = log(max(rate, 1e-6));
 	// Sharp but not jagged: the outline fades over about a screen pixel.
 	float fw = max(fwidth(lr), 1e-4);
 	float edge = smoothstep(u_lfrom - fw, u_lfrom + fw, lr);
-	if (edge <= 0.0) {
-		o = vec4(0.0);
-		return;
-	}
+	if (edge <= 0.0) return vec4(0.0);
+	vec3 kinds = v.gba;
 	int k = kinds.x >= kinds.y && kinds.x >= kinds.z ? 0 : (kinds.y >= kinds.z ? 1 : 2);
 	float top = k == 0 ? u_ltop.x : (k == 1 ? u_ltop.y : u_ltop.z);
 	float t = clamp((lr - u_lfrom) / (top - u_lfrom), 0.0, 1.0);
 	vec3 col = texture(u_ramp, vec2(t, (float(k) + 0.5) / 3.0)).rgb;
-	float a = (0.25 + 0.75 * clamp((lr - u_lfrom) / (u_lsolid - u_lfrom), 0.0, 1.0)) * edge;
-	o = vec4(col * a, a);
+	float a = (0.55 + 0.45 * clamp((lr - u_lfrom) / (u_lsolid - u_lfrom), 0.0, 1.0)) * edge;
+	return vec4(col * a, a);
+}
+
+vec4 frame(in sampler2D tex, int mode) {
+	return mode == 0 ? fine(tex) : texture(tex, v_uv);
+}
+
+void main() {
+	if (any(lessThan(v_uv, vec2(0.0))) || any(greaterThan(v_uv, vec2(1.0)))) discard;
+	vec4 c = frame(u_tex1, u_mode.y);
+	if (u_t < 1.0) c = mix(frame(u_tex0, u_mode.x), c, u_t);
+	o = c * u_opacity;
 }`;
+
+/** The largest rate the prepared frames hold (mm/h): every ramp's top is under it. */
+export const RATE_TOP = 64;
+
+/** An opacity expression (['interpolate', ['linear'], ['zoom'], z, v, …], or a number) at
+ *  a zoom: custom layers have no paint properties, so the layer works it out itself. */
+export function opacityAt(expr: ExpressionSpecification | number, zoom: number): number {
+	if (typeof expr === 'number') return expr;
+	const stops = (expr as unknown[]).slice(3) as number[];
+	if (expr[0] !== 'interpolate' || stops.length < 2) return 1;
+	if (zoom <= stops[0]) return stops[1];
+	for (let i = 2; i < stops.length; i += 2) {
+		if (zoom <= stops[i]) {
+			const f = (zoom - stops[i - 2]) / (stops[i] - stops[i - 2]);
+			return stops[i - 1] + (stops[i + 1] - stops[i - 1]) * f;
+		}
+	}
+	return stops[stops.length - 1];
+}
 
 // ---- Colours: each ramp's stops, run together in OKLab (as palette.py does) ------------
 
@@ -199,168 +261,55 @@ export function rampTexels(
 	return out;
 }
 
-// ---- The renderer --------------------------------------------------------------------
-
-export class PrecipGl {
-	readonly canvas: HTMLCanvasElement;
-	private gl: WebGL2RenderingContext;
-	private prog: WebGLProgram;
-	private tex: WebGLTexture[];
-	/** Which frame each of the two frame textures holds. */
-	private held: (string | null)[] = [null, null];
-	private uni: Record<string, WebGLUniformLocation | null> = {};
-
-	/** null where WebGL 2 isn't available (the map needs it, so rarely). */
-	static create(spec: FineSpec, ramps: Record<PrecipKind, Ramp>, w: number, h: number) {
-		try {
-			const canvas = document.createElement('canvas');
-			const gl = canvas.getContext('webgl2', {
-				alpha: true,
-				premultipliedAlpha: true,
-				antialias: false,
-				depth: false,
-				stencil: false,
-				preserveDrawingBuffer: false
-			});
-			return gl ? new PrecipGl(canvas, gl, spec, ramps, w, h) : null;
-		} catch (e) {
-			console.error('precipitation renderer', e);
-			return null;
+/**
+ * A fine frame coloured on the CPU, pixel by pixel (for 3D, where the map drapes ordinary
+ * pictures): `px` holds the decoded frame (RGBA, gray = index) and becomes the colours,
+ * with `under` (another decoded frame) mixed in as numbers at its weight. Each pixel's
+ * colour is the ramp's at its rate: smooth steps, which the map blends between pixels.
+ */
+export function colorize(
+	px: Uint8ClampedArray,
+	spec: FineSpec,
+	ramps: Record<PrecipKind, Ramp>,
+	under: Uint8ClampedArray | null = null,
+	weight = 0
+) {
+	const lut = fineLut(spec);
+	const tex = rampTexels(spec, ramps);
+	const lfrom = Math.log(spec.from);
+	const lsolid = Math.log(spec.solid);
+	const ltop = KINDS.map((k) => Math.log(spec.ramps.find((r) => r.type === k)?.top ?? 10));
+	// Index → colour, for frames without a hand-over (the usual case: a table lookup).
+	const colour = (kind: number, rate: number, out: number) => {
+		if (kind < 1 || !(rate >= spec.from)) {
+			px[out + 3] = 0;
+			return;
 		}
+		const lr = Math.log(rate);
+		const k = kind - 1;
+		const x = Math.round((255 * Math.min(1, (lr - lfrom) / (ltop[k] - lfrom))) as number);
+		const at = (k * 256 + x) * 4;
+		px[out] = tex[at];
+		px[out + 1] = tex[at + 1];
+		px[out + 2] = tex[at + 2];
+		px[out + 3] = Math.round(255 * (0.55 + 0.45 * Math.min(1, (lr - lfrom) / (lsolid - lfrom))));
+	};
+	if (!under || weight <= 0) {
+		const table = new Uint8ClampedArray(256 * 4);
+		const keep = px;
+		px = table;
+		for (let i = 0; i < 256; i++) colour(lut[i * 2], lut[i * 2 + 1], i * 4);
+		px = keep;
+		const t32 = new Uint32Array(table.buffer);
+		const p32 = new Uint32Array(px.buffer, px.byteOffset, px.length / 4);
+		for (let i = 0; i < p32.length; i++) p32[i] = t32[px[i * 4]];
+		return;
 	}
-
-	private constructor(
-		canvas: HTMLCanvasElement,
-		gl: WebGL2RenderingContext,
-		private spec: FineSpec,
-		ramps: Record<PrecipKind, Ramp>,
-		private w: number,
-		private h: number
-	) {
-		this.canvas = canvas;
-		this.gl = gl;
-		const shader = (type: number, src: string) => {
-			const s = gl.createShader(type)!;
-			gl.shaderSource(s, src);
-			gl.compileShader(s);
-			if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-				throw new Error(gl.getShaderInfoLog(s) ?? '');
-			return s;
-		};
-		const prog = gl.createProgram()!;
-		gl.attachShader(prog, shader(gl.VERTEX_SHADER, VERTEX));
-		gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FRAGMENT));
-		gl.linkProgram(prog);
-		if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
-			throw new Error(gl.getProgramInfoLog(prog) ?? '');
-		this.prog = prog;
-		gl.useProgram(prog);
-		for (const name of [
-			'u_frame',
-			'u_under',
-			'u_lut',
-			'u_ramp',
-			'u_rect',
-			'u_size',
-			'u_under_w',
-			'u_lfrom',
-			'u_lsolid',
-			'u_ltop'
-		])
-			this.uni[name] = gl.getUniformLocation(prog, name);
-
-		const buf = gl.createBuffer();
-		gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-		const loc = gl.getAttribLocation(prog, 'a_pos');
-		gl.enableVertexAttribArray(loc);
-		gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-		const texture = (unit: number) => {
-			const t = gl.createTexture()!;
-			gl.activeTexture(gl.TEXTURE0 + unit);
-			gl.bindTexture(gl.TEXTURE_2D, t);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, unit === 3 ? gl.LINEAR : gl.NEAREST);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, unit === 3 ? gl.LINEAR : gl.NEAREST);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-			return t;
-		};
-		this.tex = [texture(0), texture(1)];
-		// Empty until a frame arrives.
-		for (const unit of [0, 1]) {
-			gl.activeTexture(gl.TEXTURE0 + unit);
-			gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(1));
-		}
-		texture(2);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, 256, 1, 0, gl.RG, gl.FLOAT, fineLut(spec));
-		texture(3);
-		gl.texImage2D(
-			gl.TEXTURE_2D,
-			0,
-			gl.RGBA8,
-			256,
-			3,
-			0,
-			gl.RGBA,
-			gl.UNSIGNED_BYTE,
-			rampTexels(spec, ramps)
-		);
-		gl.uniform1i(this.uni.u_frame, 0);
-		gl.uniform1i(this.uni.u_under, 1);
-		gl.uniform1i(this.uni.u_lut, 2);
-		gl.uniform1i(this.uni.u_ramp, 3);
-		gl.uniform2f(this.uni.u_size, w, h);
-		const top = (kind: PrecipKind) => Math.log(spec.ramps.find((r) => r.type === kind)?.top ?? 10);
-		gl.uniform1f(this.uni.u_lfrom, Math.log(spec.from));
-		gl.uniform1f(this.uni.u_lsolid, Math.log(spec.solid));
-		gl.uniform3f(this.uni.u_ltop, top('snow'), top('mix'), top('rain'));
-		gl.disable(gl.BLEND);
-	}
-
-	/** Put a frame (its file, and its decoded picture) in texture 0 or 1, unless it's there. */
-	hold(slot: 0 | 1, file: string, bmp: ImageBitmap) {
-		if (this.held[slot] === file) return;
-		const gl = this.gl;
-		gl.activeTexture(gl.TEXTURE0 + slot);
-		gl.bindTexture(gl.TEXTURE_2D, this.tex[slot]);
-		gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-		gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-		gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, bmp);
-		this.held[slot] = file;
-	}
-
-	holds(slot: 0 | 1) {
-		return this.held[slot];
-	}
-
-	/** Draw `rect` of the held frame (with `underWeight` of texture 1 mixed in) into a
-	 *  `width` × `height` picture on this.canvas. */
-	render(rect: FrameRect, width: number, height: number, underWeight = 0) {
-		const gl = this.gl;
-		if (this.canvas.width !== width || this.canvas.height !== height) {
-			this.canvas.width = width;
-			this.canvas.height = height;
-		}
-		gl.viewport(0, 0, width, height);
-		gl.useProgram(this.prog);
-		gl.uniform4f(this.uni.u_rect, rect.x0, rect.y0, rect.x1, rect.y1);
-		gl.uniform1f(this.uni.u_under_w, this.held[1] ? underWeight : 0);
-		gl.clearColor(0, 0, 0, 0);
-		gl.clear(gl.COLOR_BUFFER_BIT);
-		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-	}
-
-	get frameSize() {
-		return { w: this.w, h: this.h };
-	}
-
-	destroy() {
-		const gl = this.gl;
-		for (const t of this.tex) gl.deleteTexture(t);
-		gl.deleteProgram(this.prog);
-		gl.getExtension('WEBGL_lose_context')?.loseContext();
-		this.canvas.width = this.canvas.height = 0;
+	for (let o = 0; o < px.length; o += 4) {
+		const a = px[o];
+		const b = under[o];
+		const ra = lut[a * 2 + 1] * (1 - weight);
+		const rb = lut[b * 2 + 1] * weight;
+		colour(ra >= rb ? lut[a * 2] : lut[b * 2], ra + rb, o);
 	}
 }
