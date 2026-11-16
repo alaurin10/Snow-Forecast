@@ -7,6 +7,14 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **No more "rain" on Mt. Rainier's summit on the radar.**
+  - What it was: the radar beam strikes the mountain, which shows as a strong, unmoving
+    echo. Environment Canada leaves it untyped, and the map used to call any untyped echo
+    rain.
+  - Now: an echo that no nearby radar type, and no forecast precipitation, explains is
+    left out.
+  - Real precipitation is still typed as before: by radar near it, or by the forecast.
+
 - **The radar is reliable again.**
   - **Colours:** the server colours every frame, as before, and the map shows it as a
     picture, flat and in 3D alike. The map-side drawing that replaced this sometimes showed
