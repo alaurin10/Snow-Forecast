@@ -1086,6 +1086,60 @@ phone that doesn't press it stays at the "open" figure.
 fewer tiles and cheaper layers; PR 4, terrain worker throughput; PR 5, optional, playback
 memory and backend bytes. Each records its numbers here.
 
+## Radar look notes (done 16 Nov 2026)
+
+Asked for by the owner during the performance pass: radar looked pixelated and jumped at
+the radar → nowcast → forecast joins. Owner's choices:
+- frames fade on screen, and the first forecast hours are blended with the nowcast;
+- this comes before performance PRs 3–5.
+
+**Numbers instead of bands.** Radar and nowcast are asked for with a coded SLD
+(`geomet.code_sld`, 100 log-spaced intervals). `radar_eccc.compose` now returns a rate and
+a type per pixel.
+
+**Softening.** Every precipitation frame is softened by source (`maps/smooth.py`: three box
+blurs, worked only round the wet area, 0.04–0.07 s a frame). Types are blurred as shares,
+so their borders are smooth.
+
+**The fine palette.** Frames are painted on their own palette (`palette.FINE_*`):
+- 36 snow, 20 mix and 72 rain steps, ~15% apart.
+- Colours run between the ramps' stops in OKLab, which keeps the green → yellow
+  transition from going muddy.
+- Rates from 0.03 mm/h fade in through alpha.
+- 7% steps made 165 KB files; 15% steps make 132 KB (57 KB before, in six steps). Lossless
+  WebP was smaller still but took 5.5 s a frame.
+- Frames carry `palette: "fine"`. `point.py` and `_forecast_types` read either palette,
+  and frame keys gained `f2` so old frames are drawn again.
+
+**Hand-over.**
+- *Planned:* blend on the server.
+- *Built:* the browser mixes the first 2 forecast hours with the last nowcast frame
+  (`radar.ts` `handover`, `HANDOVER_S`).
+- *Why:* the nowcast moves every 6 minutes while forecast frames are redrawn every 30.
+- *Taps:* `point.py` mixes the numbers with the same weights.
+
+**Fades.** `PrecipLayer` keeps two canvas sources and fades between them with a
+`raster-opacity` transition (≤ 260 ms, inside the frame's time; none with reduced motion).
+In 3D the drape is redrawn on each frame of the fade. Play speed follows the time step
+(`radar.ts` `frameMs`).
+
+**Legend.** The key is a gradient.
+
+Measured with `e2e/perf.spec.ts`, against PR 2:
+
+| | PR 2 | Radar look |
+|---|---|---|
+| Page process, peak | 383–387 MB | 374 MB |
+| GPU process, peak | 341–366 MB | 396 MB (the second canvas's texture) |
+| First frame | 3.5–3.7 s | 3.0 s |
+
+Known limits:
+- The green → yellow stretch of the rain ramp still passes through olive, since its stops
+  go from dark green to yellow.
+- Snow/mix/rain borders are only as good as GeoMet's type picture.
+- The hand-over mixes two pictures, so a storm the model places differently fades out in
+  one place and in at the other.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

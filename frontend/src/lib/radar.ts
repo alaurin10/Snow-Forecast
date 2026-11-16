@@ -279,6 +279,38 @@ export async function loadTimeline(): Promise<Timeline> {
 
 export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 
+/**
+ * The forecast frames this soon after the last nowcast frame (or radar, without one) are
+ * shown mixed with it, fading from the nowcast to the model, so the hand-over between the
+ * two sources is gradual rather than a jump. Taps give the same mix (keep in step with
+ * HANDOVER_S in backend/snowwatch/maps/point.py).
+ */
+export const HANDOVER_S = 2 * 3600;
+
+/** The hand-over for the frame at `i`: which frame shows under it, and how much of it
+ *  (1 at the nowcast's end, falling to 0 HANDOVER_S later); null for none. */
+export function handover(frames: Frame[], i: number): { from: number; weight: number } | null {
+	const f = frames[i];
+	if (!f || f.kind !== 'forecast') return null;
+	let from = -1;
+	for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'nowcast') from = j;
+	if (from < 0) for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'radar') from = j;
+	if (from < 0 || f.t <= frames[from].t) return null;
+	const weight = 1 - (f.t - frames[from].t) / HANDOVER_S;
+	return weight > 0 ? { from, weight } : null;
+}
+
+/** How long a frame stays on screen while playing, by the time to the next one: quick
+ *  through 6- and 12-minute radar, slower through hourly and 3- and 6-hourly forecast,
+ *  so the weather moves at a steadier pace. */
+export function frameMs(stepS: number): number {
+	const min = stepS / 60;
+	if (min <= 12) return 300;
+	if (min <= 60) return 450;
+	if (min <= 180) return 550;
+	return 650;
+}
+
 // ---- Labels ------------------------------------------------------------------
 
 const clock = (d: Date) =>

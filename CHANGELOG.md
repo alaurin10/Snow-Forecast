@@ -7,6 +7,16 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Smoother radar on the map.** Precipitation is now drawn in continuous colour rather
+  than six flat steps, with soft edges where it starts:
+  - Radar arrives from Environment Canada as numbers rather than coloured bands.
+  - The model forecasts are smoothed where they used to show their grid cells.
+  - The borders between snow, mix and rain follow the weather, not blocks.
+  - Frames fade into one another as the radar plays or the slider moves (in 3D too), and
+    steps through 6- and 12-minute radar more quickly than through hourly forecast.
+  - The first two forecast hours fade from the last radar nowcast into the model, so the
+    hand-over between the two is gradual; tapping the map gives the same mix.
+  - The key shows each type's colours as a continuous strip.
 - **The map does less wasted work** (performance pass, part 2; nothing it shows changes):
   - Radar pictures and satellite tiles reach the map as soon as they arrive. They used
     to wait until a copy was written to the offline cache, which is now written in the

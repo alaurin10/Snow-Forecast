@@ -112,6 +112,39 @@ def sld(layer: str, ramp: list[tuple[float, str]], scale: float = 1) -> str:
     )
 
 
+# A style that codes the rate in the picture rather than colouring it: CODE_STEPS
+# intervals, log-spaced from CODE_FROM (mm or cm an hour), each drawn in its own colour
+# (#<code>0000), so the rate comes back to within ~10% (`code_rates`).
+CODE_STEPS = 100
+CODE_FROM = 0.02
+CODE_TO = 100.0
+_CODE_EDGES = np.geomspace(CODE_FROM, CODE_TO, CODE_STEPS)
+# Code → rate: the middle (geometric) of its interval; 0 for no echo.
+CODE_RATE = np.zeros(256, np.float32)
+CODE_RATE[1:CODE_STEPS] = np.sqrt(_CODE_EDGES[:-1] * _CODE_EDGES[1:])
+CODE_RATE[CODE_STEPS] = CODE_TO
+
+
+def code_sld(layer: str) -> str:
+    """A GeoMet style drawing `layer`'s rate as a code in the red channel."""
+    entries = [*((q, i + 1) for i, q in enumerate(_CODE_EDGES)), (99999.0, CODE_STEPS)]
+    cmap = "".join(f'<ColorMapEntry color="#{c:02x}0000" quantity="{q:g}"/>' for q, c in entries)
+    return (
+        '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld">'
+        f"<NamedLayer><Name>{layer}</Name><UserStyle><FeatureTypeStyle><Rule>"
+        f'<RasterSymbolizer><ColorMap type="intervals">{cmap}</ColorMap></RasterSymbolizer>'
+        "</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>"
+    )
+
+
+def code_rates(img: np.ndarray | None) -> np.ndarray | None:
+    """A picture drawn with `code_sld` back to rates (0 where there's no echo)."""
+    if img is None:
+        return None
+    rate: np.ndarray = np.where(img[..., 3] > 0, CODE_RATE[img[..., 0]], 0.0).astype(np.float32)
+    return rate
+
+
 def geomet_map(
     net: Net,
     layer: str,

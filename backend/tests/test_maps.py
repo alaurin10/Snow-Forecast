@@ -13,22 +13,31 @@ import numpy as np
 import pytest
 
 from snowwatch.maps import grib
-from snowwatch.maps.geomet import Net, ts_iso
+from snowwatch.maps.geomet import CODE_RATE, CODE_STEPS, Net, code_rates, code_sld, ts_iso
 from snowwatch.maps.palette import (
+    FINE_ALPHA,
+    FINE_FROM,
+    FINE_PALETTE,
     MIX,
     MIX_T,
+    NONE,
     RAIN,
     RAIN_T,
     SNOW,
     SNOW_T,
     decode_indices,
     encode,
+    encode_fine,
+    fine_index,
+    fine_values,
     hex_rgb,
     kinds_of,
+    rate_band,
     snap,
 )
 from snowwatch.maps.region import WEST, box_region, region_for, spread
 from snowwatch.maps.render import RETIRE_S, FrameOut, Renderer, TotalOut
+from snowwatch.maps.smooth import blur, soften
 from snowwatch.maps.sources import radar_eccc as rx
 
 FIXTURES = Path(__file__).parent / "fixtures" / "grib"
@@ -81,6 +90,16 @@ def test_palette_indices_carry_the_type() -> None:
 # ---- ECCC radar typing ---------------------------------------------------------------
 
 
+def code_of(rate: float) -> int:
+    """The code geomet.code_sld draws `rate` in."""
+    return int(np.argmin(np.abs(CODE_RATE[1 : CODE_STEPS + 1] - rate))) + 1
+
+
+def coded(h: int, w: int, rate: float) -> np.ndarray:
+    """A picture drawn with geomet.code_sld: `rate` everywhere."""
+    return rgba(h, w, (code_of(rate), 0, 0))
+
+
 def rgba(h: int, w: int, color: tuple[int, int, int] | None = None) -> np.ndarray:
     out = np.zeros((h, w, 4), np.uint8)
     if color:
@@ -99,11 +118,84 @@ def test_type_picture_classified_by_legend_colour() -> None:
     assert rx.classify_types(None) is None
 
 
+def test_fine_palette_runs_smoothly_and_reads_back() -> None:
+    rate = np.geomspace(0.01, 80, 400).astype(np.float32)[None, :]
+    for code, top in ((SNOW_T, 6.0), (MIX_T, 6.0), (RAIN_T, 60.0)):
+        idx = fine_index(rate, np.full(rate.shape, code, np.uint8))
+        value, kind = fine_values(idx)
+        drawn = rate >= FINE_FROM
+        assert (idx[~drawn] == 0).all() and (kind[drawn] == code).all()
+        # Each rate comes back within its step (~8%) up to the ramp's top.
+        within = drawn & (rate <= top)
+        assert (np.abs(value[within] - rate[within]) <= 0.08 * rate[within]).all()
+        # Steps rise one at a time: no jumps in colour.
+        steps = np.diff(idx[drawn].astype(int))
+        assert set(steps.tolist()) <= {0, 1}
+    # Light rates fade in; from FINE_SOLID they're solid.
+    alpha = FINE_ALPHA
+    light = fine_index(np.array([[0.04]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
+    solid = fine_index(np.array([[0.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
+    assert 0 < alpha[light] < 128 and alpha[solid] == 255 and alpha[0] == 0
+    # A ramp's stops keep their colours.
+    at_stop = fine_index(np.array([[2.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
+    assert max(abs(a - b) for a, b in zip(FINE_PALETTE[at_stop], rain[3], strict=True)) < 20
+    # Encoded as a palette PNG with per-entry alpha, it decodes to the same indices.
+    img = encode_fine(fine_index(rate, np.full(rate.shape, RAIN_T, np.uint8)))
+    back = decode_indices(img)
+    assert (
+        back is not None and (back == fine_index(rate, np.full(rate.shape, RAIN_T, np.uint8))).all()
+    )
+
+
+def test_rate_band_matches_the_ramp_steps() -> None:
+    assert rate_band(RAIN_T, 0.05) is None  # drawn faintly, too light to call wet
+    assert rate_band(RAIN_T, 0.3) == (RAIN_T, 0.1, 0.5)
+    band = rate_band(RAIN_T, 20)
+    assert band is not None and band[:2] == (RAIN_T, 10.0) and np.isnan(band[2])
+    assert rate_band(SNOW_T, 1.5) == (SNOW_T, 1.0, 2.0)
+    assert rate_band(NONE, 1.0) is None
+
+
+def test_soften_smooths_steps_and_keeps_the_amount() -> None:
+    # 2-pixel blocks (a 3 km model copied from its nearest cell), snow left, rain right.
+    blocks = np.repeat(
+        np.repeat(np.linspace(0.2, 2, 25, dtype=np.float32).reshape(5, 5), 4, 0), 4, 1
+    )
+    kind = np.full(blocks.shape, SNOW_T, np.uint8)
+    kind[:, 10:] = RAIN_T
+    out, k = soften(blocks, kind, 1.2)
+    assert np.abs(np.diff(out, axis=1)).max() < np.abs(np.diff(blocks, axis=1)).max()
+    assert abs(float(out.mean()) - float(blocks.mean())) < 0.02 * float(blocks.mean())
+    assert (k[:, :8] == SNOW_T).all() and (k[:, 12:] == RAIN_T).all()
+    # No data stays no data, and doesn't drag its neighbours down.
+    holes = blocks.copy()
+    holes[:, :4] = np.nan
+    out, _ = soften(holes, kind, 1.2)
+    assert np.isnan(out[:, :4]).all() and float(out[:, 4].min()) >= 0.2 * 0.95
+    # Dry stays dry far from any echo; an echo's edge fades.
+    dot = np.zeros((40, 40), np.float32)
+    dot[20, 20] = 5
+    out, k = soften(dot, np.where(dot > 0, RAIN_T, NONE).astype(np.uint8), 1.0)
+    assert out[0, 0] == 0 and k[0, 0] == NONE and 0 < out[20, 22] < out[20, 21] < out[20, 20]
+    assert blur(np.zeros((3, 3), np.float32), 1.0).sum() == 0
+
+
+def test_code_sld_round_trips_rates() -> None:
+    sld = code_sld(rx.RRAI)
+    assert sld.count("<ColorMapEntry") == CODE_STEPS + 1 and 'color="#010000"' in sld
+    for rate in (0.03, 0.1, 0.5, 2.5, 20.0):
+        got = code_rates(coded(1, 1, rate))
+        assert got is not None and abs(float(got[0, 0]) - rate) <= 0.06 * rate
+    clear = code_rates(rgba(1, 1))
+    assert clear is not None and float(clear[0, 0]) == 0
+    assert code_rates(None) is None
+
+
 def test_compose_types_each_echo() -> None:
     h, w = 1, 40
-    rain_pic = rgba(h, w, rain[1])  # 0.5 mm/h everywhere…
-    rain_pic[0, 2] = (*rain[3], 255)  # …2.5 mm/h here
-    snow_pic = rgba(h, w, snow[2])
+    rain_rate = np.full((h, w), 0.5, np.float32)  # 0.5 mm/h everywhere…
+    rain_rate[0, 2] = 2.5  # …2.5 mm/h here
+    snow_rate = np.full((h, w), 1.2, np.float32)
     types = np.zeros((h, w), np.uint8)
     types[0, 0] = SNOW_T
     types[0, 1:3] = MIX_T
@@ -111,22 +203,26 @@ def test_compose_types_each_echo() -> None:
     # 4…11: untyped but near the rain pixel; 30+: far from any typed pixel.
     fallback = np.zeros((h, w), np.uint8)
     fallback[0, 30:35] = SNOW_T
-    out = rx.compose(rain_pic, snow_pic, types, fallback)
+    out = rx.compose(rain_rate, snow_rate, types, fallback)
     assert out is not None
-    assert tuple(out[0, 0, :3]) == snow[2]
-    assert tuple(out[0, 1, :3]) == mix[0]  # mixed at 0.5 mm/h: light
-    assert tuple(out[0, 2, :3]) == mix[1]  # mixed at 2.5 mm/h: heavy
-    assert tuple(out[0, 3, :3]) == rain[1]
-    assert tuple(out[0, 6, :3]) == rain[1]  # nearest radar type within reach
-    assert tuple(out[0, 32, :3]) == snow[2]  # the forecast's type
-    assert tuple(out[0, 38, :3]) == rain[1]  # nothing else known: rain
-    assert out[0, :, 3].min() == 255
+    amount, kind = out
+    assert (kind[0, 0], amount[0, 0]) == (SNOW_T, np.float32(1.2))  # snow: the snow rate
+    assert (kind[0, 1], amount[0, 1]) == (MIX_T, np.float32(0.5))  # mixed: the rain rate
+    assert (kind[0, 2], amount[0, 2]) == (MIX_T, np.float32(2.5))
+    assert (kind[0, 3], amount[0, 3]) == (RAIN_T, np.float32(0.5))
+    assert kind[0, 6] == RAIN_T  # nearest radar type within reach
+    assert (kind[0, 32], amount[0, 32]) == (SNOW_T, np.float32(1.2))  # the forecast's type
+    assert kind[0, 38] == RAIN_T  # nothing else known: rain
 
 
 def test_compose_without_pictures() -> None:
     assert rx.compose(None, None, None) is None
-    only_snow = rx.compose(None, rgba(1, 2, snow[0]), np.full((1, 2), SNOW_T, np.uint8))
-    assert only_snow is not None and tuple(only_snow[0, 0, :3]) == snow[0]
+    snow_rate = np.full((1, 2), 0.2, np.float32)
+    only = rx.compose(None, snow_rate, np.full((1, 2), SNOW_T, np.uint8))
+    assert only is not None and only[1][0, 0] == SNOW_T and only[0][0, 0] == np.float32(0.2)
+    # Mixed where only the snow picture has echo: the snow rate.
+    mixed = rx.compose(None, snow_rate, np.full((1, 2), MIX_T, np.uint8))
+    assert mixed is not None and mixed[0][0, 1] == np.float32(0.2)
 
 
 def test_radar_times_sit_on_the_clock() -> None:
@@ -188,9 +284,9 @@ class GeoMet(Net):
         h, w = int(params["height"]), int(params["width"])
         layer = params["layers"]
         if layer in (rx.RRAI, rx.NOW_RAIN):
-            return rgba(h, w, rain[2])
+            return coded(h, w, 1.5)
         if layer in (rx.RSNO, rx.NOW_SNOW):
-            return rgba(h, w, snow[1])
+            return coded(h, w, 0.7)
         if layer == rx.TYPE:  # snow in the top half, rain below
             out = rgba(h, w, hex_rgb("#9bfe9b"))
             out[: h // 2] = (*hex_rgb("#7fe0ec"), 255)
@@ -216,11 +312,14 @@ def test_radar_render_types_frames_and_adds_a_nowcast(tmp_path: Path) -> None:
     assert [f["t"] - (latest - 360) for f in nowcast] == [720, 1440, 2160, 2880, 3600, 4320]
     assert all(not f["past"] for f in nowcast) and nowcast[0]["file"].startswith("n")
 
-    from PIL import Image
-
-    img = np.asarray(Image.open(tmp_path / radar[-1]["file"]).convert("RGBA"))
-    assert tuple(img[2, 20, :3]) == snow[1]  # typed snow: the snow-rate colour
-    assert tuple(img[-2, 20, :3]) == rain[2]  # typed rain: the rain-rate colour
+    assert {f["palette"] for f in ix["frames"]} == {"fine"}
+    idx = decode_indices((tmp_path / radar[-1]["file"]).read_bytes())
+    assert idx is not None
+    value, kind = fine_values(idx)
+    # Typed snow takes the snow rate, typed rain the rain rate (each within the code's and
+    # the palette's steps).
+    assert kind[2, 20] == SNOW_T and abs(float(value[2, 20]) - 0.7) < 0.1
+    assert kind[-2, 20] == RAIN_T and abs(float(value[-2, 20]) - 1.5) < 0.2
 
     # Nothing new: nothing redrawn.
     before = len(net.maps)

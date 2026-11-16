@@ -4,47 +4,118 @@ import { FrameStore, PrecipLayer } from './precipOverlay';
 
 /** Just enough of a MapLibre map for the precipitation layer. */
 function fakeMap(terrain: boolean) {
-	const source = { play: vi.fn(), pause: vi.fn() };
+	const sources: Record<
+		string,
+		{ play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> }
+	> = {};
+	const layers = new Set<string>();
+	const paint: Record<string, Record<string, unknown>> = {};
+	const listeners: (() => void)[] = [];
 	const releaseAllRTT = vi.fn();
 	const map = {
-		addSource: vi.fn(),
-		addLayer: vi.fn(),
-		getSource: () => source,
+		addSource: vi.fn((id: string) => (sources[id] = { play: vi.fn(), pause: vi.fn() })),
+		addLayer: vi.fn((l: { id: string; paint: Record<string, unknown> }) => {
+			layers.add(l.id);
+			paint[l.id] = { ...l.paint };
+		}),
+		getLayer: (id: string) => layers.has(id),
+		getSource: (id: string) => sources[id],
+		removeLayer: (id: string) => layers.delete(id),
+		removeSource: (id: string) => delete sources[id],
+		setPaintProperty: vi.fn((id: string, k: string, v: unknown) => (paint[id][k] = v)),
+		on: vi.fn((_: string, f: () => void) => listeners.push(f)),
+		off: vi.fn((_: string, f: () => void) => listeners.splice(listeners.indexOf(f), 1)),
 		triggerRepaint: vi.fn(),
 		terrain: terrain ? { tileManager: { releaseAllRTT } } : null
 	};
-	return { map, source, releaseAllRTT };
+	return { map, sources, paint, listeners, releaseAllRTT };
 }
 
 describe('PrecipLayer', () => {
 	afterEach(() => vi.unstubAllGlobals());
-	const ctx = { clearRect: vi.fn(), drawImage: vi.fn() };
-	// These tests run without a DOM: the layer only needs a canvas with a 2D context.
+	const ctx = {
+		clearRect: vi.fn(),
+		drawImage: vi.fn(),
+		globalAlpha: 1,
+		globalCompositeOperation: 'source-over'
+	};
+	// These tests run without a DOM: the layer only needs canvases with a 2D context.
 	const withCanvas = () =>
 		vi.stubGlobal('document', { createElement: () => ({ getContext: () => ctx }) });
 	const bounds: [[number, number], [number, number]] = [
 		[31, -134],
 		[57, -102]
 	];
+	const bmp = {} as ImageBitmap;
+	const [A, B] = PrecipLayer.IDS;
 
-	it('uploads each frame, and redraws the 3D drape so the new frame shows over terrain', () => {
+	it('draws each frame into the layer not showing, then fades it in over the other', () => {
 		withCanvas();
-		const { map, source, releaseAllRTT } = fakeMap(true);
+		const { map, sources, paint } = fakeMap(false);
 		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
-		layer.draw('f1.png', null);
-		layer.draw('f2.png', null);
-		expect(source.pause).toHaveBeenCalledTimes(2);
-		expect(releaseAllRTT).toHaveBeenCalledTimes(2);
-		expect(map.triggerRepaint).toHaveBeenCalledTimes(2);
+		expect(paint[A]['raster-opacity']).toBe(0.7);
+		expect(paint[B]['raster-opacity']).toBe(0);
+		layer.draw('f1.png', bmp, 200);
+		expect(sources[B].pause).toHaveBeenCalledTimes(1); // uploaded once
+		expect(paint[B]).toMatchObject({
+			'raster-opacity': 0.7,
+			'raster-opacity-transition': { duration: 200, delay: 0 }
+		});
+		expect(paint[A]).toMatchObject({
+			'raster-opacity': 0,
+			'raster-opacity-transition': { duration: 200, delay: 0 }
+		});
+		layer.draw('f2.png', bmp, 200);
+		expect(sources[A].pause).toHaveBeenCalledTimes(1);
+		expect(paint[A]['raster-opacity']).toBe(0.7);
+		expect(paint[B]['raster-opacity']).toBe(0);
 		expect(layer.showing).toBe('f2.png');
+		// The opacity follows the layer on screen.
+		layer.setOpacity(0.5);
+		expect(paint[A]['raster-opacity']).toBe(0.5);
+		expect(paint[B]['raster-opacity']).toBe(0);
+	});
+
+	it('mixes the hand-over frame under the new one, each at its share', () => {
+		withCanvas();
+		const { map } = fakeMap(false);
+		const seen: [number, string][] = [];
+		ctx.drawImage.mockImplementation(() =>
+			seen.push([ctx.globalAlpha, ctx.globalCompositeOperation])
+		);
+		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
+		layer.draw('f1.png', bmp, 0, { bmp, weight: 0.25 });
+		expect(seen).toEqual([
+			[0.25, 'lighter'],
+			[0.75, 'lighter']
+		]);
+		expect([ctx.globalAlpha, ctx.globalCompositeOperation]).toEqual([1, 'source-over']);
+		ctx.drawImage.mockReset();
+	});
+
+	it('in 3D, redraws the drape through the fade, then stops', () => {
+		withCanvas();
+		const { map, listeners, releaseAllRTT } = fakeMap(true);
+		let now = 1000;
+		vi.stubGlobal('performance', { now: () => now });
+		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
+		layer.draw('f1.png', bmp, 200);
+		expect(releaseAllRTT).toHaveBeenCalledTimes(1);
+		expect(listeners).toHaveLength(1);
+		listeners[0]();
+		expect(releaseAllRTT).toHaveBeenCalledTimes(2);
+		now += 300;
+		listeners[0]();
+		expect(listeners).toHaveLength(0);
+		expect(map.triggerRepaint).toHaveBeenCalledTimes(2);
 	});
 
 	it('in 2D there is no drape to redraw', () => {
 		withCanvas();
-		const { map, source } = fakeMap(false);
-		new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7).draw('f1.png', null);
-		expect(source.pause).toHaveBeenCalledTimes(1);
+		const { map, listeners } = fakeMap(false);
+		new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7).draw('f1.png', null, 200);
 		expect(map.triggerRepaint).not.toHaveBeenCalled();
+		expect(listeners).toHaveLength(0);
 	});
 });
 

@@ -13,6 +13,7 @@ from PIL import Image
 
 from snowwatch import precip
 from snowwatch.api.app import create_app
+from snowwatch.maps.palette import NONE, RAIN_T, SNOW_T, decode_indices, fine_values
 from snowwatch.precip import (
     MIX,
     PALETTE,
@@ -191,14 +192,20 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path, monkeypatch: Any)
 
     # A forecast frame: HRDPS's snow well inside its domain, HRRR's rain well outside it,
     # and the same amount (0.6 mm/h) all the way across the join.
-    first = np.asarray(Image.open(out / future[0]["file"]).convert("RGBA"))
-    assert tuple(first[10, 10][:3]) == snow[1]
-    assert tuple(first[90, 10][:3]) == rain[1]
-    column = [tuple(px[:3]) for px in first[:, 10]]
-    assert set(column) == {snow[1], rain[1]} and first[:, 10, 3].min() == 255
+    def rates(file: str) -> tuple[np.ndarray, np.ndarray]:
+        idx = decode_indices((out / file).read_bytes())
+        assert idx is not None
+        return fine_values(idx)
+
+    assert future[0]["palette"] == "fine"
+    value, kind = rates(future[0]["file"])
+    assert kind[10, 10] == SNOW_T and kind[90, 10] == RAIN_T
+    assert set(kind[:, 10].tolist()) == {SNOW_T, RAIN_T}
+    assert np.abs(value[:, 10] - 0.6).max() <= 0.05  # no gap or bump at the join
     # Beyond HRRR's reach, RDPS (dry here) fills in outside HRDPS's domain.
-    late = np.asarray(Image.open(out / future[-1]["file"]).convert("RGBA"))
-    assert tuple(late[10, 10][:3]) == snow[1] and late[90, 10, 3] == 0
+    value, kind = rates(future[-1]["file"])
+    assert kind[10, 10] == SNOW_T and abs(float(value[10, 10]) - 0.6) <= 0.05
+    assert kind[90, 10] == NONE
 
     # Nothing changed: nothing fetched or redrawn.
     before = (net.images, net.grids)

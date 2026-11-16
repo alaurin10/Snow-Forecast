@@ -119,16 +119,32 @@ export class FrameStore {
 	}
 }
 
+/** A frame drawn over another, partly: the hand-over from the last nowcast frame to the
+ *  forecast (radar.ts, `handover`). `weight` is the other frame's share. */
+export interface Blend {
+	bmp: ImageBitmap;
+	weight: number;
+}
+
 /**
- * The precipitation as one canvas laid over the pictures' box, in a MapLibre canvas
- * source. It drapes over 3D terrain like the base map. Drawing a frame uploads the
- * canvas to the GPU once (play then pause), rather than every frame of an animation.
+ * The precipitation laid over the pictures' box in two MapLibre canvas sources, one over
+ * the other. A new frame is drawn into the one not showing, which then fades in over
+ * `fade` ms while the other fades out: one upload per frame, and the GPU does the fade
+ * (a paint transition). It drapes over 3D terrain like the base map.
  */
 export class PrecipLayer {
-	readonly canvas: HTMLCanvasElement;
-	private ctx: CanvasRenderingContext2D;
-	private shown: string | null = null;
+	/** The two layers' ids; `ID` is the lower one, which other layers are placed by. */
 	static readonly ID = 'precip';
+	static readonly IDS = ['precip', 'precip-b'] as const;
+	private canvases: HTMLCanvasElement[] = [];
+	private ctxs: CanvasRenderingContext2D[] = [];
+	/** Which of the two shows the frame on screen. */
+	private front = 0;
+	private shown: string | null = null;
+	private opacity: unknown;
+	/** When the fade under way ends (performance.now()), or 0. */
+	private fadeEnds = 0;
+	private onRender: (() => void) | null = null;
 
 	constructor(
 		private map: MlMap,
@@ -138,60 +154,128 @@ export class PrecipLayer {
 		opacity: unknown,
 		beforeId?: string
 	) {
-		this.canvas = document.createElement('canvas');
-		this.canvas.width = width;
-		this.canvas.height = height;
-		this.ctx = this.canvas.getContext('2d')!;
+		this.opacity = opacity;
 		const [[south, west], [north, east]] = bounds;
-		map.addSource(PrecipLayer.ID, {
-			type: 'canvas',
-			canvas: this.canvas,
-			animate: false,
-			coordinates: [
-				[west, north],
-				[east, north],
-				[east, south],
-				[west, south]
-			]
+		const coordinates: [[number, number], [number, number], [number, number], [number, number]] = [
+			[west, north],
+			[east, north],
+			[east, south],
+			[west, south]
+		];
+		PrecipLayer.IDS.forEach((id, i) => {
+			const canvas = document.createElement('canvas');
+			canvas.width = width;
+			canvas.height = height;
+			this.canvases.push(canvas);
+			this.ctxs.push(canvas.getContext('2d')!);
+			map.addSource(id, { type: 'canvas', canvas, animate: false, coordinates });
+			map.addLayer(
+				{
+					id,
+					type: 'raster',
+					source: id,
+					paint: {
+						'raster-opacity': (i === this.front ? opacity : 0) as number,
+						'raster-opacity-transition': { duration: 0, delay: 0 },
+						'raster-fade-duration': 0,
+						'raster-resampling': 'linear'
+					}
+				},
+				// Each under `beforeId`, so the second lands just above the first.
+				beforeId
+			);
 		});
-		map.addLayer(
-			{
-				id: PrecipLayer.ID,
-				type: 'raster',
-				source: PrecipLayer.ID,
-				paint: {
-					'raster-opacity': opacity as number,
-					'raster-fade-duration': 0,
-					'raster-resampling': 'linear'
-				}
-			},
-			beforeId
-		);
 	}
 
 	get showing() {
 		return this.shown;
 	}
 
-	draw(file: string | null, bmp: ImageBitmap | null) {
-		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-		if (bmp) this.ctx.drawImage(bmp, 0, 0, this.canvas.width, this.canvas.height);
+	/** The pictures' opacity (by zoom), for whichever layer is showing. */
+	setOpacity(opacity: unknown) {
+		this.opacity = opacity;
+		const id = PrecipLayer.IDS[this.front];
+		if (this.map.getLayer(id)) this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
+	}
+
+	/**
+	 * Show a frame (null: nothing), fading from the one on screen over `fade` ms; `under`
+	 * is drawn beneath it at its weight (the hand-over), the frame at the rest.
+	 */
+	draw(file: string | null, bmp: ImageBitmap | null, fade = 0, under: Blend | null = null) {
+		const back = 1 - this.front;
+		const [idFront, idBack] = [PrecipLayer.IDS[this.front], PrecipLayer.IDS[back]];
+		if (!this.map.getLayer(idFront) || !this.map.getLayer(idBack)) return;
+		// A fade still under way: the layer it fades out is about to be drawn into, so it
+		// goes at once rather than showing the new picture before its turn.
+		this.setFade(idBack, 0, 0);
+		const ctx = this.ctxs[back];
+		const canvas = this.canvases[back];
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		if (under && under.weight > 0 && bmp) {
+			// Each picture at its share, added: a straight mix where both have echo, and
+			// each fading where only one does.
+			ctx.globalCompositeOperation = 'lighter';
+			ctx.globalAlpha = under.weight;
+			ctx.drawImage(under.bmp, 0, 0, canvas.width, canvas.height);
+			ctx.globalAlpha = 1 - under.weight;
+			ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+			ctx.globalAlpha = 1;
+			ctx.globalCompositeOperation = 'source-over';
+		} else if (bmp) ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
 		this.shown = file;
-		const src = this.map.getSource(PrecipLayer.ID) as CanvasSource | undefined;
+		const src = this.map.getSource(idBack) as CanvasSource | undefined;
 		// play() marks it changed and asks for a repaint; pause() uploads it right away.
 		src?.play();
 		src?.pause();
-		// In 3D, MapLibre drapes layers over the terrain from a cached texture per terrain
-		// tile, and only redraws that cache when an image source changes, not a canvas
-		// source. Without this, the frame on screen stays the same while the slider moves.
-		if (this.map.terrain) {
-			this.map.terrain.tileManager.releaseAllRTT();
-			this.map.triggerRepaint();
-		}
+		this.setFade(idBack, this.opacity, fade);
+		this.setFade(idFront, 0, fade);
+		this.front = back;
+		this.redrape(fade);
+	}
+
+	private setFade(id: string, opacity: unknown, ms: number) {
+		this.map.setPaintProperty(id, 'raster-opacity-transition', { duration: ms, delay: 0 });
+		this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
+	}
+
+	/**
+	 * In 3D, MapLibre drapes layers over the terrain from a cached texture per terrain
+	 * tile, redrawn when an image source changes but not a canvas source or a fade.
+	 * Without this, the frame on screen stays the same while the slider moves: the cache
+	 * is dropped now and on every frame drawn until the fade ends.
+	 */
+	private redrape(fade: number) {
+		const terrain = this.map.terrain;
+		if (!terrain) return;
+		terrain.tileManager.releaseAllRTT();
+		this.map.triggerRepaint();
+		if (fade <= 0) return;
+		this.fadeEnds = performance.now() + fade + 50;
+		if (this.onRender) return;
+		this.onRender = () => {
+			const t = this.map.terrain;
+			if (t) t.tileManager.releaseAllRTT();
+			if (performance.now() >= this.fadeEnds && this.onRender) {
+				this.map.off('render', this.onRender);
+				this.onRender = null;
+				// One last redraw, at the fade's end.
+				if (t) {
+					t.tileManager.releaseAllRTT();
+					this.map.triggerRepaint();
+				}
+			}
+		};
+		this.map.on('render', this.onRender);
 	}
 
 	remove() {
-		if (this.map.getLayer(PrecipLayer.ID)) this.map.removeLayer(PrecipLayer.ID);
-		if (this.map.getSource(PrecipLayer.ID)) this.map.removeSource(PrecipLayer.ID);
+		if (this.onRender) this.map.off('render', this.onRender);
+		this.onRender = null;
+		for (const id of PrecipLayer.IDS) {
+			if (this.map.getLayer(id)) this.map.removeLayer(id);
+			if (this.map.getSource(id)) this.map.removeSource(id);
+		}
+		for (const c of this.canvases) c.width = c.height = 0;
 	}
 }
