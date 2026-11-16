@@ -204,7 +204,8 @@ def test_compose_types_each_echo() -> None:
     types[0, 0] = SNOW_T
     types[0, 1:3] = MIX_T
     types[0, 3] = RAIN_T
-    # 4…11: untyped but near the rain pixel; 30+: far from any typed pixel.
+    # 4…11: untyped but near the rain pixel; 30+: far from any typed pixel (the pixel at 3
+    # is 27 away from 30, beyond even the wider search).
     fallback = np.zeros((h, w), np.uint8)
     fallback[0, 30:35] = SNOW_T
     out = rx.compose(rain_rate, snow_rate, types, fallback)
@@ -216,7 +217,14 @@ def test_compose_types_each_echo() -> None:
     assert (kind[0, 3], amount[0, 3]) == (RAIN_T, np.float32(0.5))
     assert kind[0, 6] == RAIN_T  # nearest radar type within reach
     assert (kind[0, 32], amount[0, 32]) == (SNOW_T, np.float32(1.2))  # the forecast's type
-    assert kind[0, 38] == RAIN_T  # nothing else known: rain
+    # No radar type within ~12 km and a dry forecast: a radar type within ~24 km.
+    assert kind[0, 15] == RAIN_T
+    # Nothing types it (no radar type near, a dry forecast): clutter, not drawn.
+    assert (kind[0, 25], amount[0, 25]) == (NONE, np.float32(0))
+    assert (kind[0, 38], amount[0, 38]) == (NONE, np.float32(0))
+    # Without a type picture at all, an echo is rain rather than nothing.
+    none = rx.compose(rain_rate, snow_rate, None, None)
+    assert none is not None and (none[1] == RAIN_T).all()
 
 
 def test_compose_without_pictures() -> None:

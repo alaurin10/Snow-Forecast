@@ -12,7 +12,13 @@ and combine them into a rate and a type per pixel: snow pixels take the snow rat
 pixels the rain rate, mixed and freezing pixels the rain rate (the snow rate where only
 the snow picture has echo); the renderer paints them (palette.fine_index). The type
 product leaves the lightest echoes unclassified, so an echo without a type takes the
-nearest type within a few kilometres, then the forecast's type for that hour, else rain.
+nearest type within ~12 km, then the forecast's type for that hour, then the nearest type
+within ~24 km. An echo with none of those isn't drawn: alone, far from any typed echo and
+where the forecast is dry, it is almost always the beam striking terrain (Mt. Rainier:
+7–11 mm/h, in the same pixels scan after scan, Nov 2026), which defaulting to rain painted
+green. On 16 Nov 2026 that left out 1% of what had been drawn, nearly all under 0.3 mm/h.
+Only when GeoMet sends no type picture at all does an echo fall back to rain, so a missing
+picture can't blank the map.
 
 The nowcast (`…PrecipRate-Extrapolation`) moves the latest echoes forward with no growth
 or decay, and is typed by the latest observed type picture.
@@ -53,7 +59,8 @@ RECENT_S = 30 * MIN  # …and every 6 minutes for the last half hour
 NOWCAST_S = 72 * MIN
 NOWCAST_EVERY_S = 12 * MIN
 TYPE_LAG_S = 12 * MIN  # the type picture may trail the rate pictures by a scan or two
-FILL_PX = 8  # an untyped echo takes a type from this many pixels away (~12 km)
+FILL_PX = 8  # an untyped echo takes a type from this many pixels away (~12 km)…
+FAR_FILL_PX = 16  # …or, if the forecast doesn't type it either, from this far (~24 km)
 
 # GeoMet's default style for Radar_1km_SfcPrecipType: the published legend's colours
 # and, where they differ by a step, the colours its pictures actually use (Nov 2026).
@@ -104,13 +111,18 @@ def classify_types(img: np.ndarray | None) -> np.ndarray | None:
 def fill_types(
     types: np.ndarray | None, echo: np.ndarray, fallback: np.ndarray | None
 ) -> np.ndarray:
-    """A type for every echo: radar's, a nearby radar type, the forecast's, else rain."""
+    """A type for each echo: radar's, a nearby radar type, the forecast's, a radar type
+    further off. With a type picture, an echo none of those types is left untyped (not
+    drawn: clutter, see above); without one, it is rain."""
     out = np.zeros(echo.shape, np.uint8) if types is None else spread(types, FILL_PX)
     gap = echo & (out == NONE)
     if fallback is not None and fallback.shape == out.shape:
         out[gap] = fallback[gap]
         gap &= out == NONE
-    out[gap] = RAIN_T
+    if types is None:
+        out[gap] = RAIN_T
+    elif gap.any():
+        out[gap] = spread(types, FAR_FILL_PX)[gap]
     return out
 
 

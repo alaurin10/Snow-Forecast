@@ -87,6 +87,9 @@ FINE_KEY = "f5"
 # radar's 1 km scans just enough to lose the pixel steps; HRRR and NBM, copied from the
 # nearest 2.5–3 km cell, enough to lose their ~2 px blocks. GeoMet's models arrive
 # interpolated already.
+# Radar frames drawn with the current typing (radar_eccc.fill_types: echoes nothing types
+# are left out): in their keys, so older radar frames are drawn again.
+RADAR_TYPING = "t2"
 RADAR_SIGMA = 0.8
 GRIB_SIGMA = 1.2
 # Radar's types come from a coarser product, and echoes it leaves untyped take the
@@ -540,7 +543,7 @@ class Renderer:
         src = {"north": "radar-eccc", "south": "radar-eccc"}
         for t in p.radar:
             type_t = radar_eccc.type_time(t, p.types)
-            key = f"eccc|{FINE_KEY}|{t}|{type_t}|{region.key}"
+            key = f"eccc|{FINE_KEY}|{RADAR_TYPING}|{t}|{type_t}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
@@ -557,7 +560,7 @@ class Renderer:
         types: np.ndarray | None = None
         src = {"north": "nowcast-eccc", "south": "nowcast-eccc"}
         for t in p.nowcast:
-            key = f"now|{FINE_KEY}|{p.nowcast_ref}|{t}|{type_t}|{region.key}"
+            key = f"now|{FINE_KEY}|{RADAR_TYPING}|{p.nowcast_ref}|{t}|{type_t}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
