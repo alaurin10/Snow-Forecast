@@ -260,15 +260,13 @@ def decode_indices(data: bytes) -> np.ndarray | None:
 
 # ---- Precipitation frames: the fine palette ----------------------------------------
 #
-# Radar, nowcast and forecast frames carry numbers, not colours: each pixel is an index
-# meaning a type and a rate (each type's rates in many small log steps), written as a
-# grayscale lossless WebP (gray = index; ~18% smaller than a PNG). The browser smooths
-# those numbers and colours them at the screen's own resolution
-# (frontend/src/lib/map/precipGl.ts), so storms have smooth, sharp outlines and continuous
-# colour at any zoom, rather than a stretched picture's blurred pixels. The index
-# describes the steps (`fine_spec`), so the browser needs no copy of them. Frames drawn
-# this way say so (`palette: "fine"`); older ones are palette PNGs on PALETTE.
-# FINE_PALETTE/FINE_ALPHA give the same colours here (tests, previews).
+# Radar, nowcast and forecast frames are drawn on a palette of their own: each type's
+# ramp in many small steps, the colours running smoothly between the ramp's stops (in log
+# rate, mixed in OKLab), so the picture reads as continuous rather than banded. The
+# lightest rates fade in (each entry carries its own alpha), so echoes have soft edges.
+# Still a palette PNG, so files stay small and every index still means a type and a rate
+# (probes, taps). The map shows these pictures as they are, flat and in 3D alike.
+# Frames drawn this way say so in the index (`palette: "fine"`); older ones use PALETTE.
 
 FINE = "fine"
 # mm of water an hour: the lightest drawn. As light as the old six steps' first (radar
@@ -360,7 +358,7 @@ def _fine_tables() -> tuple[list[RGB], bytes, np.ndarray, np.ndarray, dict[int, 
             value[len(rgb)] = v
             rgb.append(_ramp_rgb(ramp, v))
             a = np.clip(np.log(v / FINE_FROM) / np.log(FINE_SOLID / FINE_FROM), 0, 1)
-            alpha.append(round(255 * (0.25 + 0.75 * a)))
+            alpha.append(round(255 * (0.4 + 0.6 * a)))
     rgb += [(0, 0, 0)] * (256 - len(rgb))
     alpha += [0] * (256 - len(alpha))
     return rgb, bytes(alpha), kind, value, offsets
@@ -389,37 +387,16 @@ def fine_values(indexed: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.nan_to_num(FINE_VALUE[indexed], nan=0.0), FINE_KIND[indexed]
 
 
-FINE_EXT = "webp"
+FINE_EXT = "png"
 
 
 def encode_fine(indexed: np.ndarray) -> bytes:
-    """Fine-palette indices as a grayscale lossless WebP (gray = index), for the browser to
-    colour. Exact, and ~18% smaller than a PNG; ~0.4 s for a busy frame over the West."""
+    """A palette PNG on the fine palette, each entry with its own alpha."""
+    im = Image.fromarray(indexed, "P")
+    im.putpalette([v for c in FINE_PALETTE for v in c])
     buf = io.BytesIO()
-    Image.fromarray(indexed, "L").save(buf, "WEBP", lossless=True, method=4, quality=50)
+    im.save(buf, "PNG", optimize=True, transparency=FINE_ALPHA)
     return buf.getvalue()
-
-
-def preview_fine(indexed: np.ndarray) -> np.ndarray:
-    """Fine-palette indices as RGBA, coloured as the steps are (for tests and previews;
-    the map colours them in the browser, smoothly)."""
-    pal = np.array([(*c, a) for c, a in zip(FINE_PALETTE, FINE_ALPHA, strict=True)], np.uint8)
-    out: np.ndarray = pal[indexed]
-    return out
-
-
-def fine_spec() -> dict[str, object]:
-    """The fine steps as the index describes them to the browser: each type's first
-    index, number of steps and top rate, the lightest rate drawn and where it's solid."""
-    names = {SNOW_T: "snow", MIX_T: "mix", RAIN_T: "rain"}
-    return {
-        "from": FINE_FROM,
-        "solid": FINE_SOLID,
-        "ramps": [
-            {"type": names[code], "start": _FINE_AT[code][0], "steps": n, "top": top}
-            for code, _, n, top in FINE_RAMPS
-        ],
-    }
 
 
 def rate_band(code: int, value: float) -> tuple[int, float, float] | None:

@@ -7,15 +7,17 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Fixed
-- **The radar is quick again, and no longer washes the map green.**
-  - Dragging the slider follows your finger frame by frame.
-  - The map draws the radar directly on the phone's graphics chip, in one cheap pass per
-    screen frame. Each frame's numbers are prepared once when the frame arrives, rather
-    than worked out again for every pixel on every frame.
-  - In 3D the radar is a draped picture coloured when the frame changes.
-  - Frames are 18% smaller (lossless WebP).
-  - Nothing under 0.1 mm/h is drawn: Environment Canada's nowcast reads about 0.04 mm/h
-    over most of the West, which showed as a green disc at the end of the nowcast.
+- **The radar is reliable again.**
+  - **Colours:** the server colours every frame, as before, and the map shows it as a
+    picture, flat and in 3D alike. The map-side drawing that replaced this sometimes showed
+    rain as snow (snow over Seattle in a forecast that said rain), and disagreed between
+    flat and 3D.
+  - **After switching apps:** the radar draws again when you come back to the app, rather
+    than staying blank until a reload.
+  - **Kept:** the smooth colours and soft edges, fades while playing, no fade while
+    dragging the slider, and the gradual hand-over from the nowcast.
+  - **No green wash:** nothing lighter than 0.1 mm/h is drawn (the nowcast's background
+    of ~0.04 mm/h washed the West green).
 
 ### Changed
 - **Smoother radar on the map.** Precipitation is now drawn the way the best weather apps

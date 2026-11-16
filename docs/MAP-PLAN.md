@@ -1194,6 +1194,37 @@ and preparation ~10 ms.
 - The emulated GPU here can't say how a real phone does: try playback and the slider on a
   phone, flat and in 3D.
 
+### Radar look, back to pictures (16 Nov 2026)
+
+**What the owner saw on a phone:**
+- snow over Seattle and Redmond in a frame 9 days out;
+- rain on Rainier's summit in 3D, and nothing at the same time in 2D;
+- the radar gone after switching apps, until a reload.
+
+**The data was right.** Live GDPS and NBM for that frame say rain at both places (NBM:
+2 mm of rain in 6 h). The map-side drawing was wrong. It kept the type shares in a
+texture's channels, the rain share in alpha. Where that channel isn't written, rain reads
+as snow. 2D and 3D were drawn by different code, and the GPU path kept textures that a
+backgrounded iPhone drops and nothing rebuilt.
+
+**Decision: reliability over the last bit of looks.**
+- The server colours every precipitation frame again: the fine palette, OKLab, soft
+  alpha, as a palette PNG.
+- The map shows it with the two canvas sources and fades from the first radar-look
+  commit, flat and in 3D alike.
+- The GPU renderer (`precipGl.ts`, the custom layer, the CPU colouring for 3D) is gone.
+- `FINE_FROM` stays 0.1 mm/h, no fade while the slider is dragged, and the hand-over is
+  kept.
+- New: back in front (`visibilitychange`) or after `webglcontextrestored`, the map frees
+  its decoded frames and draws the frame on screen again.
+- Frame keys gained `f5`.
+
+**Checked.** A light-rain disc over Seattle (0.34 mm/h) and snow on Rainier show green
+and blue alike flat, in 3D and after a hidden/visible round trip. All e2e tests pass.
+
+**Known limits.** Zoomed far in, a picture at ~1.5 km a pixel is soft, as before the GPU
+attempt; outlines aren't as crisp as Apple's.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

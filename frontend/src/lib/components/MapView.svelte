@@ -1530,12 +1530,7 @@
 			h ? store.bitmap(frames[h.from]) : null
 		]);
 		if (token !== showToken || !overlay) return;
-		// A fine frame holds numbers: without the index's key to them it can't be shown.
-		const fine = (want as Frame).palette === 'fine';
-		if (fine && !timeline.fine) return;
-		const blend =
-			fine && under && h ? { file: frames[h.from].file, bmp: under, weight: h.weight } : null;
-		overlay.draw(want.file, bmp, fadeMs(), blend, fine ? 'fine' : 'picture');
+		overlay.draw(want.file, bmp, fadeMs(), under && h ? { bmp: under, weight: h.weight } : null);
 		shown = want.file;
 		if (bmp && !firstFrame) {
 			firstFrame = true;
@@ -1612,9 +1607,7 @@
 			const tl = await loadTimeline();
 			loadError = null;
 			// The pictures' box only changes when locations do.
-			const sameBox =
-				timeline &&
-				JSON.stringify([timeline.bounds, timeline.fine]) === JSON.stringify([tl.bounds, tl.fine]);
+			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
 			const next = weatherView(tl, weather, prefs.mapWind);
 			timeline = tl;
 			store.keepOnly([...tl.frames, ...tl.totals, ...Object.values(tl.layers).flat()]);
@@ -1630,8 +1623,7 @@
 					tl.width,
 					tl.height,
 					weatherOpacity(weather),
-					PRECIP_BEFORE,
-					tl.fine
+					PRECIP_BEFORE
 				);
 			}
 			void show();
@@ -1734,12 +1726,32 @@
 		if (ready && map && radar) setSnowLine(map, level, PrecipLayer.ID);
 	});
 
-	// Stop playing when the app goes to the background.
+	// Stop playing when the app goes to the background. Back in front, draw the frame on
+	// screen again from its download: a phone may have dropped the map's graphics, or the
+	// memory behind the decoded pictures, while the app was away (the radar would
+	// otherwise stay blank until a reload).
 	$effect(() => {
-		const onHide = () => document.hidden && (playing = false);
-		document.addEventListener('visibilitychange', onHide);
-		return () => document.removeEventListener('visibilitychange', onHide);
+		const onChange = () => {
+			if (document.hidden) {
+				playing = false;
+				return;
+			}
+			redrawWeather();
+		};
+		document.addEventListener('visibilitychange', onChange);
+		return () => document.removeEventListener('visibilitychange', onChange);
 	});
+	$effect(() => {
+		if (!ready || !map) return;
+		const m = map;
+		m.on('webglcontextrestored', redrawWeather);
+		return () => void m.off('webglcontextrestored', redrawWeather);
+	});
+	function redrawWeather() {
+		if (!overlay) return;
+		store.forgetDecoded();
+		void show();
+	}
 
 	$effect(() => {
 		if (!radar) return;

@@ -2,108 +2,120 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Map as MlMap } from 'maplibre-gl';
 import { FrameStore, PrecipLayer } from './precipOverlay';
 
-/** Just enough of a MapLibre map for the precipitation layer (a custom layer, added
- *  but not drawn: no WebGL here). */
-function fakeMap() {
-	const layers: Record<string, { terrainTileRevision: number; id: string }> = {};
-	const on: Record<string, (() => void)[]> = {};
-	let terrain = false;
+/** Just enough of a MapLibre map for the precipitation layer. */
+function fakeMap(terrain: boolean) {
+	const sources: Record<
+		string,
+		{ play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> }
+	> = {};
+	const layers = new Set<string>();
+	const paint: Record<string, Record<string, unknown>> = {};
+	const listeners: (() => void)[] = [];
+	const releaseAllRTT = vi.fn();
 	const map = {
-		addLayer: vi.fn((l: { id: string; terrainTileRevision: number }) => (layers[l.id] = l)),
-		getLayer: (id: string) => layers[id],
-		removeLayer: vi.fn((id: string) => delete layers[id]),
-		addSource: vi.fn(),
-		getSource: vi.fn(() => ({ play: vi.fn(), pause: vi.fn() })),
-		removeSource: vi.fn(),
-		setPaintProperty: vi.fn(),
-		setLayoutProperty: vi.fn(),
-		on: vi.fn((ev: string, f: () => void) => (on[ev] ??= []).push(f)),
-		off: vi.fn((ev: string, f: () => void) => on[ev]?.splice(on[ev].indexOf(f), 1)),
-		getTerrain: () => (terrain ? {} : null),
+		addSource: vi.fn((id: string) => (sources[id] = { play: vi.fn(), pause: vi.fn() })),
+		addLayer: vi.fn((l: { id: string; paint: Record<string, unknown> }) => {
+			layers.add(l.id);
+			paint[l.id] = { ...l.paint };
+		}),
+		getLayer: (id: string) => layers.has(id),
+		getSource: (id: string) => sources[id],
+		removeLayer: (id: string) => layers.delete(id),
+		removeSource: (id: string) => delete sources[id],
+		setPaintProperty: vi.fn((id: string, k: string, v: unknown) => (paint[id][k] = v)),
+		on: vi.fn((_: string, f: () => void) => listeners.push(f)),
+		off: vi.fn((_: string, f: () => void) => listeners.splice(listeners.indexOf(f), 1)),
 		triggerRepaint: vi.fn(),
-		getZoom: () => 8
+		terrain: terrain ? { tileManager: { releaseAllRTT } } : null
 	};
-	const set3d = (v: boolean) => {
-		terrain = v;
-		for (const f of on.terrain ?? []) f();
-	};
-	return { map, layers, set3d, on };
+	return { map, sources, paint, listeners, releaseAllRTT };
 }
 
 describe('PrecipLayer', () => {
 	afterEach(() => vi.unstubAllGlobals());
+	const ctx = {
+		clearRect: vi.fn(),
+		drawImage: vi.fn(),
+		globalAlpha: 1,
+		globalCompositeOperation: 'source-over'
+	};
+	// These tests run without a DOM: the layer only needs canvases with a 2D context.
+	const withCanvas = () =>
+		vi.stubGlobal('document', { createElement: () => ({ getContext: () => ctx }) });
 	const bounds: [[number, number], [number, number]] = [
 		[31, -134],
 		[57, -102]
 	];
-	const bmp = { width: 1600, height: 1000 } as ImageBitmap;
-	const make = (map: unknown) => new PrecipLayer(map as MlMap, bounds, 1600, 1000, 0.7, 'labels');
+	const bmp = {} as ImageBitmap;
+	const [A, B] = PrecipLayer.IDS;
 
-	it('is a custom layer flat, and a draped picture in 3D, under the given layer', () => {
-		const { map, layers, set3d, on } = fakeMap();
-		const canvas = {
-			width: 0,
-			height: 0,
-			getContext: () => ({ clearRect: vi.fn(), drawImage: vi.fn() })
-		};
-		vi.stubGlobal('document', { createElement: () => canvas });
-		const layer = make(map);
-		expect(map.addLayer).toHaveBeenCalledWith(
-			expect.objectContaining({ type: 'custom' }),
-			'labels'
-		);
-		expect(typeof (layers[PrecipLayer.ID] as unknown as Record<string, unknown>).render).toBe(
-			'function'
-		);
-		layer.draw('f1.png', bmp, 0, null, 'picture');
-		expect(map.addSource).not.toHaveBeenCalled(); // no 3D picture until 3D is on
-		set3d(true);
-		expect(map.addSource).toHaveBeenCalledWith(
-			PrecipLayer.ID_3D,
-			expect.objectContaining({ type: 'canvas' })
-		);
-		expect(layers[PrecipLayer.ID_3D]).toBeDefined();
-		expect(map.setLayoutProperty).toHaveBeenLastCalledWith(
-			PrecipLayer.ID_3D,
-			'visibility',
-			'visible'
-		);
-		expect([canvas.width, canvas.height]).toEqual([1600, 1000]);
-		set3d(false);
-		expect(map.setLayoutProperty).toHaveBeenLastCalledWith(PrecipLayer.ID_3D, 'visibility', 'none');
-		layer.remove();
-		expect(on.terrain).toHaveLength(0);
-		expect(map.removeSource).toHaveBeenCalledWith(PrecipLayer.ID_3D);
+	it('draws each frame into the layer not showing, then fades it in over the other', () => {
+		withCanvas();
+		const { map, sources, paint } = fakeMap(false);
+		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
+		expect(paint[A]['raster-opacity']).toBe(0.7);
+		expect(paint[B]['raster-opacity']).toBe(0);
+		layer.draw('f1.png', bmp, 200);
+		expect(sources[B].pause).toHaveBeenCalledTimes(1); // uploaded once
+		expect(paint[B]).toMatchObject({
+			'raster-opacity': 0.7,
+			'raster-opacity-transition': { duration: 200, delay: 0 }
+		});
+		expect(paint[A]).toMatchObject({
+			'raster-opacity': 0,
+			'raster-opacity-transition': { duration: 200, delay: 0 }
+		});
+		layer.draw('f2.png', bmp, 200);
+		expect(sources[A].pause).toHaveBeenCalledTimes(1);
+		expect(paint[A]['raster-opacity']).toBe(0.7);
+		expect(paint[B]['raster-opacity']).toBe(0);
+		expect(layer.showing).toBe('f2.png');
+		// The opacity follows the layer on screen.
+		layer.setOpacity(0.5);
+		expect(paint[A]['raster-opacity']).toBe(0.5);
+		expect(paint[B]['raster-opacity']).toBe(0);
 	});
 
-	it('asks for a redraw (and, in 3D, new terrain tiles) for each frame, and on every frame of a fade', () => {
-		const { map, layers } = fakeMap();
-		const frames: (() => void)[] = [];
-		vi.stubGlobal('requestAnimationFrame', (f: () => void) => frames.push(f));
-		vi.stubGlobal('cancelAnimationFrame', () => {});
+	it('mixes the hand-over frame under the new one, each at its share', () => {
+		withCanvas();
+		const { map } = fakeMap(false);
+		const seen: [number, string][] = [];
+		ctx.drawImage.mockImplementation(() =>
+			seen.push([ctx.globalAlpha, ctx.globalCompositeOperation])
+		);
+		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
+		layer.draw('f1.png', bmp, 0, { bmp, weight: 0.25 });
+		expect(seen).toEqual([
+			[0.25, 'lighter'],
+			[0.75, 'lighter']
+		]);
+		expect([ctx.globalAlpha, ctx.globalCompositeOperation]).toEqual([1, 'source-over']);
+		ctx.drawImage.mockReset();
+	});
+
+	it('in 3D, redraws the drape through the fade, then stops', () => {
+		withCanvas();
+		const { map, listeners, releaseAllRTT } = fakeMap(true);
 		let now = 1000;
 		vi.stubGlobal('performance', { now: () => now });
-		const layer = make(map);
-		const rev = () => layers[PrecipLayer.ID].terrainTileRevision;
-		layer.draw('f1.png', bmp, 0);
-		expect(layer.showing).toBe('f1.png');
-		expect(rev()).toBe(1);
-		expect(frames).toHaveLength(0); // no fade, no animation
-		layer.draw('f2.png', bmp, 200, null, 'fine');
-		expect(rev()).toBe(2);
-		expect(frames).toHaveLength(1);
-		now += 100;
-		frames.shift()!();
-		expect(rev()).toBe(3);
-		expect(frames).toHaveLength(1); // still fading
-		now += 150;
-		frames.shift()!();
-		expect(frames).toHaveLength(0); // done
-		expect(map.triggerRepaint).toHaveBeenCalledTimes(4);
-		layer.setOpacity(0.5);
-		expect(rev()).toBe(5);
-		layer.remove();
-		expect(map.removeLayer).toHaveBeenCalledWith(PrecipLayer.ID);
+		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
+		layer.draw('f1.png', bmp, 200);
+		expect(releaseAllRTT).toHaveBeenCalledTimes(1);
+		expect(listeners).toHaveLength(1);
+		listeners[0]();
+		expect(releaseAllRTT).toHaveBeenCalledTimes(2);
+		now += 300;
+		listeners[0]();
+		expect(listeners).toHaveLength(0);
+		expect(map.triggerRepaint).toHaveBeenCalledTimes(2);
+	});
+
+	it('in 2D there is no drape to redraw', () => {
+		withCanvas();
+		const { map, listeners } = fakeMap(false);
+		new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7).draw('f1.png', null, 200);
+		expect(map.triggerRepaint).not.toHaveBeenCalled();
+		expect(listeners).toHaveLength(0);
 	});
 });
 
