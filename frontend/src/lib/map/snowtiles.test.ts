@@ -9,6 +9,7 @@ import {
 	snowAtElevation,
 	snowTilesUrl
 } from './layers/snowtiles';
+import { TOTAL_OPACITY } from './style';
 
 const ELEVS = Array.from({ length: 19 }, (_, i) => i * 250);
 const BOUNDS: [[number, number], [number, number]] = [
@@ -53,14 +54,9 @@ describe('snow totals adjusted to terrain', () => {
 			addSource: vi.fn((id: string, spec: { tiles: string[] }) => sources.set(id, spec)),
 			addLayer: vi.fn((spec: { id: string }) => layers.add(spec.id)),
 			removeLayer: vi.fn((id: string) => layers.delete(id)),
-			removeSource: vi.fn((id: string) => sources.delete(id)),
-			setLayerZoomRange: vi.fn()
+			removeSource: vi.fn((id: string) => sources.delete(id))
 		};
-		const opts = {
-			bounds: BOUNDS,
-			opacity: ['literal', 0.7] as never,
-			pictureIds: ['precip', 'precip-b']
-		};
+		const opts = { bounds: BOUNDS, opacity: TOTAL_OPACITY };
 		const set = (tiles: string | null) => setSnowTiles(map as never, tiles, opts);
 		set('/a/{z}/{x}/{y}.png');
 		expect(map.addSource).toHaveBeenCalledTimes(1);
@@ -71,18 +67,18 @@ describe('snow totals adjusted to terrain', () => {
 			maxzoom: 11,
 			bounds: [-134, 31, -102, 57]
 		});
-		expect(map.addLayer.mock.calls[0][0]).toMatchObject({ id: SNOWTILES_ID, minzoom: 8 });
-		// Both of the picture's layers.
-		expect(map.setLayerZoomRange).toHaveBeenCalledWith('precip', 0, SNOWTILES_ZOOM);
-		expect(map.setLayerZoomRange).toHaveBeenLastCalledWith('precip-b', 0, SNOWTILES_ZOOM);
+		// Up to where the opacity reaches 0.
+		expect(map.addLayer.mock.calls[0][0]).toMatchObject({
+			id: SNOWTILES_ID,
+			minzoom: 8,
+			maxzoom: 15
+		});
 		set('/a/{z}/{x}/{y}.png'); // the same: nothing redone
 		expect(map.addSource).toHaveBeenCalledTimes(1);
 		set('/b/{z}/{x}/{y}.png'); // another window
 		expect(map.removeSource).toHaveBeenCalledTimes(1);
 		expect(sources.get(SNOWTILES_ID)?.tiles).toEqual(['/b/{z}/{x}/{y}.png']);
-		set(null); // another layer, or no tiles: the picture at every zoom again
+		set(null); // another layer, or no tiles
 		expect(layers.has(SNOWTILES_ID)).toBe(false);
-		expect(map.setLayerZoomRange).toHaveBeenCalledWith('precip', 0, 24);
-		expect(map.setLayerZoomRange).toHaveBeenLastCalledWith('precip-b', 0, 24);
 	});
 });

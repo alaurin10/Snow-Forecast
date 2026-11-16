@@ -107,7 +107,7 @@ export function setRecentDates(map: MlMap, data: GeoJSON.FeatureCollection | nul
 		src.setData(data);
 		return;
 	}
-	map.addSource(DATES, { type: 'geojson', data, tolerance: 0.5 });
+	map.addSource(DATES, { type: 'geojson', data, tolerance: 0.5, maxzoom: 12 });
 	map.addLayer({
 		id: 'satdates-casing',
 		type: 'line',

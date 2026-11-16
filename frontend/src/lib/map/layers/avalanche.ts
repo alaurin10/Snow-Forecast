@@ -43,7 +43,8 @@ export function addZones(
 		src.setData(data);
 		return;
 	}
-	map.addSource(ZONES_SOURCE, { type: 'geojson', data, tolerance: 0.6 });
+	// Zones are tens of kilometres across: tiles to zoom 12 hold their outlines to a metre or two.
+	map.addSource(ZONES_SOURCE, { type: 'geojson', data, tolerance: 0.6, maxzoom: 12 });
 	map.addLayer(
 		{
 			id: ZONE_FILL,

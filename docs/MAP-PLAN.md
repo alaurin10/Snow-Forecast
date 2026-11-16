@@ -1082,9 +1082,122 @@ The timings don't move here: the contour library is served locally, so the start
 shows only on a slow network. The test presses Play, so it still measures playback; a
 phone that doesn't press it stays at the "open" figure.
 
-**Still to do:** PR 3,
-fewer tiles and cheaper layers; PR 4, terrain worker throughput; PR 5, optional, playback
-memory and backend bytes. Each records its numbers here.
+The radar look work (below) came between PR 2 and PR 3, at the owner's request.
+
+**PR 3, fewer tiles and cheaper layers (done 16 Nov 2026).**
+
+*Layers drawn only where they show.*
+- Esri topo stops at z12.5 (`maxzoom: DETAIL_ZOOM + 0.5`). It was 13, but OpenTopoMap is
+  opaque over it from z12.3.
+- Weather pictures stop where their opacity reaches 0: radar and clouds at 13, the others
+  at 15 (`style.goneAt`). This applies to `PrecipLayer` and the snow-total tiles. The tiles
+  were kept, and drawn invisibly, at every zoom.
+- The picture's limit while the snow-total tiles show (`SNOWTILES_ZOOM`) is now set in
+  one place, `MapView.pictureMaxZoom`; `setSnowTiles` no longer sets it.
+- `tooClose` ("zoom out to see precipitation") reads the same limit.
+
+*GeoJSON cut into fewer tiles.* MapLibre cuts GeoJSON to z18 by default. Tiles at a
+source's maxzoom aren't simplified, so the drawing is the same.
+- `ski`, stations, reports, ATES, the measured line and the location dot are cut to z14
+  (`GEOJSON_ZOOM`).
+- Avalanche zones and the satellite views' outlines are cut to z12.
+- Checked: the e2e map specs pass (taps, the glacier tap, run profiles), and runs and
+  their labels draw the same zoomed in past z14.
+
+*One copy of the ski file.* MapLibre 6 keeps the GeoJSON it loaded from a URL on the
+page (the worker sends it back). Glacier taps and run profiles now read that copy
+(`GeoJSONSource.getData()`), so the file isn't downloaded and parsed a second time.
+- If the source hasn't loaded within 4 s, they download it as before. `getData` waits for
+  ever on a source that failed.
+- `findGlacier` tests each glacier's bounding box, kept per feature, before its outline.
+- Not done: reading features through `querySourceFeatures`. It returns pieces cut at tile
+  edges, and a glacier's area needs the whole outline.
+
+*Terrain worker lifetime.* `retainTerrain()` in `terrain/client.ts`:
+- The full map holds the worker from before the map is made until after it's removed.
+- When no map holds it, the worker is terminated, which frees its decoded DEM tiles
+  (28 on phones, 48 on desktop) for the rest of the visit.
+- Anything that finishes late gets no worker (`terrainClient()` is null).
+- The protocols look the worker up per request, so the next map starts a fresh one.
+- Checked: leaving the map and coming back in the app starts a second worker (the first
+  is terminated), and hill shading, served through it, draws.
+- The maplibre-contour `DemSource` stays for the page's life. Its worker is shared, and
+  the library has no way to free a source: making a new source would add a second cache
+  in that worker, not replace the first.
+
+*Tile cache: not changed.* Phones keep `maxTileCacheSize: 60` per source.
+`maxTileCacheZoomLevels: 3` (sized by the view) was tried and moved neither memory nor
+refetching beyond run-to-run noise:
+
+| | Fixed (60) | Zoom levels (3) |
+|---|---|---|
+| Page process, peak | 376 MB, 377 MB | 375 MB, 378 MB |
+| Map tiles fetched | 82, 84 | 74, 81 |
+| Elevation tiles fetched | 47, 50 | 47, 55 |
+
+`e2e/perf.spec.ts` now also counts the map tiles, elevation tiles and precipitation frames
+it asks for (`requests` in perf.json).
+
+Numbers (`e2e/perf.spec.ts`, phone profile, both builds measured the same day):
+
+| | Before (main) | PR 3 |
+|---|---|---|
+| Page process at open | 219–224 MB | 218–234 MB |
+| Page process, peak | 379–381 MB | 371–383 MB |
+| GPU process, peak | 356–379 MB | 361–397 MB |
+| Whole browser, peak | 851–866 MB | 827–885 MB |
+| JS heap, peak | 15.3–16.8 MB | 13.2–15.1 MB |
+| Map `load` / first frame | 1.9–2.6 s / 3.4–4.6 s | 2.0–3.0 s / 3.6–4.4 s |
+
+The test opens at about z9 and stays below z12. It doesn't tap a glacier or profile a run,
+and it doesn't leave the map. So most of PR 3 (Esri past z12.5, GeoJSON past z14, the
+second ski copy, the worker freed off the map) doesn't show in it. What it does cover is
+within noise, apart from a slightly lower JS heap.
+
+**Still to do.** Each PR records its numbers here.
+
+*PR 4, terrain worker throughput* (`lib/map/terrain/*`, `layers/analysis.ts`,
+`layers/terrain.ts`):
+- **Two workers.**
+  - One serves tiles: `dem://`, `terrain://`, taps and profiles.
+  - The other runs whole-view jobs: shade, sun hours, wind and concern.
+  - Each keeps its own DEM LRU at today's sizes, and they share downloads through the
+    HTTP cache.
+  - 3D and hillshade tiles then stop queuing behind a 0.5 s sun-hours job.
+- **Cache hits on pan.**
+  - Snap job rectangles (`grid.ts` `rectKey`) to a tile-aligned grid with a one-tile
+    margin, so small pans reuse the cached grids and results.
+  - Keep sun-hours and wind arrays per key in a 2–3 entry LRU.
+  - Crop to the view when drawing.
+- **Overlay tiles.**
+  - Cache slope and aspect per tile as `Uint8Array`s in the worker, so a new mode or
+    problem query only recolours.
+  - Cache the zone mask per tile and zone.
+  - Write `hornAt` and `concernAt` results into reusable typed arrays, not objects per
+    pixel.
+  - `setOverlay` bumps its query only when the pixels really change.
+  - Concern jobs stop sending the zone polygons each time (left over from PR 2).
+- **Cancellation.**
+  - Honour `cancel` for `dem` requests and before fetching neighbours, with an
+    `AbortController` per request in `dem.ts`. A shared fetch aborts only when every
+    waiter has cancelled.
+  - Abort listeners `{ once: true }` and removed after use (`client.ts`).
+  - Clear stale ids from the worker's `cancelled` set.
+- **Yields inside long jobs:** inside a single wind direction (`wind.ts`), so a cancel
+  lands within about 50 ms.
+- **DEM pyramid, only if a trace shows it matters:** outside lidar, answer coarser tiles
+  with "use the parent" rather than upsampling and re-encoding them. Keep z15/z16 where
+  lidar exists, and don't cap `MAX_ZOOM`.
+
+*PR 5, optional, after measuring: playback memory and backend bytes.*
+- Size `DECODED` by device: 4 on phones; on desktop the whole loop within about 150 MB.
+- A smaller precipitation canvas on phones, if it looks the same at phone zooms.
+- In 3D, `releaseAllRTT` at most once per animation frame.
+- Backend:
+  - gzip `/api/precip` and the JSON routes (a `GZipMiddleware` with a minimum size, or
+    the `json_file()` helper in `api/app.py`);
+  - don't write empty snow tiles to disk (`maps/tiles_render.py`); serve a shared empty
+    tile.
 
 ## Radar look notes (done 16 Nov 2026)
 

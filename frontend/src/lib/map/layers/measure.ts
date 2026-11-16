@@ -3,6 +3,7 @@
 // everything else.
 import type { GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import type { LngLat } from '../measure';
+import { GEOJSON_ZOOM } from '../style';
 
 const LINE = 'measure-line';
 const POINTS = 'measure-points';
@@ -18,9 +19,9 @@ export interface MeasureDrawing {
 
 function ensure(map: MlMap) {
 	if (map.getSource(LINE)) return;
-	map.addSource(LINE, { type: 'geojson', data: EMPTY });
-	map.addSource(POINTS, { type: 'geojson', data: EMPTY });
-	map.addSource(HOVER, { type: 'geojson', data: EMPTY });
+	map.addSource(LINE, { type: 'geojson', data: EMPTY, maxzoom: GEOJSON_ZOOM });
+	map.addSource(POINTS, { type: 'geojson', data: EMPTY, maxzoom: GEOJSON_ZOOM });
+	map.addSource(HOVER, { type: 'geojson', data: EMPTY, maxzoom: GEOJSON_ZOOM });
 	map.addLayer({
 		id: 'measure-casing',
 		type: 'line',

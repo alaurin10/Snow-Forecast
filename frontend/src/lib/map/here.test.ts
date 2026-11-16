@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MapStation, ObsProps, ZoneFeature } from '../types.gen';
 import {
 	areaText,
+	findGlacier,
 	glacierArea,
 	hereItems,
 	osmLink,
@@ -164,6 +165,13 @@ describe('glacier area', () => {
 		// In the hole, on a run, or nowhere: not a glacier.
 		expect(glacierArea(fc, -121.945, 50.025)).toBeNull();
 		expect(glacierArea(fc, -122.95, 50.05)).toBeNull();
+	});
+
+	it('finds the glacier tapped again the same way (its box is kept)', () => {
+		expect(findGlacier(fc, -120.895, 50.005)?.properties?.name).toBe('B');
+		expect(findGlacier(fc, -120.895, 50.005)?.properties?.name).toBe('B');
+		// Between B's two parts: inside its box but in neither.
+		expect(findGlacier(fc, -120.95, 50.005)).toBeNull();
 	});
 
 	it('says an area in hectares or km², acres or square miles', () => {

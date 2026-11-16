@@ -3,6 +3,7 @@
 // tiles the server paints from the window's snow by elevation and the terrain, so peaks
 // get the snow above the snow level and valleys below it don't.
 import type { ExpressionSpecification, Map as MlMap, RasterSourceSpecification } from 'maplibre-gl';
+import { goneAt } from '../style';
 
 export const SNOWTILES_ID = 'snowtiles';
 /** What the tiles show, in words (the plan's caption). */
@@ -23,8 +24,9 @@ export function snowTilesUrl(
 
 /**
  * Show a total's terrain-adjusted tiles from SNOWTILES_ZOOM in (null hides them), under
- * `beforeId`, with the precipitation picture's opacity. The picture is limited to zooms
- * below SNOWTILES_ZOOM while the tiles show, so the two never draw at once.
+ * `beforeId`, with the precipitation picture's opacity, up to where that fades out. (The
+ * caller limits the picture to zooms below SNOWTILES_ZOOM while the tiles show, so the two
+ * never draw at once.)
  */
 export function setSnowTiles(
 	map: MlMap,
@@ -33,15 +35,10 @@ export function setSnowTiles(
 		bounds: [[number, number], [number, number]];
 		opacity: ExpressionSpecification;
 		beforeId?: string;
-		/** The picture's layers, kept to zooms below the tiles while they show. */
-		pictureIds: readonly string[];
 	}
 ): void {
 	const src = map.getSource(SNOWTILES_ID) as
 		(RasterSourceSpecification & { tiles?: string[] }) | undefined;
-	// (The picture's layer is remade when the box changes, so this is set every time.)
-	for (const id of opts.pictureIds)
-		if (map.getLayer(id)) map.setLayerZoomRange(id, 0, tiles ? SNOWTILES_ZOOM : 24);
 	const current = map.getLayer(SNOWTILES_ID) ? (src?.tiles?.[0] ?? null) : null;
 	if (current === tiles) return;
 	if (map.getLayer(SNOWTILES_ID)) map.removeLayer(SNOWTILES_ID);
@@ -63,6 +60,7 @@ export function setSnowTiles(
 			type: 'raster',
 			source: SNOWTILES_ID,
 			minzoom: SNOWTILES_ZOOM,
+			maxzoom: goneAt(opts.opacity),
 			paint: {
 				'raster-opacity': opts.opacity,
 				'raster-fade-duration': 0,

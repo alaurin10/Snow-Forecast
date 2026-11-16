@@ -7,6 +7,7 @@ import type {
 	Map as MlMap
 } from 'maplibre-gl';
 import { ATES } from '../features';
+import { GEOJSON_ZOOM } from '../style';
 
 export const STATION_LAYERS = ['stations', 'station-labels'];
 export const REPORT_LAYERS = ['reports'];
@@ -28,7 +29,7 @@ function source(map: MlMap, id: string, data: GeoJSON.FeatureCollection): boolea
 		had.set(id, data);
 		return false;
 	}
-	map.addSource(id, { type: 'geojson', data });
+	map.addSource(id, { type: 'geojson', data, maxzoom: GEOJSON_ZOOM });
 	had.set(id, data);
 	return true;
 }
