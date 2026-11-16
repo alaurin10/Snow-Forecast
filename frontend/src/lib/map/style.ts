@@ -78,6 +78,17 @@ export function weatherOpacity(w: string): ExpressionSpecification {
 	return FIELD_OPACITY;
 }
 
+/**
+ * The zoom where an opacity-by-zoom ramp reaches 0 for good, as a layer's maxzoom: past
+ * it the layer is invisible, so MapLibre needn't draw it or keep its tiles. 24 (no limit)
+ * if the ramp doesn't end at 0.
+ */
+export function goneAt(opacity: ExpressionSpecification): number {
+	const e = opacity as unknown[];
+	const [z, v] = e.slice(-2);
+	return e[0] === 'interpolate' && v === 0 && typeof z === 'number' ? z : 24;
+}
+
 /** Cross-fade from Esri over half a zoom level. */
 export const OTM_OPACITY: ExpressionSpecification = [
 	'interpolate',
@@ -111,6 +122,10 @@ export const ELEVATION_ATTRIBUTION =
 
 /** The ski map's features (runs, routes, huts …), as the server serves them. */
 export const SKI_DATA = '/api/osm/ski.geojson';
+/** GeoJSON sources are cut into tiles to this zoom (MapLibre's default is 18) and
+ *  stretched beyond it. Tiles at a source's maxzoom aren't simplified, so what's drawn
+ *  is the same. */
+export const GEOJSON_ZOOM = 14;
 
 // Base map and ski-run tiles come through the server, which caches them.
 const tiles = (layer: string) => [`/api/tiles/${layer}/{z}/{x}/{y}.png`];
@@ -338,6 +353,9 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 		ski: {
 			type: 'geojson',
 			data: SKI_DATA,
+			// Cut into tiles to zoom 14 (about 20 cm a unit here) and stretched beyond, rather
+			// than cut again at every zoom to 18.
+			maxzoom: GEOJSON_ZOOM,
 			attribution:
 				'Runs, lifts, peaks, huts, glaciers © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
 		},
@@ -348,7 +366,9 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			id: 'esri',
 			type: 'raster',
 			source: 'esri',
-			maxzoom: DETAIL_ZOOM + 1,
+			// OpenTopoMap covers it from DETAIL_ZOOM + 0.3 (OTM_OPACITY): no Esri tiles are
+			// fetched or drawn under it after that.
+			maxzoom: DETAIL_ZOOM + 0.5,
 			layout: { visibility: vis(topo) },
 			paint: { 'raster-fade-duration': 150, ...basePaint(o.dark) }
 		},

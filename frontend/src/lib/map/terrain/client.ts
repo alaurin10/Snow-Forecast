@@ -55,7 +55,7 @@ export class TerrainClient {
 			if (r.ok) p.resolve(r);
 			else p.reject(new Error(r.error));
 		};
-		void this.ask({ type: 'init', maxTiles });
+		this.ask({ type: 'init', maxTiles }).catch(() => {});
 	}
 
 	private post(body: Body): { id: number; done: Promise<WorkerResponse & { ok: true }> } {
@@ -103,7 +103,7 @@ export class TerrainClient {
 
 	/** Tell the worker a zone's polygons, so tiles that name it are drawn only inside it. */
 	setZone(zone: string, polys: number[][][][]) {
-		void this.ask({ type: 'zone', zone, polys });
+		this.ask({ type: 'zone', zone, polys }).catch(() => {});
 	}
 
 	/** First and last direct sun at a spot on a date. */
@@ -126,19 +126,47 @@ export class TerrainClient {
 	async windPoint(lat: number, lon: number, sectors: number[]): Promise<number> {
 		return (await this.ask({ type: 'windpoint', lat, lon, sectors })).wind!;
 	}
+
+	/** Stop the worker, freeing its tiles; whatever was still asked for fails as aborted. */
+	shutdown() {
+		this.worker.terminate();
+		const waiting = [...this.waiting.values()];
+		this.waiting.clear();
+		for (const p of waiting) p.reject(new DOMException('Aborted', 'AbortError'));
+	}
 }
 
 let client: TerrainClient | null = null;
 let registered = false;
+/** Maps using the worker now (see `retainTerrain`). */
+let users = 0;
 
-/** The one terrain worker for the page (created on first use). */
+/** The page's terrain worker while a map holds it (created on first use), else null. */
 export function terrainClient(): TerrainClient | null {
-	if (!TerrainClient.supported()) return null;
+	if (!users || !TerrainClient.supported()) return null;
 	if (!client) {
 		const phone = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 700px)').matches;
 		client = new TerrainClient(phone ? 28 : 48);
 	}
 	return client;
+}
+
+/**
+ * A map holds the terrain worker while it's open (from before it's made). Call the
+ * function returned when it closes: when no map holds it, the worker stops and its decoded
+ * tiles (tens of MB) are freed, rather than lasting the rest of the visit on pages without
+ * a map, and anything that finishes late gets no worker. The next map starts a fresh one.
+ */
+export function retainTerrain(): () => void {
+	users++;
+	let held = true;
+	return () => {
+		if (!held) return;
+		held = false;
+		if (--users > 0 || !client) return;
+		client.shutdown();
+		client = null;
+	};
 }
 
 const TILE_RE = /^(\d+)\/(\d+)\/(\d+)/;
@@ -192,12 +220,18 @@ export function parseMatch(query: string): MatchParams | undefined {
 export function registerProtocols(ml: {
 	addProtocol: (id: string, fn: AddProtocolAction) => void;
 }) {
-	const c = terrainClient();
-	if (!c || registered) return !!c;
+	if (!TerrainClient.supported()) return false;
+	if (registered) return true;
 	registered = true;
+	// The worker is looked up per request: it's replaced after a shutdown.
+	const worker = () => {
+		const c = terrainClient();
+		if (!c) throw new Error('no terrain worker');
+		return c;
+	};
 	ml.addProtocol('dem', async (params, abort) => {
 		const { z, x, y } = parse(params.url.slice('dem://'.length));
-		const r = await c.ask({ type: 'dem', z, x, y }, abort.signal);
+		const r = await worker().ask({ type: 'dem', z, x, y }, abort.signal);
 		return { data: r.bytes ?? r.bitmap! };
 	});
 	ml.addProtocol('terrain', async (params, abort) => {
@@ -207,7 +241,7 @@ export function registerProtocols(ml: {
 		const mode = path.slice(0, slash) as TerrainMode;
 		const { z, x, y } = parse(path.slice(slash + 1));
 		const zone = new URLSearchParams(query).get('zone') ?? undefined;
-		const r = await c.ask(
+		const r = await worker().ask(
 			{ type: 'tile', mode, z, x, y, match: parseMatch(query), zone },
 			abort.signal
 		);

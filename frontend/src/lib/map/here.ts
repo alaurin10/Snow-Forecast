@@ -317,7 +317,33 @@ export function findGlacier(
 ): GeoJSON.Feature | null {
 	const ice = fc.features.filter((f) => f.properties?.kind === 'glacier');
 	const byId = osm ? ice.find((f) => f.properties?.osm === osm) : undefined;
-	return byId ?? ice.find((f) => polygons(f.geometry).some((p) => inPolygon(p, lon, lat))) ?? null;
+	return (
+		byId ??
+		ice.find(
+			(f) => inBox(f, lon, lat) && polygons(f.geometry).some((p) => inPolygon(p, lon, lat))
+		) ??
+		null
+	);
+}
+
+/** Each feature's [west, south, east, north], worked out once. */
+const boxes = new WeakMap<GeoJSON.Feature, [number, number, number, number]>();
+
+/** Inside the feature's bounding box: a cheap test before the outline's. */
+function inBox(f: GeoJSON.Feature, lon: number, lat: number): boolean {
+	let b = boxes.get(f);
+	if (!b) {
+		b = [Infinity, Infinity, -Infinity, -Infinity];
+		for (const p of polygons(f.geometry))
+			for (const [x, y] of p[0] ?? []) {
+				if (x < b[0]) b[0] = x;
+				if (y < b[1]) b[1] = y;
+				if (x > b[2]) b[2] = x;
+				if (y > b[3]) b[3] = y;
+			}
+		boxes.set(f, b);
+	}
+	return lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3];
 }
 
 /** The glacier's whole area in square metres, or null if it isn't found. */

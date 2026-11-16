@@ -13,6 +13,7 @@ import {
 	weatherView,
 	windTick
 } from './weather';
+import { goneAt, weatherOpacity } from './style';
 import { pointSource, windSource } from './windsource';
 
 const H = 3600;
@@ -222,5 +223,19 @@ describe('wind away from saved locations', () => {
 		expect(pointSource(point, 52.5, -125, 'next24')).toBeNull(); // ~55 km away
 		expect(pointSource({ ...point, inside: false }, 52, -125, 'next24')).toBeNull();
 		expect(windSource(null, 52, -125, 'next24')).toBeNull();
+	});
+});
+
+describe('where weather layers stop being drawn', () => {
+	it('is where their opacity reaches 0', () => {
+		expect(goneAt(weatherOpacity('radar'))).toBe(13);
+		expect(goneAt(weatherOpacity('clouds'))).toBe(13);
+		expect(goneAt(weatherOpacity('totals'))).toBe(15);
+		expect(goneAt(weatherOpacity('snowlevel'))).toBe(15);
+	});
+
+	it('has no limit when the opacity never reaches 0', () => {
+		expect(goneAt(['interpolate', ['linear'], ['zoom'], 8, 0, 9, 0.6, 15, 0.5])).toBe(24);
+		expect(goneAt(['literal', 0.7] as never)).toBe(24);
 	});
 });

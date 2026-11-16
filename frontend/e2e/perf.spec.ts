@@ -122,6 +122,20 @@ test('the map stays within its memory budget on a phone', async ({ baseURL }, in
 		const context = await browser.newContext({ ...devices['Pixel 7'], baseURL });
 		// The slope overlay on from the start: the worst case is everything at once.
 		await context.addInitScript(() => localStorage.setItem('sw.mapOverlay', 'slope'));
+		/** Map tiles and elevation asked for, by kind: fewer kept in memory mustn't mean
+		 *  more fetched again. */
+		const requests: Record<string, number> = {};
+		context.on('request', (r) => {
+			const u = r.url();
+			const kind = u.includes('/api/tiles/')
+				? 'tiles'
+				: /mapterhorn|elevation-tiles/.test(u)
+					? 'elevation'
+					: u.includes('/api/precip/')
+						? 'precip'
+						: null;
+			if (kind) requests[kind] = (requests[kind] ?? 0) + 1;
+		});
 		const page = await context.newPage();
 		const cdp = await context.newCDPSession(page);
 		await cdp.send('Performance.enable');
@@ -192,7 +206,8 @@ test('the map stays within its memory budget on a phone', async ({ baseURL }, in
 			js_heap_peak_mb: round(heapPeak),
 			...(await drawTimes(page)),
 			map_load_ms: load,
-			first_frame_ms: frame
+			first_frame_ms: frame,
+			requests
 		};
 		const out = info.outputPath('perf.json');
 		writeFileSync(out, JSON.stringify(result, null, 2));

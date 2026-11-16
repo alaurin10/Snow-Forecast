@@ -43,6 +43,17 @@ Notable changes to Snow Watch. The format follows
   - The first two forecast hours fade from the last radar nowcast into the model, so the
     hand-over between the two is gradual; tapping the map gives the same mix.
   - The key shows each type's colours as a continuous strip.
+- **The map fetches and draws less that you can't see** (performance pass, part 3;
+  nothing it shows changes):
+  - The Esri base map stops at the zoom where OpenTopoMap has covered it, and weather
+    layers stop at the zoom where they have faded out, rather than being drawn invisibly.
+  - Runs, stations, reports, ATES areas, avalanche zones and the measured line are cut
+    into map tiles to zoom 12–14 and stretched beyond, rather than cut again at every
+    zoom to 18.
+  - Tapping a glacier or profiling a run reads the ski map's file the map already has,
+    rather than downloading and keeping a second copy.
+  - Leaving the map frees the terrain worker and the elevation tiles it holds; it starts
+    again when you come back.
 - **The map does less wasted work** (performance pass, part 2; nothing it shows changes):
   - Radar pictures and satellite tiles reach the map as soon as they arrive. They used
     to wait until a copy was written to the offline cache, which is now written in the

@@ -4,6 +4,7 @@
 // Everything stays on the device: positions are never sent anywhere.
 
 import type { GeoJSONSource, Map as MlMap, Marker } from 'maplibre-gl';
+import { GEOJSON_ZOOM } from './map/style';
 
 export type LocState = 'off' | 'locating' | 'following' | 'shown' | 'denied' | 'unavailable';
 
@@ -204,7 +205,7 @@ export class UserLocation {
 
 	private ensureLayers() {
 		if (this.map.getSource(SRC)) return;
-		this.map.addSource(SRC, { type: 'geojson', data: empty() });
+		this.map.addSource(SRC, { type: 'geojson', data: empty(), maxzoom: GEOJSON_ZOOM });
 		this.map.addLayer({
 			id: 'userloc-accuracy',
 			type: 'fill',

@@ -150,6 +150,8 @@ export class PrecipLayer {
 	private front = 0;
 	private shown: string | null = null;
 	private opacity: unknown;
+	/** Zoomed in this far the pictures are hidden (they've faded out, or tiles replace them). */
+	private maxzoom: number;
 	/** When the fade under way ends (performance.now()), or 0. */
 	private fadeEnds = 0;
 	private onRender: (() => void) | null = null;
@@ -160,9 +162,11 @@ export class PrecipLayer {
 		width: number,
 		height: number,
 		opacity: unknown,
-		beforeId?: string
+		beforeId?: string,
+		maxzoom = 24
 	) {
 		this.opacity = opacity;
+		this.maxzoom = maxzoom;
 		const [[south, west], [north, east]] = bounds;
 		const coordinates: [[number, number], [number, number], [number, number], [number, number]] = [
 			[west, north],
@@ -182,6 +186,7 @@ export class PrecipLayer {
 					id,
 					type: 'raster',
 					source: id,
+					maxzoom,
 					paint: {
 						'raster-opacity': (i === this.front ? opacity : 0) as number,
 						'raster-opacity-transition': { duration: 0, delay: 0 },
@@ -204,6 +209,14 @@ export class PrecipLayer {
 		this.opacity = opacity;
 		const id = PrecipLayer.IDS[this.front];
 		if (this.map.getLayer(id)) this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
+	}
+
+	/** Hide the pictures from this zoom in. */
+	setMaxZoom(maxzoom: number) {
+		if (maxzoom === this.maxzoom) return;
+		this.maxzoom = maxzoom;
+		for (const id of PrecipLayer.IDS)
+			if (this.map.getLayer(id)) this.map.setLayerZoomRange(id, 0, maxzoom);
 	}
 
 	/**

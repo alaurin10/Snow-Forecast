@@ -14,7 +14,14 @@
 <script lang="ts">
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-	import type { Map as MlMap, MapMouseEvent, MapTouchEvent, Marker, Popup } from 'maplibre-gl';
+	import type {
+		GeoJSONSource,
+		Map as MlMap,
+		MapMouseEvent,
+		MapTouchEvent,
+		Marker,
+		Popup
+	} from 'maplibre-gl';
 	import type { OverviewRow } from '../types.gen';
 	import { bucket } from '../calendar';
 	import { dangerWord } from '../conditions';
@@ -84,10 +91,16 @@
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
 		weatherOpacity,
+		goneAt,
 		WIND_MIN_ZOOM
 	} from '../map/style';
 	import { AnalysisLayer, AreaRunner, viewBounds, type AreaState } from '../map/layers/analysis';
-	import { setSnowTiles, snowTilesUrl, TERRAIN_NOTE } from '../map/layers/snowtiles';
+	import {
+		setSnowTiles,
+		SNOWTILES_ZOOM,
+		snowTilesUrl,
+		TERRAIN_NOTE
+	} from '../map/layers/snowtiles';
 	import type { AreaJob } from '../map/terrain/client';
 	import type { SunFacts } from '../map/terrain/shade';
 	import { sunDay, sunPosition, type Ymd } from '../map/terrain/sun';
@@ -108,7 +121,7 @@
 		setTerrainUnits,
 		setupTerrain
 	} from '../map/layers/terrain';
-	import { terrainClient } from '../map/terrain/client';
+	import { retainTerrain, terrainClient } from '../map/terrain/client';
 	import type { PointFacts } from '../map/terrain/messages';
 	import TimelineControls from '../map/Timeline.svelte';
 	import LayersSheet from '../map/LayersSheet.svelte';
@@ -236,7 +249,7 @@
 	// that and are gone up close, where one pixel would fill the screen.
 	const weather = $derived<MapWeather>(radar ? prefs.mapWeather : 'off');
 	/** Smooth fields (totals, snow level, wind, snow on the ground) stay on further in. */
-	const tooClose = $derived(zoom >= (weather === 'radar' || weather === 'clouds' ? 13 : 15));
+	const tooClose = $derived(zoom >= goneAt(weatherOpacity(weather)));
 
 	const layersOpen = $derived(panel === 'layers');
 	/** Phones and tablets: the More menu (measure, offline maps, about) is open. */
@@ -794,11 +807,29 @@
 	let measureHover = $state<number | null>(null);
 	/** Every run's and route's whole line, fetched the first time one is profiled. */
 	let skiIndex: SkiLines | null = null;
-	/** The map's OpenStreetMap file (runs, routes, glaciers…), fetched once when needed. */
+	/** The map's OpenStreetMap file (runs, routes, glaciers…), read once when needed. */
 	let skiData: Promise<GeoJSON.FeatureCollection | null> | null = null;
+	/** The ski source's own copy: MapLibre keeps the file it loaded for drawing on the page,
+	 *  so a second download would only make a second copy. Null if it hasn't loaded within
+	 *  a few seconds (getData waits for as long as the file takes, or for ever if it failed). */
+	async function skiFromMap(): Promise<GeoJSON.FeatureCollection | null> {
+		const src = map?.getSource('ski') as GeoJSONSource | undefined;
+		if (!src) return null;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<null>((r) => (timer = setTimeout(() => r(null), 4000)));
+		const data = await Promise.race([src.getData(), late]).finally(() => clearTimeout(timer));
+		return data?.type === 'FeatureCollection' && data.features.length ? data : null;
+	}
 	function loadSki(): Promise<GeoJSON.FeatureCollection | null> {
-		skiData ??= fetch(SKI_DATA)
-			.then((r) => (r.ok ? (r.json() as Promise<GeoJSON.FeatureCollection>) : null))
+		skiData ??= skiFromMap()
+			.catch(() => null)
+			.then(
+				async (fc) =>
+					fc ??
+					fetch(SKI_DATA).then((r) =>
+						r.ok ? (r.json() as Promise<GeoJSON.FeatureCollection>) : null
+					)
+			)
 			.catch((e) => {
 				console.error('ski map', e);
 				skiData = null;
@@ -1495,9 +1526,17 @@
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
+	/** Where the picture stops being drawn: where it has faded out, or where the snow
+	 *  total's terrain-adjusted tiles take over. */
+	function pictureMaxZoom(): number {
+		return snowTiles ? SNOWTILES_ZOOM : goneAt(weatherOpacity(weather));
+	}
 	$effect(() => {
 		const o = weatherOpacity(weather);
-		if (ready && map) overlay?.setOpacity(o);
+		const max = pictureMaxZoom();
+		if (!ready || !map) return;
+		overlay?.setOpacity(o);
+		overlay?.setMaxZoom(max);
 	});
 	const stillMotion =
 		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1623,7 +1662,8 @@
 					tl.width,
 					tl.height,
 					weatherOpacity(weather),
-					PRECIP_BEFORE
+					PRECIP_BEFORE,
+					pictureMaxZoom()
 				);
 			}
 			void show();
@@ -1695,8 +1735,7 @@
 		setSnowTiles(map, tiles, {
 			bounds: tl.bounds,
 			opacity: weatherOpacity('totals'),
-			beforeId: PRECIP_BEFORE,
-			pictureIds: PrecipLayer.IDS
+			beforeId: PRECIP_BEFORE
 		});
 	});
 
@@ -1769,6 +1808,8 @@
 	$effect(() => {
 		if (!el) return;
 		let cancelled = false;
+		/** Lets go of the terrain worker (it stops once no map holds it). */
+		let releaseTerrain: (() => void) | null = null;
 		import('maplibre-gl').then(async (mod) => {
 			if (cancelled || !el) return;
 			ml = (mod as unknown as { default?: typeof mod }).default ?? mod;
@@ -1776,6 +1817,7 @@
 			// point it at the copy Vite ships.
 			ml.setWorkerUrl(maplibreWorker);
 			// The terrain worker and contours only matter on the full map.
+			if (radar) releaseTerrain = retainTerrain();
 			const terrain = radar ? setupTerrain(ml) : { worker: false, contours: null };
 			analysis = terrain.worker;
 			const ctiles = radar ? contourTiles(units) : undefined;
@@ -1954,6 +1996,8 @@
 			probeMarker = null;
 			map?.remove();
 			map = null;
+			releaseTerrain?.();
+			releaseTerrain = null;
 		};
 	});
 
