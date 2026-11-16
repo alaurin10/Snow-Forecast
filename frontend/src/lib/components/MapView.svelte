@@ -100,6 +100,7 @@
 	import {
 		contourTiles,
 		setContours,
+		addContours,
 		setOverlay,
 		setShade,
 		setTerrainUnits,
@@ -142,7 +143,8 @@
 	import { hscroll } from '../hscroll';
 	import StationCard from '../map/StationCard.svelte';
 	import ReportCard from '../map/ReportCard.svelte';
-	import { plainLine, setMeasure } from '../map/layers/measure';
+	import { plainLine, setMeasure, setMeasureHover } from '../map/layers/measure';
+	import { visibleInterval } from '../visibleInterval';
 	import {
 		lineBounds,
 		parseGpx,
@@ -429,12 +431,18 @@
 	});
 
 	// ---- Terrain layers ------------------------------------------------------------
+	/** The zone whose outline the terrain worker has. */
+	let zoneSent: unknown = null;
 	$effect(() => {
 		const o = overlayMode;
 		const q = matchQ;
 		if (!ready || !map || !radar) return;
-		// The worker needs the zone's outline before it draws tiles clipped to it.
-		if (q && centreZone) terrainClient()?.setZone(centreZone.id, polygons(centreZone.geometry));
+		// The worker needs the zone's outline before it draws tiles clipped to it (once per
+		// zone: it keeps it).
+		if (q && centreZone && centreZone !== zoneSent) {
+			terrainClient()?.setZone(centreZone.id, polygons(centreZone.geometry));
+			zoneSent = centreZone;
+		}
 		setOverlay(map, o, q);
 	});
 	$effect(() => {
@@ -590,8 +598,7 @@
 	});
 	$effect(() => {
 		if (!recent) return;
-		const id = setInterval(() => satState !== 'loading' && void loadSat(), 30 * 60 * 1000);
-		return () => clearInterval(id);
+		return visibleInterval(() => satState !== 'loading' && void loadSat(), 30 * 60 * 1000);
 	});
 	const satSpot = $derived(nearestSpot(satData, centre.lat, centre.lon)?.spot ?? null);
 	// Another location's scenes: start from its newest.
@@ -624,6 +631,11 @@
 	let problemPick = $state<number | 'all'>('all');
 	let problemSlope = $state(30);
 
+	let zonesPrinted = '';
+	/** Everything but the outlines (which don't change without the rest changing too). */
+	const zonesPrint = (d: ZonesOut) =>
+		JSON.stringify(d, (k, v: unknown) => (k === 'geometry' ? undefined : v));
+
 	async function loadZones() {
 		if (zonesState === 'loading') return;
 		const first = !zonesData;
@@ -631,7 +643,13 @@
 		try {
 			const d = await getAvalancheZones();
 			if (first) problemSlope = d.problem_slope_deg ?? 30;
-			zonesData = d;
+			// The 5-minute refresh mostly brings the same zones: keep the object then, so
+			// the map isn't sent them again and nothing that follows them is redone.
+			const print = zonesPrint(d);
+			if (print !== zonesPrinted) {
+				zonesPrinted = print;
+				zonesData = d;
+			}
 			zonesState = 'ready';
 		} catch (e) {
 			console.error('avalanche zones', e);
@@ -729,35 +747,35 @@
 	// Stations report hourly; new field reports come in through the day.
 	$effect(() => {
 		if (!radar) return;
-		const id = setInterval(
+		return visibleInterval(
 			() => {
 				if (stationsOn) void loadFeature('stations');
 				if (reportsOn) void loadFeature('reports');
 			},
 			30 * 60 * 1000
 		);
-		return () => clearInterval(id);
 	});
+	// Built once per download (and units): switching a layer on or off, or the theme,
+	// doesn't build or send its data again (setStations etc. skip data they have).
+	const stationsGj = $derived(stationsData ? stationsGeojson(stationsData, units) : null);
+	const reportsGj = $derived(reportsData ? reportsGeojson(reportsData) : null);
+	const atesGj = $derived(atesData ? atesGeojson(atesData) : null);
 	$effect(() => {
-		const d = stationsData;
+		const d = stationsGj;
 		const on = stationsOn;
-		const u = units;
 		const h = halo(dark);
-		if (ready && map && (d || map.getSource('stations')))
-			setStations(map, d ? stationsGeojson(d, u) : null, on, h);
+		if (ready && map && (d || map.getSource('stations'))) setStations(map, d, on, h);
 	});
 	$effect(() => {
-		const d = reportsData;
+		const d = reportsGj;
 		const on = reportsOn;
-		if (ready && map && (d || map.getSource('reports')))
-			setReports(map, d ? reportsGeojson(d) : null, on);
+		if (ready && map && (d || map.getSource('reports'))) setReports(map, d, on);
 	});
 	$effect(() => {
-		const d = atesData;
+		const d = atesGj;
 		const on = atesOn;
 		// Under the place names, runs and the weather.
-		if (ready && map && (d || map.getSource('ates')))
-			setAtes(map, d ? atesGeojson(d) : null, on, PRECIP_BEFORE);
+		if (ready && map && (d || map.getSource('ates'))) setAtes(map, d, on, PRECIP_BEFORE);
 	});
 
 	// ---- Measure: a line tapped out, a run or route, or a GPX track ----------------------
@@ -826,15 +844,19 @@
 		const on = measuring;
 		const pts = measurePts;
 		const s = measureSamples;
-		const hv = measureHover;
 		const edit = measureEdit;
 		if (!ready || !map) return;
 		if (!on) return setMeasure(map, null);
 		setMeasure(map, {
 			line: s ? segmentsGeojson(s) : plainLine(pts),
-			points: edit ? pts : [],
-			hover: hv != null && s?.[hv] ? [s[hv].lon, s[hv].lat] : null
+			points: edit ? pts : []
 		});
+	});
+	$effect(() => {
+		const s = measureSamples;
+		const hv = measureHover;
+		if (!ready || !map || !measuring) return;
+		setMeasureHover(map, hv != null && s?.[hv] ? [s[hv].lon, s[hv].lat] : null);
 	});
 
 	function startMeasure() {
@@ -1434,8 +1456,11 @@
 	let loadError = $state<string | null>(null);
 	let frame = $state(0);
 	// Loops play by themselves, unless the device asks for less motion.
+	// Radar plays by itself on wider screens; on phones it waits for Play (decoding and
+	// uploading a frame every few hundred ms is the heaviest thing the map does).
 	let playing = $state(
-		typeof matchMedia === 'undefined' || !matchMedia('(prefers-reduced-motion: reduce)').matches
+		!phone &&
+			(typeof matchMedia === 'undefined' || !matchMedia('(prefers-reduced-motion: reduce)').matches)
 	);
 	let now = $state(Date.now());
 	/** The picture on screen (file name), which lags the wanted one while it decodes. */
@@ -1693,12 +1718,13 @@
 
 	$effect(() => {
 		if (!radar) return;
-		const ids = [
-			setInterval(refresh, 5 * 60 * 1000),
-			setInterval(() => zonesState === 'ready' && void loadZones(), 5 * 60 * 1000),
-			setInterval(() => (now = Date.now()), 60 * 1000)
+		// Not while the page is hidden; a missed one runs when it's seen again.
+		const stops = [
+			visibleInterval(refresh, 5 * 60 * 1000),
+			visibleInterval(() => zonesState === 'ready' && void loadZones(), 5 * 60 * 1000),
+			visibleInterval(() => (now = Date.now()), 60 * 1000)
 		];
-		return () => ids.forEach(clearInterval);
+		return () => stops.forEach((stop) => stop());
 	});
 
 	const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -1713,8 +1739,7 @@
 			// point it at the copy Vite ships.
 			ml.setWorkerUrl(maplibreWorker);
 			// The terrain worker and contours only matter on the full map.
-			const terrain = radar ? await setupTerrain(ml) : { worker: false };
-			if (cancelled || !el) return;
+			const terrain = radar ? setupTerrain(ml) : { worker: false, contours: null };
 			analysis = terrain.worker;
 			const ctiles = radar ? contourTiles(units) : undefined;
 			contoursReady = !!ctiles;
@@ -1758,7 +1783,13 @@
 				}),
 				'top-right'
 			);
-			map.on('zoom', () => (zoom = map!.getZoom()));
+			// Kept to the quarter zoom below: everything that reads it compares it with a
+			// threshold on a quarter, so it only needs to change a few times a pinch, not
+			// on every frame.
+			map.on('zoom', () => {
+				const z = Math.floor(map!.getZoom() * 4) / 4;
+				if (z !== zoom) zoom = z;
+			});
 			// The map came to rest: the view's sun or wind picture is redone a moment later.
 			let rest: ReturnType<typeof setTimeout>;
 			map.on('moveend', () => {
@@ -1840,7 +1871,7 @@
 				performance.mark('map:load');
 				// Credits start folded to their (i) button, which opens them.
 				el?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
-				zoom = map!.getZoom();
+				zoom = Math.floor(map!.getZoom() * 4) / 4;
 				if (radar && canLocate) {
 					loc = new UserLocation(map!, ml!);
 					loc.onChange = (st) => (locState = st);
@@ -1859,6 +1890,13 @@
 				const c = map!.getCenter();
 				centre = { lat: c.lat, lon: c.lng };
 				if (radar) refresh();
+				// Contours, if maplibre-contour arrived after the map was made.
+				if (radar && !contoursReady)
+					void terrain.contours?.then(() => {
+						if (cancelled || !map) return;
+						const d = dark;
+						contoursReady = addContours(map, { units, dark: d, on: contoursOn });
+					});
 			});
 		});
 		return () => {

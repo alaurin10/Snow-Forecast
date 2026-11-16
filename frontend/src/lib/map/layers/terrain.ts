@@ -8,6 +8,7 @@ import { BASE_ZOOM, MAPTERHORN } from '../terrain/dem';
 import {
 	CONTOUR_LAYERS,
 	contourColor,
+	contourLayers,
 	contourThresholds,
 	elevationBands,
 	overlayTiles,
@@ -23,9 +24,10 @@ let contourLoading: Promise<void> | null = null;
 
 /**
  * Get the page ready for terrain: the dem:// and terrain:// protocols (false on
- * browsers without the worker), and maplibre-contour, loaded on demand.
+ * browsers without the worker), and maplibre-contour, loaded on demand. The map doesn't
+ * wait for contours: `contours` settles once they can be added (see `addContours`).
  */
-export async function setupTerrain(ml: MapLibre): Promise<{ worker: boolean }> {
+export function setupTerrain(ml: MapLibre): { worker: boolean; contours: Promise<void> } {
 	const worker = registerProtocols(ml);
 	if (!contourLoading) {
 		contourLoading = import('maplibre-contour')
@@ -44,8 +46,25 @@ export async function setupTerrain(ml: MapLibre): Promise<{ worker: boolean }> {
 			})
 			.catch((e) => console.error('contours', e));
 	}
-	await contourLoading;
-	return { worker };
+	return { worker, contours: contourLoading };
+}
+
+/**
+ * Contours added to a map made before maplibre-contour arrived, where the style puts them
+ * (just above the satellite labels). False if they can't be (yet).
+ */
+export function addContours(
+	map: MlMap,
+	o: { units: UnitSystem; dark: boolean; on: boolean }
+): boolean {
+	if (map.getSource('contours')) return true;
+	const tiles = contourTiles(o.units);
+	if (!tiles) return false;
+	const order = map.getLayersOrder();
+	const before = order[order.indexOf('satlabels') + 1];
+	map.addSource('contours', { type: 'vector', tiles: [tiles], maxzoom: 15 });
+	for (const layer of contourLayers(o.dark, o.units, o.on)) map.addLayer(layer, before);
+	return true;
 }
 
 export function contourTiles(units: UnitSystem): string | undefined {

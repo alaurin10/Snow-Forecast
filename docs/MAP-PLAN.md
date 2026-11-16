@@ -1021,7 +1021,68 @@ Under SwiftShader the GPU process holds what a phone keeps in GPU memory. It gro
 phone, use remote DevTools: the Performance panel with 4× CPU throttling while panning,
 pinching and playing; the Memory panel; and the two marks in the Timings track.
 
-**Still to do:** PR 2, quick wins (service worker, startup, playback, data sent again); PR 3,
+**PR 2, quick wins (done 15 Nov 2026).**
+
+*Service worker.*
+- `apiFirst` returns the response at once and writes its offline copy under
+  `event.waitUntil`. It used to wait for `cache.put` of every precipitation frame,
+  satellite tile and snow tile.
+- `api-v2` is pruned by age on activate and at most hourly. When a new `/api/precip` index
+  is cached, frames it no longer names are dropped.
+- Frames and tiles stay cached, so offline the map still shows the last radar seen. The
+  plan had them skip the cache; that would have lost this.
+- With no offline area saved, map tiles, glyphs and elevation skip the service worker
+  (`caches.has(OFFLINE)` at start-up; `lib/offlineMaps.ts` tells it when that changes).
+- Routing is in `lib/swRoute.ts`, with tests.
+
+*Startup.*
+- `routes/map/+page.svelte` imports maplibre-gl and maplibre-contour alongside the
+  overview fetch.
+- The map is made without waiting for maplibre-contour; `addContours` adds the contours
+  above the satellite labels when it arrives.
+- The map still mounts after the overview: mounting it before would change how it frames
+  the locations on open.
+
+*Playback.*
+- No autoplay on phones (≤ 700 px).
+- `FrameStore` shares one decode between asks for the same frame. It used to leak a
+  bitmap, and closes one that finishes after the store was cleared.
+- Frame downloads are aborted when the map closes.
+
+*Data sent again.*
+- Zones are sent again only when anything but their outlines changed.
+- Station, report and ATES GeoJSON is built in a `$derived`, so it isn't rebuilt on a
+  toggle or theme change. `setData` is skipped for data a source already has.
+- Measure hover updates only the hover source.
+- The terrain worker gets a zone's outline once.
+
+*Smaller items.*
+- `zoom` state is kept to the quarter below. Every threshold is on a quarter, so nothing
+  reads differently.
+- `recentLayers` uses `getLayersOrder()`, not `getStyle()`.
+- Compass turns under 1.5° are skipped.
+- Map refreshes use `lib/visibleInterval.ts`: skipped while hidden, caught up on return.
+- The Sky backdrop pauses on `/map`.
+
+*Not done.*
+- The once-per-frame batching of the "downloaded" set: it's small either way.
+- Concern jobs still send the zone polygons: that needs the worker's protocol, so PR 4.
+
+Numbers, the same test twice:
+
+| | PR 1 | PR 2 |
+|---|---|---|
+| Page process at open | 271 MB | 236–250 MB |
+| Page process, peak | 405–431 MB | 383–387 MB |
+| Whole browser, peak | 934–957 MB | 876–879 MB |
+| Map `load` | ~1.8 s | 1.75–1.94 s |
+| First frame | ~3.6 s | 3.5–3.7 s |
+
+The timings don't move here: the contour library is served locally, so the startup change
+shows only on a slow network. The test presses Play, so it still measures playback; a
+phone that doesn't press it stays at the "open" figure.
+
+**Still to do:** PR 3,
 fewer tiles and cheaper layers; PR 4, terrain worker throughput; PR 5, optional, playback
 memory and backend bytes. Each records its numbers here.
 

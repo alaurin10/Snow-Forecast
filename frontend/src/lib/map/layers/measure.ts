@@ -14,7 +14,6 @@ export interface MeasureDrawing {
 	line: GeoJSON.FeatureCollection;
 	/** The points tapped out, while they can still be changed. */
 	points: LngLat[];
-	hover: LngLat | null;
 }
 
 function ensure(map: MlMap) {
@@ -87,7 +86,14 @@ export function setMeasure(map: MlMap, d: MeasureDrawing | null) {
 	ensure(map);
 	(map.getSource(LINE) as GeoJSONSource).setData(d?.line ?? EMPTY);
 	(map.getSource(POINTS) as GeoJSONSource).setData(points(d?.points ?? []));
-	(map.getSource(HOVER) as GeoJSONSource).setData(points(d?.hover ? [d.hover] : []));
+	if (!d) setMeasureHover(map, null);
 	// Keep it on top of layers added since (weather pictures, zones).
 	for (const id of ['measure-casing', LINE, POINTS, HOVER]) map.moveLayer(id);
+}
+
+/** The spot on the line under the pointer on the profile, or none. Only this changes as
+ *  the pointer moves, so it alone is sent to the map. */
+export function setMeasureHover(map: MlMap, at: LngLat | null) {
+	const src = map.getSource(HOVER) as GeoJSONSource | undefined;
+	src?.setData(points(at ? [at] : []));
 }

@@ -7,6 +7,7 @@
      drops what falls; "Off" (and the device's reduce-motion setting) stops everything.
      It also hands the glass a hint of the sky's colour (--sky-key). -->
 <script lang="ts">
+	import { page } from '$app/state';
 	import { prefs } from '../prefs.svelte';
 	import { skyState } from '../skystate.svelte';
 	import { colorMode } from '../mode.svelte';
@@ -55,7 +56,9 @@
 			mq?.removeEventListener('change', onMq);
 		};
 	});
-	const falling = $derived(live && prefs.motion === 'full' && !reduced && !hidden);
+	// The map page covers the whole window: nothing to animate behind it.
+	const covered = $derived(page.route.id === '/map');
+	const falling = $derived(live && prefs.motion === 'full' && !reduced && !hidden && !covered);
 
 	// The glass takes a hint of the sky's colour (theme.css; Live Sky only).
 	$effect(() => {
@@ -69,7 +72,7 @@
 	class="sky"
 	data-weather={sky.weather}
 	data-phase={sky.phase}
-	class:paused={hidden}
+	class:paused={hidden || covered}
 	aria-hidden="true"
 	style:--k1={live ? paint.k1 : undefined}
 	style:--k2={live ? paint.k2 : undefined}

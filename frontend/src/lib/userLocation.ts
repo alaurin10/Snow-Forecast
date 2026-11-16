@@ -123,6 +123,9 @@ export class UserLocation {
 	private onOrient = (e: DeviceOrientationEvent) => {
 		const h = compassHeading(e);
 		if (h === null) return;
+		// Compasses report many times a second, jittering by a fraction of a degree: only a
+		// turn worth seeing moves the arrow.
+		if (this.compass !== null && Math.abs(((h - this.compass + 540) % 360) - 180) < 1.5) return;
 		this.compass = h;
 		this.drawHeading();
 	};

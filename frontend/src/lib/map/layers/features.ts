@@ -16,13 +16,20 @@ export const TAP_LAYERS = ['stations', 'reports'];
 
 const vis = (on: boolean) => (on ? 'visible' : 'none') as 'visible' | 'none';
 
+/** The data each source was last given, so the same data isn't sent to the map again. */
+const sent = new WeakMap<MlMap, Map<string, GeoJSON.FeatureCollection>>();
+
 function source(map: MlMap, id: string, data: GeoJSON.FeatureCollection): boolean {
+	let had = sent.get(map);
+	if (!had) sent.set(map, (had = new Map()));
 	const src = map.getSource(id) as GeoJSONSource | undefined;
 	if (src) {
-		src.setData(data);
+		if (had.get(id) !== data) src.setData(data);
+		had.set(id, data);
 		return false;
 	}
 	map.addSource(id, { type: 'geojson', data });
+	had.set(id, data);
 	return true;
 }
 

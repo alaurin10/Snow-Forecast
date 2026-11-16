@@ -9,6 +9,11 @@
 	import MapView from '../../lib/components/MapView.svelte';
 	import type { OverviewRow } from '../../lib/types.gen';
 
+	// Start downloading the map's code alongside the overview, not after it (MapView
+	// imports the same modules, so it finds them loaded or on their way).
+	void import('maplibre-gl');
+	void import('maplibre-contour');
+
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
 	let retry = $state(0);

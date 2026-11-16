@@ -17,6 +17,10 @@ export class FrameStore {
 	private blobs = new Map<string, Blob>();
 	private loading = new Map<string, Promise<Blob | null>>();
 	private decoded = new Map<string, ImageBitmap>();
+	/** Decodes under way, so two asks for one frame share one decode (and one bitmap). */
+	private decoding = new Map<string, Promise<ImageBitmap | null>>();
+	/** Cancels the downloads under way when the map closes. */
+	private abort = new AbortController();
 	private active = 0;
 	private queue: (() => void)[] = [];
 
@@ -31,7 +35,7 @@ export class FrameStore {
 		let p = this.loading.get(f.file);
 		if (!p) {
 			p = this.limited(urgent, async () => {
-				const res = await fetch(frameUrl(f));
+				const res = await fetch(frameUrl(f), { signal: this.abort.signal });
 				if (!res.ok) throw new Error(`frame ${res.status}`);
 				return res.blob();
 			}).then(
@@ -55,11 +59,23 @@ export class FrameStore {
 			this.decoded.set(f.file, have);
 			return have;
 		}
+		let p = this.decoding.get(f.file);
+		if (!p) {
+			p = this.decode(f).finally(() => this.decoding.delete(f.file));
+			this.decoding.set(f.file, p);
+		}
+		return p;
+	}
+
+	private async decode(f: Pic): Promise<ImageBitmap | null> {
 		const blob = await this.blob(f, true);
-		if (!blob) return null;
-		const again = this.decoded.get(f.file);
-		if (again) return again;
+		if (!blob || !this.blobs.has(f.file)) return null;
 		const bmp = await createImageBitmap(blob);
+		// Forgotten while it decoded (another timeline, or the map closed).
+		if (!this.blobs.has(f.file)) {
+			bmp.close();
+			return null;
+		}
 		this.decoded.set(f.file, bmp);
 		while (this.decoded.size > DECODED) {
 			const [file, old] = this.decoded.entries().next().value!;
@@ -81,7 +97,10 @@ export class FrameStore {
 		}
 	}
 
+	/** Forget everything and cancel the downloads under way (the map is closing). */
 	clear() {
+		this.abort.abort();
+		this.abort = new AbortController();
 		this.keepOnly([]);
 	}
 
