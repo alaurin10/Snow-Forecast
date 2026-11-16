@@ -69,4 +69,29 @@ describe('the terrain worker’s lifetime', () => {
 		b();
 		expect(FakeWorker.made[0].terminated).toBe(true);
 	});
+
+	it('makes the job worker only when it’s asked for, and stops both together', async () => {
+		const { jobsClient, retainTerrain, sendZone, terrainClient } = await import('./client');
+		expect(jobsClient()).toBeNull();
+		const release = retainTerrain();
+		const tiles = terrainClient()!;
+		// A zone for the overlay tiles doesn't start the job worker.
+		sendZone('z1', [[[[0, 0]]]], 'geom1');
+		expect(FakeWorker.made).toHaveLength(1);
+		const jobs = jobsClient()!;
+		expect(jobs).not.toBe(tiles);
+		expect(FakeWorker.made).toHaveLength(2);
+		// Now it's running, zones go to both, each once per outline.
+		sendZone('z1', [[[[0, 0]]]], 'geom1');
+		sendZone('z1', [[[[0, 0]]]], 'geom1');
+		const zones = (w: FakeWorker) =>
+			w.posted.filter((m) => (m as { type: string }).type === 'zone').length;
+		expect(zones(FakeWorker.made[0])).toBe(1);
+		expect(zones(FakeWorker.made[1])).toBe(1);
+		sendZone('z1', [[[[1, 1]]]], 'geom2');
+		expect(zones(FakeWorker.made[0])).toBe(2);
+		release();
+		expect(FakeWorker.made.every((w) => w.terminated)).toBe(true);
+		expect(jobsClient()).toBeNull();
+	});
 });

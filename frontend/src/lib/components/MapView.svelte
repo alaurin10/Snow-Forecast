@@ -121,7 +121,7 @@
 		setTerrainUnits,
 		setupTerrain
 	} from '../map/layers/terrain';
-	import { retainTerrain, terrainClient } from '../map/terrain/client';
+	import { jobsClient, retainTerrain, sendZone, terrainClient } from '../map/terrain/client';
 	import type { PointFacts } from '../map/terrain/messages';
 	import TimelineControls from '../map/Timeline.svelte';
 	import LayersSheet from '../map/LayersSheet.svelte';
@@ -446,18 +446,14 @@
 	});
 
 	// ---- Terrain layers ------------------------------------------------------------
-	/** The zone whose outline the terrain worker has. */
-	let zoneSent: unknown = null;
 	$effect(() => {
 		const o = overlayMode;
 		const q = matchQ;
 		if (!ready || !map || !radar) return;
 		// The worker needs the zone's outline before it draws tiles clipped to it (once per
 		// zone: it keeps it).
-		if (q && centreZone && centreZone !== zoneSent) {
-			terrainClient()?.setZone(centreZone.id, polygons(centreZone.geometry));
-			zoneSent = centreZone;
-		}
+		if (q && centreZone)
+			sendZone(centreZone.id, polygons(centreZone.geometry), centreZone.geometry);
 		setOverlay(map, o, q);
 	});
 	$effect(() => {
@@ -582,11 +578,14 @@
 					windSectors: setup.windSectors,
 					windScale: setup.windScale,
 					sunDate: setup.inputs.sun ? ymd(centreZone.properties.today) : null,
-					zone: polygons(centreZone.geometry)
+					zone: centreZone.id
 				};
 			opacity = ANALYSIS_OPACITY.concern;
 		}
 		if (!ready || !map || !runner) return;
+		// The job worker clips the concern index to the zone it has been told about.
+		if (job?.type === 'concern' && centreZone)
+			jobsClient()?.setZone(centreZone.id, polygons(centreZone.geometry), centreZone.geometry);
 		if (job) runner.request(job, viewBounds(map), AREA_PX, opacity);
 		else runner.request(null);
 	});
@@ -1955,11 +1954,11 @@
 					loc = new UserLocation(map!, ml!);
 					loc.onChange = (st) => (locState = st);
 				}
-				const tc = radar && analysis ? terrainClient() : null;
-				if (tc) {
+				if (radar && analysis) {
 					// Over the terrain overlays, under the precipitation (added later, above it).
 					analysisLayer = new AnalysisLayer(map!, PRECIP_BEFORE);
-					runner = new AreaRunner(tc, analysisLayer);
+					// The whole-view layers run in their own worker, made when first needed.
+					runner = new AreaRunner(jobsClient, analysisLayer);
 					runner.onstate = (st) => (areaState = st);
 				}
 				// The free space first, so framing the locations lands beside the rail.

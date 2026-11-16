@@ -86,25 +86,53 @@ export function maxTan(g: Grid, o: Offsets, out: Float32Array): Float32Array {
 	return out;
 }
 
+/** One ray of a fan: its angle in degrees, a share of the mean, added to `sum`. */
+function fanRay(
+	g: Grid,
+	azimuth: number,
+	from: number,
+	to: number,
+	sum: Float32Array,
+	buf: Float32Array
+) {
+	maxTan(g, rayOffsets(azimuth, from / g.m, to / g.m), buf);
+	for (let i = 0; i < sum.length; i++)
+		if (buf[i] !== -Infinity) sum[i] += Math.atan(buf[i]) / RAD / FAN.length;
+}
+
 /** Sx in degrees for wind from an azimuth, searching (from, to] metres upwind. */
 export function sx(g: Grid, windFrom: number, from: number, to: number): Float32Array {
 	const sum = new Float32Array(g.data.length);
 	const buf = new Float32Array(g.data.length);
-	for (const da of FAN) {
-		maxTan(g, rayOffsets(windFrom + da, from / g.m, to / g.m), buf);
-		for (let i = 0; i < sum.length; i++)
-			if (buf[i] !== -Infinity) sum[i] += Math.atan(buf[i]) / RAD / FAN.length;
-	}
+	for (const da of FAN) fanRay(g, windFrom + da, from, to, sum, buf);
 	return sum;
 }
 
 /**
  * The wind effect on every pixel for one wind direction, −1 (stripped) to 1 (loaded),
- * added to `acc` with a weight.
+ * added to `acc` with a weight. `pause` comes between rays (six to a direction), so a
+ * cancel lands within one ray; false if it said to stop.
  */
-function addDirection(g: Grid, half: Grid, windFrom: number, weight: number, acc: Float32Array) {
-	const near = sx(g, windFrom, 0, NEAR_M);
-	const far = sx(half, windFrom, NEAR_M, FAR_M);
+async function addDirection(
+	g: Grid,
+	half: Grid,
+	windFrom: number,
+	weight: number,
+	acc: Float32Array,
+	pause: () => Promise<boolean>
+): Promise<boolean> {
+	const near = new Float32Array(g.data.length);
+	const buf = new Float32Array(g.data.length);
+	for (const da of FAN) {
+		fanRay(g, windFrom + da, 0, NEAR_M, near, buf);
+		if (!(await pause())) return false;
+	}
+	const far = new Float32Array(half.data.length);
+	const hbuf = new Float32Array(half.data.length);
+	for (const da of FAN) {
+		fanRay(half, windFrom + da, NEAR_M, FAR_M, far, hbuf);
+		if (!(await pause())) return false;
+	}
 	const { width: W, height: H } = g;
 	for (let r = 0; r < H; r++) {
 		for (let c = 0; c < W; c++) {
@@ -114,6 +142,7 @@ function addDirection(g: Grid, half: Grid, windFrom: number, weight: number, acc
 			acc[i] += weight * (s > 1 ? 1 : s < -1 ? -1 : s);
 		}
 	}
+	return true;
 }
 
 /** The sectors worth computing and their weights (summing to 1). */
@@ -128,7 +157,7 @@ export function windWeights(sectors: number[]): { azimuth: number; weight: numbe
 /**
  * The wind effect over a grid, −1 (stripped) to 1 (loaded). `sectors` is the share of
  * the loading by the direction the wind blows from, north first, clockwise. `pause`
- * lets other work in between directions and says whether to carry on.
+ * lets other work in between rays and says whether to carry on.
  */
 export async function windEffect(
 	g: Grid,
@@ -137,10 +166,8 @@ export async function windEffect(
 ): Promise<Float32Array | null> {
 	const acc = new Float32Array(g.data.length);
 	const half = halve(g);
-	for (const { azimuth, weight } of windWeights(sectors)) {
-		addDirection(g, half, azimuth, weight, acc);
-		if (!(await pause())) return null;
-	}
+	for (const { azimuth, weight } of windWeights(sectors))
+		if (!(await addDirection(g, half, azimuth, weight, acc, pause))) return null;
 	return acc;
 }
 

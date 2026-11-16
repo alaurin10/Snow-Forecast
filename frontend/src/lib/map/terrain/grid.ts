@@ -90,11 +90,38 @@ export function rectFor(b: Bounds, maxPx: number, maxZoom: number): Rect {
 
 export const rectKey = (r: Rect) => `${r.z}/${r.x0}/${r.y0}/${r.width}/${r.height}`;
 
-/** Fetch and stitch the elevation for a rectangle. `alive` is asked between tiles. */
+/** Snap step for job rectangles, in pixels: a view that moves less stays inside one. */
+export const SNAP_PX = 32;
+
+/** The rectangle grown outward to whole steps of `step` pixels. */
+export function snap(r: Rect, step = SNAP_PX): Rect {
+	const x0 = Math.floor(r.x0 / step) * step;
+	const y0 = Math.floor(r.y0 / step) * step;
+	const x1 = Math.ceil((r.x0 + r.width) / step) * step;
+	const y1 = Math.ceil((r.y0 + r.height) / step) * step;
+	return { z: r.z, x0, y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/** `outer` holds all of `inner` (same zoom). */
+export function contains(outer: Rect, inner: Rect): boolean {
+	return (
+		outer.z === inner.z &&
+		inner.x0 >= outer.x0 &&
+		inner.y0 >= outer.y0 &&
+		inner.x0 + inner.width <= outer.x0 + outer.width &&
+		inner.y0 + inner.height <= outer.y0 + outer.height
+	);
+}
+
+/**
+ * Fetch and stitch the elevation for a rectangle. `alive` is asked once the tiles are in;
+ * `signal` calls off the downloads (null then).
+ */
 export async function mosaic(
 	dem: Pick<DemCache, 'elev'>,
 	rect: Rect,
-	alive: () => boolean = () => true
+	alive: () => boolean = () => true,
+	signal?: AbortSignal
 ): Promise<Grid | null> {
 	const { z, x0, y0, width, height } = rect;
 	const data = new Float32Array(width * height);
@@ -107,7 +134,7 @@ export async function mosaic(
 	for (let ty = ty0; ty <= ty1; ty++) {
 		for (let tx = tx0; tx <= tx1; tx++) {
 			jobs.push(
-				dem.elev(z, ((tx % n) + n) % n, ty).then((e) => {
+				dem.elev(z, ((tx % n) + n) % n, ty, signal).then((e) => {
 					if (e.sea) return;
 					// Tiles are TILE px here whatever size the source sent.
 					const k = e.size / TILE;
@@ -129,8 +156,13 @@ export async function mosaic(
 			);
 		}
 	}
-	await Promise.all(jobs);
-	if (!alive()) return null;
+	try {
+		await Promise.all(jobs);
+	} catch (e) {
+		if (signal?.aborted) return null;
+		throw e;
+	}
+	if (!alive() || signal?.aborted) return null;
 	return { ...rect, data, m: rectMetres(rect) };
 }
 

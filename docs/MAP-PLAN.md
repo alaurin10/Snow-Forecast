@@ -1154,40 +1154,99 @@ and it doesn't leave the map. So most of PR 3 (Esri past z12.5, GeoJSON past z14
 second ski copy, the worker freed off the map) doesn't show in it. What it does cover is
 within noise, apart from a slightly lower JS heap.
 
-**Still to do.** Each PR records its numbers here.
+**PR 4, terrain worker throughput (done 16 Nov 2026).**
 
-*PR 4, terrain worker throughput* (`lib/map/terrain/*`, `layers/analysis.ts`,
-`layers/terrain.ts`):
-- **Two workers.**
-  - One serves tiles: `dem://`, `terrain://`, taps and profiles.
-  - The other runs whole-view jobs: shade, sun hours, wind and concern.
-  - Each keeps its own DEM LRU at today's sizes, and they share downloads through the
-    HTTP cache.
-  - 3D and hillshade tiles then stop queuing behind a 0.5 s sun-hours job.
-- **Cache hits on pan.**
-  - Snap job rectangles (`grid.ts` `rectKey`) to a tile-aligned grid with a one-tile
-    margin, so small pans reuse the cached grids and results.
-  - Keep sun-hours and wind arrays per key in a 2–3 entry LRU.
-  - Crop to the view when drawing.
-- **Overlay tiles.**
-  - Cache slope and aspect per tile as `Uint8Array`s in the worker, so a new mode or
-    problem query only recolours.
-  - Cache the zone mask per tile and zone.
-  - Write `hornAt` and `concernAt` results into reusable typed arrays, not objects per
-    pixel.
-  - `setOverlay` bumps its query only when the pixels really change.
-  - Concern jobs stop sending the zone polygons each time (left over from PR 2).
-- **Cancellation.**
-  - Honour `cancel` for `dem` requests and before fetching neighbours, with an
-    `AbortController` per request in `dem.ts`. A shared fetch aborts only when every
-    waiter has cancelled.
-  - Abort listeners `{ once: true }` and removed after use (`client.ts`).
-  - Clear stale ids from the worker's `cancelled` set.
-- **Yields inside long jobs:** inside a single wind direction (`wind.ts`), so a cancel
-  lands within about 50 ms.
-- **DEM pyramid, only if a trace shows it matters:** outside lidar, answer coarser tiles
-  with "use the parent" rather than upsampling and re-encoding them. Keep z15/z16 where
-  lidar exists, and don't cap `MAX_ZOOM`.
+*Two workers* (`terrain/client.ts`).
+- `terrainClient()`, the tile worker: `dem://`, `terrain://`, taps, profiles, the
+  sun-times and wind facts for a tap. 28/48 decoded tiles (phone/desktop), as before.
+- `jobsClient()`, the job worker: shade, sun hours, wind and concern (`AreaRunner` takes
+  it as a getter).
+  - It is made the first time one of those layers is opened, so a visit that never opens
+    one costs nothing more.
+  - It keeps fewer tiles (16/32) and downloaded files (24/48, against 96) than the tile
+    worker, because it keeps the views' grids instead.
+- Both run the same `analysis.worker.ts`, start with the map and stop with it
+  (`retainTerrain`).
+- Zones go to the tile worker, and to the job worker if it's running (`sendZone`); a
+  concern job tells the job worker itself. Each client remembers what it sent (the six
+  newest, as the worker keeps them), so a zone goes once per outline.
+
+*Cancellation.*
+- The worker keeps an `AbortController` per request, and `cancel` aborts it. A cancel that
+  arrives after the answer leaves nothing behind (the old `cancelled` set grew).
+- `DemCache` threads the signal through `elev`, `demTile`, `around` and `mosaic`
+  (`once`):
+  - each asker's promise rejects at once;
+  - the shared download stops only when every asker has called it off, or never if one
+    asked without a signal;
+  - a called-off download is not cached, and doesn't count toward the switch to AWS.
+- MapLibre's aborts for tiles scrolled away now reach the download.
+- `ask` adds its abort listener `{ once: true }` and removes it when the answer comes.
+
+*Overlay tiles.*
+- `classify` works a tile's slope (hundredths of a degree, `Uint16Array`) and aspect
+  sector (`Uint8Array`) out once, and the worker keeps them for 8/24 tiles (about
+  0.75 MB each). `paintClasses` colours them, so slope ↔ aspect ↔ problems only
+  recolours. `paint` is the two together.
+- The zone mask is kept per tile and zone: "all inside" and "all outside" as a word, the
+  pixels only for tiles the outline crosses.
+- Horn is written out in `classify` and in the concern loop (no object per pixel).
+  `concernCls` gives `concernAt(…).cls` without building the factors.
+- Tests check that every mode draws the same pixels as the old code, and `concernCls`
+  against `concernAt` on 4,000 random spots.
+- `matchQuery` writes the same rules one way: aspects in compass order, ranges sorted and
+  joined where they touch, rules sorted without repeats. `setOverlay` already compared
+  the URL, so the tiles reload only when what they show changes.
+- Concern jobs name their zone instead of carrying its polygons.
+
+*Whole-view layers.*
+- A job's rectangle is snapped outward to 32 px steps (`grid.snap`).
+- Each layer keeps 1/2 views (phone/desktop): grids plus results, which are sun hours by
+  date and the wind effect by sectors, two of each.
+- A view still inside a kept rectangle reuses it (`contains`). That covers a nudge,
+  panning back, a layer switched off and on, or the date or wind set back. The picture
+  covers the kept rectangle.
+- Differs from the plan: no one-tile margin. A 512 px margin around a 768–1024 px view
+  would work on several times the pixels for every new view, and margins of 10–15 %
+  would still cost 1.3–1.7× for pans that small. Snapping alone costs at most a few
+  percent.
+- Not cropped to the view: the margin is at most one step, and drawing it means a nudge
+  shows no edge.
+
+*Yields.*
+- The wind effect yields between rays, six to a direction, not between directions, so a
+  cancel lands within one ray.
+- The worker yields with a `MessageChannel` message, not `setTimeout(0)`. Browsers
+  stretch nested timeouts to 4 ms, and a sun-hours job yields some thirty times.
+
+*Not done.* The DEM pyramid (plan: only if a trace shows it matters). No trace of it was
+taken here, so it stays open.
+
+*Measured* (headless Chromium, the GPU emulated in software, 4 cores):
+
+| | main | PR 4 |
+|---|---|---|
+| One 512 px overlay tile, worked out | 22.4 ms | 22.0 ms |
+| The same tile, recoloured (new mode or problems) | 22.4 ms | 3.4 ms |
+| Sun hours, flat (median per run) | 390–437 ms | 225–401 ms |
+| Settled after a pan, Sun hours on, flat | 0.44–0.80 s | 0.43–0.57 s |
+| Settled after a pan, Sun hours on, 3D | 4.7–6.1 s | 4.6–6.3 s |
+| Phone page process, peak (`perf.spec.ts`) | 374–389 MB | 389–398 MB |
+
+- "Settled" is the map's last `idle` after a drag, with weather off and every elevation
+  tile served locally 20 ms late (`page.route`), so downloads don't hide the rest.
+- In 3D it is set by the software GPU (about 5 s a pan here), so the split's gain for
+  tiles waiting behind a job can't show in this container. With real downloads, tiles
+  took 0.9–1.9 s (median) on both builds, most of it the download.
+- A first try at timing each tile request from the page measured the page's own busy
+  main thread as well: it read 0.7–1.0 s (main) against 3.2–3.6 s (PR 4) per 3D tile,
+  with whole batches finishing together. The settle times above don't support a
+  slowdown, but this is worth checking on a real phone (remote DevTools, Performance
+  panel, Sun hours on, 3D).
+- Memory is within noise. The kept slope and aspect add about 6 MB on phones, and the job
+  worker costs nothing until a whole-view layer is opened.
+
+**Still to do.**
 
 *PR 5, optional, after measuring: playback memory and backend bytes.*
 - Size `DECODED` by device: 4 on phones; on desktop the whole loop within about 150 MB.

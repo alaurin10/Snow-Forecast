@@ -120,8 +120,9 @@ export class AreaRunner {
 	private stale = false;
 	onstate: (s: AreaState) => void = () => {};
 
+	/** `client` gives the job worker (made when first needed), or null once it's gone. */
 	constructor(
-		private client: TerrainClient,
+		private client: () => TerrainClient | null,
 		private layer: AnalysisLayer
 	) {}
 
@@ -142,8 +143,10 @@ export class AreaRunner {
 		const want = this.want;
 		if (!want) return;
 		this.stale = false;
+		const client = this.client();
+		if (!client) return this.onstate('failed');
 		this.onstate('working');
-		const run = this.client.area(want.job, want.bounds, want.maxPx);
+		const run = client.area(want.job, want.bounds, want.maxPx);
 		this.running = run;
 		run.done
 			.then(
