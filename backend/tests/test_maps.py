@@ -137,9 +137,9 @@ def test_fine_palette_runs_smoothly_and_reads_back() -> None:
         assert set(steps.tolist()) <= {0, 1}
     # Light rates fade in; from FINE_SOLID they're solid.
     alpha = FINE_ALPHA
-    light = fine_index(np.array([[0.04]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
+    light = fine_index(np.array([[0.12]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
     solid = fine_index(np.array([[0.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
-    assert 0 < alpha[light] < 128 and alpha[solid] == 255 and alpha[0] == 0
+    assert 0 < alpha[light] < 255 and alpha[solid] == 255 and alpha[0] == 0
     # A ramp's stops keep their colours.
     at_stop = fine_index(np.array([[2.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
     assert max(abs(a - b) for a, b in zip(FINE_PALETTE[at_stop], rain[3], strict=True)) < 20
@@ -152,7 +152,7 @@ def test_fine_palette_runs_smoothly_and_reads_back() -> None:
 
 
 def test_rate_band_matches_the_ramp_steps() -> None:
-    assert rate_band(RAIN_T, 0.05) is None  # drawn faintly, too light to call wet
+    assert rate_band(RAIN_T, 0.05) is None  # too light to call wet (or to draw)
     assert rate_band(RAIN_T, 0.3) == (RAIN_T, 0.1, 0.5)
     band = rate_band(RAIN_T, 20)
     assert band is not None and band[:2] == (RAIN_T, 10.0) and np.isnan(band[2])

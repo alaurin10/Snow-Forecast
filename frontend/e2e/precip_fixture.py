@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from snowwatch.maps.palette import RAIN_T, SNOW_T, encode_fine, fine_index, fine_spec
+from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index, fine_spec
 from snowwatch.maps.region import WEST, box_region
 
 WIDTH = 1700  # config/forecast.yaml map.width
@@ -53,7 +53,7 @@ def main(out: Path) -> None:
     for step, (kind, t, span) in enumerate(times):
         data = picture(region, step)
         prefix = {"radar": "r", "nowcast": "n", "forecast": "f"}[kind]
-        name = f"{prefix}{t}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        name = f"{prefix}{t}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         (out / name).write_bytes(data)
         src = {"north": "hrdps", "south": "hrrr"} if kind == "forecast" else {}
         frames.append(

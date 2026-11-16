@@ -1501,11 +1501,10 @@
 	});
 	const stillMotion =
 		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-	/** How long the picture on screen fades into the next: within a playing frame's time,
-	 *  a little for a slider step, none when asked for less motion. */
+	/** How long the picture on screen fades into the next: within a playing frame's time;
+	 *  none for the slider (it follows the finger) or when asked for less motion. */
 	function fadeMs(): number {
-		if (stillMotion) return 0;
-		if (!playing || !looping) return 180;
+		if (stillMotion || !playing || !looping) return 0;
 		const a = frames[frame];
 		const b = frames[(frame + 1) % count];
 		return Math.min(260, 0.6 * frameMs(a && b && b.t > a.t ? b.t - a.t : 3600));

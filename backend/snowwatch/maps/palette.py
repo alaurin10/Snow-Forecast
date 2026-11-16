@@ -245,10 +245,12 @@ def encode(indexed: np.ndarray) -> bytes:
 
 
 def decode_indices(data: bytes) -> np.ndarray | None:
-    """A palette (or, for fine frames, grayscale) PNG we wrote back to its indices (None
-    if it isn't one)."""
+    """A palette PNG, or a fine frame (grayscale, WebP or PNG), we wrote back to its
+    indices (None if it isn't one)."""
     try:
-        im = Image.open(io.BytesIO(data))
+        im: Image.Image = Image.open(io.BytesIO(data))
+        if im.format == "WEBP" and im.mode == "RGB":
+            im = im.convert("L")  # exact for gray: the weights add up to 1
         if im.mode not in ("P", "L"):
             return None
         return np.asarray(im)
@@ -260,16 +262,20 @@ def decode_indices(data: bytes) -> np.ndarray | None:
 #
 # Radar, nowcast and forecast frames carry numbers, not colours: each pixel is an index
 # meaning a type and a rate (each type's rates in many small log steps), written as a
-# grayscale PNG (gray = index). The browser smooths those numbers and colours them at the
-# screen's own resolution (frontend/src/lib/map/precipGl.ts), so storms have smooth,
-# sharp outlines and continuous colour at any zoom, rather than a stretched picture's
-# blurred pixels. The index describes the steps (`fine_spec`), so the browser needs no
-# copy of them. Frames drawn this way say so (`palette: "fine"`); older ones are palette
-# PNGs on PALETTE. FINE_PALETTE/FINE_ALPHA give the same colours here (tests, previews).
+# grayscale lossless WebP (gray = index; ~18% smaller than a PNG). The browser smooths
+# those numbers and colours them at the screen's own resolution
+# (frontend/src/lib/map/precipGl.ts), so storms have smooth, sharp outlines and continuous
+# colour at any zoom, rather than a stretched picture's blurred pixels. The index
+# describes the steps (`fine_spec`), so the browser needs no copy of them. Frames drawn
+# this way say so (`palette: "fine"`); older ones are palette PNGs on PALETTE.
+# FINE_PALETTE/FINE_ALPHA give the same colours here (tests, previews).
 
 FINE = "fine"
-FINE_FROM = 0.03  # mm of water an hour: the lightest drawn, faintly
-FINE_SOLID = 0.15  # fully opaque from here
+# mm of water an hour: the lightest drawn. As light as the old six steps' first (radar
+# below it is mostly clutter, and GeoMet's nowcast reads ~0.04 over most of its domain,
+# which would wash the whole map).
+FINE_FROM = 0.1
+FINE_SOLID = 0.25  # fully opaque from here
 # Type code → (ramp, number of steps, top of the last step). Steps ~16% apart (mix ~30%,
 # a short ramp of two colours): smooth to the eye once the map blends neighbouring
 # pixels, and half the file of 7% steps.
@@ -383,10 +389,14 @@ def fine_values(indexed: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.nan_to_num(FINE_VALUE[indexed], nan=0.0), FINE_KIND[indexed]
 
 
+FINE_EXT = "webp"
+
+
 def encode_fine(indexed: np.ndarray) -> bytes:
-    """Fine-palette indices as a grayscale PNG (gray = index), for the browser to colour."""
+    """Fine-palette indices as a grayscale lossless WebP (gray = index), for the browser to
+    colour. Exact, and ~18% smaller than a PNG; ~0.4 s for a busy frame over the West."""
     buf = io.BytesIO()
-    Image.fromarray(indexed, "L").save(buf, "PNG", optimize=True)
+    Image.fromarray(indexed, "L").save(buf, "WEBP", lossless=True, method=4, quality=50)
     return buf.getvalue()
 
 
@@ -415,7 +425,7 @@ def fine_spec() -> dict[str, object]:
 def rate_band(code: int, value: float) -> tuple[int, float, float] | None:
     """A typed rate to its step on the type's ramp: (type, lower bound, upper bound, NaN
     for the top step), as RATE_BANDS gives for PALETTE frames. None below the ramp's first
-    step (drawn faintly, but too light to call wet)."""
+    step."""
     ramp = {SNOW_T: SNOW, MIX_T: MIX, RAIN_T: RAIN}.get(code)
     if ramp is None or not value >= ramp[0][0]:
         return None
