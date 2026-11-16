@@ -436,10 +436,17 @@ def test_tiles_outside_the_box_sea_and_failures(tmp_path: Path) -> None:
     far = tiles_render.tile(td, st, cache, tid, 7, x, y)  # type: ignore[arg-type]
     assert far is not None and calls == []
     assert (np.asarray(Image.open(io.BytesIO(far)).convert("RGBA"))[..., 3] == 0).all()
+    # No snow: the shared clear picture, remembered rather than written.
+    assert far == tiles_render.EMPTY and tiles_render.known_empty(tid, 7, x, y)
+    assert not (st / tid / "7").exists()
     # Over the sea (Mapterhorn has no tile): sea level, so no snow here.
     x, y = tile_of(49, -118, 8)
     sea = tiles_render.tile(td, st, cache, tid, 8, x, y)  # type: ignore[arg-type]
-    assert sea is not None
+    assert sea == tiles_render.EMPTY and not (st / tid / "8").exists()
+    # Asked again: not drawn again (no second elevation fetch).
+    asked = len(calls)
+    assert tiles_render.tile(td, st, cache, tid, 8, x, y) == tiles_render.EMPTY  # type: ignore[arg-type]
+    assert len(calls) == asked
     # Mapterhorn not answering: no tile, and nothing kept.
     x, y = tile_of(49, -118, 9)
     with pytest.raises(tiles_render.Unavailable):

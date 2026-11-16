@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.middleware.gzip import GZipMiddleware
 
 from snowwatch import __version__, overlays
 from snowwatch.api.admin import make_admin_router
@@ -122,6 +123,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     }
     if prod:
         security_headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    # Compressed answers: JSON (the precipitation index, forecasts, the overview) and the
+    # app's own scripts and styles. Behind a tunnel the edge compresses for visitors, but
+    # the bytes leave this machine as sent, over the home connection's upload. Pictures
+    # and answers already compressed (json_file) pass through as they are. Level 6: most
+    # of the gain for a fraction of level 9's time. Added before the middleware below, so
+    # it sits inside it and sees each response whole (that one streams every body, and
+    # a streamed body is compressed however small).
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     @app.middleware("http")
     async def add_security_headers(
@@ -299,7 +309,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         terrain (see snowwatch/maps/tiles_render.py). The id changes with the forecast,
         so a tile never changes."""
         work = settings.map_work_dir
-        if not (work / "snowtiles" / tiles_id / str(z) / str(x) / f"{y}.png").exists():
+        drawn = (work / "snowtiles" / tiles_id / str(z) / str(x) / f"{y}.png").exists()
+        if not drawn and not snow_tiles.known_empty(tiles_id, z, x, y):
             tile_misses.check(request)  # drawing one costs a little, and may fetch elevation
         try:
             data = snow_tiles.tile(work / "totals", work / "snowtiles", tiles(), tiles_id, z, x, y)

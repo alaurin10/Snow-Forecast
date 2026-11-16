@@ -7,6 +7,10 @@ window's grid by elevation (bins.py: bilinear between cells, linear between band
 painted on the snow totals' colours. Drawn tiles are kept under
 data/maps/snowtiles/<id>/ until the worker drops that grid. Nothing is fetched but the
 elevation tiles.
+
+Most tiles have no snow at all (outside the box, valleys, the sea). Those aren't written:
+every one is the same picture (`EMPTY`), and the process remembers which they were
+(`known_empty`), so they are neither drawn again nor kept as files by the thousand.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 import re
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +122,30 @@ def encode(indices: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+# A tile with no snow, the same for every address (index 0 is transparent).
+EMPTY = encode(np.zeros((TILE, TILE), np.uint8))
+
+# Addresses ("id/z/x/y") of tiles found to have no snow, newest last; bounded, so a long
+# run of panning can't grow it without end (a forgotten one is just drawn again).
+_empty: OrderedDict[str, None] = OrderedDict()
+MAX_EMPTY = 200_000
+
+
+def _key(tiles_id: str, z: int, x: int, y: int) -> str:
+    return f"{tiles_id}/{z}/{x}/{y}"
+
+
+def known_empty(tiles_id: str, z: int, x: int, y: int) -> bool:
+    """This tile was found to have no snow (it is `EMPTY`, and not on disk)."""
+    return _key(tiles_id, z, x, y) in _empty
+
+
+def _remember_empty(tiles_id: str, z: int, x: int, y: int) -> None:
+    _empty[_key(tiles_id, z, x, y)] = None
+    while len(_empty) > MAX_EMPTY:
+        _empty.popitem(last=False)
+
+
 def read_meta(totals_dir: Path, tiles_id: str) -> dict[str, Any] | None:
     try:
         meta = json.loads((totals_dir / f"bins-{tiles_id}.json").read_text())
@@ -151,10 +180,14 @@ def tile(
     meta = read_meta(totals_dir, tiles_id)
     if grid is None or meta is None:
         return None
+    if known_empty(tiles_id, z, x, y):
+        return EMPTY
+    indices = None
     if overlaps(grid, meta, z, x, y):
-        cm = snow_cm(grid, meta, z, x, y, elevation(cache, z, x, y))
-        data = encode(index_ramp(cm, TOTAL))
-    else:
-        data = encode(np.zeros((TILE, TILE), np.uint8))
+        indices = index_ramp(snow_cm(grid, meta, z, x, y, elevation(cache, z, x, y)), TOTAL)
+    if indices is None or not indices.any():
+        _remember_empty(tiles_id, z, x, y)
+        return EMPTY
+    data = encode(indices)
     write_atomic(path, data)
     return data
