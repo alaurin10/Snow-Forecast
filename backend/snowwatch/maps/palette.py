@@ -245,10 +245,11 @@ def encode(indexed: np.ndarray) -> bytes:
 
 
 def decode_indices(data: bytes) -> np.ndarray | None:
-    """A palette PNG we wrote back to its indices (None if it isn't one)."""
+    """A palette (or, for fine frames, grayscale) PNG we wrote back to its indices (None
+    if it isn't one)."""
     try:
         im = Image.open(io.BytesIO(data))
-        if im.mode != "P":
+        if im.mode not in ("P", "L"):
             return None
         return np.asarray(im)
     except (OSError, ValueError):
@@ -257,18 +258,21 @@ def decode_indices(data: bytes) -> np.ndarray | None:
 
 # ---- Precipitation frames: the fine palette ----------------------------------------
 #
-# Radar, nowcast and forecast frames are drawn on a palette of their own: each type's
-# ramp in many small steps, the colours running smoothly between the ramp's stops (in log
-# rate), so the picture reads as continuous rather than banded. The lightest rates fade in
-# (each entry carries its own alpha), so echoes have soft edges. Still a palette PNG, so
-# files stay small and every index still means a type and a rate (probes, taps).
-# Frames drawn this way say so in the index (`palette: "fine"`); older ones use PALETTE.
+# Radar, nowcast and forecast frames carry numbers, not colours: each pixel is an index
+# meaning a type and a rate (each type's rates in many small log steps), written as a
+# grayscale PNG (gray = index). The browser smooths those numbers and colours them at the
+# screen's own resolution (frontend/src/lib/map/precipGl.ts), so storms have smooth,
+# sharp outlines and continuous colour at any zoom, rather than a stretched picture's
+# blurred pixels. The index describes the steps (`fine_spec`), so the browser needs no
+# copy of them. Frames drawn this way say so (`palette: "fine"`); older ones are palette
+# PNGs on PALETTE. FINE_PALETTE/FINE_ALPHA give the same colours here (tests, previews).
 
 FINE = "fine"
 FINE_FROM = 0.03  # mm of water an hour: the lightest drawn, faintly
 FINE_SOLID = 0.15  # fully opaque from here
-# Type code → (ramp, number of steps, top of the last step). Steps ~15% apart: smooth to
-# the eye once the map blends neighbouring pixels, and half the file of 7% steps.
+# Type code → (ramp, number of steps, top of the last step). Steps ~16% apart (mix ~30%,
+# a short ramp of two colours): smooth to the eye once the map blends neighbouring
+# pixels, and half the file of 7% steps.
 FINE_RAMPS: list[tuple[int, list[tuple[float, str]], int, float]] = [
     (SNOW_T, SNOW, 36, 6.0),
     (MIX_T, MIX, 20, 6.0),
@@ -380,12 +384,32 @@ def fine_values(indexed: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def encode_fine(indexed: np.ndarray) -> bytes:
-    """A palette PNG on the fine palette, each entry with its own alpha."""
-    im = Image.fromarray(indexed, "P")
-    im.putpalette([v for c in FINE_PALETTE for v in c])
+    """Fine-palette indices as a grayscale PNG (gray = index), for the browser to colour."""
     buf = io.BytesIO()
-    im.save(buf, "PNG", optimize=True, transparency=FINE_ALPHA)
+    Image.fromarray(indexed, "L").save(buf, "PNG", optimize=True)
     return buf.getvalue()
+
+
+def preview_fine(indexed: np.ndarray) -> np.ndarray:
+    """Fine-palette indices as RGBA, coloured as the steps are (for tests and previews;
+    the map colours them in the browser, smoothly)."""
+    pal = np.array([(*c, a) for c, a in zip(FINE_PALETTE, FINE_ALPHA, strict=True)], np.uint8)
+    out: np.ndarray = pal[indexed]
+    return out
+
+
+def fine_spec() -> dict[str, object]:
+    """The fine steps as the index describes them to the browser: each type's first
+    index, number of steps and top rate, the lightest rate drawn and where it's solid."""
+    names = {SNOW_T: "snow", MIX_T: "mix", RAIN_T: "rain"}
+    return {
+        "from": FINE_FROM,
+        "solid": FINE_SOLID,
+        "ramps": [
+            {"type": names[code], "start": _FINE_AT[code][0], "steps": n, "top": top}
+            for code, _, n, top in FINE_RAMPS
+        ],
+    }
 
 
 def rate_band(code: int, value: float) -> tuple[int, float, float] | None:

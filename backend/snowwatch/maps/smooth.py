@@ -63,15 +63,18 @@ def soften(
     """Amounts blurred by `sigma` pixels (NaN, no data, stays NaN and doesn't pull its
     neighbours down), and each pixel's type the one most present within `kind_sigma`
     (default `sigma`): types may come from a coarser product than the amounts."""
-    if sigma <= 0:
-        return amount, kind
     ks = sigma if kind_sigma is None else kind_sigma
-    have = np.isfinite(amount)
-    w = 1 - blur((~have).astype(np.float32), sigma)
-    total = blur(np.where(have, amount, 0.0), sigma)
-    out = np.full(amount.shape, np.nan, np.float32)
-    np.divide(total, w, out=out, where=w > 1e-3)
-    out[~have] = np.nan
+    if sigma <= 0 and ks <= 0:
+        return amount, kind
+    if sigma > 0:
+        have = np.isfinite(amount)
+        w = 1 - blur((~have).astype(np.float32), sigma)
+        total = blur(np.where(have, amount, 0.0), sigma)
+        out = np.full(amount.shape, np.nan, np.float32)
+        np.divide(total, w, out=out, where=w > 1e-3)
+        out[~have] = np.nan
+    else:
+        out = amount
     best = np.zeros(amount.shape, np.float32)
     k = np.zeros(kind.shape, np.uint8)
     for code in (SNOW_T, MIX_T, RAIN_T):

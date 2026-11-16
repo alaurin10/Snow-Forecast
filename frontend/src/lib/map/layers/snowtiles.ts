@@ -33,14 +33,15 @@ export function setSnowTiles(
 		bounds: [[number, number], [number, number]];
 		opacity: ExpressionSpecification;
 		beforeId?: string;
-		pictureId: string;
+		/** The picture's layers, kept to zooms below the tiles while they show. */
+		pictureIds: readonly string[];
 	}
 ): void {
 	const src = map.getSource(SNOWTILES_ID) as
 		(RasterSourceSpecification & { tiles?: string[] }) | undefined;
 	// (The picture's layer is remade when the box changes, so this is set every time.)
-	if (map.getLayer(opts.pictureId))
-		map.setLayerZoomRange(opts.pictureId, 0, tiles ? SNOWTILES_ZOOM : 24);
+	for (const id of opts.pictureIds)
+		if (map.getLayer(id)) map.setLayerZoomRange(id, 0, tiles ? SNOWTILES_ZOOM : 24);
 	const current = map.getLayer(SNOWTILES_ID) ? (src?.tiles?.[0] ?? null) : null;
 	if (current === tiles) return;
 	if (map.getLayer(SNOWTILES_ID)) map.removeLayer(SNOWTILES_ID);

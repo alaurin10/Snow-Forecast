@@ -18,6 +18,7 @@ from snowwatch.maps.palette import (
     FINE_ALPHA,
     FINE_FROM,
     FINE_PALETTE,
+    FINE_RAMPS,
     MIX,
     MIX_T,
     NONE,
@@ -120,14 +121,17 @@ def test_type_picture_classified_by_legend_colour() -> None:
 
 def test_fine_palette_runs_smoothly_and_reads_back() -> None:
     rate = np.geomspace(0.01, 80, 400).astype(np.float32)[None, :]
-    for code, top in ((SNOW_T, 6.0), (MIX_T, 6.0), (RAIN_T, 60.0)):
+    for code, _, n, top in FINE_RAMPS:
         idx = fine_index(rate, np.full(rate.shape, code, np.uint8))
         value, kind = fine_values(idx)
         drawn = rate >= FINE_FROM
         assert (idx[~drawn] == 0).all() and (kind[drawn] == code).all()
-        # Each rate comes back within its step (~8%) up to the ramp's top.
+        # Each rate comes back within its step (half a step either way of its middle) up
+        # to the ramp's top: ~8% for snow and rain, ~14% for mix.
+        half = np.sqrt((top / FINE_FROM) ** (1 / n))
         within = drawn & (rate <= top)
-        assert (np.abs(value[within] - rate[within]) <= 0.08 * rate[within]).all()
+        ratio = value[within] / rate[within]
+        assert (ratio <= half * 1.001).all() and (ratio >= 1 / half / 1.001).all()
         # Steps rise one at a time: no jumps in colour.
         steps = np.diff(idx[drawn].astype(int))
         assert set(steps.tolist()) <= {0, 1}
@@ -139,7 +143,7 @@ def test_fine_palette_runs_smoothly_and_reads_back() -> None:
     # A ramp's stops keep their colours.
     at_stop = fine_index(np.array([[2.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
     assert max(abs(a - b) for a, b in zip(FINE_PALETTE[at_stop], rain[3], strict=True)) < 20
-    # Encoded as a palette PNG with per-entry alpha, it decodes to the same indices.
+    # Encoded as a grayscale PNG (gray = index), it decodes to the same indices.
     img = encode_fine(fine_index(rate, np.full(rate.shape, RAIN_T, np.uint8)))
     back = decode_indices(img)
     assert (
@@ -313,6 +317,14 @@ def test_radar_render_types_frames_and_adds_a_nowcast(tmp_path: Path) -> None:
     assert all(not f["past"] for f in nowcast) and nowcast[0]["file"].startswith("n")
 
     assert {f["palette"] for f in ix["frames"]} == {"fine"}
+    # The index tells the browser how to read them.
+    spec = ix["fine"]
+    assert spec["from"] == FINE_FROM and [r["type"] for r in spec["ramps"]] == [
+        "snow",
+        "mix",
+        "rain",
+    ]
+    assert [r["start"] for r in spec["ramps"]] == [1, 37, 57] and spec["ramps"][2]["top"] == 60.0
     idx = decode_indices((tmp_path / radar[-1]["file"]).read_bytes())
     assert idx is not None
     value, kind = fine_values(idx)

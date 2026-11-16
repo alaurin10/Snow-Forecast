@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from snowwatch.maps.palette import RAIN_T, SNOW_T, encode_fine, fine_index
+from snowwatch.maps.palette import RAIN_T, SNOW_T, encode_fine, fine_index, fine_spec
 from snowwatch.maps.region import WEST, box_region
 
 WIDTH = 1700  # config/forecast.yaml map.width
@@ -81,6 +81,7 @@ def main(out: Path) -> None:
         "totals": [],
         "layers": {},
         "attribution": [],
+        "fine": fine_spec(),
     }
     (out / "index.json").write_text(json.dumps(index))
 

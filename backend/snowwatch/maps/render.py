@@ -61,6 +61,7 @@ from snowwatch.maps.palette import (
     encode,
     encode_fine,
     fine_index,
+    fine_spec,
     index_ramp,
     kinds_of,
     paint_total,
@@ -81,16 +82,17 @@ INDEX_VERSION = 2
 RETIRE_S = 15 * 60  # how long a file that left the index stays on disk
 # Precipitation frames drawn on the fine palette: in each frame's key, so frames drawn
 # the old way are drawn again rather than reused.
-FINE_KEY = "f2"
-# How much each source is softened before it is painted (smooth.py), in pixels (~1.5 km):
-# radar's 1 km scans just enough to lose the pixel steps; HRRR and NBM, copied from the
-# nearest 2.5–3 km cell, enough to lose their ~2 px blocks. GeoMet's models arrive
-# interpolated already.
-RADAR_SIGMA = 0.8
+FINE_KEY = "f3"
+# How much each source is softened before it is painted (smooth.py), in pixels (~1.5 km).
+# The browser smooths every frame's rates as it colours them (frontend
+# src/lib/map/precipGl.ts), so radar's own detail is kept; HRRR and NBM, copied from the
+# nearest 2.5–3 km cell, lose their ~2 px blocks here. GeoMet's models arrive interpolated.
+RADAR_SIGMA = 0.0
 GRIB_SIGMA = 1.2
-# Radar's types come from a coarser product (GeoMet's type picture, filled in from up to
-# ~12 km away), in blocks: their borders are smoothed further.
-RADAR_KIND_SIGMA = 2.5
+# Radar's types come from a coarser product, and echoes it leaves untyped take the
+# nearest type within ~12 km (filled pixel by pixel, in diamonds): their borders are
+# rounded off over a few pixels.
+RADAR_KIND_SIGMA = 4.0
 
 DOMAIN_LAYER = HRDPS.precip  # drawn solid, it shows where HRDPS has data
 # Splitting NBM's 6-hour amount between two 3-hour frames follows RDPS's split, softened
@@ -369,6 +371,8 @@ class Renderer:
             "frames": [asdict(f) for f in frames],
             "totals": [asdict(t) for t in sorted(totals, key=lambda t: (t.window, t.hours))],
             "layers": {k: {"frames": [asdict(f) for f in v]} for k, v in layers.items()},
+            # How to read frames with `palette: "fine"` (palette.fine_spec).
+            "fine": fine_spec(),
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
         }
 

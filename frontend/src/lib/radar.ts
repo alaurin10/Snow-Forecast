@@ -9,6 +9,7 @@
 // northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
 // RDPS) and 6-hourly to 10 days (Canadian GDPS) in Canada, with NOAA's National Blend in
 // the US. The server blends the sources as numbers, so there are no joins to see.
+import type { FineSpec } from './map/precipGl';
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -92,6 +93,8 @@ export interface Frame {
 	 * (`south`), e.g. "hrdps", "nbm", and one filling in where neither reaches (`fill`).
 	 */
 	src: { north?: string; south?: string; fill?: string };
+	/** "fine": the picture holds numbers (Timeline.fine says how to read them). */
+	palette?: string;
 }
 
 /** Forecast snow over a window: Canada's models north of 49°N, NOAA's blend south of it. */
@@ -147,6 +150,8 @@ export interface PrecipIndex {
 	attribution?: string[];
 	/** The other weather layers by name (from milestone 7 of the map). */
 	layers?: Record<string, { frames?: Partial<LayerFrame>[] }>;
+	/** How frames with `palette: "fine"` read: numbers, coloured here (map/precipGl.ts). */
+	fine?: FineSpec;
 }
 
 export interface Timeline {
@@ -165,6 +170,8 @@ export interface Timeline {
 	attribution: string[];
 	/** The other weather layers by name, each in time order (snowfall by window). */
 	layers: Record<string, LayerFrame[]>;
+	/** How fine frames read, when the server draws them that way. */
+	fine: FineSpec | null;
 }
 
 const ORDER: Record<FrameKind, number> = { radar: 0, nowcast: 1, forecast: 2 };
@@ -228,6 +235,7 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		extendedFrom,
 		totals,
 		attribution: Array.isArray(ix.attribution) ? ix.attribution : [],
+		fine: ix.fine && Array.isArray(ix.fine.ramps) ? ix.fine : null,
 		layers
 	};
 }

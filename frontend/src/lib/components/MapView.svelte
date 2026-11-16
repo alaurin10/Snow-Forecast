@@ -1531,7 +1531,12 @@
 			h ? store.bitmap(frames[h.from]) : null
 		]);
 		if (token !== showToken || !overlay) return;
-		overlay.draw(want.file, bmp, fadeMs(), under && h ? { bmp: under, weight: h.weight } : null);
+		// A fine frame holds numbers: without the index's key to them it can't be shown.
+		const fine = (want as Frame).palette === 'fine';
+		if (fine && !timeline.fine) return;
+		const blend =
+			fine && under && h ? { file: frames[h.from].file, bmp: under, weight: h.weight } : null;
+		overlay.draw(want.file, bmp, fadeMs(), blend, fine ? 'fine' : 'picture');
 		shown = want.file;
 		if (bmp && !firstFrame) {
 			firstFrame = true;
@@ -1608,7 +1613,9 @@
 			const tl = await loadTimeline();
 			loadError = null;
 			// The pictures' box only changes when locations do.
-			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
+			const sameBox =
+				timeline &&
+				JSON.stringify([timeline.bounds, timeline.fine]) === JSON.stringify([tl.bounds, tl.fine]);
 			const next = weatherView(tl, weather, prefs.mapWind);
 			timeline = tl;
 			store.keepOnly([...tl.frames, ...tl.totals, ...Object.values(tl.layers).flat()]);
@@ -1624,7 +1631,8 @@
 					tl.width,
 					tl.height,
 					weatherOpacity(weather),
-					PRECIP_BEFORE
+					PRECIP_BEFORE,
+					tl.fine
 				);
 			}
 			void show();
@@ -1697,7 +1705,7 @@
 			bounds: tl.bounds,
 			opacity: weatherOpacity('totals'),
 			beforeId: PRECIP_BEFORE,
-			pictureId: PrecipLayer.ID
+			pictureIds: PrecipLayer.IDS
 		});
 	});
 

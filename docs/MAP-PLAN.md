@@ -1088,55 +1088,71 @@ memory and backend bytes. Each records its numbers here.
 
 ## Radar look notes (done 16 Nov 2026)
 
-Asked for by the owner during the performance pass: radar looked pixelated and jumped at
-the radar → nowcast → forecast joins. Owner's choices:
+Asked for by the owner during the performance pass. Radar looked pixelated and jumped at
+the radar → nowcast → forecast joins; the owner then pointed at Apple Maps' radar (smooth,
+sharp storm outlines, continuous colour) as the aim. Owner's choices:
 - frames fade on screen, and the first forecast hours are blended with the nowcast;
-- this comes before performance PRs 3–5.
+- this comes before performance PRs 3–5;
+- the app must not get slower.
+
+**First attempt, not kept.** Colouring continuously on the server (a fine palette, OKLab,
+light blurs) removed the steps. But a 1.5 km-a-pixel picture stretched by the map still
+shows blurred pixels zoomed in: the colours have to be chosen after smoothing, at the
+screen's resolution.
 
 **Numbers instead of bands.** Radar and nowcast are asked for with a coded SLD
-(`geomet.code_sld`, 100 log-spaced intervals). `radar_eccc.compose` now returns a rate and
-a type per pixel.
+(`geomet.code_sld`, 100 log-spaced intervals). `radar_eccc.compose` returns a rate and a
+type per pixel.
 
-**Softening.** Every precipitation frame is softened by source (`maps/smooth.py`: three box
-blurs, worked only round the wet area, 0.04–0.07 s a frame). Types are blurred as shares,
-so their borders are smooth.
+**Frames as numbers.**
+- Every precipitation frame is written as an index per pixel (type and rate:
+  `palette.fine_index`, 36/20/72 log steps) in a grayscale PNG. The index's `fine`
+  describes the steps (`palette.fine_spec`).
+- Softening before writing (`maps/smooth.py`: three box blurs round the wet area,
+  0.04–0.07 s a frame):
+  - HRRR and NBM by 1.2 px (their nearest-cell blocks);
+  - radar's types by 4 px (GeoMet's coarser type picture, filled into untyped echoes in
+    diamonds);
+  - radar's rates not at all.
+- About 110–125 KB a busy radar frame (57 KB in six colour steps). Frame keys gained `f3`.
+  `point.py` and `_forecast_types` read either kind of frame.
 
-**The fine palette.** Frames are painted on their own palette (`palette.FINE_*`):
-- 36 snow, 20 mix and 72 rain steps, ~15% apart.
-- Colours run between the ramps' stops in OKLab, which keeps the green → yellow
-  transition from going muddy.
-- Rates from 0.03 mm/h fade in through alpha.
-- 7% steps made 165 KB files; 15% steps make 132 KB (57 KB before, in six steps). Lossless
-  WebP was smaller still but took 5.5 s a frame.
-- Frames carry `palette: "fine"`. `point.py` and `_forecast_types` read either palette,
-  and frame keys gained `f2` so old frames are drawn again.
+**Coloured on the GPU** (`frontend/src/lib/map/precipGl.ts`). A WebGL 2 program, for each
+pixel of a view-sized picture:
+- reads the 4×4 frame pixels round it, smoothed with a cubic B-spline (no overshoot);
+- turns each index into a rate through a lookup texture, and adds the rates up;
+- picks the type most present;
+- colours from a 256-step ramp per type (the `RAMPS` stops mixed in OKLab), with
+  `fwidth` anti-aliasing at the outline and alpha rising from 0.03 to 0.15 mm/h.
 
-**Hand-over.**
-- *Planned:* blend on the server.
-- *Built:* the browser mixes the first 2 forecast hours with the last nowcast frame
-  (`radar.ts` `handover`, `HANDOVER_S`).
-- *Why:* the nowcast moves every 6 minutes while forecast frames are redrawn every 30.
-- *Taps:* `point.py` mixes the numbers with the same weights.
+`PrecipLayer` draws only the view plus a 25% margin, at the screen's pixel density (at
+most 8 picture pixels to a frame pixel). It redraws on `moveend`, and drapes in 3D as
+before. Other weather layers' pictures are cropped and scaled the same way.
 
-**Fades.** `PrecipLayer` keeps two canvas sources and fades between them with a
-`raster-opacity` transition (≤ 260 ms, inside the frame's time; none with reduced motion).
-In 3D the drape is redrawn on each frame of the fade. Play speed follows the time step
-(`radar.ts` `frameMs`).
+**Hand-over.** The first 2 forecast hours are mixed with the last nowcast frame as
+numbers, in the same program (`radar.ts` `handover`, `HANDOVER_S`). Taps give the same mix
+(`point.py`).
+
+**Fades.** Two canvas sources with a `raster-opacity` transition (≤ 260 ms; none with
+reduced motion). Play speed follows the time step (`frameMs`).
 
 **Legend.** The key is a gradient.
 
-Measured with `e2e/perf.spec.ts`, against PR 2:
+Measured with `e2e/perf.spec.ts` (headless Chromium, the GPU emulated in software):
 
 | | PR 2 | Radar look |
 |---|---|---|
-| Page process, peak | 383–387 MB | 374 MB |
-| GPU process, peak | 341–366 MB | 396 MB (the second canvas's texture) |
-| First frame | 3.5–3.7 s | 3.0 s |
+| Page process, peak | 383–387 MB | 358–364 MB |
+| GPU process, peak | 341–366 MB | 343–369 MB |
+| Drawing a frame (median, slowest) | — | 9.8 ms, 62–67 ms (3D) |
+| First frame | 3.5–3.7 s | 2.3–2.4 s |
 
-Known limits:
-- The green → yellow stretch of the rain ramp still passes through olive, since its stops
-  go from dark green to yellow.
-- Snow/mix/rain borders are only as good as GeoMet's type picture.
+**Known limits.**
+- Panning further than the 25% margin shows the edge until the map stops.
+- In a tilted 3D view the picture spreads its pixels to the horizon, so the near ground
+  gets fewer.
+- Snow/mix/rain borders are only as good as GeoMet's type picture, and keep some straight
+  edges from its fill.
 - The hand-over mixes two pictures, so a storm the model places differently fades out in
   one place and in at the other.
 

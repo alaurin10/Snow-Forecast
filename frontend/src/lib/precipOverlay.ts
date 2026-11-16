@@ -3,9 +3,12 @@
 // The server draws each frame as one picture over the locations' region (see
 // ../radar.ts). Here we download them all once, keep them compressed (a couple of MB for
 // the whole timeline), and decode only the frame on screen and its neighbours. Showing a
-// frame is a single draw into one canvas, so scrubbing is instant and memory stays flat.
+// frame draws the part of it on screen into a view-sized picture: radar, nowcast and
+// forecast frames carry numbers, coloured on the GPU at the screen's resolution
+// (map/precipGl.ts); the other layers' pictures are cropped and scaled.
 import type { CanvasSource, Map as MlMap } from 'maplibre-gl';
-import { frameUrl } from './radar';
+import { PrecipGl, type FineSpec, type FrameRect } from './map/precipGl';
+import { frameUrl, RAMPS } from './radar';
 
 /** Anything with a picture file under /api/precip/: a frame or a snow total. */
 type Pic = { file: string };
@@ -70,7 +73,8 @@ export class FrameStore {
 	private async decode(f: Pic): Promise<ImageBitmap | null> {
 		const blob = await this.blob(f, true);
 		if (!blob || !this.blobs.has(f.file)) return null;
-		const bmp = await createImageBitmap(blob);
+		// No colour management: a fine frame's gray is a number, not a colour.
+		const bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
 		// Forgotten while it decoded (another timeline, or the map closed).
 		if (!this.blobs.has(f.file)) {
 			bmp.close();
@@ -122,15 +126,33 @@ export class FrameStore {
 /** A frame drawn over another, partly: the hand-over from the last nowcast frame to the
  *  forecast (radar.ts, `handover`). `weight` is the other frame's share. */
 export interface Blend {
+	file: string;
 	bmp: ImageBitmap;
 	weight: number;
 }
 
+/** What a picture is: numbers to colour (`fine`), or a picture to show as it is. */
+export type PicKind = 'fine' | 'picture';
+
+type Corners = [[number, number], [number, number], [number, number], [number, number]];
+
+const mercY = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+const latOf = (y: number) => (360 / Math.PI) * Math.atan(Math.exp(y)) - 90;
+
+/** How far past the view the picture reaches, each way (a share of the view): a short
+ *  pan shows no edge before the picture is redrawn for the new view. */
+const MARGIN = 0.25;
+/** Most picture pixels per frame pixel when zoomed far in (outlines are already smooth). */
+const MAX_DENSITY = 8;
+/** Most pixels across either way. */
+const MAX_SIDE = 4096;
+
 /**
- * The precipitation laid over the pictures' box in two MapLibre canvas sources, one over
- * the other. A new frame is drawn into the one not showing, which then fades in over
- * `fade` ms while the other fades out: one upload per frame, and the GPU does the fade
- * (a paint transition). It drapes over 3D terrain like the base map.
+ * The precipitation in two MapLibre canvas sources, one over the other, each a picture of
+ * the view (and a margin) rather than of the whole region, redrawn when the map stops
+ * moving. A new frame is drawn into the one not showing, which then fades in over `fade`
+ * ms while the other fades out: the GPU does the fade (a paint transition). It drapes over
+ * 3D terrain like the base map.
  */
 export class PrecipLayer {
 	/** The two layers' ids; `ID` is the lower one, which other layers are placed by. */
@@ -145,27 +167,42 @@ export class PrecipLayer {
 	/** When the fade under way ends (performance.now()), or 0. */
 	private fadeEnds = 0;
 	private onRender: (() => void) | null = null;
+	private gl: PrecipGl | null = null;
+	private glFailed = false;
+	/** What's on screen, to draw again for a new view. */
+	private current: {
+		file: string | null;
+		kind: PicKind;
+		bmp: ImageBitmap | null;
+		under: Blend | null;
+	} = { file: null, kind: 'picture', bmp: null, under: null };
+	private onMoveEnd = () => this.redraw();
+	private readonly mx0: number;
+	private readonly mx1: number;
+	private readonly my0: number;
+	private readonly my1: number;
+	/** Milliseconds the last frame took to draw (for e2e/perf.spec.ts and DevTools). */
+	lastDrawMs = 0;
 
 	constructor(
 		private map: MlMap,
 		bounds: [[number, number], [number, number]],
-		width: number,
-		height: number,
+		private width: number,
+		private height: number,
 		opacity: unknown,
-		beforeId?: string
+		beforeId?: string,
+		private spec: FineSpec | null = null
 	) {
 		this.opacity = opacity;
 		const [[south, west], [north, east]] = bounds;
-		const coordinates: [[number, number], [number, number], [number, number], [number, number]] = [
-			[west, north],
-			[east, north],
-			[east, south],
-			[west, south]
-		];
+		this.mx0 = west;
+		this.mx1 = east;
+		this.my0 = mercY(north);
+		this.my1 = mercY(south);
+		const coordinates = this.corners({ x0: 0, y0: 0, x1: width, y1: height });
 		PrecipLayer.IDS.forEach((id, i) => {
 			const canvas = document.createElement('canvas');
-			canvas.width = width;
-			canvas.height = height;
+			canvas.width = canvas.height = 1;
 			this.canvases.push(canvas);
 			this.ctxs.push(canvas.getContext('2d')!);
 			map.addSource(id, { type: 'canvas', canvas, animate: false, coordinates });
@@ -185,6 +222,8 @@ export class PrecipLayer {
 				beforeId
 			);
 		});
+		map.on('moveend', this.onMoveEnd);
+		map.on('resize', this.onMoveEnd);
 	}
 
 	get showing() {
@@ -198,40 +237,129 @@ export class PrecipLayer {
 		if (this.map.getLayer(id)) this.map.setPaintProperty(id, 'raster-opacity', opacity as number);
 	}
 
+	/** Frame pixels → the corners of that rectangle on the map. */
+	private corners(r: FrameRect): Corners {
+		const lon = (x: number) => this.mx0 + ((this.mx1 - this.mx0) * x) / this.width;
+		const lat = (y: number) => latOf(this.my0 + ((this.my1 - this.my0) * y) / this.height);
+		return [
+			[lon(r.x0), lat(r.y0)],
+			[lon(r.x1), lat(r.y0)],
+			[lon(r.x1), lat(r.y1)],
+			[lon(r.x0), lat(r.y1)]
+		];
+	}
+
+	/** The part of the frame in view (and the margin), and the picture's size for it; null
+	 *  when none of the frame is in view. */
+	private view(): { rect: FrameRect; w: number; h: number } | null {
+		const b = this.map.getBounds();
+		const fx = (lon: number) => ((lon - this.mx0) / (this.mx1 - this.mx0)) * this.width;
+		const fy = (lat: number) => ((mercY(lat) - this.my0) / (this.my1 - this.my0)) * this.height;
+		let x0 = fx(b.getWest());
+		let x1 = fx(b.getEast());
+		let y0 = fy(Math.min(85, b.getNorth()));
+		let y1 = fy(Math.max(-85, b.getSouth()));
+		const mx = (x1 - x0) * MARGIN;
+		const my = (y1 - y0) * MARGIN;
+		x0 = Math.max(0, Math.floor(x0 - mx));
+		x1 = Math.min(this.width, Math.ceil(x1 + mx));
+		y0 = Math.max(0, Math.floor(y0 - my));
+		y1 = Math.min(this.height, Math.ceil(y1 + my));
+		if (x1 <= x0 || y1 <= y0) return null;
+		// As many pixels as the screen shows across the same stretch, no more than
+		// MAX_DENSITY a frame pixel.
+		const c = this.map.getCanvas();
+		const viewW = Math.max(1, fx(b.getEast()) - fx(b.getWest()));
+		const perPx = Math.min(MAX_DENSITY, c.width / viewW);
+		let w = Math.max(1, Math.round((x1 - x0) * perPx));
+		let h = Math.max(1, Math.round((y1 - y0) * perPx));
+		const shrink = Math.min(1, MAX_SIDE / Math.max(w, h));
+		w = Math.max(1, Math.round(w * shrink));
+		h = Math.max(1, Math.round(h * shrink));
+		return { rect: { x0, y0, x1, y1 }, w, h };
+	}
+
+	/** Paint the current picture into layer `i` for the view; false when nothing to show. */
+	private paint(i: number): boolean {
+		const { kind, bmp, under, file } = this.current;
+		const v = this.view();
+		const canvas = this.canvases[i];
+		const ctx = this.ctxs[i];
+		const t0 = performance.now();
+		if (!v || !bmp || !file) {
+			canvas.width = canvas.height = 1;
+			ctx.clearRect(0, 0, 1, 1);
+		} else {
+			if (canvas.width !== v.w || canvas.height !== v.h) {
+				canvas.width = v.w;
+				canvas.height = v.h;
+			} else ctx.clearRect(0, 0, v.w, v.h);
+			const gl = kind === 'fine' ? this.renderer() : null;
+			// A freed bitmap can't be uploaded; one already on the GPU needn't be.
+			if (gl && (bmp.width || gl.holds(0) === file)) {
+				gl.hold(0, file, bmp);
+				if (under && (under.bmp.width || gl.holds(1) === under.file))
+					gl.hold(1, under.file, under.bmp);
+				gl.render(v.rect, v.w, v.h, under?.weight ?? 0);
+				ctx.drawImage(gl.canvas, 0, 0);
+			} else if (bmp.width) {
+				const { x0, y0, x1, y1 } = v.rect;
+				ctx.imageSmoothingQuality = 'high';
+				ctx.drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, v.w, v.h);
+			}
+		}
+		const src = this.map.getSource(PrecipLayer.IDS[i]) as CanvasSource | undefined;
+		if (v) src?.setCoordinates(this.corners(v.rect));
+		// play() marks it changed and asks for a repaint; pause() uploads it right away.
+		src?.play();
+		src?.pause();
+		this.lastDrawMs = performance.now() - t0;
+		// Read by e2e/perf.spec.ts, and in DevTools on a phone.
+		performance.measure?.('map:draw', { start: t0 });
+		return !!v;
+	}
+
+	private renderer(): PrecipGl | null {
+		if (this.gl || this.glFailed || !this.spec) return this.gl;
+		this.gl = PrecipGl.create(this.spec, RAMPS, this.width, this.height);
+		this.glFailed = !this.gl;
+		return this.gl;
+	}
+
 	/**
-	 * Show a frame (null: nothing), fading from the one on screen over `fade` ms; `under`
-	 * is drawn beneath it at its weight (the hand-over), the frame at the rest.
+	 * Show a picture (null: nothing), fading from the one on screen over `fade` ms. A fine
+	 * frame can have another mixed in under it (the hand-over), at that one's weight.
 	 */
-	draw(file: string | null, bmp: ImageBitmap | null, fade = 0, under: Blend | null = null) {
+	draw(
+		file: string | null,
+		bmp: ImageBitmap | null,
+		fade = 0,
+		under: Blend | null = null,
+		kind: PicKind = 'picture'
+	) {
 		const back = 1 - this.front;
 		const [idFront, idBack] = [PrecipLayer.IDS[this.front], PrecipLayer.IDS[back]];
 		if (!this.map.getLayer(idFront) || !this.map.getLayer(idBack)) return;
 		// A fade still under way: the layer it fades out is about to be drawn into, so it
 		// goes at once rather than showing the new picture before its turn.
 		this.setFade(idBack, 0, 0);
-		const ctx = this.ctxs[back];
-		const canvas = this.canvases[back];
-		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		if (under && under.weight > 0 && bmp) {
-			// Each picture at its share, added: a straight mix where both have echo, and
-			// each fading where only one does.
-			ctx.globalCompositeOperation = 'lighter';
-			ctx.globalAlpha = under.weight;
-			ctx.drawImage(under.bmp, 0, 0, canvas.width, canvas.height);
-			ctx.globalAlpha = 1 - under.weight;
-			ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-			ctx.globalAlpha = 1;
-			ctx.globalCompositeOperation = 'source-over';
-		} else if (bmp) ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+		this.current = { file, kind, bmp, under: under && under.weight > 0 ? under : null };
+		this.paint(back);
 		this.shown = file;
-		const src = this.map.getSource(idBack) as CanvasSource | undefined;
-		// play() marks it changed and asks for a repaint; pause() uploads it right away.
-		src?.play();
-		src?.pause();
 		this.setFade(idBack, this.opacity, fade);
 		this.setFade(idFront, 0, fade);
 		this.front = back;
 		this.redrape(fade);
+	}
+
+	/** The picture on screen, drawn again for the view (the map has stopped moving). */
+	redraw() {
+		if (!this.current.file) return;
+		// A fine frame's numbers are on the GPU; another picture needs its bitmap, which
+		// may have been freed (then it stays as it is until the next frame).
+		if (this.current.kind === 'picture' && !this.current.bmp?.width) return;
+		this.paint(this.front);
+		this.redrape(0);
 	}
 
 	private setFade(id: string, opacity: unknown, ms: number) {
@@ -272,10 +400,14 @@ export class PrecipLayer {
 	remove() {
 		if (this.onRender) this.map.off('render', this.onRender);
 		this.onRender = null;
+		this.map.off('moveend', this.onMoveEnd);
+		this.map.off('resize', this.onMoveEnd);
 		for (const id of PrecipLayer.IDS) {
 			if (this.map.getLayer(id)) this.map.removeLayer(id);
 			if (this.map.getSource(id)) this.map.removeSource(id);
 		}
 		for (const c of this.canvases) c.width = c.height = 0;
+		this.gl?.destroy();
+		this.gl = null;
 	}
 }
