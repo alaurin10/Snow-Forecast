@@ -143,7 +143,7 @@ def test_fine_palette_runs_smoothly_and_reads_back() -> None:
     # A ramp's stops keep their colours.
     at_stop = fine_index(np.array([[2.5]], np.float32), np.array([[RAIN_T]], np.uint8))[0, 0]
     assert max(abs(a - b) for a, b in zip(FINE_PALETTE[at_stop], rain[3], strict=True)) < 20
-    # Encoded as a grayscale PNG (gray = index), it decodes to the same indices.
+    # Encoded as a palette PNG with per-entry alpha, it decodes to the same indices.
     img = encode_fine(fine_index(rate, np.full(rate.shape, RAIN_T, np.uint8)))
     back = decode_indices(img)
     assert (
@@ -317,14 +317,8 @@ def test_radar_render_types_frames_and_adds_a_nowcast(tmp_path: Path) -> None:
     assert all(not f["past"] for f in nowcast) and nowcast[0]["file"].startswith("n")
 
     assert {f["palette"] for f in ix["frames"]} == {"fine"}
-    # The index tells the browser how to read them.
-    spec = ix["fine"]
-    assert spec["from"] == FINE_FROM and [r["type"] for r in spec["ramps"]] == [
-        "snow",
-        "mix",
-        "rain",
-    ]
-    assert [r["start"] for r in spec["ramps"]] == [1, 37, 57] and spec["ramps"][2]["top"] == 60.0
+    # Coloured pictures (a palette PNG), as the map shows them flat and in 3D.
+    assert (tmp_path / radar[-1]["file"]).read_bytes()[:4] == b"\x89PNG"
     idx = decode_indices((tmp_path / radar[-1]["file"]).read_bytes())
     assert idx is not None
     value, kind = fine_values(idx)
