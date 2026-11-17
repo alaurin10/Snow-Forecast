@@ -1,4 +1,6 @@
-// The precipitation pictures on the map.
+// The weather pictures on the map: snow totals, snow level, wind, snow on the ground,
+// observed snowfall and clouds, and the radar on a browser that can't draw it from numbers
+// (./map/precip/layer.ts draws it everywhere else).
 //
 // The server draws each frame as one picture over the locations' region (see
 // ../radar.ts). Here we download them all once, keep them compressed (a couple of MB for
@@ -127,13 +129,6 @@ export class FrameStore {
 	}
 }
 
-/** A frame drawn over another, partly: the hand-over from the last nowcast frame to the
- *  forecast (radar.ts, `handover`). `weight` is the other frame's share. */
-export interface Blend {
-	bmp: ImageBitmap;
-	weight: number;
-}
-
 /**
  * The precipitation laid over the pictures' box in two MapLibre canvas sources, one over
  * the other. A new frame is drawn into the one not showing, which then fades in over
@@ -219,11 +214,8 @@ export class PrecipLayer {
 			if (this.map.getLayer(id)) this.map.setLayerZoomRange(id, 0, maxzoom);
 	}
 
-	/**
-	 * Show a frame (null: nothing), fading from the one on screen over `fade` ms; `under`
-	 * is drawn beneath it at its weight (the hand-over), the frame at the rest.
-	 */
-	draw(file: string | null, bmp: ImageBitmap | null, fade = 0, under: Blend | null = null) {
+	/** Show a picture (null: nothing), fading from the one on screen over `fade` ms. */
+	draw(file: string | null, bmp: ImageBitmap | null, fade = 0) {
 		const t0 = performance.now();
 		const back = 1 - this.front;
 		const [idFront, idBack] = [PrecipLayer.IDS[this.front], PrecipLayer.IDS[back]];
@@ -234,17 +226,7 @@ export class PrecipLayer {
 		const ctx = this.ctxs[back];
 		const canvas = this.canvases[back];
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		if (under && under.weight > 0 && bmp) {
-			// Each picture at its share, added: a straight mix where both have echo, and
-			// each fading where only one does.
-			ctx.globalCompositeOperation = 'lighter';
-			ctx.globalAlpha = under.weight;
-			ctx.drawImage(under.bmp, 0, 0, canvas.width, canvas.height);
-			ctx.globalAlpha = 1 - under.weight;
-			ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-			ctx.globalAlpha = 1;
-			ctx.globalCompositeOperation = 'source-over';
-		} else if (bmp) ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+		if (bmp) ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
 		this.shown = file;
 		const src = this.map.getSource(idBack) as CanvasSource | undefined;
 		// play() marks it changed and asks for a repaint; pause() uploads it right away.

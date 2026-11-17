@@ -53,10 +53,13 @@
 	import { viewport } from '../viewport.svelte';
 	import { RAIL_FOLDED_DROP, RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
+		dataUrl,
+		loadWide,
+		posAt,
+		timeAt,
 		frameLabel,
 		frameMs,
 		frameSource,
-		handover,
 		loadTimeline,
 		PrecipError,
 		RADAR_GAPS,
@@ -66,6 +69,7 @@
 		type Timeline
 	} from '../radar';
 	import { FrameStore, PrecipLayer } from '../precipOverlay';
+	import { RadarLayer, radarGlSupported } from '../map/precip/layer';
 	import { UserLocation, type LocState } from '../userLocation';
 	import OfflineMaps from './OfflineMaps.svelte';
 	import {
@@ -91,6 +95,7 @@
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
 		weatherOpacity,
+		opacityAt,
 		goneAt,
 		WIND_MIN_ZOOM
 	} from '../map/style';
@@ -519,10 +524,9 @@
 			(windOn && zoom < WIND_MIN_ZOOM) ||
 			(concernOn && zoom < CONCERN_MIN_ZOOM)
 	);
-	/** Hill shading lit from where the sun is, while the shade is showing. */
-	const sunLight = $derived(
-		sunOn && sunMode === 'shade' && sunPos && sunPos.altitude > 0 && !areaTooFar ? sunPos : null
-	);
+	/** Hill shading lit from where the sun is, while the shade is showing: below the
+	 *  horizon too, so the last step of the day only darkens (style.ts, sunPaint). */
+	const sunLight = $derived(sunOn && sunMode === 'shade' && sunPos && !areaTooFar ? sunPos : null);
 	/** The map's own forecast at the centre: the wind-effect layer's wind away from locations. */
 	let centrePoint = $state.raw<PointOut | null>(null);
 	let pointTried = $state(false);
@@ -1487,6 +1491,12 @@
 	/** Why the weather isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
 	let frame = $state(0);
+	/**
+	 * Where the slider is, as a frame's index or between two. The radar is drawn at this
+	 * (it blends the frames either side); `frame` is the nearest whole frame, for the label
+	 * and the layers shown as pictures.
+	 */
+	let pos = $state(0);
 	// Loops play by themselves, unless the device asks for less motion.
 	// Radar plays by itself on wider screens; on phones it waits for Play (decoding and
 	// uploading a frame every few hundred ms is the heaviest thing the map does).
@@ -1519,8 +1529,24 @@
 					view.picks[Math.min(1, view.picks.length - 1)])
 			: undefined
 	);
+	// ---- The radar, drawn from numbers on the graphics chip (../map/precip/layer.ts) -----
+	const glOk = radarGlSupported();
+	/** The radar is drawn that way: the server lists each frame's numbers. */
+	const glRadar = $derived(
+		glOk && weather === 'radar' && looping && count > 0 && frames.every((f) => !!f.data)
+	);
+	let radarLayer: RadarLayer | null = null;
+	/** Bumped when the radar's frames arrive or what it shows changes. */
+	let radarTick = $state(0);
+	const radarWaiting = $derived.by(() => {
+		void radarTick;
+		void pos;
+		return glRadar && !!radarLayer?.waiting;
+	});
 	const waiting = $derived(
-		(!!current && shown !== current.file) || (!!pick && shown !== pick.file)
+		glRadar
+			? radarWaiting
+			: (!!current && shown !== current.file) || (!!pick && shown !== pick.file)
 	);
 
 	const store = new FrameStore();
@@ -1537,6 +1563,123 @@
 		overlay?.setOpacity(o);
 		overlay?.setMaxZoom(max);
 	});
+	$effect(() => {
+		const use = glRadar;
+		const tl = timeline;
+		const list = frames;
+		if (!ready || !map || !tl) return;
+		if (!use) {
+			radarLayer?.remove();
+			radarLayer = null;
+			return;
+		}
+		const o = weatherOpacity('radar');
+		radarLayer ??= new RadarLayer(map, {
+			bounds: tl.bounds,
+			width: tl.width,
+			height: tl.height,
+			beforeId: PRECIP_BEFORE,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			lean: phone,
+			onChange: radarChanged
+		});
+		radarLayer.setFrames(
+			list.map((f) => ({ file: f.data!, url: dataUrl(f), full: (f.ds ?? 1) === 1 }))
+		);
+		radarLayer.setPosition(untrack(() => pos));
+	});
+	$effect(() => {
+		const p = pos;
+		if (glRadar) radarLayer?.setPosition(p);
+	});
+	// The frame index follows the slider, and the slider follows a jump to a frame (a new
+	// timeline, another layer, "now").
+	$effect(() => {
+		const f = frame;
+		if (Math.round(untrack(() => pos)) !== f) pos = f;
+	});
+	/** The radar layer's frames arrived or what it shows changed (it may say so many times
+	 *  in one go, and from inside an effect): note it once, afterwards. */
+	let radarNoted = false;
+	function radarChanged() {
+		if (radarNoted) return;
+		radarNoted = true;
+		queueMicrotask(() => {
+			radarNoted = false;
+			radarTick++;
+			ready_ = dataReady();
+		});
+	}
+	// ---- The radar beyond the box (docs/RADAR-PLAN.md M6) ------------------------------
+	// A coarser loop over most of North America, beneath the box's own (which it leaves
+	// undrawn), fetched once the view reaches beyond the box. It has radar and nowcast
+	// only, so it shows while the slider is in them and hides in the forecast.
+	let wide = $state.raw<Timeline | null>(null);
+	let wideLayer: RadarLayer | null = null;
+	let wideAsked = false;
+	/** The view reaches beyond the box the frames cover. */
+	const beyondBox = $derived.by(() => {
+		void viewTick;
+		const tl = timeline;
+		if (!map || !tl || !ready) return false;
+		const b = map.getBounds();
+		const [[s_, w], [n, e]] = tl.bounds;
+		return b.getWest() < w || b.getEast() > e || b.getSouth() < s_ || b.getNorth() > n;
+	});
+	$effect(() => {
+		if (!glRadar || !beyondBox || wideAsked) return;
+		wideAsked = true;
+		void loadWide().then((w) => (wide = w));
+	});
+	$effect(() => {
+		const w = wide;
+		const tl = timeline;
+		const use = glRadar && !!w;
+		if (!ready || !map || !tl) return;
+		if (!use || !w) {
+			wideLayer?.remove();
+			wideLayer = null;
+			return;
+		}
+		const o = weatherOpacity('radar');
+		wideLayer ??= new RadarLayer(map, {
+			id: 'radar-wide',
+			bounds: w.bounds,
+			width: w.width,
+			height: w.height,
+			hole: tl.bounds,
+			beforeId: RadarLayer.ID,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			lean: phone
+		});
+		wideLayer.setFrames(
+			w.frames
+				.filter((f) => f.data)
+				.map((f) => ({
+					file: f.data!,
+					url: dataUrl(f, '/api/precip/wide'),
+					full: (f.ds ?? 1) === 1
+				}))
+		);
+	});
+	// The wide loop follows the slider by time.
+	$effect(() => {
+		const p = pos;
+		const w = wide;
+		if (!wideLayer || !w) return;
+		const t = timeAt(frames, p);
+		const at = t == null ? null : posAt(w.frames, t);
+		wideLayer.setHidden(at == null);
+		if (at != null) wideLayer.setPosition(at);
+	});
+
+	/** The frames whose numbers are on hand, by picture name (as the slider's track wants). */
+	function dataReady(): Set<string> {
+		const have = radarLayer?.ready() ?? new Set<string>();
+		return new Set(frames.filter((f) => f.data && have.has(f.data)).map((f) => f.file));
+	}
 	const stillMotion =
 		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 	/** How long the picture on screen fades into the next: within a playing frame's time;
@@ -1560,20 +1703,31 @@
 			shown = null;
 			return;
 		}
+		if (glRadar) {
+			// The radar layer draws it; the picture layers stand empty.
+			++showToken;
+			if (overlay?.showing) overlay.draw(null, null, 0);
+			shown = want.file;
+			return;
+		}
 		const token = ++showToken;
-		// Radar's first forecast hours fade from the last nowcast frame (radar.ts).
-		const h = weather === 'radar' && looping ? handover(frames, frame) : null;
-		const [bmp, under] = await Promise.all([
-			store.bitmap(want),
-			h ? store.bitmap(frames[h.from]) : null
-		]);
+		let bmp: ImageBitmap | null;
+		try {
+			bmp = await store.bitmap(want);
+		} catch (e) {
+			console.error('weather picture', e);
+			return;
+		}
 		if (token !== showToken || !overlay) return;
-		overlay.draw(want.file, bmp, fadeMs(), under && h ? { bmp: under, weight: h.weight } : null);
+		if (!bmp) return; // not downloaded: the picture on screen stays, and it's tried again
+		overlay.draw(want.file, bmp, fadeMs());
 		shown = want.file;
 		if (bmp && !firstFrame) {
 			firstFrame = true;
 			performance.mark('map:frame');
 		}
+		// The layer's other windows, so choosing one shows it at once.
+		if (pick) for (const p of view.picks) if (p.file !== want.file) void store.blob(p);
 		// Have the next one decoded before it's asked for.
 		const next = looping ? frames[(frame + 1) % count] : undefined;
 		if (next) void store.bitmap(next);
@@ -1589,7 +1743,7 @@
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	async function fetchAll() {
 		const run = ++fetchRun;
-		if (!timeline || !looping) return;
+		if (!timeline || !looping || glRadar) return;
 		const from = view.extendedFrom;
 		const list = frames;
 		const order = list
@@ -1623,6 +1777,10 @@
 	$effect(() => {
 		const list = frames;
 		if (!ready) return;
+		if (glRadar) {
+			ready_ = untrack(dataReady);
+			return;
+		}
 		ready_ = new Set(list.filter((f) => store.has(f)).map((f) => f.file));
 		void untrack(fetchAll);
 	});
@@ -1644,6 +1802,7 @@
 			const atNow = !timeline || frame === Math.max(0, view.now);
 			const tl = await loadTimeline();
 			loadError = null;
+			if (wideAsked) void loadWide().then((w) => (wide = w ?? wide));
 			// The pictures' box only changes when locations do.
 			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
 			const next = weatherView(tl, weather, prefs.mapWind);
@@ -1693,7 +1852,7 @@
 	// Play: step when the next frame is on hand (or after a short wait), quicker through
 	// observations, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || !looping || count < 2) return;
+		if (!ready || !playing || !looping || count < 2 || glRadar) return;
 		let hold = 0;
 		let waits = 0;
 		let loops = 0;
@@ -1718,6 +1877,62 @@
 		};
 		id = setTimeout(tick, 600);
 		return () => clearTimeout(id);
+	});
+
+	// The radar plays as one movement, not a frame at a time: the slider's position runs on
+	// with the clock (quicker through 6- and 12-minute radar than hourly forecast), and the
+	// layer blends the frames either side of it. It waits a little for frames still on
+	// their way, rests on "now" and at the end, and stops after a few loops.
+	$effect(() => {
+		if (!ready || !playing || !glRadar || count < 2) return;
+		const last = count - 1;
+		const nowAt = view.now;
+		let p = untrack(() => pos);
+		let before = performance.now();
+		let hold = 400;
+		let stalled = 0;
+		let loops = 0;
+		let wrap = false;
+		let raf = requestAnimationFrame(function tick(t: number) {
+			raf = requestAnimationFrame(tick);
+			const dt = Math.min(100, t - before);
+			before = t;
+			if (hold > 0) {
+				hold -= dt;
+				return;
+			}
+			if (wrap) {
+				wrap = false;
+				// A few loops, then rest on "now": endless playback keeps the phone busy.
+				if (++loops >= 3) {
+					playing = false;
+					frame = Math.max(0, nowAt);
+					return;
+				}
+				p = 0;
+			} else {
+				if (radarLayer?.waiting && stalled < 3000) {
+					stalled += dt;
+					return;
+				}
+				stalled = 0;
+				const i = Math.min(last - 1, Math.floor(p));
+				const step = frames[i + 1].valid - frames[i].valid;
+				const next = p + dt / frameMs(step > 0 ? step : 3600);
+				if (nowAt > 0 && p < nowAt && next >= nowAt) {
+					p = nowAt;
+					hold = 900;
+				} else if (next >= last) {
+					p = last;
+					hold = 1800;
+					wrap = true;
+				} else p = next;
+			}
+			// Asked for less motion: whole frames, no blending between them.
+			pos = stillMotion ? Math.floor(p) : p;
+			frame = Math.round(p);
+		});
+		return () => cancelAnimationFrame(raf);
 	});
 
 	// ---- Terrain-adjusted snow totals (Snow total, zoomed in) ----------------------------
@@ -1786,6 +2001,7 @@
 		return () => void m.off('webglcontextrestored', redrawWeather);
 	});
 	function redrawWeather() {
+		radarLayer?.revive();
 		if (!overlay) return;
 		store.forgetDecoded();
 		void show();
@@ -2634,6 +2850,8 @@
 						{weather}
 						{units}
 						bind:frame
+						bind:pos
+						smooth={glRadar}
 						bind:playing
 						bind:pickId={() => pick?.id ?? 0, (v) => (picked = { ...picked, [weather]: v })}
 						{pick}

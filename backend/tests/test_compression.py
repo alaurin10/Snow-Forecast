@@ -68,3 +68,22 @@ def test_answers_already_compressed_are_not_compressed_again(settings: Settings)
         assert r.headers["content-encoding"] == "gzip"
         raw = b"".join(r.iter_raw())
     assert json.loads(gzip.decompress(raw)) == stations
+
+
+def test_frames_as_numbers_and_the_wide_radar_are_served(settings: Settings) -> None:
+    d = settings.precip_dir
+    (d / "wide").mkdir(parents=True)
+    (d / "r1-0123456789ab.bin").write_bytes(b"\x1f\x8b numbers")
+    (d / "wide" / "index.json").write_text('{"frames": []}')
+    (d / "wide" / "r2-0123456789ab.bin").write_bytes(b"\x1f\x8b wide")
+    client = TestClient(create_app(settings))
+    r = client.get("/api/precip/r1-0123456789ab.bin", headers={"Accept-Encoding": "gzip"})
+    # Already a gzip stream: sent as it is, for the browser to inflate itself.
+    assert r.status_code == 200 and r.headers["content-type"] == "application/gzip"
+    assert "content-encoding" not in r.headers and "immutable" in r.headers["cache-control"]
+    assert client.get("/api/precip/wide").json() == {"frames": []}
+    assert client.get("/api/precip/wide/r2-0123456789ab.bin").content == b"\x1f\x8b wide"
+    # Each route reads its own folder only; nothing from the request picks another.
+    assert client.get("/api/precip/wide/r1-0123456789ab.bin").status_code == 404
+    assert client.get("/api/precip/r2-0123456789ab.bin?folder=wide").status_code == 404
+    assert client.get("/api/precip/wide/..%2Findex.json").status_code == 404

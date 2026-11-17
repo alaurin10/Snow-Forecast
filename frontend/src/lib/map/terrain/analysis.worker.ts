@@ -448,7 +448,7 @@ async function area(
 		const { lat, lon } = centre(v.shader.fine);
 		const { azimuth, altitude } = sunPosition(msg.time, lat, lon);
 		return {
-			rgba: paintShade(v.shader.fine, v.shader.run(azimuth, altitude)),
+			rgba: paintShade(v.shader.fine, v.shader.run(azimuth, altitude), altitude),
 			grid: v.shader.fine
 		};
 	}

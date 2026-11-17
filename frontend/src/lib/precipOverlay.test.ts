@@ -76,23 +76,6 @@ describe('PrecipLayer', () => {
 		expect(paint[B]['raster-opacity']).toBe(0);
 	});
 
-	it('mixes the hand-over frame under the new one, each at its share', () => {
-		withCanvas();
-		const { map } = fakeMap(false);
-		const seen: [number, string][] = [];
-		ctx.drawImage.mockImplementation(() =>
-			seen.push([ctx.globalAlpha, ctx.globalCompositeOperation])
-		);
-		const layer = new PrecipLayer(map as unknown as MlMap, bounds, 4, 4, 0.7);
-		layer.draw('f1.png', bmp, 0, { bmp, weight: 0.25 });
-		expect(seen).toEqual([
-			[0.25, 'lighter'],
-			[0.75, 'lighter']
-		]);
-		expect([ctx.globalAlpha, ctx.globalCompositeOperation]).toEqual([1, 'source-over']);
-		ctx.drawImage.mockReset();
-	});
-
 	it('in 3D, redraws the drape through the fade, then stops', () => {
 		withCanvas();
 		const { map, listeners, releaseAllRTT } = fakeMap(true);

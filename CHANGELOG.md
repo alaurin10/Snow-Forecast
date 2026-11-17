@@ -6,7 +6,71 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Radar scrubs as fast as you can drag, flat and in 3D** (docs/RADAR-PLAN.md, part 1):
+  - The server sends each radar and forecast frame as numbers (the rate, and how much
+    is snow, mix or rain), and the phone's graphics chip colours them at the screen's own
+    resolution. Every frame of the timeline is held there, so moving the slider is one
+    draw: nothing is decoded or copied, and the map never stalls waiting on a frame.
+  - The slider slides rather than steps: between two frames the map shows them blended,
+    so storms move smoothly however slowly or quickly you drag, and playing is one
+    continuous movement.
+  - Frames load nearest the slider first, wherever it is dragged, and a frame that fails
+    to load is tried again (it used to stay blank).
+  - On phones the loop is held at half resolution and the frame you stop on is fetched
+    sharp.
+  - The same drawing flat and in 3D, and it comes back on its own after the phone drops
+    the map's graphics.
+- **No more jump between the nowcast and the forecast:**
+  - The nowcast hands over to the forecast as it goes: its first frames are the radar
+    moved on, its last are the forecast, and those between mix the two by the same
+    moment. Tapping the map gives the same mix.
+  - A forecast hour is placed at its middle, not its end, and none shows in the middle of
+    the nowcast any more (the loop used to go nowcast, model, nowcast).
+  - The radar is kept, not cleared, when no radar source answers.
+- **One rule for which model draws where, at every lead time:** NOAA's models in the US
+  and Canada's in Canada, blended across the border zone (48.5–49.5°N). For the first two
+  days Washington, Idaho and Montana used to show Canada's HRDPS, then switch to NOAA's
+  blend at 48 h; now they show NOAA's models (HRRR, then the National Blend) all along, as
+  the snow totals, snow level and wind already did.
+
+- **Radar beyond the West box.** Zoom out or pan away and the radar and nowcast carry on
+  over most of North America (Alaska to the Gulf, the Pacific to the Atlantic coast), from a
+  coarser loop (about 4–7 km a pixel, 0.7 MB in all) drawn beneath the West box's own and
+  fetched only when the map looks past the box. It follows the slider by time and hides
+  in the forecast (the models stay on the West box).
+- **Deployment:** the worker's memory limit goes from 1.5 GB to 2.5 GB
+  (`docker-compose.yml`): the map jobs now peak at about 470 MB (radar), 320 MB (wide
+  radar), 570 MB (forecast), 550 MB (layers) and 400 MB (totals), and can overlap. The
+  wide radar's first run waits 3 minutes after the worker starts.
+- **Clouds: a forecast after the satellite loop.** The Clouds layer's slider now runs
+  on past "now" to about 10 days ahead: the forecast's cloud cover, every 3 hours to
+  3½ days, then every 6 hours, drawn as cloud (the thicker, the greyer). Canada's models
+  (HRDPS, RDPS, then GDPS) in Canada and NOAA's National Blend in the US, blended across
+  the border like the other layers.
+
+- **Radar over the US is checked against NOAA's MRMS**, NOAA's own quality-controlled
+  mosaic of the same radars: echoes it finds false (ground clutter, the beam striking a
+  mountain, echoes that don't reach the ground) are left out, echoes it has that
+  Environment Canada's composite missed are added, and it says rain or snow (Environment
+  Canada's "mixed" stands). Canada keeps Environment Canada's own checks and types. Echoes
+  found false scan after scan are remembered and left out of the nowcast too. On live
+  scans (17 Nov 2026) about 13% of the US echo was removed and 7% added. The radar job
+  peaks about 70 MB higher (MRMS is read straight from its PNG, not the 200 MB grid).
+
 ### Fixed
+- **Snow total: a new window shows at once in 3D.** Choosing another window (7 days to
+  10 days) used to leave the map blank, or showing the old window, until it was moved:
+  the map took the new window's tiles for the old ones' drape. Each window is now a layer
+  of its own; the old one stays until the new one's tiles are in, tiles that fail are
+  asked for again, a spinner shows while a window loads, and the other windows' pictures
+  load in the background. The server gives these tiles an allowance of their own, apart
+  from the base map's.
+- **Sun & shade: the last frames before sunset only get darker.** The final step used to
+  switch the hill shading to another method and light direction and lay a full dark veil
+  over the view, so the map looked completely different. Now the light keeps its
+  direction and fades, and sunlit ground dims a little each step from about 8° above the
+  horizon until it meets the shade as the sun sets.
 - **No more "rain" on Mt. Rainier's summit on the radar.**
   - What it was: the radar beam strikes the mountain, which shows as a strong, unmoving
     echo. Environment Canada leaves it untyped, and the map used to call any untyped echo

@@ -222,19 +222,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path, media_type="application/json", headers={"Cache-Control": "no-cache"}
         )
 
+    @app.get("/api/precip/wide")
+    def precip_wide_index() -> FileResponse:
+        """The radar beyond the box: radar and nowcast over most of North America, coarser
+        (the same index format; docs/RADAR-PLAN.md M6)."""
+        path = settings.precip_dir / "wide" / "index.json"
+        if not path.exists():
+            raise HTTPException(503, "wide radar frames not ready yet")
+        return FileResponse(
+            path, media_type="application/json", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/api/precip/wide/{name}")
+    def precip_wide_frame(name: str) -> FileResponse:
+        """One frame of the radar beyond the box (as /api/precip/{name})."""
+        return _precip_file(name, settings.precip_dir / "wide")
+
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
-        """One picture: a precipitation frame, a snow total or a frame of another weather
-        layer. Names carry a hash of the pixels, so they never change."""
-        m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp)", name)
+        """One file: a precipitation frame (as a picture, or as numbers), a snow total or a
+        frame of another weather layer. Names carry a hash of the contents, so they never
+        change."""
+        return _precip_file(name, settings.precip_dir)
+
+    def _precip_file(name: str, folder: Path) -> FileResponse:
+        """A picture or frame file from `folder` (never from the request: only the
+        routes above choose it), checked by name."""
+        m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp|bin)", name)
         if not m:
             raise HTTPException(404)
-        path = settings.precip_dir / name
+        path = folder / name
         if not path.exists():
             raise HTTPException(404)
+        ext = m.group(1)
         return FileResponse(
             path,
-            media_type=f"image/{m.group(1)}",
+            # ".bin": a frame as numbers (maps/dataframe.py), a gzip stream as it is.
+            media_type="application/gzip" if ext == "bin" else f"image/{ext}",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
@@ -281,6 +305,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tiles already cached are free; each visitor may cause a burst of 300 upstream
     # fetches (a few map screens), then 10 a second.
     tile_misses = RateLimiter(rate=10, burst=300)
+    # Snow-total tiles drawn on request have an allowance of their own: a 3D view of a few
+    # windows asks for hundreds, and they mustn't use up the base map's (or it theirs).
+    snow_tile_draws = RateLimiter(rate=20, burst=600)
 
     def tiles() -> TileCache:
         nonlocal tile_cache
@@ -311,12 +338,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         work = settings.map_work_dir
         drawn = (work / "snowtiles" / tiles_id / str(z) / str(x) / f"{y}.png").exists()
         if not drawn and not snow_tiles.known_empty(tiles_id, z, x, y):
-            tile_misses.check(request)  # drawing one costs a little, and may fetch elevation
+            snow_tile_draws.check(request)  # drawing one costs a little, may fetch elevation
         try:
             data = snow_tiles.tile(work / "totals", work / "snowtiles", tiles(), tiles_id, z, x, y)
         except snow_tiles.Unavailable as e:
             raise HTTPException(
-                503, "elevation tiles unavailable", headers={"Cache-Control": "no-store"}
+                503,
+                "elevation tiles unavailable",
+                headers={"Cache-Control": "no-store", "Retry-After": "2"},
             ) from e
         if data is None:
             raise HTTPException(404)

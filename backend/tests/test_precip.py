@@ -184,7 +184,7 @@ def test_render_writes_index_and_reuses_frames(tmp_path: Path, monkeypatch: Any)
     assert {f["south"] for f in future} == {"hrrr", ""}  # HRRR to 6 h, nothing after…
     assert {f["src"]["south"] for f in future} == {"hrrr", "rdps"}  # …so RDPS fills in
     assert future[0]["src"] == {"north": "hrdps", "south": "hrrr"}
-    assert index["version"] == 2 and "Radar: RainViewer" in index["attribution"]
+    assert index["version"] == 3 and "Radar: RainViewer" in index["attribution"]
     for f in frames:
         assert (out / f["file"]).exists()
     on_disk = json.loads((out / "index.json").read_text())

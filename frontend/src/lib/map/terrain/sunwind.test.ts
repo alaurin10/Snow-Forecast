@@ -18,6 +18,7 @@ import { TILE, type Elev } from './dem';
 import { compass16, dateAt, daySteps, sunDay, sunPosition } from './sun';
 import {
 	cast,
+	dusk,
 	horizon,
 	horizonAt,
 	paintHours,
@@ -329,6 +330,34 @@ describe('cast shadows', () => {
 		const hp = paintHours(Float32Array.from([0, 9]));
 		expect([hp[0], hp[1], hp[2], hp[3]]).toEqual([0x1d, 0x1b, 0x4b, 255]);
 		expect(hp[4]).toBe(0xf9);
+	});
+
+	it('darkens step by step into sunset, with no jump at the last frame', () => {
+		// A ridge to the west: at the end of the day part of the slope is in its shadow.
+		const g = grid(40, 20, 30, (c) => 1000 + Math.max(0, 15 - c) * 40);
+		const shader = new Shader(g);
+		const [lat, lon] = [47.4, -121.4];
+		const day = sunDay([2026, 12, 21], lat, lon);
+		const mean = (t: number) => {
+			const { azimuth, altitude } = sunPosition(t, lat, lon);
+			const px = paintShade(g, shader.run(azimuth, altitude), altitude);
+			let sum = 0;
+			for (let i = 3; i < px.length; i += 4) sum += px[i];
+			return sum / (px.length / 4) / 255;
+		};
+		// Every 15 minutes through the last 90 before sunset, then the sunset itself.
+		const times = [6, 5, 4, 3, 2, 1, 0].map((k) => day.sunset! - k * 15 * 60000);
+		const dark = times.map(mean);
+		for (let i = 1; i < dark.length; i++) {
+			expect(dark[i]).toBeGreaterThanOrEqual(dark[i - 1] - 1e-9);
+			// Each step a little darker: no more than about a third of the way.
+			expect(dark[i] - dark[i - 1]).toBeLessThan(0.34);
+		}
+		expect(dark[dark.length - 1]).toBe(1);
+		expect(dusk(10)).toBe(0);
+		expect(dusk(0.25)).toBe(1);
+		expect(dusk(4)).toBeGreaterThan(0.4);
+		expect(dusk(4)).toBeLessThan(0.6);
 	});
 });
 

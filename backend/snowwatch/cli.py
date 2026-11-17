@@ -185,6 +185,7 @@ def cmd_map(args: argparse.Namespace, settings: Settings) -> int:
     w = Worker(settings, get_forecast_config())
     jobs = {
         "radar": w.radar,
+        "wide": w.wide_radar,
         "forecast": w.forecast_frames,
         "totals": w.totals_fields,
         "layers": w.weather_layers,
@@ -453,7 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("map", help="redraw one part of the map's pictures now")
     s.add_argument(
         "part",
-        choices=["radar", "forecast", "totals", "layers", "sat", "stations", "obs", "all"],
+        choices=["radar", "wide", "forecast", "totals", "layers", "sat", "stations", "obs", "all"],
     )
     s.set_defaults(func=cmd_map)
 

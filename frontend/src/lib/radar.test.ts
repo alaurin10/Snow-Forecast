@@ -3,9 +3,9 @@ import {
 	frameLabel,
 	frameMs,
 	frameSource,
-	handover,
-	HANDOVER_S,
 	loadTimeline,
+	posAt,
+	timeAt,
 	RAMPS,
 	rampTop,
 	toTimeline,
@@ -23,13 +23,15 @@ const f = (t: number, past: boolean, south: Frame['south'] = ''): Frame => ({
 	south,
 	kind: past ? 'radar' : 'forecast',
 	span_h: past ? 0 : 1,
-	src: past ? { north: 'radar-eccc', south: 'radar-eccc' } : { north: 'hrdps', south: south }
+	src: past ? { north: 'radar-eccc', south: 'radar-eccc' } : { north: 'hrdps', south: south },
+	valid: past ? t : t - 1800
 });
 /** A 3- or 6-hour frame beyond two days. */
 const ext = (t: number, span: number, north = 'gdps', south = 'nbm'): Frame => ({
 	...f(t, false, south),
 	span_h: span,
-	src: { north, south }
+	src: { north, south },
+	valid: t - span * 1800
 });
 const nc = (t: number): Frame => ({
 	t,
@@ -38,7 +40,8 @@ const nc = (t: number): Frame => ({
 	south: '',
 	kind: 'nowcast',
 	span_h: 0,
-	src: { north: 'nowcast-eccc', south: 'nowcast-eccc' }
+	src: { north: 'nowcast-eccc', south: 'nowcast-eccc' },
+	valid: t
 });
 
 describe('toTimeline', () => {
@@ -51,7 +54,7 @@ describe('toTimeline', () => {
 		],
 		width: 1700,
 		height: 1970,
-		frames: [f(3600, false), nc(1920), f(600, true), nc(2640), f(1200, true)],
+		frames: [f(7200, false), nc(1920), f(600, true), nc(2640), f(1200, true)],
 		attribution: ['Radar: Environment and Climate Change Canada (North American composite)']
 	};
 	it('orders radar, then nowcast, then forecast, with "now" at the last radar frame', () => {
@@ -68,6 +71,15 @@ describe('toTimeline', () => {
 		expect(tl.width).toBe(1700);
 		expect(tl.attribution).toHaveLength(1);
 		expect(tl.extendedFrom).toBe(-1);
+	});
+	it('leaves out a forecast frame standing for a time the nowcast has reached', () => {
+		// The hour ending 3600 stands for 1800: inside the nowcast (to 2640). An older server
+		// lists it; a newer one marks such frames hidden or leaves them out.
+		const tl = toTimeline({ ...ix, frames: [...ix.frames, f(3600, false)] });
+		expect(tl.frames.map((x) => x.t)).toEqual([600, 1200, 1920, 2640, 7200]);
+		expect(tl.frames.map((x) => x.valid)).toEqual([600, 1200, 1920, 2640, 5400]);
+		const hidden = toTimeline({ ...ix, frames: [{ ...f(7200, false), hidden: true }] });
+		expect(hidden.frames).toEqual([]);
 	});
 	it('finds where the 3- and 6-hour frames start', () => {
 		const tl = toTimeline({ ...ix, frames: [...ix.frames, ext(99 * 3600, 6), ext(80 * 3600, 3)] });
@@ -143,16 +155,23 @@ describe('frameLabel', () => {
 describe('frameSource', () => {
 	it('names where each frame came from', () => {
 		expect(frameSource(f(1, true))).toMatch(/Environment Canada/);
+		expect(frameSource(f(1, true))).not.toMatch(/MRMS/);
+		expect(
+			frameSource({
+				...f(1, true),
+				src: { north: 'radar-eccc', south: 'radar-eccc', check: 'mrms' }
+			})
+		).toMatch(/checked against NOAA's MRMS/);
 		expect(frameSource({ ...f(1, true), src: { north: 'rainviewer' } })).toMatch(/RainViewer/);
 		expect(frameSource(nc(1))).toMatch(/^Nowcast/);
-		expect(frameSource(f(1, false, 'hrrr'))).toMatch(
-			/HRDPS model where it reaches .*, NOAA HRRR beyond, blended where they meet/
+		expect(frameSource(f(1, false, 'hrrr'))).toBe(
+			'Forecast: Canadian HRDPS model in Canada, NOAA HRRR in the US, blended across the border.'
 		);
 		expect(frameSource(f(1, false, 'nbm'))).toMatch(/National Blend/);
 		expect(frameSource(f(1, false, ''))).toBe('Forecast: Canadian HRDPS model where it reaches.');
 		expect(
 			frameSource({ ...f(1, false, 'hrrr'), src: { north: 'hrdps', south: 'hrrr', fill: 'rdps' } })
-		).toMatch(/NOAA HRRR and Canadian RDPS beyond/);
+		).toMatch(/NOAA HRRR in the US, .* Canadian RDPS fills in where neither reaches/);
 		expect(frameSource(ext(1, 6))).toMatch(
 			/6-hour average: Canadian GDPS model in Canada, .* in the US, blended across the border/
 		);
@@ -229,36 +248,6 @@ describe('loadTimeline errors', () => {
 	});
 });
 
-describe('handover', () => {
-	const fr = (t: number, kind: Frame['kind']): Frame => ({
-		t,
-		past: kind === 'radar',
-		file: `${kind}${t}.png`,
-		south: '',
-		kind,
-		span_h: kind === 'forecast' ? 1 : 0,
-		src: {}
-	});
-	const H = 3600;
-	const frames = [
-		fr(0, 'radar'),
-		fr(720, 'nowcast'),
-		fr(720 + H, 'forecast'),
-		fr(720 + 2 * H, 'forecast')
-	];
-	it('fades the first forecast hours from the last nowcast frame', () => {
-		expect(handover(frames, 2)).toEqual({ from: 1, weight: 0.5 });
-		expect(handover(frames, 3)).toBeNull(); // two hours on: the model alone
-		expect(handover(frames, 0)).toBeNull();
-		expect(handover(frames, 1)).toBeNull();
-		expect(HANDOVER_S).toBe(2 * H);
-	});
-	it('starts from the last radar frame when there is no nowcast', () => {
-		const noNowcast = [fr(0, 'radar'), fr(H / 2, 'forecast')];
-		expect(handover(noNowcast, 1)).toEqual({ from: 0, weight: 0.75 });
-	});
-});
-
 describe('frameMs', () => {
 	it('is quicker through radar than through the forecast', () => {
 		expect(frameMs(360)).toBe(300);
@@ -266,5 +255,20 @@ describe('frameMs', () => {
 		expect(frameMs(3600)).toBe(450);
 		expect(frameMs(3 * 3600)).toBe(550);
 		expect(frameMs(6 * 3600)).toBe(650);
+	});
+});
+
+describe('timeAt and posAt', () => {
+	const fr = [{ valid: 100 }, { valid: 200 }, { valid: 400 }];
+	it('turns a slider position into an instant and back', () => {
+		expect(timeAt(fr, 0)).toBe(100);
+		expect(timeAt(fr, 1.5)).toBe(300);
+		expect(timeAt(fr, 9)).toBe(400);
+		expect(timeAt([], 1)).toBeNull();
+		expect(posAt(fr, 300)).toBe(1.5);
+		expect(posAt(fr, 100)).toBe(0);
+		expect(posAt(fr, 50)).toBe(0); // within the slack
+		expect(posAt(fr, 400 + 601)).toBeNull(); // beyond the loop: hidden
+		expect(posAt(fr, 100 - 601)).toBeNull();
 	});
 });

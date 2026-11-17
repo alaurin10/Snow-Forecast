@@ -95,6 +95,9 @@ async function prunePrecip(index: Response) {
 	const cache = await caches.open(API);
 	for (const req of await cache.keys()) {
 		const path = new URL(req.url).pathname;
+		// The wide radar's frames are listed in an index of their own (they go after two
+		// days, like everything else here).
+		if (path.startsWith('/api/precip/wide')) continue;
 		if (path.startsWith('/api/precip/') && !keep.has(path.slice('/api/precip/'.length)))
 			await cache.delete(req);
 	}

@@ -55,6 +55,11 @@ class MapConfig(BaseModel):
     # Picture width in pixels (1700 over the default box is about 1.5 km a pixel).
     width: int = Field(1700, ge=200, le=4000)
     radar_minutes: int = Field(6, ge=1)
+    # Radar beyond the box (docs/RADAR-PLAN.md M6): a coarser loop of radar and nowcast
+    # over most of North America, drawn beneath the box's own. None: none.
+    wide_region: tuple[float, float, float, float] | None = (15.0, -170.0, 72.0, -50.0)
+    wide_width: int = Field(1800, ge=200, le=4000)  # about 4–7 km a pixel
+    wide_minutes: int = Field(12, ge=1)
     forecast_minutes: int = Field(30, ge=5)
     totals_minutes: int = Field(60, ge=10)
     # The other weather layers: snow level, wind, snow on the ground, observed snowfall

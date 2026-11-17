@@ -27,6 +27,12 @@
 		units: UnitSystem;
 		/** The frame on the slider. */
 		frame: number;
+		/**
+		 * Where the slider is, as a frame's index or between two (with `smooth`: the radar
+		 * blends the frames either side, so the slider moves freely rather than in steps).
+		 */
+		pos?: number;
+		smooth?: boolean;
 		playing: boolean;
 		/** The picked picture's window, in hours (0 for snow on the ground). */
 		pickId: number;
@@ -49,6 +55,8 @@
 		weather,
 		units,
 		frame = $bindable(),
+		pos = $bindable(0),
+		smooth = false,
 		playing = $bindable(),
 		pickId = $bindable(),
 		pick,
@@ -176,7 +184,8 @@
 					<span
 						class="span faint"
 						title={adjusted ? `${TERRAIN_NOTE} ${pick.sources}` : pick.sources}
-						>{pick.span}{#if adjusted}<span class="adj">&nbsp;· adjusted to terrain</span
+						>{#if waiting}<i class="spin" aria-label="Loading"
+							></i>{/if}{pick.span}{#if adjusted}<span class="adj">&nbsp;· adjusted to terrain</span
 							>{/if}</span
 					>
 				</div>
@@ -201,8 +210,23 @@
 						type="range"
 						min="0"
 						max={Math.max(0, count - 1)}
-						bind:value={frame}
-						oninput={() => (playing = false)}
+						step={smooth ? 0.02 : 1}
+						value={smooth ? pos : frame}
+						oninput={(e) => {
+							const v = Number(e.currentTarget.value);
+							playing = false;
+							pos = v;
+							frame = Math.round(v);
+						}}
+						onkeydown={(e) => {
+							// The keys move a whole frame, however finely the slider slides.
+							const d = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+							if (!smooth || !d) return;
+							e.preventDefault();
+							playing = false;
+							frame = Math.min(Math.max(0, count - 1), Math.max(0, Math.round(pos) + d));
+							pos = frame;
+						}}
 						aria-label="Time"
 						aria-valuetext={`${label.when}, ${label.rel}`}
 						style:--buffer={buffered}
@@ -277,7 +301,11 @@
 				</span>
 			</div>
 		{:else if weather === 'clouds'}
-			<span class="key faint">GOES-West · true colour by day, infrared at night</span>
+			<span class="key faint"
+				>{current?.past
+					? 'GOES-West · true colour by day, infrared at night'
+					: 'Forecast cloud cover · thicker is greyer'}</span
+			>
 		{:else}
 			<div class="key">
 				{#each legendRamps as r (r.kind)}
