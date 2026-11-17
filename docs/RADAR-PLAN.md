@@ -50,7 +50,7 @@ The owner's list, and the cause found for each by reading the code and the live 
 
 ### M1 — Server: frames as numbers, one time axis, a real hand-over
 
-- [ ] `backend/snowwatch/maps/dataframe.py`: a precipitation frame as byte planes.
+- [x] `backend/snowwatch/maps/dataframe.py`: a precipitation frame as byte planes.
   - **rate**: `0` dry, `1..255` log-spaced 0.02–100 mm/h (`code = 1 + 254·ln(r/0.02)/ln(5000)`).
   - **type**: snowiness `0` rain, `128` mix, `255` snow, at ¼ of the rate plane's
     resolution, filled across dry ground (nearest wet pixel), lightly blurred.
@@ -58,39 +58,46 @@ The owner's list, and the cause found for each by reading the code and the live 
     delta-filtered (left neighbour), then one raw-deflate stream. Name
     `<prefix><t>-<sha12>.bin`, immutable.
   - Resolution by source: radar and nowcast full, hourly models ½, 3 h/6 h models ¼.
-- [ ] `render.py`: `_save_precip` also writes the data file; index v3 adds per frame
+- [x] `render.py`: `_save_precip` also writes the data file; index v3 adds per frame
   `data`, `dw`, `dh`, `valid` (the instant the frame stands for: scan time, or the middle
   of a forecast window). PNGs and probes stay for now (old cached apps, taps).
-- [ ] `_index`: no forecast frame at or before the last nowcast frame. Radar never
+- [x] `_index`: no forecast frame at or before the last nowcast frame. Radar never
   committed empty: keep the last frames, mark `radar_stale`.
-- [ ] Hand-over on the server: each nowcast frame is `(1−w)·nowcast + w·model(t)`,
+- [x] Hand-over on the server: each nowcast frame is `(1−w)·nowcast + w·model(t)`,
   `model(t)` interpolated in time between the bracketing forecast frames (read back from
   their data files), `w` easing 0 → 1 over the nowcast's span. `point.py` and `radar.ts`
   lose `HANDOVER_S`.
-- [ ] `api/app.py`: serve `.bin`. `frontend/e2e/precip_fixture.py` writes v3.
+- [x] `api/app.py`: serve `.bin`. `frontend/e2e/precip_fixture.py` writes v3.
 
 ### M2 — App: radar on the graphics chip, continuous scrubbing
 
+Landed (with M1). As built: the queue is `loader.ts` (nearest the slider first, six at a
+time, cancels, retries); playing is a `requestAnimationFrame` loop in `MapView.svelte`
+rather than a separate clock module. `e2e/radar.spec.ts` checks free scrubbing, every frame
+drawn in 3D and recovery after a lost context. Phone profile (`perf.spec.ts`, 17 Nov
+2026): page process peak 342 MB (was ~430), a new frame 0–1.1 ms on the main thread
+(was ~10 ms); the graphics process holds more (441 MB peak, SwiftShader).
+
 New `frontend/src/lib/map/precip/`:
 
-- [ ] `codec.ts` + `frames.worker.ts`: fetch, inflate (`DecompressionStream('deflate-raw')`),
+- [x] `codec.ts` + `frames.worker.ts`: fetch, inflate (`DecompressionStream('deflate-raw')`),
   unfilter, optional 2× downsample, off the main thread.
 - [ ] `store.ts`: priority queue that can re-prioritise and cancel; every frame resident
   as two R8 textures within a byte budget (desktop: radar at full resolution; phone:
   radar at ½ plus full for the frame at rest); compressed bytes kept for rebuilds.
-- [ ] `gl.ts`: one program. `rate = mix(A, B, f)`, `type = mix(A, B, f)`, colour from a
+- [x] `gl.ts`: one program. `rate = mix(A, B, f)`, `type = mix(A, B, f)`, colour from a
   LUT built from `radar.ts:RAMPS` (pinned to `palette.py` by a shared fixture), soft
   alpha above the 0.1 mm/h floor, premultiplied.
-- [ ] `layer.ts`: a MapLibre custom layer: `render` (flat) and `renderToTerrainTile` +
+- [x] `layer.ts`: a MapLibre custom layer: `render` (flat) and `renderToTerrainTile` +
   `terrainTileRevision` (3D). Kept honest by e2e tests: 30 frame changes in 3D each
   change the pixels; flat and 3D colours match; forced context loss recovers; a rain and
   a snow frame match the server palette. Fallback if the 3D hook fails those tests: the
   same program draws into our own WebGL canvas fed to a MapLibre `canvas` source.
-- [ ] `clock.ts` + `Timeline.svelte`: the slider is a continuous position; frames blend by
+- [x] `clock.ts` + `Timeline.svelte`: the slider is a continuous position; frames blend by
   `valid` time; playing advances smoothly; one draw per animation frame.
-- [ ] `MapView.svelte`: radar on the new path; `PrecipLayer`/`FrameStore` stay for the
+- [x] `MapView.svelte`: radar on the new path; `PrecipLayer`/`FrameStore` stay for the
   pictures (snow totals, depth, snowfall, snow level, wind, clouds).
-- [ ] `service-worker.ts`/`swRoute.ts`: `.bin` frames cached and pruned like PNGs.
+- [x] `service-worker.ts`/`swRoute.ts`: `.bin` frames cached and pruned like PNGs.
 - [ ] `e2e/perf.spec.ts`: a scrub test (phone, flat and 3D): time from slider event to
   pixels, and the memory ceiling.
 

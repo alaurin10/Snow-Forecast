@@ -47,16 +47,21 @@ export function route(
 	return 'network';
 }
 
-/** The pictures the precipitation index names (`/api/precip/<file>`), for pruning. */
+/** The files the precipitation index names (`/api/precip/<file>`: pictures, and frames
+ *  as numbers), for pruning. */
 export function precipFiles(index: unknown): Set<string> {
 	const out = new Set<string>();
+	type Named = { file?: unknown; data?: unknown };
 	const ix = index as {
-		frames?: { file?: unknown }[];
-		totals?: { file?: unknown }[];
-		layers?: Record<string, { frames?: { file?: unknown }[] }>;
+		frames?: Named[];
+		totals?: Named[];
+		layers?: Record<string, { frames?: Named[] }>;
 	} | null;
-	const add = (list: { file?: unknown }[] | undefined) => {
-		for (const f of list ?? []) if (typeof f?.file === 'string') out.add(f.file);
+	const add = (list: Named[] | undefined) => {
+		for (const f of list ?? []) {
+			if (typeof f?.file === 'string') out.add(f.file);
+			if (typeof f?.data === 'string') out.add(f.data);
+		}
 	};
 	add(ix?.frames);
 	add(ix?.totals);

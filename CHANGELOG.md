@@ -6,6 +6,29 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Radar scrubs as fast as you can drag, flat and in 3D** (docs/RADAR-PLAN.md, part 1):
+  - The server sends each radar and forecast frame as numbers (the rate, and how much
+    is snow, mix or rain), and the phone's graphics chip colours them at the screen's own
+    resolution. Every frame of the timeline is held there, so moving the slider is one
+    draw: nothing is decoded or copied, and the map never stalls waiting on a frame.
+  - The slider slides rather than steps: between two frames the map shows them blended,
+    so storms move smoothly however slowly or quickly you drag, and playing is one
+    continuous movement.
+  - Frames load nearest the slider first, wherever it is dragged, and a frame that fails
+    to load is tried again (it used to stay blank).
+  - On phones the loop is held at half resolution and the frame you stop on is fetched
+    sharp.
+  - The same drawing flat and in 3D, and it comes back on its own after the phone drops
+    the map's graphics.
+- **No more jump between the nowcast and the forecast:**
+  - The nowcast hands over to the forecast as it goes: its first frames are the radar
+    moved on, its last are the forecast, and those between mix the two by the same
+    moment. Tapping the map gives the same mix.
+  - A forecast hour is placed at its middle, not its end, and none shows in the middle of
+    the nowcast any more (the loop used to go nowcast, model, nowcast).
+  - The radar is kept, not cleared, when no radar source answers.
+
 ### Fixed
 - **No more "rain" on Mt. Rainier's summit on the radar.**
   - What it was: the radar beam strikes the mountain, which shows as a strong, unmoving

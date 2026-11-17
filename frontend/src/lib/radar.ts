@@ -5,7 +5,7 @@
 // North America, and lists them in /api/precip. The browser only downloads and swaps
 // pictures, so scrubbing is instant and a phone's memory stays low.
 // Sources: Environment Canada's North American radar composite (past 3 h, typed) and its
-// nowcast (next 72 min); hourly to ~48 h, Environment Canada's HRDPS (Canada and the
+// nowcast (next 72 min, handing over to the forecast as it goes); hourly to ~48 h, Environment Canada's HRDPS (Canada and the
 // northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
 // RDPS) and 6-hourly to 10 days (Canadian GDPS) in Canada, with NOAA's National Blend in
 // the US. The server blends the sources as numbers, so there are no joins to see.
@@ -92,6 +92,18 @@ export interface Frame {
 	 * (`south`), e.g. "hrdps", "nbm", and one filling in where neither reaches (`fill`).
 	 */
 	src: { north?: string; south?: string; fill?: string };
+	/**
+	 * The instant the frame stands for (Unix seconds): a scan's or a nowcast's time, the
+	 * middle of a forecast frame's span. Frames are ordered and blended by it.
+	 */
+	valid: number;
+	/**
+	 * The frame as numbers (backend/snowwatch/maps/dataframe.py), which the map colours
+	 * itself: the file under /api/precip/, and how many of the box's pixels one of its
+	 * pixels spans (1 for radar, 2 for hourly models, 4 beyond). Absent from an older server.
+	 */
+	data?: string;
+	ds?: number;
 }
 
 /** Forecast snow over a window: Canada's models north of 49°N, NOAA's blend south of it. */
@@ -132,7 +144,8 @@ export interface LayerFrame {
 	runs: Record<string, number>;
 }
 
-/** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`. */
+/** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`;
+ *  before version 3 they lack `valid` and `data`. */
 export interface PrecipIndex {
 	version?: number;
 	generated: string;
@@ -140,7 +153,7 @@ export interface PrecipIndex {
 	bounds: [[number, number], [number, number]];
 	width: number;
 	height: number;
-	frames: (Pick<Frame, 't' | 'past' | 'file' | 'south'> & Partial<Frame>)[];
+	frames: (Pick<Frame, 't' | 'past' | 'file' | 'south'> & Partial<Frame> & { hidden?: boolean })[];
 	/** `window` arrived with the 10-day totals; older indexes have only `hours`. */
 	totals?: (Omit<Total, 'window'> & { window?: number })[];
 	/** Credit lines for the sources in use. */
@@ -169,10 +182,15 @@ export interface Timeline {
 
 const ORDER: Record<FrameKind, number> = { radar: 0, nowcast: 1, forecast: 2 };
 
-/** Turn the server's list into a timeline: in time order, radar, then nowcast, then forecast. */
+/**
+ * Turn the server's list into a timeline: radar, then the nowcast, then the forecast, each
+ * after the last by the instants they stand for. A forecast frame standing for a time the
+ * nowcast has already reached is left out (an older server lists them: the model would
+ * show in the middle of the nowcast).
+ */
 export function toTimeline(ix: PrecipIndex): Timeline {
-	const frames: Frame[] = [...(ix.frames ?? [])]
-		.filter((f) => typeof f?.t === 'number' && typeof f?.file === 'string')
+	const all: Frame[] = [...(ix.frames ?? [])]
+		.filter((f) => typeof f?.t === 'number' && typeof f?.file === 'string' && !f.hidden)
 		.map((f) => {
 			const kind: FrameKind =
 				f.kind === 'radar' || f.kind === 'nowcast' || f.kind === 'forecast'
@@ -180,15 +198,19 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 					: f.past
 						? 'radar'
 						: 'forecast';
+			const span_h = typeof f.span_h === 'number' ? f.span_h : kind === 'forecast' ? 1 : 0;
 			return {
 				...f,
 				kind,
 				past: kind === 'radar',
-				span_h: typeof f.span_h === 'number' ? f.span_h : kind === 'forecast' ? 1 : 0,
-				src: f.src ?? {}
+				span_h,
+				src: f.src ?? {},
+				valid: f.valid || (kind === 'forecast' ? f.t - (span_h * HOUR) / 2 : f.t)
 			};
 		})
-		.sort((a, b) => a.t - b.t || ORDER[a.kind] - ORDER[b.kind]);
+		.sort((a, b) => a.valid - b.valid || ORDER[a.kind] - ORDER[b.kind]);
+	const reached = Math.max(-Infinity, ...all.filter((f) => f.kind !== 'forecast').map((f) => f.t));
+	const frames = all.filter((f) => f.kind !== 'forecast' || f.valid > reached);
 	let now = -1;
 	let nowcastEnd = -1;
 	let extendedFrom = -1;
@@ -279,26 +301,7 @@ export async function loadTimeline(): Promise<Timeline> {
 
 export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 
-/**
- * The forecast frames this soon after the last nowcast frame (or radar, without one) are
- * shown mixed with it, fading from the nowcast to the model, so the hand-over between the
- * two sources is gradual rather than a jump. Taps give the same mix (keep in step with
- * HANDOVER_S in backend/snowwatch/maps/point.py).
- */
-export const HANDOVER_S = 2 * 3600;
-
-/** The hand-over for the frame at `i`: which frame shows under it, and how much of it
- *  (1 at the nowcast's end, falling to 0 HANDOVER_S later); null for none. */
-export function handover(frames: Frame[], i: number): { from: number; weight: number } | null {
-	const f = frames[i];
-	if (!f || f.kind !== 'forecast') return null;
-	let from = -1;
-	for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'nowcast') from = j;
-	if (from < 0) for (let j = 0; j < frames.length; j++) if (frames[j].kind === 'radar') from = j;
-	if (from < 0 || f.t <= frames[from].t) return null;
-	const weight = 1 - (f.t - frames[from].t) / HANDOVER_S;
-	return weight > 0 ? { from, weight } : null;
-}
+export const dataUrl = (f: { data?: string }) => `/api/precip/${f.data}`;
 
 /** How long a frame stays on screen while playing, by the time to the next one: quick
  *  through 6- and 12-minute radar, slower through hourly and 3- and 6-hourly forecast,

@@ -140,7 +140,8 @@ export function asFrame(f: LayerFrame): Frame {
 		south: f.src.south ?? '',
 		kind: past ? 'radar' : 'forecast',
 		span_h: 0,
-		src: f.src
+		src: f.src,
+		valid: f.t
 	};
 }
 

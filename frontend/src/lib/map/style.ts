@@ -78,6 +78,21 @@ export function weatherOpacity(w: string): ExpressionSpecification {
 	return FIELD_OPACITY;
 }
 
+/** An opacity-by-zoom ramp's value at a zoom (a layer we draw ourselves needs the number). */
+export function opacityAt(opacity: ExpressionSpecification, zoom: number): number {
+	const e = opacity as unknown[];
+	if (e[0] !== 'interpolate') return typeof opacity === 'number' ? opacity : 1;
+	const stops = e.slice(3) as number[];
+	if (zoom <= stops[0]) return stops[1];
+	for (let i = 2; i < stops.length; i += 2) {
+		if (zoom <= stops[i]) {
+			const f = (zoom - stops[i - 2]) / (stops[i] - stops[i - 2]);
+			return stops[i - 1] + (stops[i + 1] - stops[i - 1]) * f;
+		}
+	}
+	return stops[stops.length - 1];
+}
+
 /**
  * The zoom where an opacity-by-zoom ramp reaches 0 for good, as a layer's maxzoom: past
  * it the layer is invisible, so MapLibre needn't draw it or keep its tiles. 24 (no limit)

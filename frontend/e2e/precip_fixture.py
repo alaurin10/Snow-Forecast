@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from snowwatch.maps import dataframe
 from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index
 from snowwatch.maps.region import WEST, box_region
 
@@ -25,9 +26,10 @@ NOWCAST = 3
 FORECAST = 24  # hourly
 
 
-def picture(region, step: int) -> bytes:
+def picture(region, step: int, ds: int) -> tuple[bytes, bytes]:
     """Two bands of precipitation and a cell, moved a little east each step, drawn the way
-    the server draws frames (palette.fine_index on the fine palette)."""
+    the server draws frames: a picture on the fine palette, and the numbers (dataframe.py)
+    at 1/ds of the grid."""
     h, w = region.height, region.width
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     dx = step * 9.0
@@ -37,7 +39,7 @@ def picture(region, step: int) -> bytes:
     cell = np.exp(-((xs - 1200 - dx) ** 2 + (ys - 500) ** 2) / (2 * 120.0**2))
     rate = (np.clip(band1 + 0.8 * band2 + cell, 0, 1) ** 2 * 6).astype(np.float32)  # mm/h
     kind = np.where(ys < 900, SNOW_T, RAIN_T).astype(np.uint8)  # north: snow, south: rain
-    return encode_fine(fine_index(rate, kind))
+    return encode_fine(fine_index(rate, kind)), dataframe.encode(rate, kind, ds)
 
 
 def main(out: Path) -> None:
@@ -51,10 +53,13 @@ def main(out: Path) -> None:
         + [("forecast", now // 3600 * 3600 + (i + 1) * 3600, 1) for i in range(FORECAST)]
     )
     for step, (kind, t, span) in enumerate(times):
-        data = picture(region, step)
+        ds = 2 if kind == "forecast" else 1
+        data, numbers = picture(region, step, ds)
         prefix = {"radar": "r", "nowcast": "n", "forecast": "f"}[kind]
         name = f"{prefix}{t}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         (out / name).write_bytes(data)
+        data_name = f"{prefix}{t}-{hashlib.sha1(numbers).hexdigest()[:12]}.{dataframe.EXT}"
+        (out / data_name).write_bytes(numbers)
         src = {"north": "hrdps", "south": "hrrr"} if kind == "forecast" else {}
         frames.append(
             {
@@ -67,10 +72,13 @@ def main(out: Path) -> None:
                 "span_h": span,
                 "src": src,
                 "palette": "fine",
+                "data": data_name,
+                "ds": ds,
+                "valid": t - 1800 if kind == "forecast" else t,
             }
         )
     index = {
-        "version": 2,
+        "version": 3,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "region": region.key,
         "bounds": region.bounds,
