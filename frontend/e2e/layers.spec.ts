@@ -317,3 +317,31 @@ test('phones: a swipe down puts the Layers sheet away; a short one does not', as
 	await swipe('.body', 160, 6);
 	await expect(sheet).toHaveCount(0);
 });
+
+test('the snow total is picked on a slider that stops at each window', async ({ page }) => {
+	// The e2e server has totals for 12 h, 24 h, 3 days and 10 days (e2e/precip_fixture.py),
+	// more snow over a wider area the longer the window.
+	await page.route('**/api/tiles/**', (r) => r.abort());
+	await page.addInitScript(() => localStorage.setItem('sw.mapWeather', 'totals'));
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	const slider = page.getByRole('slider', { name: 'Snow total window' });
+	await expect(slider).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByRole('group', { name: 'Window' })).toHaveCount(0);
+	const controls = page.getByRole('region', { name: 'Precipitation' });
+	const canvas = page.locator('canvas.maplibregl-canvas');
+	const shot = async () => {
+		await page.waitForTimeout(1200);
+		return canvas.screenshot();
+	};
+	await slider.fill('0');
+	await expect(controls).toContainText('Next 12 hours');
+	const short = await shot();
+	// The arrow keys step a window at a time.
+	await slider.focus();
+	await page.keyboard.press('ArrowRight');
+	await expect(controls).toContainText('Next 24 hours');
+	await slider.fill('3');
+	await expect(controls).toContainText('Next 10 days');
+	await expect(slider).toHaveAttribute('aria-valuetext', /^Next 10 days, /);
+	expect((await shot()).equals(short)).toBe(false);
+});

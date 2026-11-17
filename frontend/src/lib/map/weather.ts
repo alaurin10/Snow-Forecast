@@ -101,6 +101,10 @@ export interface Pick {
 	sources: string;
 	/** Snow totals: the terrain-adjusted tiles' URL template, when there are some. */
 	tiles?: string | null;
+	/** Snow totals: when the window ends ("to Fri 4 PM"). */
+	until?: string;
+	/** Snow totals: the slider's tick under this window ("12h", "3d"). */
+	tick?: string;
 }
 
 export interface WeatherView {
@@ -162,7 +166,9 @@ function picks(tl: Timeline, weather: MapWeather): Pick[] {
 			file: t.file,
 			span: totalSpan(t),
 			sources: totalSources(t),
-			tiles: t.tiles ?? null
+			tiles: t.tiles ?? null,
+			until: `to ${dayHour(t.end)}`,
+			tick: t.window < 48 ? `${t.window}h` : `${Math.round(t.window / 24)}d`
 		}));
 	}
 	if (weather === 'depth') {
