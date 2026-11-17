@@ -400,13 +400,16 @@
 	const span = $derived(N * STEP[R]);
 	const i0 = $derived(steps[0]?.i0 ?? 0);
 	const pos = (i: number) => (i - i0) / span;
-	const midnights = $derived.by(() => {
-		let p = '';
+	// Day boundaries, as fractions of the width. The plot, the lower panel and the date
+	// axis all draw them at the same spots, so a day reads as one column top to bottom.
+	const dayEdges = $derived.by(() => {
+		const out: number[] = [];
 		for (let i = i0 + 1; i < i0 + span; i++)
-			if (band.hourly.t[i] && hourOf(band.hourly.t[i]) === 0)
-				p += `M${(pos(i) * 1000).toFixed(1)} 0V${H}`;
-		return p;
+			if (band.hourly.t[i] && hourOf(band.hourly.t[i]) === 0) out.push(pos(i));
+		return out;
 	});
+	const midnights = $derived(dayEdges.map((f) => `M${(f * 1000).toFixed(1)} 0V${H}`).join(''));
+	const midnightsLow = $derived(dayEdges.map((f) => `M${(f * 1000).toFixed(1)} 0V100`).join(''));
 	// Reference lines (freezing; this location's elevations) and their labels. Each label
 	// tries its full name, then a short name, then the elevation alone, and keeps the longest
 	// that fits beside its line (just above or below it) in a spot the data line stays clear
@@ -1162,6 +1165,7 @@
 			<svg viewBox="0 0 1000 100" preserveAspectRatio="none">
 				<path d={lower.shade} class="night" />
 				<path d="M0 50H1000M0 0H1000" class="grid" />
+				<path d={midnightsLow} class="midnight" />
 				<path d={lower.cloud} class="cloudarea" />
 				<path d={lower.pop} class="popbars" />
 			</svg>
@@ -1169,12 +1173,19 @@
 		</div>
 		<div class="yaxis right lowaxis"></div>
 	</div>
+	<!-- The date axis sits in the same row layout as the plot and the lower panel (the
+	     same scale columns either side), so every date lines up with the bars above it. -->
 	<div class="xaxis">
-		{#each xlabels as x (x.left)}
-			<span style:left={x.left} class:strong={x.strong} class:minor={x.minor}
-				>{x.name}<small>{x.sub}</small></span
-			>
-		{/each}
+		<div class="yaxis left xspace"></div>
+		<div class="xticks">
+			{#each dayEdges as f (f)}<i class="xtick" style:left="{(f * 100).toFixed(2)}%"></i>{/each}
+			{#each xlabels as x (x.left)}
+				<span style:left={x.left} class:strong={x.strong} class:minor={x.minor}
+					>{x.name}<small>{x.sub}</small></span
+				>
+			{/each}
+		</div>
+		<div class="yaxis right xspace"></div>
 	</div>
 	{#if showTimeline && timeline}
 		<div class="tl">
@@ -1607,11 +1618,7 @@
 		}
 	}
 	.fc.fullscreen.phone .lower .yaxis {
-		display: block;
-		width: 38px;
-	}
-	.fc.fullscreen.phone .lower .yaxis.right {
-		width: 24px;
+		visibility: visible;
 	}
 	.lowcap {
 		display: flex;
@@ -2155,9 +2162,26 @@
 		border-color: var(--level);
 	}
 	.xaxis {
-		position: relative;
+		display: flex;
+		gap: 8px;
 		height: 32px;
-		margin: -6px 42px 0 54px;
+		margin-top: -6px;
+	}
+	.yaxis.xspace {
+		height: auto;
+	}
+	.xticks {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+	}
+	/* A short tick under each day boundary, continuing the plot's midnight lines. */
+	.xtick {
+		position: absolute;
+		top: 0;
+		width: 1px;
+		height: 6px;
+		background: var(--border);
 	}
 	.xaxis span {
 		position: absolute;
@@ -2281,9 +2305,11 @@
 	.fc.phone .tlday small {
 		font-size: 0.68rem;
 	}
+	/* The lower panel's scale is left out on phones, but its columns keep their width so
+	   the panel spans exactly the plot's width and both cursors line up. */
 	.fc.phone .yaxis.lowaxis,
 	.fc.phone .lower .yaxis {
-		display: none;
+		visibility: hidden;
 	}
 	.fc.phone .lplot,
 	.fc.phone .yaxis.lowaxis {
@@ -2601,9 +2627,6 @@
 		}
 		.yaxis.right {
 			width: 24px;
-		}
-		.xaxis {
-			margin: -6px 32px 0 46px;
 		}
 		.readout span {
 			display: none;
