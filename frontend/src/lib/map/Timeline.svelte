@@ -3,7 +3,8 @@
   row of types above it, or in Layers): for the loops,
   a player and a slider (radar from three hours ago, through the nowcast, to ten days out;
   snow level and wind to three and a half days; clouds over the last three hours); for the
-  others, a window picker; and the colour key for whichever is showing.
+  snow total, a slider that stops at each window (12 hours to 10 days); for the others, a
+  window picker; and the colour key for whichever is showing.
 -->
 <script lang="ts">
 	import { elevation, type UnitSystem } from '../units';
@@ -166,7 +167,39 @@
 	<!-- Fixed rows, so the box keeps its size whatever it shows. -->
 	<div class="main">
 		{#if view.mode === 'pick'}
-			{#if pick}
+			{#if pick && weather === 'totals' && view.picks.length > 1}
+				{@const at = Math.max(
+					0,
+					view.picks.findIndex((p) => p.id === pick.id)
+				)}
+				{@const last = view.picks.length - 1}
+				<div class="player">
+					<div class="track">
+						<input
+							type="range"
+							min="0"
+							max={last}
+							step="1"
+							value={at}
+							oninput={(e) => (pickId = view.picks[Number(e.currentTarget.value)].id)}
+							aria-label="Snow total window"
+							aria-valuetext="{pick.name}, {pick.span}"
+						/>
+						<div class="ticks" aria-hidden="true">
+							{#each view.picks as p, i (p.id)}
+								<span class:now={i === at} style:left="{(i / last) * 100}%">{p.tick}</span>
+							{/each}
+						</div>
+					</div>
+					<div class="time" title={adjusted ? `${TERRAIN_NOTE} ${pick.sources}` : pick.sources}>
+						<strong class="num"
+							>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{pick.name}</strong
+						>
+						<span>{pick.until ?? pick.span}</span>
+						{#if adjusted}<span class="adj">adjusted to terrain</span>{/if}
+					</div>
+				</div>
+			{:else if pick}
 				<div class="totals">
 					{#if view.picks.length > 1}
 						<div class="seg" role="group" aria-label="Window">

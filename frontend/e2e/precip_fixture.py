@@ -1,7 +1,8 @@
 """Precipitation frames for the e2e server (e2e/serve.sh), so the map's timeline has
 something to play: radar for the past two hours, a short nowcast and a day of hourly
 forecast, at the real picture size over the real box, with bands of rain and snow that
-drift east. Written fresh each run (no binaries in git).
+drift east; and snow totals for a few windows, more snow over a wider area the longer
+the window. Written fresh each run (no binaries in git).
 
     uv run --frozen python ../frontend/e2e/precip_fixture.py <data>/precip
 """
@@ -9,15 +10,17 @@ drift east. Written fresh each run (no binaries in git).
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from snowwatch.maps import dataframe
-from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index
+from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index, paint_total
 from snowwatch.maps.region import WEST, box_region
 
 WIDTH = 1700  # config/forecast.yaml map.width
@@ -82,6 +85,29 @@ def main(out: Path) -> None:
                 "valid": t - 1800 if kind == "forecast" else t,
             }
         )
+    totals = []
+    h, w = region.height, region.width
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    start = now // 3600 * 3600
+    for window in (12, 24, 72, 240):
+        reach = 150 + window * 3.0
+        cm = (window / 2) * np.exp(-((xs - 700) ** 2 + (ys - 900) ** 2) / (2 * reach**2))
+        buf = io.BytesIO()
+        Image.fromarray(paint_total(cm.astype(np.float32)), "RGBA").save(buf, "PNG")
+        png = buf.getvalue()
+        name = f"t{window}-{hashlib.sha1(png).hexdigest()[:12]}.png"
+        (out / name).write_bytes(png)
+        totals.append(
+            {
+                "hours": window,
+                "window": window,
+                "start": start,
+                "end": start + window * 3600,
+                "file": name,
+                "key": name,
+                "source": "hrdps+nbm",
+            }
+        )
     index = {
         "version": 3,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -91,7 +117,7 @@ def main(out: Path) -> None:
         "height": region.height,
         "now": frames[RADAR - 1]["t"],
         "frames": frames,
-        "totals": [],
+        "totals": totals,
         "layers": {},
         "attribution": [],
     }
