@@ -318,6 +318,26 @@ test('phones: a swipe down puts the Layers sheet away; a short one does not', as
 	await expect(sheet).toHaveCount(0);
 });
 
+test('the forecast chart, its lower panel and its date axis share one time axis', async ({
+	page
+}) => {
+	await page.goto('/location/whistler', { waitUntil: 'networkidle' });
+	const fc = page.locator('.fc').first();
+	await fc.scrollIntoViewIfNeeded();
+	const plot = (await fc.locator('.plot').boundingBox())!;
+	const low = (await fc.locator('.lplot').boundingBox())!;
+	const dates = (await fc.locator('.xticks').boundingBox())!;
+	for (const b of [low, dates]) {
+		expect(Math.abs(b.x - plot.x)).toBeLessThan(1);
+		expect(Math.abs(b.width - plot.width)).toBeLessThan(1);
+	}
+	// Reading a time puts the cursor at the same spot in the plot and the lower panel.
+	await page.mouse.move(plot.x + plot.width * 0.4, plot.y + plot.height / 2);
+	const c1 = (await fc.locator('.plot .cursor').boundingBox())!;
+	const c2 = (await fc.locator('.lplot .cursor').boundingBox())!;
+	expect(Math.abs(c1.x - c2.x)).toBeLessThan(1);
+});
+
 test('the snow total is picked on a slider that stops at each window', async ({ page }) => {
 	// The e2e server has totals for 12 h, 24 h, 3 days and 10 days (e2e/precip_fixture.py),
 	// more snow over a wider area the longer the window.
