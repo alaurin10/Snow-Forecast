@@ -385,6 +385,7 @@ export interface PointOut {
 	roses: RoseOut[];
 	snow_level: PointValue[];
 	totals: PointTotal[];
+	wide?: boolean;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -421,6 +422,7 @@ export interface PointObserved {
  * via the `definition` "PointRate".
  */
 export interface PointRate {
+	filled?: boolean;
 	high: number | null;
 	kind: string;
 	low: number | null;

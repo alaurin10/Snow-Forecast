@@ -465,6 +465,50 @@ def test_point_reads_fine_frames_as_drawn(tmp_path: Path) -> None:
     ]
 
 
+def test_point_beyond_the_box_reads_the_wide_radar(tmp_path: Path) -> None:
+    """Outside the box a tap reads the wide loop (radar and nowcast), at the wide loop's
+    own pixel: its probes keep every pixel, and the step is read from their size."""
+    index, out, totals_dir = point_index(tmp_path)
+    wide_region = box_region(15, -170, 72, -50, 120)
+    wide_dir = tmp_path / "wide"
+    r = Renderer(wide_dir, Net.__new__(Net), now=lambda: NOW, probe_step=1)
+    shape = (wide_region.height, wide_region.width)
+    amount = np.zeros(shape, np.float32)
+    kind = np.full(shape, PSNOW, np.uint8)
+    # Snow over one ~50 km patch round Anchorage only.
+    lons, lats = wide_region.lonlats()
+    near = (np.abs(lats - 61.2) < 0.4)[:, None] & (np.abs(lons + 149.9) < 0.8)[None, :]
+    amount[near] = 1.5
+    snowy = r._save_precip(amount, kind, "r1")[0]
+    top = NOW - NOW % H
+    base = {"past": True, "south": "", "key": "k", "src": {}, "palette": "fine", "span_h": 0}
+    wide = {
+        "bounds": wide_region.bounds,
+        "width": wide_region.width,
+        "height": wide_region.height,
+        "frames": [
+            {**base, "t": top - 600, "file": snowy, "kind": "radar"},
+            {**base, "t": top, "file": snowy, "kind": "nowcast", "past": False},
+        ],
+    }
+    assert np.load(wide_dir / "probe" / f"{snowy}.npy").shape == shape
+    bc = BackcountryConfig()
+    anchorage = point.probe(index, out, totals_dir, 61.2, -149.9, NOW, bc, (wide, wide_dir))
+    assert not anchorage.inside and anchorage.wide
+    assert [(x.kind, x.type, x.low) for x in anchorage.rates] == [
+        ("radar", "snow", 1.0),
+        ("nowcast", "snow", 1.0),
+    ]
+    assert anchorage.totals == [] and anchorage.snow_level == []
+    # A few hundred km away it's dry, not the patch's snow (a coarse probe would smear it).
+    fairbanks = point.probe(index, out, totals_dir, 64.8, -147.7, NOW, bc, (wide, wide_dir))
+    assert fairbanks.wide and all(x.type is None for x in fairbanks.rates)
+    # Inside the box the box's own frames answer; beyond both, nothing.
+    assert point.probe(index, out, totals_dir, 49.0, -118.0, NOW, bc, (wide, wide_dir)).inside
+    gone = point.probe(index, out, totals_dir, 5.0, 100.0, NOW, bc, (wide, wide_dir))
+    assert not gone.inside and not gone.wide and gone.rates == []
+
+
 def test_point_api(tmp_path: Path, settings: Settings) -> None:
     client = TestClient(create_app(settings))
     assert client.get("/api/map/point?lat=49&lon=-118").status_code == 503
@@ -480,6 +524,15 @@ def test_point_api(tmp_path: Path, settings: Settings) -> None:
     body = r.json()
     assert body["inside"] and body["totals"][0]["cm"] == 12.0 and len(body["rates"]) == 3
     assert body["min_snow_cm"] == 2.0
+    # Beyond the box: the wide loop's index answers once it's there.
+    assert not client.get("/api/map/point?lat=61.2&lon=-149.9").json()["wide"]
+    wide = box_region(15, -170, 72, -50, 120)
+    (settings.precip_dir / "wide").mkdir()
+    (settings.precip_dir / "wide" / "index.json").write_text(
+        json.dumps({"bounds": wide.bounds, "width": wide.width, "height": wide.height})
+    )
+    far = client.get("/api/map/point?lat=61.2&lon=-149.9").json()
+    assert far["wide"] and not far["inside"] and far["rates"] == []
     # Layer pictures are served like frames, WebP included.
     (settings.precip_dir / "c123-0123456789ab.webp").write_bytes(b"RIFF")
     got = client.get("/api/precip/c123-0123456789ab.webp")

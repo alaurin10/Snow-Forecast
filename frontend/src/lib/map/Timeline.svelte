@@ -322,6 +322,11 @@
 						<span class="top">{rampTop(r, units)}</span>
 					</span>
 				{/each}
+				{#if prefs.mapRadarGaps === 'on' && current?.kind !== 'forecast'}
+					<span class="kind" title="Where no radar sees, the forecast fills in">
+						<i class="sw gapsw" aria-hidden="true"></i>no radar
+					</span>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -375,6 +380,14 @@
 	}
 	.sw.snowy {
 		background: rgb(240 247 255);
+	}
+	/* The map's hatching for what the forecast filled in where radar is blind. */
+	.sw.gapsw {
+		background: repeating-linear-gradient(
+			-45deg,
+			rgb(120 170 230 / 0.85) 0 2px,
+			rgb(120 170 230 / 0.4) 2px 4px
+		);
 	}
 	.sw.mixy {
 		background: rgb(244 166 198);

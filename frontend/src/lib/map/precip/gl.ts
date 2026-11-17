@@ -43,6 +43,8 @@ uniform float u_mix;     // 0: frame a, 1: frame b
 uniform float u_opacity;
 uniform vec3 u_draw;     // code drawn from, code at full strength, strength at the first
 uniform vec4 u_hole;     // a box (uv x0, y0, x1, y1) left undrawn: another layer draws it
+uniform float u_gaps;    // 1: show what the forecast filled in where radar is blind; 0: leave it out
+uniform float u_hatch;   // the hatching's period, in drawn pixels
 out vec4 o_color;
 
 // The rate code at uv, smoothed with a cubic B-spline over the 4x4 texels round it:
@@ -88,11 +90,11 @@ void main() {
 
 	// The type with the largest share of the water, the frame with more water counting
 	// for more as one hands to the next.
-	vec2 ta = texture(u_type_a, v_uv * u_tspan_a).rg;
-	vec2 tb = texture(u_type_b, v_uv * u_tspan_b).rg;
+	vec3 ta = texture(u_type_a, v_uv * u_tspan_a).rgb;
+	vec3 tb = texture(u_type_b, v_uv * u_tspan_b).rgb;
 	float wa = (1.0 - u_mix) * (a + 1.0);
 	float wb = u_mix * (b + 1.0);
-	vec2 t = (ta * wa + tb * wb) / (wa + wb);
+	vec3 t = (ta * wa + tb * wb) / (wa + wb);
 	float snow = t.r;
 	float mixed = t.g;
 	float rain = max(0.0, 1.0 - snow - mixed);
@@ -104,7 +106,14 @@ void main() {
 		? (ws * ramp(code, 0.0) + wm * ramp(code, 1.0) + wr * ramp(code, 2.0)) / sum
 		: ramp(code, 2.0);
 
-	float alpha = cover * strength * u_opacity;
+	// Where the forecast filled in what no radar sees (a texture without the plane reads
+	// 0): lighter, with fine diagonal hatching so it doesn't pass for an echo; or, with
+	// the gaps left unfilled, only the part radar saw.
+	float filled = t.b;
+	float hatch = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / u_hatch));
+	float gap = u_gaps > 0.5 ? mix(1.0, mix(0.45, 0.8, hatch), filled) : 1.0 - filled;
+	float alpha = cover * strength * u_opacity * gap;
+	if (alpha <= 0.0) discard;
 	o_color = vec4(rgb * alpha, alpha);  // premultiplied, as the map blends
 }`;
 
@@ -136,7 +145,9 @@ const UNIFORMS = [
 	'u_mix',
 	'u_opacity',
 	'u_draw',
-	'u_hole'
+	'u_hole',
+	'u_gaps',
+	'u_hatch'
 ] as const;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -243,14 +254,16 @@ export class PrecipGl {
 		this.filter(gl.LINEAR);
 		const type = gl.createTexture()!;
 		gl.bindTexture(gl.TEXTURE_2D, type);
+		// With a "filled in" plane: three channels (the shader reads 0 for a missing one).
+		const three = p.typeChannels === 3;
 		gl.texImage2D(
 			gl.TEXTURE_2D,
 			0,
-			gl.RG8,
+			three ? gl.RGB8 : gl.RG8,
 			p.typeWidth,
 			p.typeHeight,
 			0,
-			gl.RG,
+			three ? gl.RGB : gl.RG,
 			gl.UNSIGNED_BYTE,
 			p.type
 		);
@@ -282,7 +295,17 @@ export class PrecipGl {
 	 * Draw frames `a` and `b` mixed (`mix` 0: all `a`) with `matrix` taking the box (0..1,
 	 * x east, y south) to clip space. Blending is left as the caller set it (premultiplied).
 	 */
-	draw(matrix: Float32Array | number[], a: FrameTex, b: FrameTex, mix: number, opacity: number) {
+	draw(
+		matrix: Float32Array | number[],
+		a: FrameTex,
+		b: FrameTex,
+		mix: number,
+		opacity: number,
+		/** Show the forecast where radar is blind (hatched), or leave it out. */
+		gaps = true,
+		/** The hatching's period in drawn pixels (the screen's, or a terrain tile's). */
+		hatch = 8
+	) {
 		const gl = this.gl;
 		const u = this.loc;
 		gl.useProgram(this.program);
@@ -309,6 +332,8 @@ export class PrecipGl {
 		gl.uniform1f(u.u_opacity, opacity);
 		gl.uniform3f(u.u_draw, CODE_FROM, CODE_SOLID, ALPHA_FROM);
 		gl.uniform4f(u.u_hole, ...this.hole);
+		gl.uniform1f(u.u_gaps, gaps ? 1 : 0);
+		gl.uniform1f(u.u_hatch, hatch);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		gl.bindVertexArray(null);
 		gl.activeTexture(gl.TEXTURE0);

@@ -4,7 +4,9 @@
 // RATE_MAX mm of water an hour) and two type planes at a quarter of the region's
 // resolution: the share of the precipitation that is snow, and the share that is mixed or
 // freezing (rain is the rest). The type planes are filled across dry ground, so
-// interpolating at an echo's edge never mixes in "no type".
+// interpolating at an echo's edge never mixes in "no type". A radar or nowcast frame may
+// have a third plane at that resolution: the share of the water the forecast filled in
+// where no radar sees (backend/snowwatch/maps/coverage.py), drawn lighter and hatched.
 //
 // The file is a gzip stream of a 16-byte header and the planes, each row stored as
 // differences from the row above. Nothing here touches an image decoder: the bytes that
@@ -39,8 +41,10 @@ export interface Planes {
 	rate: Uint8Array;
 	width: number;
 	height: number;
-	/** Snow and mix shares interleaved (two bytes a pixel), `typeWidth` × `typeHeight`. */
+	/** Snow and mix shares interleaved (two bytes a pixel), `typeWidth` × `typeHeight`;
+	 *  three bytes a pixel when the frame says what was filled in (`typeChannels`). */
 	type: Uint8Array;
+	typeChannels: 2 | 3;
 	typeWidth: number;
 	typeHeight: number;
 	/** Region pixels per rate pixel. */
@@ -66,20 +70,20 @@ export function parse(raw: Uint8Array): Planes | null {
 	const planes = raw[13];
 	const n = width * height;
 	const tn = typeWidth * typeHeight;
-	if (!ds || planes !== 2 || !n || !tn || raw.length !== HEADER_BYTES + n + 2 * tn) return null;
+	if (!ds || (planes !== 2 && planes !== 3) || !n || !tn) return null;
+	if (raw.length !== HEADER_BYTES + n + planes * tn) return null;
 	// Copies: the planes outlive `raw`, and are handed to another thread.
 	const rate = raw.slice(HEADER_BYTES, HEADER_BYTES + n);
 	unfilter(rate, width, height);
-	const snow = raw.slice(HEADER_BYTES + n, HEADER_BYTES + n + tn);
-	const mix = raw.slice(HEADER_BYTES + n + tn);
-	unfilter(snow, typeWidth, typeHeight);
-	unfilter(mix, typeWidth, typeHeight);
-	const type = new Uint8Array(2 * tn);
-	for (let i = 0; i < tn; i++) {
-		type[2 * i] = snow[i];
-		type[2 * i + 1] = mix[i];
+	const typeChannels = planes as 2 | 3;
+	const type = new Uint8Array(typeChannels * tn);
+	for (let k = 0; k < typeChannels; k++) {
+		const start = HEADER_BYTES + n + k * tn;
+		const plane = raw.slice(start, start + tn);
+		unfilter(plane, typeWidth, typeHeight);
+		for (let i = 0; i < tn; i++) type[typeChannels * i + k] = plane[i];
 	}
-	return { rate, width, height, type, typeWidth, typeHeight, ds };
+	return { rate, width, height, type, typeWidth, typeHeight, typeChannels, ds };
 }
 
 /**

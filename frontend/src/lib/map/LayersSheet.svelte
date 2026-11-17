@@ -301,6 +301,20 @@
 			<div class="shead">
 				<h4 class="eyebrow">Weather</h4>
 				{@render infoButton('weather', 'the weather layers')}
+				{#if prefs.mapWeather === 'radar'}
+					<div class="seg shade" role="group" aria-label="Where no radar sees">
+						<button
+							aria-pressed={prefs.mapRadarGaps === 'on'}
+							title="Fill radar's blind spots from the forecast, hatched"
+							onclick={() => prefs.setMapRadarGaps(true)}>Fill gaps</button
+						>
+						<button
+							aria-pressed={prefs.mapRadarGaps === 'off'}
+							title="Show only what radar sees"
+							onclick={() => prefs.setMapRadarGaps(false)}>Radar only</button
+						>
+					</div>
+				{/if}
 			</div>
 			<div class="mp-tiles" role="group" aria-label="Weather">
 				{#each WEATHER as w (w.id)}
@@ -313,7 +327,11 @@
 				{/each}
 			</div>
 			{#if info.weather}
-				<p class="about">{aboutOf(WEATHER, prefs.mapWeather)} One at a time.</p>
+				<p class="about">
+					{aboutOf(WEATHER, prefs.mapWeather)} One at a time.{#if prefs.mapWeather === 'radar'}
+						Where no radar sees the ground (behind ridges, high over far valleys, out of range) the
+						forecast fills in, lighter and hatched.{/if}
+				</p>
 			{/if}
 		</section>
 

@@ -9,6 +9,9 @@ A frame is a few byte planes:
          colours, so an echo's edge runs smoothly through the light rates.
   snow   the share of the precipitation that is snow, 0..255, at a quarter of the region's
   mix    resolution; likewise the share that is mixed or freezing. Rain is the rest.
+  filled (radar and nowcast frames only, when there is any) the share of the water that
+         the forecast filled in where no radar sees (coverage.py), 0..255, at the type
+         planes' resolution: the map draws it lighter and hatched, or leaves it out.
 
 The type planes are *filled across dry ground* from the nearest precipitation: at an
 echo's edge the map interpolates between a wet pixel and a dry one, and a dry pixel that
@@ -24,7 +27,7 @@ and the planes, each row stored as differences from the row above (smooth fields
 to a fraction that way).
 
     b"SWF1"  u16 rate width  u16 rate height  u16 type width  u16 type height
-    u8 ds    u8 type planes (2)    2 bytes spare        (little-endian)
+    u8 ds    u8 type planes (2, or 3 with `filled`)    2 bytes spare     (little-endian)
 
 Nothing here goes through an image decoder: bytes in, bytes out.
 """
@@ -180,19 +183,38 @@ class DataFrame:
     snow: np.ndarray  # share 0..255, (th, tw)
     mix: np.ndarray
     ds: int  # region pixels per rate pixel
+    filled: np.ndarray | None = None  # share 0..255 at the type planes' size, if any
 
     def rates(self) -> np.ndarray:
         return code_rates(self.rate)
 
 
-def encode(amount: np.ndarray, kind: np.ndarray, ds: int = 1) -> bytes:
+def filled_plane(filled: np.ndarray) -> np.ndarray:
+    """The share filled in (0..1 on the region's grid) at the type planes' resolution,
+    0..255."""
+    share = _blocks(np.nan_to_num(filled, nan=0.0).astype(np.float32), TYPE_DS).mean(-1)
+    out: np.ndarray = np.clip(np.rint(share * 255), 0, 255).astype(np.uint8)
+    return out
+
+
+def encode(
+    amount: np.ndarray, kind: np.ndarray, ds: int = 1, filled: np.ndarray | None = None
+) -> bytes:
     """A frame's file from rates (mm of water an hour) and type codes on the region's
-    grid, the rate kept at 1/ds of that grid."""
+    grid, the rate kept at 1/ds of that grid; with `filled` (0..1, the share of the
+    water the forecast filled in) as a third plane if any of it is."""
     rate = rate_codes(downsample(amount, ds))
     snow, mix = type_shares(kind)
-    head = HEADER.pack(MAGIC, rate.shape[1], rate.shape[0], snow.shape[1], snow.shape[0], ds, 2, 0)
+    planes = [snow, mix]
+    if filled is not None:
+        f = filled_plane(filled)
+        if f.any():
+            planes.append(f)
+    th, tw = snow.shape
+    head = HEADER.pack(MAGIC, rate.shape[1], rate.shape[0], tw, th, ds, len(planes), 0)
+    body = head + _filter(rate) + b"".join(_filter(p) for p in planes)
     # mtime 0: the same frame is the same bytes, so its name (a hash) doesn't change.
-    return gzip.compress(head + _filter(rate) + _filter(snow) + _filter(mix), 9, mtime=0)
+    return gzip.compress(body, 9, mtime=0)
 
 
 def decode(data: bytes) -> DataFrame | None:
@@ -204,17 +226,18 @@ def decode(data: bytes) -> DataFrame | None:
     if len(raw) < HEADER.size:
         return None
     magic, w, h, tw, th, ds, planes, _ = HEADER.unpack_from(raw)
-    if magic != MAGIC or planes != 2 or not ds:
+    if magic != MAGIC or planes not in (2, 3) or not ds:
         return None
     raw = raw[HEADER.size :]
     n, tn = w * h, tw * th
-    if len(raw) != n + 2 * tn:
+    if len(raw) != n + planes * tn:
         return None
     return DataFrame(
         _unfilter(raw[:n], h, w),
         _unfilter(raw[n : n + tn], th, tw),
-        _unfilter(raw[n + tn :], th, tw),
+        _unfilter(raw[n + tn : n + 2 * tn], th, tw),
         ds,
+        _unfilter(raw[n + 2 * tn :], th, tw) if planes == 3 else None,
     )
 
 

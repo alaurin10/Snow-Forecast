@@ -25,6 +25,7 @@
 	import { CONCERN_CLASSES, type ConcernFactors } from './terrain/concern';
 	import type { PointOut } from '../types.gen';
 	import { RAMPS, type PrecipKind } from '../radar';
+	import { radarNow, type RadarNow } from './radarnow';
 	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
 	import { elevationLadder, snowAtElevation, TERRAIN_NOTE } from './layers/snowtiles';
 	import { areaText } from './here';
@@ -136,6 +137,9 @@
 				: `${sun.hours.toFixed(1)} h`
 			: ''
 	);
+	/** What the latest radar scan shows at the spot (inside the box, or the wide loop's
+	 *  beyond it). */
+	const radar = $derived(point ? radarNow(point.rates, (t) => clock(t * 1000)) : null);
 	/** The weather numbers worth showing at the spot, or null outside the map's box. */
 	const wx = $derived.by(() => {
 		if (!point || !point.inside) return null;
@@ -198,6 +202,17 @@
 	});
 	const avySection = $derived(land && (!!avy || !!ates || (!!concern && concern.base != null)));
 </script>
+
+{#snippet radarRow(r: RadarNow)}
+	<div>
+		<dt>Radar now</dt>
+		<dd>
+			{r.now}{#if r.filled}<span class="faint" title="No radar sees the ground well here">
+					· from the forecast</span
+				>{/if}{#if r.change}<span class="faint"> · {r.change}</span>{/if}
+		</dd>
+	</div>
+{/snippet}
 
 <div class="insp">
 	<section aria-label="Terrain">
@@ -308,6 +323,11 @@
 			</dl>
 		{:else if pointState === 'failed'}
 			<p class="faint msg">The weather here couldn't be loaded.</p>
+		{:else if !wx && point?.wide && radar}
+			<dl class="mp-kv">
+				{@render radarRow(radar)}
+			</dl>
+			<p class="faint msg">Beyond the forecast's area: radar only.</p>
 		{:else if !wx}
 			<p class="faint msg">Outside the area the map's weather covers.</p>
 		{:else}
@@ -353,6 +373,7 @@
 				</div>
 			{/if}
 			<dl class="mp-kv">
+				{#if radar}{@render radarRow(radar)}{/if}
 				{#if wx.level != null}
 					<div>
 						<dt>Snow level</dt>

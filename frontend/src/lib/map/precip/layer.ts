@@ -42,6 +42,8 @@ export interface RadarOptions {
 	id?: string;
 	/** A box ([[south, west], [north, east]]) left undrawn: another layer draws it. */
 	hole?: [[number, number], [number, number]];
+	/** Show the forecast where no radar sees, hatched (default), or leave it out. */
+	gaps?: boolean;
 	/** Frames arrived, or what is drawn changed: the controls may want to look again. */
 	onChange?: () => void;
 	/** For tests. */
@@ -209,6 +211,13 @@ export class RadarLayer {
 		const [[s, w], [n, e]] = h;
 		const { x0, y0, dx, dy } = this.box;
 		return [(mercX(w) - x0) / dx, (mercY(n) - y0) / dy, (mercX(e) - x0) / dx, (mercY(s) - y0) / dy];
+	}
+
+	/** Show the forecast where no radar sees (hatched), or only what radar saw. */
+	setGaps(on: boolean) {
+		if ((this.opts.gaps ?? true) === on) return;
+		this.opts.gaps = on;
+		this.changed(true);
 	}
 
 	setOpacity(opacity: (zoom: number) => number) {
@@ -407,7 +416,9 @@ export class RadarLayer {
 			out[8 + r] = m[8 + r];
 			out[12 + r] = m[r] * x0 + m[4 + r] * y0 + m[12 + r];
 		}
-		this.gfx.draw(out, p.a, p.b, p.f, this.opts.opacity(this.map.getZoom()));
+		// Hatching about 6 px apart on screen, whatever the pixel density.
+		const hatch = 6 * (this.map.getPixelRatio?.() ?? 1);
+		this.gfx.draw(out, p.a, p.b, p.f, this.opts.opacity(this.map.getZoom()), this.gaps(), hatch);
 		this.timed(t0, false);
 	}
 
@@ -433,8 +444,13 @@ export class RadarLayer {
 			(2 * (x0 - tx)) / size - 1, 1 - (2 * (y0 - ty)) / size, 0, 1
 		]);
 		const t0 = performance.now();
-		this.gfx.draw(out, p.a, p.b, p.f, this.opts.opacity(this.map.getZoom()));
+		// Draped tiles are drawn at about their own size on screen.
+		this.gfx.draw(out, p.a, p.b, p.f, this.opts.opacity(this.map.getZoom()), this.gaps(), 8);
 		this.timed(t0, true);
+	}
+
+	private gaps(): boolean {
+		return this.opts.gaps ?? true;
 	}
 
 	/** Note a draw's cost when it shows a new picture. */

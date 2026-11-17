@@ -126,7 +126,13 @@
 		setTerrainUnits,
 		setupTerrain
 	} from '../map/layers/terrain';
-	import { jobsClient, retainTerrain, sendZone, terrainClient } from '../map/terrain/client';
+	import {
+		jobsClient,
+		onDemSourceChange,
+		retainTerrain,
+		sendZone,
+		terrainClient
+	} from '../map/terrain/client';
 	import type { PointFacts } from '../map/terrain/messages';
 	import TimelineControls from '../map/Timeline.svelte';
 	import LayersSheet from '../map/LayersSheet.svelte';
@@ -1582,6 +1588,7 @@
 			opacity: (z) => opacityAt(o, z),
 			maxzoom: goneAt(o),
 			lean: phone,
+			gaps: untrack(() => prefs.mapRadarGaps) === 'on',
 			onChange: radarChanged
 		});
 		radarLayer.setFrames(
@@ -1652,7 +1659,8 @@
 			beforeId: RadarLayer.ID,
 			opacity: (z) => opacityAt(o, z),
 			maxzoom: goneAt(o),
-			lean: phone
+			lean: phone,
+			gaps: untrack(() => prefs.mapRadarGaps) === 'on'
 		});
 		wideLayer.setFrames(
 			w.frames
@@ -1663,6 +1671,13 @@
 					full: (f.ds ?? 1) === 1
 				}))
 		);
+	});
+	// Radar's blind spots: filled from the forecast (hatched), or left out.
+	$effect(() => {
+		const on = prefs.mapRadarGaps === 'on';
+		void radarTick;
+		radarLayer?.setGaps(on);
+		wideLayer?.setGaps(on);
 	});
 	// The wide loop follows the slider by time.
 	$effect(() => {
@@ -2025,6 +2040,7 @@
 		let cancelled = false;
 		/** Lets go of the terrain worker (it stops once no map holds it). */
 		let releaseTerrain: (() => void) | null = null;
+		let offDem: (() => void) | null = null;
 		import('maplibre-gl').then(async (mod) => {
 			if (cancelled || !el) return;
 			ml = (mod as unknown as { default?: typeof mod }).default ?? mod;
@@ -2067,6 +2083,10 @@
 				scrollZoom: radar,
 				renderWorldCopies: false,
 				fadeDuration: 150
+			});
+			// The elevation's source changed (terrain/dem.ts): every tile again, from it.
+			offDem = onDemSourceChange(() => {
+				for (const id of ['dem', 'demshade']) if (map?.getSource(id)) map.refreshTiles(id);
 			});
 			map.addControl(new ml.NavigationControl({ visualizePitch: true }), 'top-left');
 			map.addControl(
@@ -2209,6 +2229,8 @@
 			markers = [];
 			probeMarker?.remove();
 			probeMarker = null;
+			offDem?.();
+			offDem = null;
 			map?.remove();
 			map = null;
 			releaseTerrain?.();

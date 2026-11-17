@@ -5,7 +5,8 @@ Read straight from what the worker already wrote, nothing fetched: the index
 render.py) and the snow totals as numbers (`data/maps/totals/<window>h.npy`, every pixel).
 
 - the precipitation timeline as a typed rate band per frame (palette index → type and the
-  band's bounds in mm of water an hour), from radar through the forecast;
+  band's bounds in mm of water an hour), from radar through the forecast; outside the box,
+  radar and the nowcast from the wide loop (`data/precip/wide/`, docs/RADAR-PLAN.md M6);
 - snow totals per window, and per elevation from the terrain-adjusted grids
   (`data/maps/totals/bins-<id>.npy`, see bins.py), snow level, gusts and the ridge-level
   wind with its direction through the forecast, snow on the ground, and observed snowfall;
@@ -32,7 +33,9 @@ from snowwatch.maps.palette import FINE, FINE_KIND, FINE_VALUE, NONE, RATE_BANDS
 from snowwatch.maps.region import merc_x, merc_y
 
 HOUR = 3600
-PROBE_STEP = 4  # every 4th pixel each way (~6 km over the West box); render.py writes them
+# Every 4th pixel each way (~4 km over the West box) by default; render.py writes them. A
+# probe's own step is read from its shape (the wide loop keeps every pixel).
+PROBE_STEP = 4
 KIND_NAMES: dict[int, Literal["snow", "mix", "rain"]] = {1: "snow", 2: "mix", 3: "rain"}
 ROSE_WINDOWS = (("next24", 24), ("next72", 72))
 RIDGE_NEAR_S = 3 * HOUR  # a precipitation frame takes the ridge wind this close in time
@@ -47,6 +50,9 @@ class PointRate(BaseModel):
     type: Literal["snow", "mix", "rain"] | None  # None: dry
     low: float | None  # the colour band's bounds, mm of water an hour (≈ cm of snow)
     high: float | None  # None for the top band
+    # No radar sees the spot well (a blind valley, beyond range): the forecast fills in
+    # (render.py, `fill_gaps`).
+    filled: bool = False
 
 
 class PointValue(BaseModel):
@@ -90,6 +96,8 @@ class PointOut(BaseModel):
     lat: float
     lon: float
     inside: bool  # within the box the pictures cover
+    # Outside it but within the wide radar loop: `rates` holds its radar and nowcast only.
+    wide: bool = False
     generated: str | None
     totals: list[PointTotal]
     rates: list[PointRate]
@@ -123,10 +131,11 @@ def pixel(index: dict[str, Any], lat: float, lon: float) -> tuple[int, int] | No
 class Probes:
     """Reads one cell from each picture's probe (memory-mapped, so only that cell)."""
 
-    def __init__(self, folder: Path, row: int, col: int) -> None:
+    def __init__(self, folder: Path, row: int, col: int, height: int = 0) -> None:
         self.folder = folder / "probe"
-        self.r = row // PROBE_STEP
-        self.c = col // PROBE_STEP
+        self.row = row
+        self.col = col
+        self.height = height
 
     def cell(self, file: str) -> np.ndarray | None:
         """The probe's value(s) at the point: one per channel."""
@@ -134,22 +143,11 @@ class Probes:
             arr = np.load(self.folder / f"{file}.npy", mmap_mode="r")
         except (OSError, ValueError):
             return None
-        r = min(self.r, arr.shape[-2] - 1)
-        c = min(self.c, arr.shape[-1] - 1)
+        # The step it was written at, from its size (a picture's rows / the probe's).
+        step = max(1, round(self.height / arr.shape[-2])) if self.height else PROBE_STEP
+        r = min(self.row // step, arr.shape[-2] - 1)
+        c = min(self.col // step, arr.shape[-1] - 1)
         return np.atleast_1d(np.asarray(arr[..., r, c], dtype=np.float32))
-
-
-def _fine_rate(probes: Probes, f: dict[str, Any]) -> tuple[int, float] | None:
-    """A fine-palette frame's type and rate at the point ((NONE, 0) where dry); None for
-    a frame on the older palette, or without a probe."""
-    if f.get("palette") != FINE:
-        return None
-    cell = probes.cell(str(f.get("file", "")))
-    if cell is None:
-        return None
-    i = int(cell[0])
-    code = int(FINE_KIND[i])
-    return (code, float(FINE_VALUE[i])) if code != NONE else (NONE, 0.0)
 
 
 def _num(v: float | None, digits: int = 1) -> float | None:
@@ -166,6 +164,43 @@ def read_index(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _rates(index: dict[str, Any], probes: Probes) -> list[PointRate]:
+    """Each frame as it is drawn: the nowcast's frames already carry their hand-over to
+    the forecast (render.hand_over), so a tap reads what the map shows."""
+    out: list[PointRate] = []
+    timeline = sorted(index.get("frames", []), key=lambda f: f.get("valid") or f.get("t", 0))
+    for f in timeline:
+        kind = f.get("kind") or ("radar" if f.get("past") else "forecast")
+        span = int(f.get("span_h", 1 if kind == "forecast" else 0))
+        cell = probes.cell(str(f.get("file", "")))
+        if cell is None:
+            continue
+        if f.get("palette") == FINE:
+            i = int(cell[0])
+            code = int(FINE_KIND[i])
+            band = rate_band(code, float(FINE_VALUE[i])) if code != NONE else None
+        else:
+            band = RATE_BANDS.get(int(cell[0]))
+        # A second channel: the share of the frame's water the forecast filled in (0..255).
+        filled = band is not None and cell.size > 1 and float(cell[1]) >= 128
+        if band is None:
+            out.append(PointRate(t=f["t"], kind=kind, span_h=span, type=None, low=None, high=None))
+        else:
+            code, low, high = band
+            out.append(
+                PointRate(
+                    t=f["t"],
+                    kind=kind,
+                    span_h=span,
+                    type=KIND_NAMES[code],
+                    low=low,
+                    high=_num(high, 2),
+                    filled=filled,
+                )
+            )
+    return out
+
+
 def probe(
     index: dict[str, Any],
     precip_dir: Path,
@@ -174,8 +209,10 @@ def probe(
     lon: float,
     now: float,
     bc: BackcountryConfig,
+    wide: tuple[dict[str, Any], Path] | None = None,
 ) -> PointOut:
-    """Everything the map knows at a point."""
+    """Everything the map knows at a point. `wide` is the wide radar loop's index and
+    folder, read for a point outside the box."""
     out = PointOut(
         lat=lat,
         lon=lon,
@@ -194,41 +231,17 @@ def probe(
     )
     px = pixel(index, lat, lon)
     if px is None:
+        wide_px = pixel(wide[0], lat, lon) if wide is not None else None
+        if wide is not None and wide_px is not None:
+            # Beyond the box: what the wide loop's radar and nowcast say.
+            out.wide = True
+            probes = Probes(wide[1], *wide_px, int(wide[0].get("height", 0)))
+            out.rates = [r for r in _rates(wide[0], probes) if r.kind != "forecast"]
         return out
     out.inside = True
     row, col = px
-    probes = Probes(precip_dir, row, col)
-
-    # Each frame as it is drawn: the nowcast's frames already carry their hand-over to the
-    # forecast (render.hand_over), so a tap reads what the map shows.
-    timeline = sorted(index.get("frames", []), key=lambda f: f.get("valid") or f.get("t", 0))
-    for f in timeline:
-        kind = f.get("kind") or ("radar" if f.get("past") else "forecast")
-        span = int(f.get("span_h", 1 if kind == "forecast" else 0))
-        rate = _fine_rate(probes, f)
-        if rate is not None:
-            band = rate_band(*rate)
-        else:
-            cell = probes.cell(str(f.get("file", "")))
-            if cell is None:
-                continue
-            band = RATE_BANDS.get(int(cell[0]))
-        if band is None:
-            out.rates.append(
-                PointRate(t=f["t"], kind=kind, span_h=span, type=None, low=None, high=None)
-            )
-        else:
-            code, low, high = band
-            out.rates.append(
-                PointRate(
-                    t=f["t"],
-                    kind=kind,
-                    span_h=span,
-                    type=KIND_NAMES[code],
-                    low=low,
-                    high=_num(high, 2),
-                )
-            )
+    probes = Probes(precip_dir, row, col, int(index.get("height", 0)))
+    out.rates = _rates(index, probes)
 
     for t in index.get("totals", []):
         cm = None

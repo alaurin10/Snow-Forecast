@@ -291,6 +291,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             hit = (mtime, index)
             point_index["index"] = hit
         bc = app.state.forecast_config.backcountry
+        wide_dir = settings.precip_dir / "wide"
+        wide = cached_index("wide", wide_dir / "index.json")
         return point_probe(
             hit[1],
             settings.precip_dir,
@@ -299,7 +301,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             lon,
             time.time(),
             bc,
+            (wide, wide_dir) if wide is not None else None,
         )
+
+    def cached_index(key: str, path: Path) -> dict[str, Any] | None:
+        """An index read once per change of the file (None if it isn't there)."""
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        hit = point_index.get(key)
+        if hit is None or hit[0] != mtime:
+            index = read_point_index(path)
+            if index is None:
+                return None
+            hit = (mtime, index)
+            point_index[key] = hit
+        return hit[1]
 
     tile_cache: TileCache | None = None
     # Tiles already cached are free; each visitor may cause a burst of 300 upstream
