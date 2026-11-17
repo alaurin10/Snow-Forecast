@@ -95,6 +95,37 @@ describe('Timeline (weather controls)', () => {
 		expect(note.parentElement?.getAttribute('title')).toMatch(/snow above the model's snow level/);
 	});
 
+	it('picks the snow total on a slider that stops at each window', () => {
+		const total = (window: number) => ({
+			hours: window,
+			window,
+			start: T,
+			end: T + window * H,
+			file: `t${window}.png`
+		});
+		const view = weatherView(
+			toTimeline({
+				generated: '',
+				bounds: tl.bounds,
+				width: 10,
+				height: 10,
+				frames: [],
+				totals: [12, 72, 240].map(total)
+			}),
+			'totals',
+			'gust'
+		);
+		expect(view.picks.map((p) => p.tick)).toEqual(['12h', '3d', '10d']);
+		render(Timeline, { ...base, weather: 'totals', view, pickId: 72, pick: view.picks[1] });
+		// A slider, not a row of buttons.
+		expect(screen.queryByRole('group', { name: 'Window' })).toBeNull();
+		const slider = screen.getByRole('slider', { name: 'Snow total window' }) as HTMLInputElement;
+		expect([slider.min, slider.max, slider.value]).toEqual(['0', '2', '1']);
+		expect(slider.getAttribute('aria-valuetext')).toMatch(/^Next 3 days, /);
+		expect(screen.getByText('Next 3 days')).toBeTruthy();
+		expect(screen.getByText(/^to /)).toBeTruthy();
+	});
+
 	it('plays the snow level forecast, with the drape key when zoomed in', () => {
 		const view = weatherView(tl, 'snowlevel', 'gust');
 		const current = view.frames[0];

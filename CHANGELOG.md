@@ -7,6 +7,9 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The snow total is picked on a slider**, like the radar, rather than a row of buttons:
+  it stops at each window (12 hours to 10 days), the arrow keys step one at a time, and
+  beside it the window and when it ends ("Next 3 days, to Fri 1 PM").
 - **Radar's blind spots filled from the forecast** (docs/RADAR-PLAN.md M3): where no
   radar sees the ground (behind ridges, high over far valleys, out of range), the radar
   and nowcast frames take the forecast for the same moment, drawn lighter and hatched.
