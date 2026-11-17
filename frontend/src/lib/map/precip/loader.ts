@@ -6,6 +6,7 @@
 // frames no longer wanted are cancelled.
 import type { Planes } from './codec';
 import type { LoadRequest, LoadResponse } from './frames.worker';
+import type { StepPlanes } from './steps';
 
 /** A frame to have ready: `key` names it (file and size), `at` is its place on the slider. */
 export interface Want {
@@ -30,7 +31,7 @@ const TRIES = 3;
 /** A frame that failed every try is left alone this long, then tried again if still wanted. */
 const REST_MS = 20_000;
 
-export class FrameLoader {
+export class FrameLoader<P extends Planes | StepPlanes = Planes> {
 	private wants = new Map<string, Want>();
 	private flying = new Map<number, string>();
 	private failed = new Map<string, { tries: number; until: number }>();
@@ -41,7 +42,7 @@ export class FrameLoader {
 	constructor(
 		private worker: WorkerLike,
 		/** A frame arrived. */
-		private onPlanes: (key: string, planes: Planes) => void,
+		private onPlanes: (key: string, planes: P) => void,
 		/** Whether a frame is already on hand (so it isn't fetched again). */
 		private have: (key: string) => boolean,
 		private now: () => number = () => Date.now()
@@ -114,7 +115,7 @@ export class FrameLoader {
 		if (key === undefined) return;
 		if (r.ok) {
 			this.failed.delete(key);
-			if (this.wants.has(key)) this.onPlanes(key, r.planes);
+			if (this.wants.has(key)) this.onPlanes(key, r.planes as P);
 		} else if (!r.aborted) {
 			const tries = (this.failed.get(key)?.tries ?? 0) + 1;
 			// A quick second and third try, then a rest: never "failed for good".

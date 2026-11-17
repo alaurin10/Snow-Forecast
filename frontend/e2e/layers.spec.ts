@@ -338,30 +338,37 @@ test('the forecast chart, its lower panel and its date axis share one time axis'
 	expect(Math.abs(c1.x - c2.x)).toBeLessThan(1);
 });
 
-test('the snow total is picked on a slider that stops at each window', async ({ page }) => {
-	// The e2e server has totals for 12 h, 24 h, 3 days and 10 days (e2e/precip_fixture.py),
-	// more snow over a wider area the longer the window.
+test('the snow total slides smoothly from 12 hours to 10 days', async ({ page }) => {
+	// The e2e server has the snow total as numbers every 6 to 24 hours to 10 days
+	// (e2e/precip_fixture.py), more snow over a wider area the longer the window.
 	await page.route('**/api/tiles/**', (r) => r.abort());
 	await page.addInitScript(() => localStorage.setItem('sw.mapWeather', 'totals'));
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const slider = page.getByRole('slider', { name: 'Snow total window' });
 	await expect(slider).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByRole('group', { name: 'Window' })).toHaveCount(0);
+	expect(Number(await slider.getAttribute('step'))).toBeLessThan(1);
 	const controls = page.getByRole('region', { name: 'Precipitation' });
 	const canvas = page.locator('canvas.maplibregl-canvas');
 	const shot = async () => {
-		await page.waitForTimeout(1200);
+		await page.waitForTimeout(800);
 		return canvas.screenshot();
 	};
 	await slider.fill('0');
 	await expect(controls).toContainText('Next 12 hours');
 	const short = await shot();
-	// The arrow keys step a window at a time.
+	// The arrow keys go from window to window.
 	await slider.focus();
 	await page.keyboard.press('ArrowRight');
 	await expect(controls).toContainText('Next 24 hours');
-	await slider.fill('3');
+	// Between windows it slides: half way from 7 to 10 days.
+	await slider.fill('5.5');
+	await expect(controls).toContainText('Next 8½ days');
+	const between = await shot();
+	await slider.fill('6');
 	await expect(controls).toContainText('Next 10 days');
-	await expect(slider).toHaveAttribute('aria-valuetext', /^Next 10 days, /);
-	expect((await shot()).equals(short)).toBe(false);
+	await expect(slider).toHaveAttribute('aria-valuetext', /^Next 10 days, to /);
+	const long = await shot();
+	expect(between.equals(short)).toBe(false);
+	expect(between.equals(long)).toBe(false);
 });

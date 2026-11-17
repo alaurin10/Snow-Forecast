@@ -37,13 +37,20 @@ describe('route', () => {
 });
 
 describe('precipFiles', () => {
-	it('lists frames, totals and layer pictures', () => {
+	it("lists frames, totals, layer pictures and the snow total's steps", () => {
 		const files = precipFiles({
 			frames: [{ file: 'r1-a.png', data: 'r1-d.bin' }, { file: 2 }],
 			totals: [{ file: 't24-b.png' }],
-			layers: { wind: { frames: [{ file: 'w1-c.png' }] }, empty: {} }
+			layers: { wind: { frames: [{ file: 'w1-c.png' }] }, empty: {} },
+			steps: { steps: [{ data: 's6-e.bin' }] }
 		});
-		expect([...files].sort()).toEqual(['r1-a.png', 'r1-d.bin', 't24-b.png', 'w1-c.png']);
+		expect([...files].sort()).toEqual([
+			'r1-a.png',
+			'r1-d.bin',
+			's6-e.bin',
+			't24-b.png',
+			'w1-c.png'
+		]);
 		expect(precipFiles(null).size).toBe(0);
 	});
 });

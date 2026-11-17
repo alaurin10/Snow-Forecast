@@ -309,6 +309,24 @@ export function parseMatch(query: string): MatchParams | undefined {
 	return { slopeMin: Number(q.get('s') ?? 30), rules };
 }
 
+/**
+ * A tile's elevation at `size` px each way, Terrarium-encoded RGBA (R × 256 + G + B / 256
+ * − 32768 metres), from the tile worker's cache (the tiles 3D and the hill shading use);
+ * null without the worker.
+ */
+export async function elevationTile(
+	z: number,
+	x: number,
+	y: number,
+	size: number,
+	signal?: AbortSignal
+): Promise<Uint8Array | null> {
+	const c = terrainClient();
+	if (!c) return null;
+	const r = await c.ask({ type: 'elev', z, x, y, size }, signal);
+	return r.bytes ? new Uint8Array(r.bytes) : null;
+}
+
 /** Register dem:// and terrain:// with MapLibre (once per page). */
 export function registerProtocols(ml: {
 	addProtocol: (id: string, fn: AddProtocolAction) => void;

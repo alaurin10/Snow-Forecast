@@ -126,7 +126,9 @@
 		setTerrainUnits,
 		setupTerrain
 	} from '../map/layers/terrain';
+	import { TotalLayer } from '../map/precip/totallayer';
 	import {
+		elevationTile,
 		jobsClient,
 		onDemSourceChange,
 		retainTerrain,
@@ -1549,11 +1551,32 @@
 		void pos;
 		return glRadar && !!radarLayer?.waiting;
 	});
-	const waiting = $derived(
-		glRadar
-			? radarWaiting
-			: (!!current && shown !== current.file) || (!!pick && shown !== pick.file)
-	);
+	// ---- The snow total, drawn from numbers on the graphics chip (../map/precip/totallayer.ts)
+	/** The snow total is drawn that way: the server lists its steps as numbers. */
+	const glTotals = $derived(glOk && weather === 'totals' && on && !!timeline?.steps);
+	/** The continuous slider: hours from the totals' start. */
+	let totalHours = $state(24);
+	let totalLayer: TotalLayer | null = null;
+	/** Bumped when the snow total's steps arrive or what it shows changes. */
+	let totalTick = $state(0);
+	let totalNoted = false;
+	function totalChanged() {
+		if (totalNoted) return;
+		totalNoted = true;
+		queueMicrotask(() => {
+			totalNoted = false;
+			totalTick++;
+		});
+	}
+	const waiting = $derived.by(() => {
+		if (glRadar) return radarWaiting;
+		if (glTotals) {
+			void totalTick;
+			void totalHours;
+			return !!totalLayer?.waiting;
+		}
+		return (!!current && shown !== current.file) || (!!pick && shown !== pick.file);
+	});
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
@@ -1599,6 +1622,44 @@
 	$effect(() => {
 		const p = pos;
 		if (glRadar) radarLayer?.setPosition(p);
+	});
+	$effect(() => {
+		const use = glTotals;
+		const tl = timeline;
+		if (!ready || !map || !tl) return;
+		if (!use || !tl.steps) {
+			totalLayer?.remove();
+			totalLayer = null;
+			return;
+		}
+		const o = weatherOpacity('totals');
+		totalLayer ??= new TotalLayer(map, {
+			bounds: tl.bounds,
+			width: tl.width,
+			height: tl.height,
+			beforeId: PRECIP_BEFORE,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			// Zoomed in, the snow at each pixel's elevation, from the terrain worker's tiles.
+			elevation: analysis ? elevationTile : undefined,
+			onChange: totalChanged
+		});
+		totalLayer.setSteps(
+			tl.steps.steps.map((x) => ({ file: x.data, url: dataUrl(x), hours: x.hours }))
+		);
+		totalLayer.setPosition(untrack(() => totalHours));
+	});
+	$effect(() => {
+		const h = totalHours;
+		if (!glTotals) return;
+		totalLayer?.setPosition(h);
+		// The window nearest the slider stands for it elsewhere (its sources, the key).
+		const near = untrack(() => view.picks).reduce<number | null>(
+			(best, p) => (best == null || Math.abs(p.id - h) < Math.abs(best - h) ? p.id : best),
+			null
+		);
+		if (near != null && untrack(() => picked.totals) !== near)
+			picked = { ...untrack(() => picked), totals: near };
 	});
 	// The frame index follows the slider, and the slider follows a jump to a frame (a new
 	// timeline, another layer, "now").
@@ -1718,8 +1779,8 @@
 			shown = null;
 			return;
 		}
-		if (glRadar) {
-			// The radar layer draws it; the picture layers stand empty.
+		if (glRadar || glTotals) {
+			// The radar or snow total layer draws it; the picture layers stand empty.
 			++showToken;
 			if (overlay?.showing) overlay.draw(null, null, 0);
 			shown = want.file;
@@ -1953,10 +2014,18 @@
 	// ---- Terrain-adjusted snow totals (Snow total, zoomed in) ----------------------------
 	/** The picked total's terrain-adjusted tiles, when the server has drawn them. */
 	const snowTiles = $derived(
-		weather === 'totals' && on && !offline && pick?.tiles ? pick.tiles : null
+		weather === 'totals' && on && !offline && !glTotals && pick?.tiles ? pick.tiles : null
 	);
-	/** They're what's on screen (zoomed in far enough). */
-	const adjusted = $derived(!!snowTilesUrl(snowTiles ? pick : undefined, zoom));
+	/** They're what's on screen (zoomed in far enough), or the snow total layer's own
+	 *  terrain adjustment is. */
+	const adjusted = $derived.by(() => {
+		if (glTotals) {
+			void totalTick;
+			void totalHours;
+			return !!totalLayer?.adjusted(zoom);
+		}
+		return !!snowTilesUrl(snowTiles ? pick : undefined, zoom);
+	});
 	$effect(() => {
 		const tiles = snowTiles;
 		const tl = timeline;
@@ -2882,6 +2951,8 @@
 						{waiting}
 						snowLine={centreLevel}
 						{adjusted}
+						continuous={glTotals}
+						bind:totalHours
 						ready={ready_}
 						{loadError}
 					/>

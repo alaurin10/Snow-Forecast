@@ -127,6 +127,23 @@ export interface Total {
 	tiles?: string | null;
 }
 
+/** The snow total as numbers to one moment from `TotalSteps.start` (backend
+ *  snowwatch/maps/totaldata.py), for the Snow total's slider. */
+export interface TotalStep {
+	/** Unix seconds. */
+	end: number;
+	/** Hours from the start. */
+	hours: number;
+	/** The numbers file (under /api/precip/). */
+	data: string;
+}
+
+export interface TotalSteps {
+	/** Unix seconds. */
+	start: number;
+	steps: TotalStep[];
+}
+
 /**
  * A picture of one of the other weather layers (snow level, gusts, ridge wind, snow on the
  * ground, observed snowfall, clouds), drawn by the server like the frames.
@@ -160,6 +177,8 @@ export interface PrecipIndex {
 	attribution?: string[];
 	/** The other weather layers by name (from milestone 7 of the map). */
 	layers?: Record<string, { frames?: Partial<LayerFrame>[] }>;
+	/** The snow total as numbers at each step of its slider (newer servers). */
+	steps?: Partial<TotalSteps> | null;
 }
 
 export interface Timeline {
@@ -175,6 +194,8 @@ export interface Timeline {
 	/** Index of the first 3- or 6-hour frame (beyond ~48 h, loaded on demand), or -1. */
 	extendedFrom: number;
 	totals: Total[];
+	/** The snow total as numbers, step by step; null from an older server. */
+	steps: TotalSteps | null;
 	attribution: string[];
 	/** The other weather layers by name, each in time order (snowfall by window). */
 	layers: Record<string, LayerFrame[]>;
@@ -240,7 +261,18 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 			}))
 			.sort((a, b) => a.hours - b.hours || a.t - b.t);
 	}
+	const stepList = (ix.steps?.steps ?? [])
+		.filter(
+			(x) =>
+				typeof x?.end === 'number' && typeof x?.hours === 'number' && typeof x?.data === 'string'
+		)
+		.sort((a, b) => a.end - b.end);
+	const steps: TotalSteps | null =
+		typeof ix.steps?.start === 'number' && stepList.length
+			? { start: ix.steps.start, steps: stepList }
+			: null;
 	return {
+		steps,
 		frames,
 		bounds: ix.bounds,
 		width: ix.width,

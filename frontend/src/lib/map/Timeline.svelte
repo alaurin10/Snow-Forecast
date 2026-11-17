@@ -13,7 +13,13 @@
 	import {
 		DEPTH,
 		depthTick,
+		hoursAt,
 		levelTick,
+		markTick,
+		posAt,
+		totalMarks,
+		totalUntil,
+		totalWords,
 		SNOWLEVEL,
 		WIND,
 		windTick,
@@ -49,6 +55,10 @@
 		snowLine?: number | null;
 		/** The snow total on screen is the terrain-adjusted one (zoomed in). */
 		adjusted?: boolean;
+		/** The snow total's slider is continuous (its steps are drawn as numbers). */
+		continuous?: boolean;
+		/** Where that slider is: hours from the totals' start. */
+		totalHours?: number;
 	}
 
 	let {
@@ -67,8 +77,12 @@
 		ready,
 		loadError,
 		snowLine = null,
-		adjusted = false
+		adjusted = false,
+		continuous = false,
+		totalHours = $bindable(24)
 	}: Props = $props();
+	/** The continuous snow total slider's marks (hours), evenly spaced along it. */
+	const marks = $derived(view.steps ? totalMarks(view.steps.hours) : []);
 
 	const legendRamps = [RAMPS.snow, RAMPS.mix, RAMPS.rain];
 	const rampGradient = (r: (typeof legendRamps)[number]) =>
@@ -167,7 +181,52 @@
 	<!-- Fixed rows, so the box keeps its size whatever it shows. -->
 	<div class="main">
 		{#if view.mode === 'pick'}
-			{#if pick && weather === 'totals' && view.picks.length > 1}
+			{#if continuous && weather === 'totals' && view.steps && marks.length > 1}
+				{@const steps = view.steps}
+				{@const last = marks.length - 1}
+				{@const at = posAt(totalHours, marks)}
+				<div class="player">
+					<div class="track">
+						<input
+							type="range"
+							min="0"
+							max={last}
+							step="0.01"
+							value={at}
+							oninput={(e) => (totalHours = hoursAt(Number(e.currentTarget.value), marks))}
+							onkeydown={(e) => {
+								// The keys move from mark to mark, however finely the slider slides.
+								const d = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+								if (!d) return;
+								e.preventDefault();
+								const next = d > 0 ? Math.floor(at + 1e-6) + 1 : Math.ceil(at - 1e-6) - 1;
+								totalHours = marks[Math.min(last, Math.max(0, next))];
+							}}
+							aria-label="Snow total window"
+							aria-valuetext="{totalWords(totalHours)}, {totalUntil(steps.start, totalHours)}"
+						/>
+						<div class="ticks" aria-hidden="true">
+							{#each marks as h, i (h)}
+								<span class:now={Math.abs(at - i) < 0.05} style:left="{(i / last) * 100}%"
+									>{markTick(h)}</span
+								>
+							{/each}
+						</div>
+					</div>
+					<div
+						class="time"
+						title={adjusted ? `${TERRAIN_NOTE} ${pick?.sources ?? ''}` : pick?.sources}
+					>
+						<strong class="num"
+							>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{totalWords(
+								totalHours
+							)}</strong
+						>
+						<span>{totalUntil(steps.start, totalHours)}</span>
+						{#if adjusted}<span class="adj">adjusted to terrain</span>{/if}
+					</div>
+				</div>
+			{:else if pick && weather === 'totals' && view.picks.length > 1}
 				{@const at = Math.max(
 					0,
 					view.picks.findIndex((p) => p.id === pick.id)

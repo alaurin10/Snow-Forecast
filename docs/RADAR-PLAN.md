@@ -172,6 +172,24 @@ New `frontend/src/lib/map/precip/`:
   "Radar now" with the nowcast's start or stop, inside the box too.) App: the wide frames draw beneath the home box and load when the view leaves it;
   frames pair by `valid` time; taps outside the home box read the wide probes.
 
+### M7 — Snow total like the radar (17 Nov 2026)
+
+- [x] `maps/totaldata.py`: the snow total as numbers at every step of the slider (every
+  6 h to 48 h, 12 h to 120 h, 24 h to 240 h; `STEP_WINDOWS` includes every window):
+  `SWT1` files of an area plane (½ res) and the snow by elevation every 500 m (bins.py's
+  grid halved again, ~6 km), log-coded bytes, row-delta, gzip; ~100–150 KB each. Listed
+  under the index's `steps`. The 7 windows' pictures, grids and tiles stay (taps, older
+  apps). The walks keep their per-step grids in float16.
+- [x] `precip/totallayer.ts` + `totalgl.ts`: a custom layer holding every step (area as
+  R8, bands as an R8 3D texture: trilinear = bilinear on the ground, linear between
+  bands). Zoomed out the plain total; from zoom 7.5–8.5 it fades to the snow at each
+  pixel's elevation, from Terrarium tiles the terrain worker hands over (`elev` message;
+  256 px, ancestors past zoom 13, decoded and blended in the shader). Flat zoomed in and
+  in 3D it draws tile by tile. ~55 MB of textures for 19 steps over the West box.
+- [x] Timeline: a continuous slider (windows evenly spaced, linear between), labels
+  "Next 2½ days / to Fri 1 PM". The old pictures and server tiles remain the fallback
+  (no WebGL 2, or an older server without steps).
+
 ## Verified facts about the sources (16 Nov 2026)
 
 - GeoMet radar: `RADAR_1KM_RRAI`/`RSNO` keep 3 h at 6 min; the extrapolation layers run

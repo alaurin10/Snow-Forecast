@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from snowwatch.maps import dataframe
+from snowwatch.maps import bins, dataframe, totaldata
 from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index, paint_total
 from snowwatch.maps.region import WEST, box_region
 
@@ -108,6 +108,21 @@ def main(out: Path) -> None:
                 "source": "hrdps+nbm",
             }
         )
+    # The snow total as numbers at each step of its slider: the same patch, and by
+    # elevation nothing below 500 m, rising to 1.5 × the area total by 2,000 m and above.
+    steps = []
+    bh, bw = bins.shape_for(region)
+    by, bx = np.mgrid[0:bh, 0:bw].astype(np.float32)
+    rise = np.clip((bins.ELEVS - 500) / 1500, 0, 1) * 1.5
+    for hours in totaldata.STEP_WINDOWS:
+        reach = 150 + hours * 3.0
+        cm = (hours / 2) * np.exp(-((xs - 700) ** 2 + (ys - 900) ** 2) / (2 * reach**2))
+        cell = (hours / 2) * np.exp(-((bx * 2 - 700) ** 2 + (by * 2 - 900) ** 2) / (2 * reach**2))
+        grid = cell[..., None] * rise[None, None, :]
+        data = totaldata.encode(totaldata.area_plane(cm.astype(np.float32)), grid)
+        name = f"s{hours}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+        (out / name).write_bytes(data)
+        steps.append({"end": start + hours * 3600, "hours": hours, "data": name})
     index = {
         "version": 3,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -118,6 +133,7 @@ def main(out: Path) -> None:
         "now": frames[RADAR - 1]["t"],
         "frames": frames,
         "totals": totals,
+        "steps": {"start": start, "key": "e2e", "steps": steps},
         "layers": {},
         "attribution": [],
     }

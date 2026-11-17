@@ -56,6 +56,7 @@ export function precipFiles(index: unknown): Set<string> {
 		frames?: Named[];
 		totals?: Named[];
 		layers?: Record<string, { frames?: Named[] }>;
+		steps?: { steps?: Named[] } | null;
 	} | null;
 	const add = (list: Named[] | undefined) => {
 		for (const f of list ?? []) {
@@ -66,5 +67,6 @@ export function precipFiles(index: unknown): Set<string> {
 	add(ix?.frames);
 	add(ix?.totals);
 	for (const layer of Object.values(ix?.layers ?? {})) add(layer?.frames);
+	add(ix?.steps?.steps);
 	return out;
 }

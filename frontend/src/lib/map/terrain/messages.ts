@@ -48,6 +48,8 @@ export type WorkerRequest =
 			keepViews?: number;
 	  }
 	| { id: number; type: 'dem'; z: number; x: number; y: number }
+	/** A tile's elevation at `size` px, Terrarium-encoded RGBA, for the snow total's shader. */
+	| { id: number; type: 'elev'; z: number; x: number; y: number; size: number }
 	| {
 			id: number;
 			type: 'tile';
