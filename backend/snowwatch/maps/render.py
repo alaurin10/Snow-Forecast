@@ -41,7 +41,7 @@ import numpy as np
 from PIL import Image
 
 from snowwatch.config import SlrBand
-from snowwatch.maps import bins, grib, terrain_totals, totals
+from snowwatch.maps import bins, dataframe, grib, terrain_totals, totals
 from snowwatch.maps.blend import (
     Layer,
     Mosaic,
@@ -58,6 +58,10 @@ from snowwatch.maps.palette import (
     FINE_EXT,
     FINE_FROM,
     FINE_KIND,
+    MIX_T,
+    RAIN_T,
+    RATE_BANDS,
+    SNOW_T,
     decode_indices,
     encode,
     encode_fine,
@@ -78,11 +82,11 @@ from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run
 log = logging.getLogger("snowwatch.precip")
 
 HOUR = 3600
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 RETIRE_S = 15 * 60  # how long a file that left the index stays on disk
 # Precipitation frames drawn on the fine palette: in each frame's key, so frames drawn
 # the old way are drawn again rather than reused.
-FINE_KEY = "f5"
+FINE_KEY = "f6"
 # How much each source is softened before it is painted (smooth.py), in pixels (~1.5 km):
 # radar's 1 km scans just enough to lose the pixel steps; HRRR and NBM, copied from the
 # nearest 2.5–3 km cell, enough to lose their ~2 px blocks. GeoMet's models arrive
@@ -126,6 +130,10 @@ ATTRIBUTION = {
 
 RADAR_KINDS = {"radar", "nowcast"}
 FORECAST_KINDS = {"forecast"}
+# How much of the map's grid each kind of frame's numbers keep (dataframe.py, `ds`): radar
+# at 1 km is worth every pixel; HRDPS, HRRR and NBM (2.5–3 km) half; RDPS and GDPS
+# (10–15 km) a quarter.
+DS_RADAR, DS_HOURLY, DS_EXTENDED = 1, 2, 4
 
 
 @dataclass
@@ -145,6 +153,16 @@ class FrameOut:
     src: dict[str, str] = field(default_factory=dict)
     # "fine" for frames on palette.FINE_PALETTE; "" for the older PALETTE.
     palette: str = ""
+    # The frame as numbers (dataframe.py), which the map colours itself: the file, and how
+    # many of the region's pixels one of its rate pixels spans.
+    data: str = ""
+    ds: int = 1
+    # The instant the frame stands for: a scan's or a nowcast's time, the middle of a
+    # forecast frame's span. The map interpolates between frames by it.
+    valid: int = 0
+    # A forecast frame the timeline no longer shows (the nowcast has reached past it) but
+    # the nowcast's hand-over still reads: listed under "under" in the index.
+    hidden: bool = False
 
     @classmethod
     def load(cls, d: dict[str, Any]) -> FrameOut:
@@ -152,7 +170,9 @@ class FrameOut:
         d = dict(d)
         d.setdefault("kind", "radar" if d.get("past") else "forecast")
         names = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in d.items() if k in names})
+        out = cls(**{k: v for k, v in d.items() if k in names})
+        out.valid = out.valid or valid_time(out.t, out.kind, out.span_h)
+        return out
 
 
 @dataclass
@@ -198,6 +218,12 @@ class LayerFrame:
     def load(cls, d: dict[str, Any]) -> LayerFrame:
         names = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in names})
+
+
+def valid_time(t: int, kind: str, span_h: int) -> int:
+    """The instant a frame stands for: forecast frames are stamped with the end of their
+    span and stand for its middle."""
+    return t - span_h * HOUR // 2 if kind == "forecast" else t
 
 
 def probe_sample(values: np.ndarray) -> np.ndarray:
@@ -263,7 +289,7 @@ class Renderer:
         if index.get("region") != region.key:
             return []
         out = []
-        for f in index.get("frames", []):
+        for f in [*index.get("frames", []), *index.get("under", [])]:
             try:
                 out.append(FrameOut.load(f))
             except (TypeError, KeyError):
@@ -346,9 +372,21 @@ class Renderer:
     ) -> dict[str, Any]:
         now = max((f.t for f in frames if f.kind == "radar"), default=None)
         if now is not None:
-            # A forecast hour that ended before the latest radar scan is over.
-            frames = [f for f in frames if f.kind == "radar" or f.t > now]
-        frames = sorted(frames, key=lambda f: (f.t, f.kind != "radar"))
+            # A forecast hour that ended before the latest radar scan is over (the last
+            # such hour stays on hand: the nowcast's hand-over reads either side of it).
+            frames = [f for f in frames if f.kind == "radar" or f.t > now - HOUR]
+        # The timeline runs radar, nowcast, forecast, each after the last: a forecast
+        # frame standing for a time the nowcast has already reached would show the model
+        # in the middle of the nowcast. It stays on hand (`under`) for the hand-over.
+        reached = max((f.t for f in frames if f.kind in RADAR_KINDS), default=None)
+        for f in frames:
+            f.valid = f.valid or valid_time(f.t, f.kind, f.span_h)
+            f.hidden = f.kind == "forecast" and (
+                (reached is not None and f.valid <= reached) or (now is not None and f.t <= now)
+            )
+        frames = sorted(frames, key=lambda f: (f.valid, f.kind != "radar"))
+        under = [f for f in frames if f.hidden]
+        frames = [f for f in frames if not f.hidden]
         srcs: list[str] = []
         for f in frames:
             for s in f.src.values():
@@ -372,6 +410,7 @@ class Renderer:
             "height": region.height,
             "now": now,
             "frames": [asdict(f) for f in frames],
+            "under": [asdict(f) for f in under],
             "totals": [asdict(t) for t in sorted(totals, key=lambda t: (t.window, t.hours))],
             "layers": {k: {"frames": [asdict(f) for f in v]} for k, v in layers.items()},
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
@@ -403,16 +442,21 @@ class Renderer:
         prefix: str,
         sigma: float = 0.0,
         kind_sigma: float | None = None,
-    ) -> str:
+        ds: int = 1,
+    ) -> tuple[str, str]:
         """A precipitation frame (rates and types) softened by `sigma` pixels (types by
-        `kind_sigma`) and drawn on the fine palette, with its probe (the palette indices)."""
+        `kind_sigma`): drawn on the fine palette, with its probe (the palette indices),
+        and as numbers at 1/ds of the grid (dataframe.py). Returns both files' names."""
         amount, kind = soften(amount, kind, sigma, kind_sigma)
         indexed = fine_index(amount, kind)
         data = encode_fine(indexed)
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         self._store(name, data)
         self._write_probe(name, probe_sample(indexed))
-        return name
+        numbers = dataframe.encode(amount, kind, ds)
+        numbers_name = f"{prefix}-{hashlib.sha1(numbers).hexdigest()[:12]}.{dataframe.EXT}"
+        self._store(numbers_name, numbers)
+        return name, numbers_name
 
     def _save_ramp(
         self,
@@ -466,6 +510,7 @@ class Renderer:
         for p in [
             *self.dir.glob("*.png"),
             *self.dir.glob("*.webp"),
+            *self.dir.glob(f"*.{dataframe.EXT}"),
             *self.dir.glob("*.tmp"),
             *self.dir.glob("probe/*.npy"),
             *self.dir.glob("probe/*.tmp"),
@@ -480,6 +525,8 @@ class Renderer:
         f = prev.get(key)
         if f is None or not (self.dir / f.file).exists():
             return None
+        if not (f.data and (self.dir / f.data).exists()):
+            return None  # drawn before frames were kept as numbers: draw it again
         if not self._probe_path(f.file).exists():
             # Drawn before probes existed: make its probe from the picture.
             try:
@@ -524,17 +571,27 @@ class Renderer:
         return out
 
     def radar(self, region: Region) -> dict[str, Any]:
-        """Observed radar for the last 3 hours and the next 72 minutes' nowcast."""
+        """Observed radar for the last 3 hours and the next 72 minutes' nowcast, which
+        hands over to the forecast as it goes."""
         old = self._frames_of(self._read(), region)
         prev = {f.key: f for f in old}
-        frames = self._radar_eccc(region, prev, self._forecast_types(old))
+        frames = self._radar_eccc(region, prev, self._forecast_types(old), old)
         if not any(f.kind == "radar" for f in frames):
             log.warning("Environment Canada radar returned nothing; using RainViewer")
             frames = self._radar_rainviewer(region, prev)
+        if not frames:
+            # Neither answered: the frames we have say more than none (their times show
+            # how old they are).
+            log.warning("no radar source answered; keeping the current radar frames")
+            return self._read()
         return self._commit(region, RADAR_KINDS, frames)
 
     def _radar_eccc(
-        self, region: Region, prev: dict[str, FrameOut], fallback: np.ndarray | None
+        self,
+        region: Region,
+        prev: dict[str, FrameOut],
+        fallback: np.ndarray | None,
+        old: list[FrameOut] | None = None,
     ) -> list[FrameOut]:
         p = radar_eccc.plan(self.net)
         if p is None:
@@ -551,16 +608,23 @@ class Renderer:
             got = radar_eccc.draw_radar(self.net, t, type_t, region, fallback)
             if got is None:
                 continue
-            name = self._save_precip(*got, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA)
-            out.append(FrameOut(t, True, name, key, "", "radar", 0, src, FINE))
+            name, data = self._save_precip(*got, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR)
+            out.append(FrameOut(t, True, name, key, "", "radar", 0, src, FINE, data, DS_RADAR, t))
         if not out or not p.nowcast:
             return out
         latest = max(f.t for f in out)
         type_t = radar_eccc.type_time(latest, p.types)
         types: np.ndarray | None = None
         src = {"north": "nowcast-eccc", "south": "nowcast-eccc"}
+        model = _Model(self.dir, [f for f in old or [] if f.kind == "forecast"], region)
+        end = max(p.nowcast)
         for t in p.nowcast:
-            key = f"now|{FINE_KEY}|{RADAR_TYPING}|{p.nowcast_ref}|{t}|{type_t}|{region.key}"
+            # How much of the forecast shows: none at the latest scan, all of it by the
+            # nowcast's last frame, easing in and out between.
+            w = _ease((t - latest) / max(1, end - latest))
+            pair = model.pair(t) if w > 0 else None
+            mixed = f"{w:.2f}:{pair[0].data}:{pair[1].data}" if pair else "-"
+            key = f"now|{FINE_KEY}|{RADAR_TYPING}|{p.nowcast_ref}|{t}|{type_t}|{mixed}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
@@ -570,15 +634,21 @@ class Renderer:
             got = radar_eccc.draw_nowcast(self.net, t, p.nowcast_ref, types, region, fallback)
             if got is None:
                 continue
-            name = self._save_precip(*got, f"n{t}", RADAR_SIGMA, RADAR_KIND_SIGMA)
-            out.append(FrameOut(t, False, name, key, "", "nowcast", 0, src, FINE))
+            if pair:
+                ahead = model.at(t, pair)
+                if ahead is not None:
+                    got = hand_over(got[0], got[1], ahead, w)
+            name, data = self._save_precip(*got, f"n{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR)
+            out.append(
+                FrameOut(t, False, name, key, "", "nowcast", 0, src, FINE, data, DS_RADAR, t)
+            )
         return out
 
     def _radar_rainviewer(self, region: Region, prev: dict[str, FrameOut]) -> list[FrameOut]:
         out = []
         src = {"north": "rainviewer", "south": "rainviewer"}
         for rf in rainviewer.radar_frames(self.net):
-            key = f"radar|{rf.path}|{region.key}"
+            key = f"radar|{FINE_KEY}|{rf.path}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
@@ -588,7 +658,14 @@ class Renderer:
                 continue
             painted = repaint(img, rainviewer.radar_recolor)
             name = self._save(painted, region, f"r{rf.t}")
-            out.append(FrameOut(rf.t, True, name, key, "", "radar", 0, src))
+            # The same six steps as numbers (each step's middle), for the map to colour.
+            indexed = snap(painted, region)
+            numbers = dataframe.encode(_BAND_RATE[indexed], kinds_of(indexed), DS_RADAR)
+            data = f"r{rf.t}-{hashlib.sha1(numbers).hexdigest()[:12]}.{dataframe.EXT}"
+            self._store(data, numbers)
+            out.append(
+                FrameOut(rf.t, True, name, key, "", "radar", 0, src, "", data, DS_RADAR, rf.t)
+            )
         return out
 
     # ---- Weights for the blend -------------------------------------------------------
@@ -640,10 +717,10 @@ class Renderer:
             self._weights[key] = weight
         return weight
 
-    def _precip(self, m: Mosaic, prefix: str) -> str:
+    def _precip(self, m: Mosaic, prefix: str, ds: int) -> tuple[str, str]:
         """Colours, once, after blending: every pixel drawn has a type."""
         wet = np.nan_to_num(m.amount, nan=0.0) >= FINE_FROM
-        return self._save_precip(m.amount, fill_kinds(m.kind, wet), prefix)
+        return self._save_precip(m.amount, fill_kinds(m.kind, wet), prefix, ds=ds)
 
     # ---- Forecast -----------------------------------------------------------------
 
@@ -676,7 +753,12 @@ class Renderer:
         slots = hrrr.slots(self.net, now)
         us = self._nbm(region)
         fill = run_of(self.net, RDPS_HOURLY, RDPS_HOURLY.snow)
-        frames: list[FrameOut] = []
+        # The hour just ended stays (hidden): the nowcast's hand-over reads either side of it.
+        frames: list[FrameOut] = [
+            f
+            for f in prev.values()
+            if f.kind == "forecast" and f.span_h == 1 and now - HOUR < f.t <= now
+        ]
         todo: list[tuple[int, str, tuple[str, int, int] | None]] = []
         for t in times:
             south: tuple[str, int, int] | None = None
@@ -733,8 +815,11 @@ class Renderer:
             src = {"north": "hrdps", "south": kind or ("rdps" if filled else "")}
             if filled and kind:
                 src["fill"] = "rdps"
-            name = self._precip(mosaic(layers), f"f{t}")
-            return FrameOut(t, False, name, key, kind, "forecast", 1, src, FINE)
+            name, data = self._precip(mosaic(layers), f"f{t}", DS_HOURLY)
+            valid = valid_time(t, "forecast", 1)
+            return FrameOut(
+                t, False, name, key, kind, "forecast", 1, src, FINE, data, DS_HOURLY, valid
+            )
 
         if todo:
             # Two frames at a time (the sources are the slow part; more costs worker
@@ -834,8 +919,11 @@ class Renderer:
                     kind = "nbm"
             layers.append(Layer(run.model.name, north.rate, 1.0, north.kind))
             src = {"north": run.model.name, "south": kind or run.model.name}
-            name = self._precip(mosaic(layers), f"f{t}")
-            return FrameOut(t, False, name, key, kind, "forecast", span_h, src, FINE)
+            name, data = self._precip(mosaic(layers), f"f{t}", DS_EXTENDED)
+            valid = valid_time(t, "forecast", span_h)
+            return FrameOut(
+                t, False, name, key, kind, "forecast", span_h, src, FINE, data, DS_EXTENDED, valid
+            )
 
         with ThreadPoolExecutor(2) as pool:
             for i, frame in enumerate(pool.map(job, plan), 1):
@@ -1039,9 +1127,96 @@ class Renderer:
                 shutil.rmtree(d)
 
 
+# Each of the older palette's precipitation steps as a rate (mm of water an hour): its
+# middle, or half as much again as its floor for a ramp's top step.
+_BAND_RATE = np.zeros(256, np.float32)
+for _i, (_, _low, _high) in RATE_BANDS.items():
+    _BAND_RATE[_i] = float(np.sqrt(_low * _high)) if _high == _high else 1.5 * _low
+
+
+def _ease(x: float) -> float:
+    """0 to 1 with no corner at either end."""
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+Field = tuple[np.ndarray, np.ndarray, np.ndarray]  # rate (mm/h), snow share, mix share
+
+
+class _Model:
+    """The forecast frames as numbers, for the nowcast's hand-over: what the forecast
+    says at any time between two of its frames."""
+
+    def __init__(self, folder: Path, frames: list[FrameOut], region: Region) -> None:
+        self.folder = folder
+        self.region = region
+        self.frames = sorted((f for f in frames if f.data), key=lambda f: f.valid)
+        self._read: dict[str, dataframe.DataFrame | None] = {}
+
+    def pair(self, t: int) -> tuple[FrameOut, FrameOut] | None:
+        """The frames either side of t (the same one twice at either end, if it stands
+        for a time within the hour)."""
+        before = [f for f in self.frames if f.valid <= t]
+        after = [f for f in self.frames if f.valid > t]
+        a = before[-1] if before else None
+        b = after[0] if after else None
+        if a is None and b is not None and b.valid - t <= HOUR:
+            a = b
+        if b is None and a is not None and t - a.valid <= HOUR:
+            b = a
+        return (a, b) if a is not None and b is not None else None
+
+    def _frame(self, f: FrameOut) -> dataframe.DataFrame | None:
+        if f.data not in self._read:
+            try:
+                self._read[f.data] = dataframe.decode((self.folder / f.data).read_bytes())
+            except OSError:
+                self._read[f.data] = None
+        return self._read[f.data]
+
+    def at(self, t: int, pair: tuple[FrameOut, FrameOut]) -> Field | None:
+        """The forecast at t on the region's grid, between the pair's two frames."""
+        a, b = pair
+        fa, fb = self._frame(a), self._frame(b)
+        if fa is None or fb is None:
+            return None
+        h, w = self.region.height, self.region.width
+        ra, sa, ma = dataframe.on_grid(fa, h, w)
+        if a is b or b.valid <= a.valid:
+            return ra, sa, ma
+        f = (t - a.valid) / (b.valid - a.valid)
+        rb, sb, mb = dataframe.on_grid(fb, h, w)
+        return ra + (rb - ra) * f, sa + (sb - sa) * f, ma + (mb - ma) * f
+
+
+def hand_over(
+    amount: np.ndarray, kind: np.ndarray, ahead: Field, w: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """A nowcast frame with `w` of the forecast for the same moment mixed in: rates as a
+    straight mix, and the type whichever has more of the water behind it."""
+    rate, snow, mix = ahead
+    now = np.nan_to_num(amount, nan=0.0)
+    out = (1 - w) * now + w * rate
+    wn, wm = (1 - w) * now, w * rate
+    total = wn + wm
+    # Where neither is wet the type still matters (it is carried across dry ground, so an
+    # edge never blends toward a wrong type): the forecast's.
+    share_s = np.where(
+        total > 0, (wn * (kind == SNOW_T) + wm * snow) / np.maximum(total, 1e-9), snow
+    )
+    share_m = np.where(total > 0, (wn * (kind == MIX_T) + wm * mix) / np.maximum(total, 1e-9), mix)
+    share_r = 1 - share_s - share_m
+    kinds = np.full(kind.shape, RAIN_T, np.uint8)
+    kinds[(share_m >= share_r) & (share_m > share_s)] = MIX_T
+    kinds[(share_s >= share_r) & (share_s >= share_m)] = SNOW_T
+    return out.astype(np.float32), kinds
+
+
 def _files(index: dict[str, Any]) -> set[str]:
-    """Every picture an index names: frames, totals and the other layers' frames."""
-    out = {f.get("file") for f in index.get("frames", [])}
+    """Every file an index names: frames (pictures and numbers, shown and held back for
+    the hand-over), totals and the other layers' frames."""
+    out = {f.get("file") for f in [*index.get("frames", []), *index.get("under", [])]}
+    out |= {f.get("data") for f in [*index.get("frames", []), *index.get("under", [])]}
     out |= {t.get("file") for t in index.get("totals", [])}
     for layer in (index.get("layers") or {}).values():
         if isinstance(layer, dict):

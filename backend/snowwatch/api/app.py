@@ -224,17 +224,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
-        """One picture: a precipitation frame, a snow total or a frame of another weather
-        layer. Names carry a hash of the pixels, so they never change."""
-        m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp)", name)
+        """One file: a precipitation frame (as a picture, or as numbers), a snow total or a
+        frame of another weather layer. Names carry a hash of the contents, so they never
+        change."""
+        m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp|bin)", name)
         if not m:
             raise HTTPException(404)
         path = settings.precip_dir / name
         if not path.exists():
             raise HTTPException(404)
+        ext = m.group(1)
         return FileResponse(
             path,
-            media_type=f"image/{m.group(1)}",
+            # ".bin": a frame as numbers (maps/dataframe.py), a gzip stream as it is.
+            media_type="application/gzip" if ext == "bin" else f"image/{ext}",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 

@@ -412,9 +412,9 @@ def test_point_reads_every_layer_at_a_spot(tmp_path: Path) -> None:
     assert point.pixel({}, 49, -118) is None
 
 
-def test_point_mixes_the_hand_over_from_nowcast_to_forecast(tmp_path: Path) -> None:
-    """Frames on the fine palette: the forecast's first two hours are shown fading from the
-    last nowcast frame, so a tap gives the same mix (point.HANDOVER_S)."""
+def test_point_reads_fine_frames_as_drawn(tmp_path: Path) -> None:
+    """Frames on the fine palette: a tap gives each frame's own type and rate (the
+    nowcast's hand-over to the forecast is in the frames themselves, render.hand_over)."""
     region = box_region(44, -125, 54, -110, 40)
     out = tmp_path / "precip"
     r = Renderer(out, Net.__new__(Net), now=lambda: NOW)
@@ -423,7 +423,7 @@ def test_point_mixes_the_hand_over_from_nowcast_to_forecast(tmp_path: Path) -> N
     def fine(rate: float, kind: int, prefix: str) -> str:
         return r._save_precip(
             np.full(shape, rate, np.float32), np.full(shape, kind, np.uint8), prefix
-        )
+        )[0]
 
     top = NOW - NOW % H
     base = {"past": False, "south": "", "key": "k", "src": {}, "palette": "fine"}
@@ -435,18 +435,13 @@ def test_point_mixes_the_hand_over_from_nowcast_to_forecast(tmp_path: Path) -> N
         "frames": [
             {**base, "t": top, "file": fine(3.0, 3, "n1"), "kind": "nowcast", "span_h": 0},
             {**base, "t": top + H, "file": fine(0.7, PSNOW, "f1"), "kind": "forecast"},
-            {**base, "t": top + 2 * H, "file": fine(0.7, PSNOW, "f2"), "kind": "forecast"},
         ],
     }
     p = point.probe(index, out, tmp_path, 49.0, -118.0, NOW, BackcountryConfig())
     assert [(x.kind, x.type, x.low, x.high) for x in p.rates] == [
         ("nowcast", "rain", 2.5, 5.0),
-        # An hour on, half and half: 1.5 + 0.35 mm/h, mostly the nowcast's rain.
-        ("forecast", "rain", 1.0, 2.5),
-        ("forecast", "snow", 0.5, 1.0),  # two hours on: the model alone
+        ("forecast", "snow", 0.5, 1.0),
     ]
-    assert point.handover_weight(top + H, top) == 0.5
-    assert point.handover_weight(top, top) == 0 == point.handover_weight(top + 3 * H, top)
 
 
 def test_point_api(tmp_path: Path, settings: Settings) -> None:

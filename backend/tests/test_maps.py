@@ -373,7 +373,8 @@ def test_parts_merge_and_old_files_linger(tmp_path: Path) -> None:
         region,
         {"forecast"},
         [
-            frame(900, "forecast", "f2-bbbbbbbbbbbb.png", region.key),  # over: before "now"
+            # Over: it ended more than an hour before "now".
+            frame(-2700, "forecast", "f2-bbbbbbbbbbbb.png", region.key),
             frame(4600, "forecast", "f3-cccccccccccc.png", region.key),
         ],
     )
@@ -545,3 +546,141 @@ def test_worker_runs_map_parts_and_survives_failures(
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     assert cli.main(["map", "radar"]) == 0 and len(calls) == 2
     assert cli.main(["precip"]) == 0 and len(calls) == 3
+
+
+# ---- Frames as numbers (dataframe.py) and the timeline's order ----------------------------
+
+
+def test_data_frame_round_trip_and_type_fill() -> None:
+    from snowwatch.maps import dataframe as df
+
+    h, w = 41, 62  # neither divides by 4
+    amount = np.zeros((h, w), np.float32)
+    kind = np.zeros((h, w), np.uint8)
+    amount[4:12, 6:20], kind[4:12, 6:20] = 2.0, SNOW_T  # snow in the north-west
+    amount[28:36, 40:58], kind[28:36, 40:58] = 0.3, RAIN_T  # rain in the south-east
+    amount[20, 30] = np.nan
+    for ds in (1, 2, 4):
+        frame = df.decode(df.encode(amount, kind, ds))
+        assert frame is not None and frame.ds == ds
+        assert frame.rate.shape == (-(-h // ds), -(-w // ds))
+        assert frame.snow.shape == frame.mix.shape == (-(-h // 4), -(-w // 4))
+        rate, snow, mix = df.on_grid(frame, h, w)
+        # Rates within a code's step (6%), well inside each area.
+        assert abs(float(rate[8, 12]) - 2.0) < 0.13 and abs(float(rate[32, 50]) - 0.3) < 0.02
+        assert float(rate[20, 5]) == 0.0
+        # Types are carried across the dry ground between: snow round the snow, rain round
+        # the rain, never "no type".
+        assert float(snow[8, 12]) > 0.95 and float(snow[2, 2]) > 0.9
+        assert float(snow[32, 50]) < 0.05 and float(snow[39, 60]) < 0.1
+        assert float(mix.max()) == 0.0
+    # Codes: dry is 0, the lightest rate kept is code 1, the top of the scale 127.
+    codes = df.rate_codes(np.array([0.0, 0.049, 0.05, 0.1, 100.0, 500.0, np.nan], np.float32))
+    assert codes.tolist() == [0, 0, 1, 12, 127, 127, 0]
+    assert df.code_rates(np.array([0, 1, 127])).tolist() == pytest.approx([0, 0.05, 100], rel=1e-4)
+    # A dry, untyped frame is all rain-coloured nothing; rubbish isn't a frame.
+    empty = df.decode(df.encode(np.zeros((8, 8), np.float32), np.zeros((8, 8), np.uint8)))
+    assert empty is not None and not empty.rate.any() and not empty.snow.any()
+    assert df.decode(b"nonsense") is None
+    assert df.kinds_from_shares(np.array([200, 10, 90]), np.array([20, 20, 120])).tolist() == [
+        SNOW_T,
+        RAIN_T,
+        MIX_T,
+    ]
+
+
+def test_timeline_keeps_the_model_out_of_the_nowcast(tmp_path: Path) -> None:
+    region = small_region()
+    r = Renderer(tmp_path, Net(httpx.Client()), now=lambda: 0)
+    hour = 3600
+    names = ["r1", "n2", "n3", "f4", "f5", "f6"]
+    for n in names:
+        (tmp_path / f"{n}-aaaaaaaaaaaa.png").write_bytes(b"x")
+    radar = [
+        frame(10 * hour, "radar", "r1-aaaaaaaaaaaa.png", region.key),
+        FrameOut(10 * hour + 720, False, "n2-aaaaaaaaaaaa.png", "n2", "", "nowcast", 0),
+        FrameOut(10 * hour + 4320, False, "n3-aaaaaaaaaaaa.png", "n3", "", "nowcast", 0),
+    ]
+    r._commit(region, {"radar", "nowcast"}, radar)
+    ix = r._commit(
+        region,
+        {"forecast"},
+        [
+            # The hour ending 11:00 stands for 10:30, the one ending 12:00 for 11:30: the
+            # nowcast (to 11:12) has reached the first, not the second.
+            frame(11 * hour, "forecast", "f4-aaaaaaaaaaaa.png", region.key),
+            frame(12 * hour, "forecast", "f5-aaaaaaaaaaaa.png", region.key),
+            frame(13 * hour, "forecast", "f6-aaaaaaaaaaaa.png", region.key),
+        ],
+    )
+    assert [f["kind"] for f in ix["frames"]] == [
+        "radar",
+        "nowcast",
+        "nowcast",
+        "forecast",
+        "forecast",
+    ]
+    assert [f["valid"] for f in ix["frames"]][-2:] == [11 * hour + 1800, 12 * hour + 1800]
+    # Held back for the hand-over, and its file kept.
+    assert [f["file"] for f in ix["under"]] == ["f4-aaaaaaaaaaaa.png"]
+    assert {f.file for f in r._frames_of(r._read(), region)} >= {"f4-aaaaaaaaaaaa.png"}
+    assert ix["version"] == 3
+
+
+def test_nowcast_hands_over_to_the_forecast(tmp_path: Path) -> None:
+    """The nowcast's frames mix in the forecast for the same moment, a little at first and
+    all of it by the last, so the timeline has no jump where the two meet."""
+    from snowwatch.maps import dataframe as df
+    from snowwatch.maps.render import hand_over
+
+    latest = 1_800_000_000 - 1_800_000_000 % 360
+    net = GeoMet(latest)  # nowcast: rain at 1.5 mm/h in the south, snow at 0.7 in the north
+    region = small_region()
+    r = Renderer(tmp_path, net, now=lambda: latest + 60)
+    shape = (region.height, region.width)
+    # The forecast: 6 mm/h of rain everywhere, for the hours either side of the nowcast.
+    forecast = []
+    for i in range(3):
+        t = latest - latest % 3600 + i * 3600
+        name, data = r._save_precip(
+            np.full(shape, 6.0, np.float32), np.full(shape, RAIN_T, np.uint8), f"f{t}", ds=2
+        )
+        forecast.append(
+            FrameOut(t, False, name, f"f{t}", "", "forecast", 1, {}, "fine", data, 2, t - 1800)
+        )
+    r._commit(region, {"forecast"}, forecast)
+    ix = r.radar(region)
+    nowcast = [f for f in ix["frames"] if f["kind"] == "nowcast"]
+    south = []
+    for f in nowcast:
+        got = df.decode((tmp_path / f["data"]).read_bytes())
+        assert got is not None and got.ds == 1
+        south.append(float(got.rates()[-3, 20]))
+    # From near the nowcast's 1.5 mm/h to the forecast's 6, rising all the way.
+    assert south == sorted(south) and south[0] < 2.2 and south[-1] == pytest.approx(6.0, rel=0.07)
+    # No model frame is shown before the nowcast ends.
+    shown = [f for f in ix["frames"] if f["kind"] == "forecast"]
+    assert all(f["valid"] > nowcast[-1]["t"] for f in shown)
+    # Whichever has more of the water behind it gives the type.
+    amount = np.array([[1.0, 1.0]], np.float32)
+    kind = np.array([[SNOW_T, SNOW_T]], np.uint8)
+    ahead = (np.array([[4.0, 0.2]], np.float32), np.zeros((1, 2)), np.zeros((1, 2)))
+    mixed, kinds = hand_over(amount, kind, ahead, 0.5)
+    assert mixed[0].tolist() == pytest.approx([2.5, 0.6]) and kinds.tolist() == [[RAIN_T, SNOW_T]]
+
+    # Nothing new: nothing redrawn.
+    before = len(net.maps)
+    again = r.radar(region)
+    assert len(net.maps) == before and len(again["frames"]) == len(ix["frames"])
+
+
+def test_radar_is_kept_when_no_source_answers(tmp_path: Path) -> None:
+    class Dead(GeoMet):
+        def json(self, url: str, params: dict[str, str] | None = None) -> Any:
+            return None
+
+    region = small_region()
+    r = Renderer(tmp_path, Dead(0, up=False), now=lambda: 0)
+    (tmp_path / "r1-aaaaaaaaaaaa.png").write_bytes(b"x")
+    r._commit(region, {"radar"}, [frame(1000, "radar", "r1-aaaaaaaaaaaa.png", region.key)])
+    assert [f["t"] for f in r.radar(region)["frames"]] == [1000]
