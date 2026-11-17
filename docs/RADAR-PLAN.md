@@ -140,10 +140,10 @@ New `frontend/src/lib/map/precip/`:
 
 ### M5 — Cloud forecast on the Clouds timeline
 
-- [ ] `maps/layers.py`: after the satellite frames, total cloud cover from HRDPS (to
+- [x] `maps/layers.py`: after the satellite frames, total cloud cover from HRDPS (to
   48 h), RDPS (to 84 h), GDPS (to 10 days) north and NBM `TCDC` south, 3-hourly then
   6-hourly, blended like `model_field`; white with alpha by cover (`palette.CLOUD`).
-- [ ] `map/weather.ts`, `Timeline.svelte`: "Now" at the last satellite frame; labels, key
+- [x] `map/weather.ts`, `Timeline.svelte`: "Now" at the last satellite frame; labels, key
   and source text.
 
 ### M6 — Bigger area

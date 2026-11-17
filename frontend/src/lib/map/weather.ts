@@ -225,8 +225,9 @@ export function weatherView(tl: Timeline | null, weather: MapWeather, wind: MapW
 		...NONE,
 		mode: 'loop',
 		frames,
-		// Clouds end now; the forecast layers start after it.
-		now: weather === 'clouds' ? frames.length - 1 : -1
+		// Clouds: "now" is the last satellite picture (the forecast's cloud cover follows);
+		// the forecast layers start after it.
+		now: weather === 'clouds' ? frames.findLastIndex((f) => f.past) : -1
 	};
 }
 
@@ -261,13 +262,23 @@ export function layerLabel(f: Frame, now = Date.now()): { when: string; rel: str
 const MODELS: Record<string, string> = {
 	hrdps: 'Canadian HRDPS',
 	rdps: 'Canadian RDPS',
+	gdps: 'Canadian GDPS',
 	nbm: "NOAA's National Blend of Models"
 };
 
 /** Where a frame of one of the loop layers came from, for the map's info panel. */
 export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undefined): string {
 	if (weather === 'clouds') {
-		return 'GOES-West satellite, GeoColor: true colour by day, infrared with city lights by night (NOAA, CIRA; via NASA GIBS).';
+		if (f && !f.past) {
+			const north = MODELS[f.src.north ?? ''] ?? f.src.north ?? '';
+			const south = MODELS[f.src.south ?? ''] ?? f.src.south ?? '';
+			const from =
+				north && south && north !== south
+					? `${north} in Canada, ${south} in the US`
+					: north || south;
+			return `Forecast cloud cover from ${from}: the thicker the cloud, the greyer.`;
+		}
+		return 'GOES-West satellite, GeoColor: true colour by day, infrared with city lights by night (NOAA, CIRA; via NASA GIBS). After it, the forecast cloud cover.';
 	}
 	const north = MODELS[f?.src.north ?? ''] ?? '';
 	const south = MODELS[f?.src.south ?? ''] ?? '';

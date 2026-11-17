@@ -8,7 +8,8 @@
              which covers the whole box (with its direction kept for tap-for-numbers)
   depth      snow on the ground, daily: SNODAS in the US, CaLDAS in Canada
   snowfall   snow that fell in the last 24, 48 and 72 h: NOHRSC (US only)
-  clouds     GOES-West GeoColor, every half hour over the last 3 h
+  clouds     GOES-West GeoColor, every half hour over the last 3 h; then the forecast
+             cloud cover to 10 days (HRDPS, RDPS, GDPS in Canada, NBM in the US)
 
 Each picture is redrawn only when its inputs change (its key), like the frames. A layer
 whose sources don't answer keeps the pictures it has.
@@ -94,6 +95,13 @@ GUST = Field(
 # Coded snow-level cells take a real value from up to this many cells away (HRDPS 2.5 km:
 # ~15 km; RDPS 10 km: ~60 km): wide enough to cover a mountain range.
 CODE_FILL_CELLS = 6
+# Total cloud cover (%), Canada's models from finest to coarsest, and NBM's.
+CLOUD_HRDPS = "HRDPS.CONTINENTAL_NT"  # hourly to 48 h; 0 outside HRDPS's domain
+CLOUD_RDPS = "RDPS_10km_TotalCloudCover"  # hourly to 84 h
+CLOUD_GDPS = "GDPS_15km_TotalCloudCover"  # hourly to 84 h, 3-hourly to 240 h
+CLOUD_STEP_H = 3  # forecast cloud frames every 3 h…
+CLOUD_LONG_STEP_H = 6  # …and every 6 h beyond RDPS's run
+CLOUD_DRAWING = 2  # in each forecast cloud frame's key: change it to draw them again
 RIDGE_SPEED = "RDPS_10km_WindSpeed_700mb"  # m/s
 RIDGE_DIR = "RDPS_10km_WindDir_700mb"  # degrees, where the wind blows from
 CALDAS = "CaLDAS-NSRPS_2.5km_SnowDepth"  # metres
@@ -386,6 +394,20 @@ def snowfall(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFr
 
 
 def clouds(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFrame] | None:
+    """The satellite's last 3 hours, then the forecast's cloud cover to 10 days, on one
+    timeline. Either part keeps its pictures when its sources don't answer."""
+    seen = satellite_clouds(r, region, [f for f in old if f.kind == "observed"])
+    ahead = cloud_forecast(r, region, [f for f in old if f.kind == "forecast"])
+    if seen is None and ahead is None:
+        return None
+    if seen is None:
+        seen = [f for f in old if f.kind == "observed"]
+    if ahead is None:
+        ahead = [f for f in old if f.kind == "forecast" and f.t > int(r.now())]
+    return seen + ahead
+
+
+def satellite_clouds(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFrame] | None:
     """GOES-West GeoColor every half hour over the last 3 hours, stitched from GIBS's
     tiles onto the frames' grid and kept as WebP (it's imagery, not a palette)."""
     from snowwatch.maps.render import LayerFrame
@@ -412,3 +434,86 @@ def clouds(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFram
         return go
 
     return _parallel([job(t) for t in wanted])
+
+
+def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFrame] | None:
+    """Total cloud cover every 3 h to the end of RDPS's run, then every 6 h to GDPS's
+    (10 days): HRDPS where its domain reaches and RDPS beneath it, then GDPS, in Canada;
+    NBM in the US; blended across the border like the other layers. Drawn as cloud (see
+    Renderer._save_cloud)."""
+    from snowwatch.maps.render import LayerFrame
+
+    now = int(r.now())
+    hr = run_of(r, CLOUD_HRDPS)
+    rd = run_of(r, CLOUD_RDPS)
+    gd = run_of(r, CLOUD_GDPS)
+    if rd is None and gd is None:
+        return None
+    rd_end = max(rd.times) if rd else now
+    times: list[int] = []
+    for run, step in ((rd, CLOUD_STEP_H), (gd, CLOUD_LONG_STEP_H)):
+        if run is None:
+            continue
+        start = times[-1] if times else now
+        times += [t for t in run.times if t > start and t % (step * HOUR) == 0]
+    us: Nbm | None = r._nbm(region)
+    prev = _reuse(r, old)
+    w_hrdps = r._hrdps_weight(region) if hr is not None else None
+
+    def job(t: int) -> Callable[[], LayerFrame | None]:
+        def go() -> LayerFrame | None:
+            use_h = hr is not None and w_hrdps is not None and t in hr.times
+            base = rd if rd is not None and t in rd.times and t <= rd_end else None
+            if base is None and gd is not None and t in gd.times:
+                base = gd
+            lead = us.lead(t) if us is not None else 0
+            use_n = us is not None and 1 <= lead <= 264
+            key = "|".join(
+                [
+                    f"cloudf@{CLOUD_DRAWING}",
+                    str(t),
+                    f"h:{hr.ref}" if use_h and hr else "-",
+                    f"b:{base.ref}" if base else "-",
+                    f"n:{us.run}:{lead}" if use_n and us else "-",
+                    region.key,
+                ]
+            )
+            had = prev.get(key)
+            if had is not None:
+                return had
+            layers: list[Layer] = []
+            src: dict[str, str] = {}
+            runs: dict[str, int] = {}
+            if use_n and us is not None:
+                v = us.field(lead, "TCDC", "surface")
+                if v is not None:
+                    v = np.where((v >= 0) & (v <= 100), v, np.nan)
+                    layers.append(Layer("nbm", v, r._us_weight(region, v)))
+                    src["south"] = "nbm"
+                    runs["nbm"] = us.run
+            north = ""
+            if use_h and hr is not None and w_hrdps is not None:
+                v = grid(r, CLOUD_HRDPS, hr, t, region, (0.0, 100.5))
+                if v is not None:
+                    layers.append(Layer("hrdps", v, w_hrdps))
+                    north = "hrdps"
+                    runs["hrdps"] = _ts(hr.ref)
+            if base is not None:
+                name = CLOUD_RDPS if base is rd else CLOUD_GDPS
+                v = grid(r, name, base, t, region, (0.0, 100.5))
+                if v is not None:
+                    model = "rdps" if base is rd else "gdps"
+                    layers.append(Layer(model, v, 1.0))
+                    north = north or model
+                    runs[model] = _ts(base.ref)
+            if not north:
+                return None  # try again next time rather than draw only the US
+            src["north"] = north
+            src.setdefault("south", north)
+            cover = mosaic(layers).amount
+            name = r._save_cloud(cover, f"k{t}")
+            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs)
+
+        return go
+
+    return _parallel([job(t) for t in times])

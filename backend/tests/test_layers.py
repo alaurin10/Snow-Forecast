@@ -183,6 +183,9 @@ VALUES = {
     "RDPS_10km_WindSpeed_700mb": 20.0,
     "RDPS_10km_WindDir_700mb": 225.0,
     "CaLDAS-NSRPS_2.5km_SnowDepth": 0.5,  # m
+    "HRDPS.CONTINENTAL_NT": 90.0,  # % cloud
+    "RDPS_10km_TotalCloudCover": 60.0,
+    "GDPS_15km_TotalCloudCover": 30.0,
 }
 
 
@@ -206,7 +209,7 @@ class LayersNet(Net):
                     f'<Dimension name="reference_time" default="{t}">x</Dimension>'
                 )
                 return resp(text)
-            end = 48 if layer.startswith("HRDPS") else 84
+            end = 48 if layer.startswith("HRDPS") else 240 if layer.startswith("GDPS") else 84
             text = (
                 f'<Dimension name="time" default="x">{ts_iso(T0 + H)}/'
                 f"{ts_iso(T0 + end * H)}/PT1H</Dimension>"
@@ -230,7 +233,7 @@ class LayersNet(Net):
 
 class FieldNbm(FakeNbm):
     def field(self, fhour: int, var: str, level: str) -> np.ndarray | None:
-        value = {"SNOWLVL": 800.0, "GUST": 8.0}[var]
+        value = {"SNOWLVL": 800.0, "GUST": 8.0, "TCDC": 10.0}[var]
         return np.full((self.region.height, self.region.width), value, np.float32)
 
 
@@ -302,7 +305,25 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     assert o["hours"] == 24 and o["t"] == iso_ts("2026-11-12T00:00:00Z")
     assert probe_at(out, o["file"], bottom, 5)[0] == pytest.approx(5.08, abs=0.01)
     c = lay["clouds"]["frames"][0]
-    assert c["file"].endswith(".webp") and (out / c["file"]).exists()
+    assert c["file"].endswith(".webp") and (out / c["file"]).exists() and c["kind"] == "observed"
+    # Then the forecast's cloud cover: every 3 h to RDPS's end, every 6 h to 10 days.
+    ahead = [f for f in lay["clouds"]["frames"] if f["kind"] == "forecast"]
+    assert [f["t"] - T0 for f in ahead] == [
+        *(h * H for h in range(6, 85, 3)),
+        *(h * H for h in range(90, 241, 6)),
+    ]
+    # North HRDPS's 90%, south NBM's 10%; beyond 48 h RDPS's 60%, beyond 84 h GDPS's 30%.
+    assert probe_at(out, ahead[0]["file"], top, 5)[0] == pytest.approx(90, abs=0.5)
+    assert probe_at(out, ahead[0]["file"], bottom, 5)[0] == pytest.approx(10, abs=0.5)
+    assert ahead[0]["src"] == {"south": "nbm", "north": "hrdps"}
+    assert probe_at(out, ahead[20]["file"], top, 5)[0] == pytest.approx(60, abs=0.5)
+    assert ahead[-1]["src"]["north"] == "gdps"
+    assert probe_at(out, ahead[-1]["file"], top, 5)[0] == pytest.approx(30, abs=0.5)
+    # Half the grid's size: the map stretches it.
+    from PIL import Image
+
+    with Image.open(out / ahead[0]["file"]) as im:
+        assert im.size == (REGION.width // 2, REGION.height // 2) and im.mode == "P"
     assert any("SNODAS" in a for a in ix["attribution"])
     assert any("GOES-West" in a for a in ix["attribution"])
 

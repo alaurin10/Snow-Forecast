@@ -34,6 +34,12 @@ Notable changes to Snow Watch. The format follows
   blend at 48 h; now they show NOAA's models (HRRR, then the National Blend) all along, as
   the snow totals, snow level and wind already did.
 
+- **Clouds: a forecast after the satellite loop.** The Clouds layer's slider now runs
+  on past "now" to about 10 days ahead: the forecast's cloud cover, every 3 hours to
+  3½ days, then every 6 hours, drawn as cloud (the thicker, the greyer). Canada's models
+  (HRDPS, RDPS, then GDPS) in Canada and NOAA's National Blend in the US, blended across
+  the border like the other layers.
+
 ### Fixed
 - **Snow total: a new window shows at once in 3D.** Choosing another window (7 days to
   10 days) used to leave the map blank, or showing the old window, until it was moved:

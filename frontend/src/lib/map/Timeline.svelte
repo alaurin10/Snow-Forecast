@@ -301,7 +301,11 @@
 				</span>
 			</div>
 		{:else if weather === 'clouds'}
-			<span class="key faint">GOES-West · true colour by day, infrared at night</span>
+			<span class="key faint"
+				>{current?.past
+					? 'GOES-West · true colour by day, infrared at night'
+					: 'Forecast cloud cover · thicker is greyer'}</span
+			>
 		{:else}
 			<div class="key">
 				{#each legendRamps as r (r.kind)}

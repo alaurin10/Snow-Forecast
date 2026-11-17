@@ -47,7 +47,8 @@ const index: PrecipIndex = {
 		clouds: {
 			frames: [
 				{ t: T - 1800, file: 'c2.webp', kind: 'observed', src: { north: 'goes' } },
-				{ t: T - 3600, file: 'c1.webp', kind: 'observed', src: { north: 'goes' } }
+				{ t: T - 3600, file: 'c1.webp', kind: 'observed', src: { north: 'goes' } },
+				{ t: T + 3 * H, file: 'k3.png', kind: 'forecast', src: { north: 'hrdps', south: 'nbm' } }
 			]
 		},
 		depth: {
@@ -98,8 +99,12 @@ describe('weather layers', () => {
 		expect(weatherView(tl, 'wind', 'gust').frames[0].file).toBe('g1.png');
 		expect(weatherView(tl, 'wind', 'ridge').frames[0].file).toBe('w1.png');
 		const cl = weatherView(tl, 'clouds', 'gust');
-		expect(cl.frames.map((f) => f.file)).toEqual(['c1.webp', 'c2.webp']);
-		expect(cl.now).toBe(1); // clouds end now
+		expect(cl.frames.map((f) => f.file)).toEqual(['c1.webp', 'c2.webp', 'k3.png']);
+		expect(cl.now).toBe(1); // the satellite ends now; the forecast's cloud follows
+		expect(cl.frames[2].past).toBe(false);
+		expect(layerSource('clouds', 'gust', cl.frames[2])).toBe(
+			"Forecast cloud cover from Canadian HRDPS in Canada, NOAA's National Blend of Models in the US: the thicker the cloud, the greyer."
+		);
 		expect(layerName('wind', 'ridge')).toBe('ridge');
 		expect(layerName('radar', 'gust')).toBeNull();
 	});

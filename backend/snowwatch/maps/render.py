@@ -478,6 +478,25 @@ class Renderer:
         self._write_probe(name, probe_sample(keep).astype(np.float16))
         return name
 
+    def _save_cloud(self, cover: np.ndarray, prefix: str) -> str:
+        """Forecast cloud cover (%) drawn as cloud over the map, at half the grid's size
+        (it has no finer detail, and the map stretches it): clear below CLOUD_FROM, then
+        from a thin white veil to thick grey cloud, in 5% steps (small files). The probe
+        keeps the cover itself."""
+        c = np.nan_to_num(cover, nan=0.0).astype(np.float32)
+        half = c[: c.shape[0] // 2 * 2, : c.shape[1] // 2 * 2]
+        half = half.reshape(half.shape[0] // 2, 2, half.shape[1] // 2, 2).mean((1, 3))
+        steps = np.clip(np.rint(half / 5), 0, 20).astype(np.uint8)
+        im = Image.fromarray(steps, "P")
+        im.putpalette([v for c_ in CLOUD_RGB for v in c_])
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True, transparency=CLOUD_ALPHA)
+        data = buf.getvalue()
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
+        self._store(name, data)
+        self._write_probe(name, probe_sample(c).astype(np.float16))
+        return name
+
     def _save_webp(self, img: np.ndarray, prefix: str, quality: int = 72) -> str:
         """A colour picture (satellite imagery) as WebP, named by its bytes."""
         buf = io.BytesIO()
@@ -1142,6 +1161,21 @@ class Renderer:
             with contextlib.suppress(OSError):
                 shutil.rmtree(d)
 
+
+# Forecast cloud cover's look, by 5% step (0–100): clear to 5%, then from a light grey veil
+# to thick grey-blue cloud, strong enough to read like the satellite's clouds over the
+# light topo map and the satellite base alike.
+CLOUD_FROM = 10
+_cloud = np.clip((np.arange(21) * 5 - CLOUD_FROM + 5) / (100 - CLOUD_FROM + 5), 0, 1)
+CLOUD_ALPHA = bytes(round(255 * (0.3 + 0.62 * f**0.8)) if f > 0 else 0 for f in _cloud)
+CLOUD_RGB: list[tuple[int, int, int]] = [
+    (
+        round(238 - 96 * f),
+        round(241 - 90 * f),
+        round(245 - 78 * f),
+    )
+    for f in _cloud
+] + [(0, 0, 0)] * (256 - 21)
 
 # Each of the older palette's precipitation steps as a rate (mm of water an hour): its
 # middle, or half as much again as its floor for a ramp's top step.
