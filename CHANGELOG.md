@@ -39,6 +39,10 @@ Notable changes to Snow Watch. The format follows
   coarser loop (about 4–7 km a pixel, 0.7 MB in all) drawn beneath the West box's own and
   fetched only when the map looks past the box. It follows the slider by time and hides
   in the forecast (the models stay on the West box).
+- **Deployment:** the worker's memory limit goes from 1.5 GB to 2.5 GB
+  (`docker-compose.yml`): the map jobs now peak at about 470 MB (radar), 320 MB (wide
+  radar), 570 MB (forecast), 550 MB (layers) and 400 MB (totals), and can overlap. The
+  wide radar's first run waits 3 minutes after the worker starts.
 - **Clouds: a forecast after the satellite loop.** The Clouds layer's slider now runs
   on past "now" to about 10 days ahead: the forecast's cloud cover, every 3 hours to
   3½ days, then every 6 hours, drawn as cloud (the thicker, the greyer). Canada's models

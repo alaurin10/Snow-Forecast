@@ -52,7 +52,7 @@ services:
       timeout: 15s
       start_period: 60s
       retries: 3
-    # Forecast runs and the map's radar, forecast and totals jobs (~350 MB at peak each)
-    # can overlap.
-    mem_limit: 1536m
+    # Forecast runs and the map's jobs can overlap. Peaks measured 17 Nov 2026: radar
+    # ~470 MB, wide radar ~320, forecast ~570, layers ~550, totals ~400.
+    mem_limit: 2560m
     restart: unless-stopped

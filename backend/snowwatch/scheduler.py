@@ -6,7 +6,7 @@ import logging
 import sqlite3
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -454,18 +454,20 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
     )
     # The map's pictures: radar scans arrive every 6 minutes, model runs hourly or slower.
     mc = worker.cfg.map
-    for job, minutes, name in (
-        (worker.radar, mc.radar_minutes, "radar"),
-        (worker.wide_radar, mc.wide_minutes, "wide_radar"),
-        (worker.forecast_frames, mc.forecast_minutes, "forecast_frames"),
-        (worker.totals_fields, mc.totals_minutes, "totals_fields"),
-        (worker.weather_layers, mc.layers_minutes, "weather_layers"),
+    # The wide radar starts a few minutes later, so it doesn't add its memory to the
+    # others' first (slowest) builds.
+    for job, minutes, name, delay in (
+        (worker.radar, mc.radar_minutes, "radar", 0),
+        (worker.wide_radar, mc.wide_minutes, "wide_radar", 3),
+        (worker.forecast_frames, mc.forecast_minutes, "forecast_frames", 0),
+        (worker.totals_fields, mc.totals_minutes, "totals_fields", 0),
+        (worker.weather_layers, mc.layers_minutes, "weather_layers", 0),
     ):
         sched.add_job(
             job,
             IntervalTrigger(minutes=minutes),
             id=name,
-            next_run_time=datetime.now(UTC),
+            next_run_time=datetime.now(UTC) + timedelta(minutes=delay),
             **opts,
         )
     for job, minutes, name in (
