@@ -6,6 +6,24 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Radar's blind spots filled from the forecast** (docs/RADAR-PLAN.md M3): where no
+  radar sees the ground (behind ridges, high over far valleys, out of range), the radar
+  and nowcast frames take the forecast for the same moment, drawn lighter and hatched.
+  Where radar reaches comes from NOAA's MRMS radar quality index (to 55°N) and Environment
+  Canada's coverage beyond. Layers → Weather → "Radar only" leaves them out; tapping the
+  map says "from the forecast" there.
+- **Taps beyond the West box read the wider radar** (M6): what's falling now and whether
+  it starts or stops within the hour. Inside the box the tap panel shows the same line.
+
+### Fixed
+- **3D terrain "walls"** (seen near Whistler): a short network hiccup switched the
+  elevation tiles from Mapterhorn to the AWS tiles mid-visit, and the two disagree by
+  20–60 m at a tile's edge, which shows in 3D as a wall with the map stretched down it.
+  The switch now waits for a real outage (15 s of failures), a failed download is tried
+  again rather than kept, and when the switch does happen every tile is loaded again
+  from the one source.
+
 ### Changed
 - **Radar scrubs as fast as you can drag, flat and in 3D** (docs/RADAR-PLAN.md, part 1):
   - The server sends each radar and forecast frame as numbers (the rate, and how much

@@ -141,3 +141,32 @@ test('the radar comes back after the graphics are lost', async ({ page }, info) 
 		.poll(async () => differ(page, before, await canvas.screenshot()), { timeout: 30_000 })
 		.toBeLessThan(0.002);
 });
+
+test("radar's blind spots are filled from the forecast, or left out", async ({ page }) => {
+	// The e2e frames say radar doesn't see round the cell in the north-east of the box
+	// (e2e/precip_fixture.py): drawn hatched by default, gone with "Radar only".
+	test.setTimeout(90_000);
+	await open(page);
+	// Zoomed out so the whole box is on screen at any width.
+	const canvas = page.locator('canvas.maplibregl-canvas');
+	await canvas.focus();
+	for (let i = 0; i < 2; i++) {
+		await page.keyboard.press('Minus');
+		await page.waitForTimeout(600);
+	}
+	await look(page);
+	const filled = await canvas.screenshot();
+	await page.getByRole('button', { name: 'Layers', exact: true }).click();
+	await page.getByRole('button', { name: 'Radar only' }).click();
+	await page.getByRole('button', { name: 'Layers', exact: true }).click();
+	await look(page);
+	const radarOnly = await canvas.screenshot();
+	expect(await differ(page, filled, radarOnly)).toBeGreaterThan(0.002);
+	expect(await page.evaluate(() => localStorage.getItem('sw.mapRadarGaps'))).toBe('off');
+	// And back.
+	await page.getByRole('button', { name: 'Layers', exact: true }).click();
+	await page.getByRole('button', { name: 'Fill gaps' }).click();
+	await page.getByRole('button', { name: 'Layers', exact: true }).click();
+	await look(page);
+	expect(await differ(page, filled, await canvas.screenshot())).toBeLessThan(0.002);
+});

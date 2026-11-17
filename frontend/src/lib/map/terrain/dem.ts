@@ -7,6 +7,12 @@
 // below. If Mapterhorn keeps failing, the AWS terrain tiles (256 px, to zoom 15) take
 // over for the rest of the session.
 //
+// The two sources disagree by 20–60 m along a tile's edge round Whistler (different
+// surveys and datums), and in 3D a step between neighbouring tiles shows as a wall (the
+// terrain's skirts, the map's picture stretched down them). So the switch waits for a
+// real outage, not a burst of downloads failing together, and when it comes every tile is
+// served again from the AWS tiles (`onSwitch`): the two never meet on screen.
+//
 // Everything here is plain code with the image decoder passed in, so it runs in the
 // terrain worker and in tests.
 
@@ -17,8 +23,10 @@ export const TILE = 512;
 export const BASE_ZOOM = 12;
 /** The finest zoom any area has (US lidar). */
 export const MAX_ZOOM = 16;
-/** Network failures in a row before switching to the AWS tiles. */
+/** Network failures in a row before switching to the AWS tiles… */
 const FAILS_BEFORE_FALLBACK = 4;
+/** …spread over at least this long: downloads in flight together fail together. */
+export const OUTAGE_MS = 15_000;
 export const EARTH = 40075016.686;
 
 export const mapterhornUrl = (z: number, x: number, y: number) =>
@@ -41,6 +49,8 @@ export interface Elev {
 	srcZ: number;
 	/** Open water: every value is 0. */
 	sea?: boolean;
+	/** Filled in after a download failed: asked for again next time, not kept. */
+	retry?: boolean;
 }
 
 export function decodeTerrarium(px: Pixels): Float32Array {
@@ -191,6 +201,8 @@ interface Got {
 	size?: number;
 	sea?: boolean;
 	missing?: boolean;
+	/** Missing because the download failed (not an answer: not kept). */
+	failed?: boolean;
 }
 
 /** A small least-recently-used map. */
@@ -228,6 +240,10 @@ export interface DemOptions {
 	/** Files kept as downloaded (a few hundred KB each). */
 	maxFiles?: number;
 	online?: () => boolean;
+	/** The clock (for tests). */
+	now?: () => number;
+	/** The source changed to the AWS tiles: every tile handed out before is from the other. */
+	onSwitch?: () => void;
 }
 
 /** What a request that was called off rejects with. */
@@ -246,20 +262,28 @@ interface Shared {
 export class DemCache {
 	private got: Lru<Got>;
 	private elevs: Lru<Elev>;
+	private elevsMax: number;
 	private pending = new Map<string, Shared>();
 	private fails = 0;
+	/** When the current run of failures began. */
+	private failingSince = 0;
 	/** Using the AWS tiles instead of Mapterhorn. */
 	fallback = false;
 	private decode: Decode;
 	private fetcher: typeof fetch;
 	private online: () => boolean;
+	private now: () => number;
+	private onSwitch: () => void;
 
 	constructor(o: DemOptions) {
 		this.decode = o.decode;
 		this.fetcher = o.fetch ?? ((...a) => fetch(...a));
-		this.elevs = new Lru<Elev>(o.maxTiles ?? 40);
+		this.elevsMax = o.maxTiles ?? 40;
+		this.elevs = new Lru<Elev>(this.elevsMax);
 		this.got = new Lru<Got>(o.maxFiles ?? 96);
 		this.online = o.online ?? (() => true);
+		this.now = o.now ?? (() => Date.now());
+		this.onSwitch = o.onSwitch ?? (() => {});
 	}
 
 	/**
@@ -313,7 +337,18 @@ export class DemCache {
 	}
 
 	private failed() {
-		if (this.online() && ++this.fails >= FAILS_BEFORE_FALLBACK) this.fallback = true;
+		if (!this.online() || this.fallback) return;
+		const now = this.now();
+		if (this.fails++ === 0) this.failingSince = now;
+		if (this.fails < FAILS_BEFORE_FALLBACK || now - this.failingSince < OUTAGE_MS) return;
+		this.fallback = true;
+		// Numbers from Mapterhorn would sit beside the AWS tiles' at every seam.
+		this.elevs = new Lru<Elev>(this.elevsMax);
+		this.onSwitch();
+	}
+
+	private answered() {
+		this.fails = 0;
 	}
 
 	/** One tile as the upstream has it. */
@@ -329,7 +364,9 @@ export class DemCache {
 					: await this.fromMapterhorn(z, x, y, sig);
 				// Called off: not an answer, so nothing is kept (and it isn't a failure).
 				if (sig.aborted) throw aborted();
-				this.got.set(key, got);
+				// A failed download is filled in from the parent for now, and asked for
+				// again next time rather than kept.
+				if (!got.failed) this.got.set(key, got);
 				return got;
 			},
 			signal
@@ -348,18 +385,18 @@ export class DemCache {
 		} catch {
 			if (signal?.aborted) throw aborted();
 			this.failed();
-			return { missing: true };
+			return { missing: true, failed: true };
 		}
 		if (res.status === 404) {
-			this.fails = 0;
+			this.answered();
 			return z <= BASE_ZOOM ? { sea: true } : { missing: true };
 		}
 		if (!res.ok) {
 			// A saved-maps miss while offline also lands here (504): fill from the parent.
 			if (res.status !== 504) this.failed();
-			return { missing: true };
+			return { missing: true, failed: true };
 		}
-		this.fails = 0;
+		this.answered();
 		return { bytes: await res.arrayBuffer() };
 	}
 
@@ -387,7 +424,7 @@ export class DemCache {
 			};
 		} catch {
 			if (signal?.aborted) throw aborted();
-			return { missing: true };
+			return { missing: true, failed: true };
 		}
 	}
 
@@ -402,8 +439,10 @@ export class DemCache {
 		return this.once(
 			`e${key}`,
 			async (sig) => {
+				const from = this.fallback;
 				const e = await this.build(z, x, y, sig);
-				this.elevs.set(key, e);
+				// Not kept if the source changed meanwhile: the cache holds one source.
+				if (!e.retry && from === this.fallback) this.elevs.set(key, e);
 				return e;
 			},
 			signal
@@ -420,11 +459,13 @@ export class DemCache {
 		if (got.sea) return seaTile(z);
 		if (z === 0) throw new Error('no elevation');
 		const parent = await this.elev(z - 1, x >> 1, y >> 1, signal);
-		if (parent.sea) return seaTile(parent.srcZ);
+		const retry = got.failed || parent.retry || undefined;
+		if (parent.sea) return { ...seaTile(parent.srcZ), retry };
 		return {
 			data: upsample(parent.data, parent.size, x & 1, y & 1),
 			size: parent.size,
-			srcZ: parent.srcZ
+			srcZ: parent.srcZ,
+			retry
 		};
 	}
 

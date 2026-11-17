@@ -26,10 +26,11 @@ NOWCAST = 3
 FORECAST = 24  # hourly
 
 
-def picture(region, step: int, ds: int) -> tuple[bytes, bytes]:
+def picture(region, step: int, ds: int, blind: bool = False) -> tuple[bytes, bytes]:
     """Two bands of precipitation and a cell, moved a little east each step, drawn the way
     the server draws frames: a picture on the fine palette, and the numbers (dataframe.py)
-    at 1/ds of the grid."""
+    at 1/ds of the grid. `blind`: radar doesn't see round the cell, so the forecast filled
+    it in (the map hatches it, or leaves it out)."""
     h, w = region.height, region.width
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     dx = step * 9.0
@@ -39,7 +40,11 @@ def picture(region, step: int, ds: int) -> tuple[bytes, bytes]:
     cell = np.exp(-((xs - 1200 - dx) ** 2 + (ys - 500) ** 2) / (2 * 120.0**2))
     rate = (np.clip(band1 + 0.8 * band2 + cell, 0, 1) ** 2 * 6).astype(np.float32)  # mm/h
     kind = np.where(ys < 900, SNOW_T, RAIN_T).astype(np.uint8)  # north: snow, south: rain
-    return encode_fine(fine_index(rate, kind)), dataframe.encode(rate, kind, ds)
+    filled = None
+    if blind:
+        filled = np.zeros((h, w), np.float32)
+        filled[300:700, 1000:1450] = 1.0
+    return encode_fine(fine_index(rate, kind)), dataframe.encode(rate, kind, ds, filled)
 
 
 def main(out: Path) -> None:
@@ -54,7 +59,7 @@ def main(out: Path) -> None:
     )
     for step, (kind, t, span) in enumerate(times):
         ds = 2 if kind == "forecast" else 1
-        data, numbers = picture(region, step, ds)
+        data, numbers = picture(region, step, ds, blind=kind != "forecast")
         prefix = {"radar": "r", "nowcast": "n", "forecast": "f"}[kind]
         name = f"{prefix}{t}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         (out / name).write_bytes(data)

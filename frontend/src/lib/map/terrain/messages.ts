@@ -88,6 +88,8 @@ export type WorkerResponse =
 			ok: true;
 			bytes?: ArrayBuffer;
 			bitmap?: ImageBitmap;
+			/** An elevation tile came from the AWS tiles (Mapterhorn wasn't answering). */
+			fallback?: boolean;
 			empty?: boolean;
 			point?: PointFacts;
 			/** The box a whole-view picture covers. */

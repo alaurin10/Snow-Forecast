@@ -13,6 +13,10 @@ summit showed as heavy rain in it, and MRMS shows nothing there.
   PrecipRate_00.00   mm/h; -3 where no radar sees (beyond range, the sea, Mexico)
   PrecipFlag_00.00   0 none, 1 warm stratiform rain, 3 snow, 6 convective rain, 7 rain
                      with hail, 10 cool stratiform rain, 91/96 tropical; -3 no coverage
+  RadarQualityIndex_00.00
+                     0..1, how well the radars see the air near the ground: low where the
+                     beam is blocked by a ridge or passes high over a valley; -3 beyond
+                     range (coverage.py reads it to find where radar is blind)
 
 Both are 0.01° latitude/longitude grids over 20–55°N, 130–60°W (3500 × 7000), packed as
 a PNG inside the GRIB2 message (template 5.41): value = (R + X·2^E) / 10^D. Decoded with
@@ -42,6 +46,7 @@ log = logging.getLogger("snowwatch.precip")
 BUCKET = "https://noaa-mrms-pds.s3.amazonaws.com"
 RATE = "PrecipRate_00.00"
 FLAG = "PrecipFlag_00.00"
+QUALITY = "RadarQualityIndex_00.00"
 NO_COVERAGE = -3.0
 # The grid: cell centres from 54.995°N down and from 129.995°W east, 0.01° apart.
 NORTH = 54.995
@@ -191,4 +196,22 @@ def scan(net: Net, t: int, region: Region) -> Scan | None:
             kind[wet & np.isin(flag, RAIN_FLAGS)] = RAIN_T
         kind[~(rate > 0)] = NONE
         return Scan(when, rate, kind)
+    return None
+
+
+def quality(net: Net, t: int, region: Region) -> np.ndarray | None:
+    """MRMS's radar quality index (0..1) on the region near time t: 0 beyond the radars'
+    range, NaN outside MRMS's grid. None if MRMS has none of the last few scans' (it is
+    sometimes a few minutes behind the rates)."""
+    for back in range(4):
+        raw = _get(net, QUALITY, t - (t % EVERY_S) - back * EVERY_S)
+        if raw is None:
+            continue
+        q = _sample(raw, region)
+        del raw
+        if q is None or not np.isfinite(q).any():
+            return None
+        q[np.isfinite(q) & (q < 0)] = 0.0
+        out: np.ndarray = np.minimum(q, 1.0)
+        return out
     return None

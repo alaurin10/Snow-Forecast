@@ -112,9 +112,18 @@ New `frontend/src/lib/map/precip/`:
   `radar_eccc.Check`, `apply_check`, `Clutter`. Its quality index isn't readable by
   gribberish; MRMS is read from its PNG packing directly.) Radar frame = `mosaic([MRMS, ECCC composite])`, feathered at MRMS's edge. Types:
   MRMS `PrecipFlag`, then ECCC's type picture, then the forecast. RainViewer last.
-- [ ] Coverage plane (¼ res) in the data frame from MRMS's quality index and GeoMet's
+- [x] Coverage plane (¼ res) in the data frame from MRMS's quality index and GeoMet's
   `RADAR_COVERAGE_RRAI`. Where no radar sees, fill from the current forecast hour, drawn
   lighter with a hatch; legend line and a "Fill radar gaps" toggle; taps say so.
+  (Landed as: `maps/coverage.py` makes `seen` (0..1) from MRMS's `RadarQualityIndex`
+  (read from its PNG packing like the rates; 0.15 blind → 0.5 seen) to 55°N and
+  `RADAR_COVERAGE_RRAI.INV` beyond, softened, kept on disk for 30 min. `render.fill_gaps`
+  adds `(1 − seen) · max(0, forecast − radar)` to each new radar frame and to the nowcast
+  before its hand-over: the forecast only adds. The share filled is a third ¼-res plane
+  (`planes = 3`; files without it read as before) and the probe's second channel. The
+  shader draws it at 45–80 % alpha in diagonal hatching, or leaves it out ("Radar only"
+  in Layers, `sw.mapRadarGaps`); the timeline key says "no radar". The wide loop has no
+  forecast, so no fill there.)
 - [ ] `maps/qc.py`: speckle removal; a learned clutter map (echo in nearly every scan
   while surroundings and the model are dry; on disk, with decay); frame sanity checks
   (wet-area jump, stale scan) that reject a frame and keep the last good one.
@@ -157,7 +166,10 @@ New `frontend/src/lib/map/precip/`:
   forecast: the same ownership rule, RDPS/GDPS where no fine model reaches.
 - [x] (Landed as radar and nowcast only, via the same `Renderer.radar` into `precip/wide/`,
   served at `/api/precip/wide`; 1800 × 1356 px, 23 frames of ~31 KB, a 90 s cold build at
-  317 MB. Taps outside the box aren't read from it yet.) App: the wide frames draw beneath the home box and load when the view leaves it;
+  317 MB. Taps outside the box read it since 17 Nov: the wide renderer keeps a probe of
+  every pixel (a probe's step is read from its size), `/api/map/point` falls back to
+  `precip/wide/index.json` (`wide: true`, radar and nowcast only), and the tap panel shows
+  "Radar now" with the nowcast's start or stop, inside the box too.) App: the wide frames draw beneath the home box and load when the view leaves it;
   frames pair by `valid` time; taps outside the home box read the wide probes.
 
 ## Verified facts about the sources (16 Nov 2026)
@@ -186,6 +198,12 @@ New `frontend/src/lib/map/precip/`:
 
 ## Found along the way
 
-- 3D terrain near Whistler shows a wall with stretched stripes along a band (with no
-  weather layer at all, 17 Nov 2026, SwiftShader): elevation tiles from different
-  sources not meeting? To look into separately (`terrain/dem.ts`).
+- ~~3D terrain near Whistler shows a wall with stretched stripes along a band~~ (fixed
+  17 Nov): Mapterhorn and the AWS tiles differ by 20–60 m along tile edges round Whistler,
+  and four failures in a row (one dropped connection fails every download in flight)
+  switched the session to AWS mid-visit, leaving both on screen. `DemCache` now needs
+  failures over 15 s, doesn't keep a failed download, clears its numbers on the switch,
+  and the page reloads `dem`/`demshade` (`onDemSourceChange` → `map.refreshTiles`).
+- Elevation tiles take 60–90 s to all load in 3D under SwiftShader (tiles sit "loading";
+  hillshade tiles drawn meanwhile show as straight-edged veils). Worth a look at the
+  terrain worker's throughput on a real phone.

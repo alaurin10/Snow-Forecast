@@ -30,6 +30,26 @@ describe('codec', () => {
 		expect([...p.rate]).toEqual(ref.rate.flat());
 		expect([...p.type].filter((_, i) => i % 2 === 0)).toEqual(ref.snow.flat());
 		expect([...p.type].filter((_, i) => i % 2 === 1)).toEqual(ref.mix.flat());
+		expect(p.typeChannels).toBe(2);
+	});
+	it('reads a frame with the share the forecast filled in as a third type channel', () => {
+		// Made by dataframe.encode with `filled` (the west whole, a band half, the east none).
+		const filledBin = readFileSync(new URL('frame-filled.bin', dir));
+		const want = JSON.parse(readFileSync(new URL('frame-filled.json', dir), 'utf8')) as {
+			rate: number[][];
+			snow: number[][];
+			mix: number[][];
+			filled: number[][];
+		};
+		const p = parse(new Uint8Array(gunzipSync(filledBin)))!;
+		expect(p).not.toBeNull();
+		expect(p.typeChannels).toBe(3);
+		expect([...p.rate]).toEqual(want.rate.flat());
+		const channel = (k: number) => [...p.type].filter((_, i) => i % 3 === k);
+		expect(channel(0)).toEqual(want.snow.flat());
+		expect(channel(1)).toEqual(want.mix.flat());
+		expect(channel(2)).toEqual(want.filled.flat());
+		expect(want.filled[0]).toEqual([0, 128, 255, 255]);
 	});
 	it('turns down anything else', () => {
 		expect(parse(new Uint8Array(4))).toBeNull();
@@ -55,6 +75,7 @@ describe('codec', () => {
 			type: new Uint8Array(2),
 			typeWidth: 1,
 			typeHeight: 1,
+			typeChannels: 2,
 			ds: 1
 		};
 		const h = halve(p);
@@ -107,6 +128,7 @@ const planes = (): Planes => ({
 	type: new Uint8Array(2),
 	typeWidth: 1,
 	typeHeight: 1,
+	typeChannels: 2,
 	ds: 1
 });
 const wants = (n: number) =>

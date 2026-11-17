@@ -3575,6 +3575,10 @@
             "$ref": "#/$defs/PointTotal"
           },
           "type": "array"
+        },
+        "wide": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -3599,6 +3603,10 @@
     "PointRate": {
       "description": "One frame of the precipitation timeline at the point.",
       "properties": {
+        "filled": {
+          "default": false,
+          "type": "boolean"
+        },
         "high": {
           "anyOf": [
             {

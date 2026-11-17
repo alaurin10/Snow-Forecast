@@ -133,6 +133,9 @@ class Prefs {
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapWeather = $state<MapWeather>(loadWeather());
 	mapWind = $state<MapWind>(load('sw.mapWind', ['gust', 'ridge'] as const, 'gust'));
+	/** Radar's blind spots (blocked by ridges, overshooting valleys, out of range) filled
+	 *  from the forecast, hatched; or radar only. */
+	mapRadarGaps = $state<'on' | 'off'>(load('sw.mapRadarGaps', ['on', 'off'] as const, 'on'));
 	mapOverlay = $state<MapOverlay>(load('sw.mapOverlay', MAP_OVERLAYS, 'none'));
 	mapFeatures = $state<Set<MapFeature>>(loadFeatures());
 	mapShade = $state<MapShade>(load('sw.mapShade', ['off', 'light', 'strong'] as const, 'light'));
@@ -189,6 +192,11 @@ class Prefs {
 	setMapWind(w: MapWind) {
 		this.mapWind = w;
 		save('sw.mapWind', w);
+	}
+
+	setMapRadarGaps(on: boolean) {
+		this.mapRadarGaps = on ? 'on' : 'off';
+		save('sw.mapRadarGaps', this.mapRadarGaps);
 	}
 
 	setMapOverlay(o: MapOverlay) {

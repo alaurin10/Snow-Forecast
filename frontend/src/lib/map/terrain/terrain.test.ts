@@ -7,6 +7,7 @@ import {
 	encodeTerrarium,
 	locate,
 	metresPerPixel,
+	OUTAGE_MS,
 	sample,
 	stitch,
 	tileLat,
@@ -245,11 +246,17 @@ describe('fetching elevation', () => {
 		expect(seen.length).toBe(1);
 	});
 
-	it('switches to the AWS tiles after repeated network failures', async () => {
+	it('switches to the AWS tiles after network failures over a while', async () => {
 		const { f, seen } = upstream((u) => (u.includes('mapterhorn') ? 'error' : 200));
-		const dem = new DemCache({ decode, fetch: f });
-		for (let i = 0; i < 4; i++) await dem.elev(12, i, 0).catch(() => null);
+		let now = 0;
+		let switched = 0;
+		const dem = new DemCache({ decode, fetch: f, now: () => now, onSwitch: () => switched++ });
+		for (let i = 0; i < 4; i++) {
+			await dem.elev(12, i, 0).catch(() => null);
+			now += OUTAGE_MS / 3;
+		}
 		expect(dem.fallback).toBe(true);
+		expect(switched).toBe(1);
 		const e = await dem.elev(12, 9, 9);
 		// Four AWS tiles one zoom deeper, stitched.
 		expect(e.size).toBe(SIZE * 2);
@@ -259,10 +266,76 @@ describe('fetching elevation', () => {
 		).toBe(true);
 	});
 
+	it('stays on Mapterhorn when downloads in flight fail together', async () => {
+		// A dropped connection fails every download under way at once: that is one moment,
+		// not an outage, and the AWS tiles would meet Mapterhorn's on screen in a step.
+		const { f } = upstream((u) => (u.includes('mapterhorn') ? 'error' : 200));
+		const dem = new DemCache({ decode, fetch: f, now: () => 1000 });
+		await Promise.all([0, 1, 2, 3, 4, 5].map((i) => dem.elev(12, i, 0).catch(() => null)));
+		expect(dem.fallback).toBe(false);
+	});
+
+	it('forgets the numbers it had when it switches source', async () => {
+		let down = false;
+		const { f, seen } = upstream((u) => (down && u.includes('mapterhorn') ? 'error' : 200));
+		let now = 0;
+		const dem = new DemCache({ decode, fetch: f, now: () => now });
+		await dem.elev(13, 10, 20);
+		down = true;
+		for (let i = 0; i < 4; i++) {
+			await dem.elev(12, 100 + i, 0).catch(() => null);
+			now += OUTAGE_MS / 3;
+		}
+		expect(dem.fallback).toBe(true);
+		// Asked again from the AWS tiles, not served from Mapterhorn's copy.
+		const e = await dem.elev(13, 10, 20);
+		expect(e.size).toBe(SIZE * 2);
+		expect(seen.some((u) => u.includes('s3.amazonaws.com') && u.includes('/14/20/40.png'))).toBe(
+			true
+		);
+	});
+
+	it('asks again for a tile whose download failed', async () => {
+		let fail = true;
+		const { f, seen } = upstream((u) => (fail && u.includes('/13/') ? 'error' : 200));
+		const dem = new DemCache({ decode, fetch: f });
+		const first = await dem.elev(13, 10, 20);
+		// Filled in from the parent meanwhile…
+		expect(first.srcZ).toBe(12);
+		expect(first.retry).toBe(true);
+		fail = false;
+		// …and not kept: the next ask downloads it.
+		const again = await dem.elev(13, 10, 20);
+		expect(again.srcZ).toBe(13);
+		expect(seen.filter((u) => u.endsWith('/13/10/20.webp')).length).toBe(2);
+	});
+
 	it("doesn't give up on Mapterhorn while the device is offline", async () => {
 		const { f } = upstream(() => 'error');
 		const dem = new DemCache({ decode, fetch: f, online: () => false });
 		for (let i = 0; i < 6; i++) await dem.elev(12, i, 0).catch(() => null);
 		expect(dem.fallback).toBe(false);
+	});
+});
+
+describe('the elevation source changing', () => {
+	it('tells the map once each time the source changes, not on the first tile', async () => {
+		const { noteDemSource, onDemSourceChange } = await import('./client');
+		let n = 0;
+		const off = onDemSourceChange(() => n++);
+		noteDemSource(false);
+		noteDemSource(false);
+		noteDemSource(undefined);
+		await Promise.resolve();
+		expect(n).toBe(0);
+		noteDemSource(true);
+		noteDemSource(true);
+		await Promise.resolve();
+		expect(n).toBe(1);
+		// A new worker starts on Mapterhorn again.
+		noteDemSource(false);
+		await Promise.resolve();
+		expect(n).toBe(2);
+		off();
 	});
 });

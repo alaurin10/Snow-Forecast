@@ -229,6 +229,7 @@ class Worker:
     def _map_job(self, name: str) -> None:
         """Redraw one part of the map's pictures (only what changed) and update the index."""
         from snowwatch.maps.geomet import Net
+        from snowwatch.maps.point import PROBE_STEP
         from snowwatch.maps.region import box_region, region_for
         from snowwatch.maps.render import Renderer
 
@@ -246,6 +247,7 @@ class Worker:
                     return
                 region = box_region(*self.cfg.map.wide_region, self.cfg.map.wide_width)
                 out_dir, work_dir = out_dir / "wide", work_dir / "wide"
+            probe_step = 1 if name == "wide" else PROBE_STEP
             headers = {"User-Agent": self.settings.user_agent}
             with httpx.Client(headers=headers, follow_redirects=True) as client:
                 r = Renderer(
@@ -254,6 +256,7 @@ class Worker:
                     work_dir=work_dir,
                     nbm_cycles=tuple(self.cfg.map.nbm_cycles),
                     slr_bands=self.cfg.slr_bands,
+                    probe_step=probe_step,
                 )
                 job = {
                     "radar": r.radar,

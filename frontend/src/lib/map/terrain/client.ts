@@ -165,6 +165,27 @@ export class TerrainClient {
 let client: TerrainClient | null = null;
 let jobs: TerrainClient | null = null;
 let registered = false;
+/** Whether the elevation tiles handed to the map came from the AWS tiles (null: none yet). */
+let demFallback: boolean | null = null;
+const demSwitch = new Set<() => void>();
+
+/**
+ * Call `fn` when the elevation's source changes (the worker gave up on Mapterhorn, or a
+ * new worker starts on it again): the tiles the map holds are from the other source, and
+ * in 3D the two don't meet (dem.ts), so it should load them all again. Returns the undo.
+ */
+export function onDemSourceChange(fn: () => void): () => void {
+	demSwitch.add(fn);
+	return () => demSwitch.delete(fn);
+}
+
+/** Note the source of an elevation tile just handed to the map. */
+export function noteDemSource(fallback: boolean | undefined) {
+	if (fallback === undefined) return;
+	const was = demFallback;
+	demFallback = fallback;
+	if (was !== null && was !== fallback) for (const fn of demSwitch) queueMicrotask(fn);
+}
 /** Maps using the workers now (see `retainTerrain`). */
 let users = 0;
 
@@ -304,6 +325,7 @@ export function registerProtocols(ml: {
 	ml.addProtocol('dem', async (params, abort) => {
 		const { z, x, y } = parse(params.url.slice('dem://'.length));
 		const r = await worker().ask({ type: 'dem', z, x, y }, abort.signal);
+		noteDemSource(r.fallback);
 		return { data: r.bytes ?? r.bitmap! };
 	});
 	ml.addProtocol('terrain', async (params, abort) => {

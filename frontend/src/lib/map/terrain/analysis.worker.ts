@@ -466,13 +466,14 @@ async function handle(
 		case 'dem': {
 			const t = await dem.demTile(msg.z, msg.x, msg.y, signal);
 			if (signal.aborted) throw aborted();
+			const fallback = dem.fallback;
 			if ('bytes' in t) {
 				// A copy: the cache keeps the original for analysis and the next request.
 				const bytes = t.bytes.slice(0);
-				return { res: { id, ok: true, bytes }, transfer: [bytes] };
+				return { res: { id, ok: true, bytes, fallback }, transfer: [bytes] };
 			}
 			const bmp = await bitmap(encodeTerrarium(t.data), t.size);
-			return { res: { id, ok: true, bitmap: bmp }, transfer: [bmp] };
+			return { res: { id, ok: true, bitmap: bmp, fallback }, transfer: [bmp] };
 		}
 		case 'tile': {
 			const rgba = await overlayTile(msg, signal);

@@ -41,7 +41,7 @@ import numpy as np
 from PIL import Image
 
 from snowwatch.config import SlrBand
-from snowwatch.maps import bins, dataframe, grib, terrain_totals, totals
+from snowwatch.maps import bins, coverage, dataframe, grib, terrain_totals, totals
 from snowwatch.maps.blend import (
     Layer,
     Mosaic,
@@ -59,6 +59,7 @@ from snowwatch.maps.palette import (
     FINE_FROM,
     FINE_KIND,
     MIX_T,
+    NONE,
     RAIN_T,
     RATE_BANDS,
     SNOW_T,
@@ -74,7 +75,7 @@ from snowwatch.maps.palette import (
 )
 from snowwatch.maps.point import PROBE_STEP
 from snowwatch.maps.region import Region, stitch
-from snowwatch.maps.smooth import soften
+from snowwatch.maps.smooth import blur, soften
 from snowwatch.maps.sources import hrrr, mrms, nbm, radar_eccc, rainviewer, rdps_gdps
 from snowwatch.maps.sources.nbm import Nbm
 from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run, run_of
@@ -94,6 +95,9 @@ FINE_KEY = "f6"
 # Radar frames drawn with the current typing (radar_eccc.fill_types: echoes nothing types
 # are left out): in their keys, so older radar frames are drawn again.
 RADAR_TYPING = "t4"
+# Radar and nowcast frames with their blind spots filled from the forecast (fill_gaps): in
+# their keys, so frames drawn before are drawn again.
+GAPS = "g1"
 RADAR_SIGMA = 0.8
 GRIB_SIGMA = 1.2
 # Radar's types come from a coarser product, and echoes it leaves untyped take the
@@ -230,11 +234,11 @@ def valid_time(t: int, kind: str, span_h: int) -> int:
     return t - span_h * HOUR // 2 if kind == "forecast" else t
 
 
-def probe_sample(values: np.ndarray) -> np.ndarray:
-    """Every PROBE_STEP-th pixel each way, from the middle of each block (the last two
-    axes: rows, columns)."""
-    k = PROBE_STEP // 2
-    out: np.ndarray = values[..., k::PROBE_STEP, k::PROBE_STEP]
+def probe_sample(values: np.ndarray, step: int = PROBE_STEP) -> np.ndarray:
+    """Every `step`-th pixel each way, from the middle of each block (the last two axes:
+    rows, columns)."""
+    k = step // 2
+    out: np.ndarray = values[..., k::step, k::step]
     return out
 
 
@@ -258,8 +262,12 @@ class Renderer:
         work_dir: Path | None = None,
         nbm_cycles: tuple[int, ...] = (0, 12),
         slr_bands: list[SlrBand] | None = None,
+        probe_step: int = PROBE_STEP,
     ) -> None:
         self.dir = out_dir
+        # Every how many pixels a frame's probe keeps (point.py reads any step): the wide
+        # loop's pixels are ~4 km, so it keeps every one.
+        self.probe_step = probe_step
         self.net = net
         self.now = now
         self.nbm_cycles = nbm_cycles
@@ -434,9 +442,9 @@ class Renderer:
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
         self._store(name, data)
         if values is None:
-            self._write_probe(name, probe_sample(indexed))
+            self._write_probe(name, probe_sample(indexed, self.probe_step))
         else:
-            self._write_probe(name, probe_sample(values).astype(np.float16))
+            self._write_probe(name, probe_sample(values, self.probe_step).astype(np.float16))
         return name
 
     def _save_precip(
@@ -447,17 +455,28 @@ class Renderer:
         sigma: float = 0.0,
         kind_sigma: float | None = None,
         ds: int = 1,
+        filled: np.ndarray | None = None,
     ) -> tuple[str, str]:
         """A precipitation frame (rates and types) softened by `sigma` pixels (types by
         `kind_sigma`): drawn on the fine palette, with its probe (the palette indices),
-        and as numbers at 1/ds of the grid (dataframe.py). Returns both files' names."""
+        and as numbers at 1/ds of the grid (dataframe.py). Returns both files' names.
+        `filled` is the share of each pixel's water the forecast filled in (fill_gaps):
+        a plane of the numbers, and the probe's second channel (0..255)."""
         amount, kind = soften(amount, kind, sigma, kind_sigma)
+        if filled is not None:
+            filled = blur(filled, sigma) if sigma > 0 else filled
+            if not filled.any():
+                filled = None
         indexed = fine_index(amount, kind)
         data = encode_fine(indexed)
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
         self._store(name, data)
-        self._write_probe(name, probe_sample(indexed))
-        numbers = dataframe.encode(amount, kind, ds)
+        if filled is None:
+            self._write_probe(name, probe_sample(indexed, self.probe_step))
+        else:
+            share = np.clip(np.rint(filled * 255), 0, 255).astype(np.uint8)
+            self._write_probe(name, probe_sample(np.stack([indexed, share]), self.probe_step))
+        numbers = dataframe.encode(amount, kind, ds, filled)
         numbers_name = f"{prefix}-{hashlib.sha1(numbers).hexdigest()[:12]}.{dataframe.EXT}"
         self._store(numbers_name, numbers)
         return name, numbers_name
@@ -476,7 +495,7 @@ class Renderer:
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
         self._store(name, data)
         keep = values if probe is None else probe
-        self._write_probe(name, probe_sample(keep).astype(np.float16))
+        self._write_probe(name, probe_sample(keep, self.probe_step).astype(np.float16))
         return name
 
     def _save_cloud(self, cover: np.ndarray, prefix: str) -> str:
@@ -495,7 +514,7 @@ class Renderer:
         data = buf.getvalue()
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
         self._store(name, data)
-        self._write_probe(name, probe_sample(c).astype(np.float16))
+        self._write_probe(name, probe_sample(c, self.probe_step).astype(np.float16))
         return name
 
     def _save_webp(self, img: np.ndarray, prefix: str, quality: int = 72) -> str:
@@ -557,7 +576,7 @@ class Renderer:
             except OSError:
                 idx = None
             if idx is not None:
-                self._write_probe(f.file, probe_sample(idx))
+                self._write_probe(f.file, probe_sample(idx, self.probe_step))
         return f
 
     # ---- Everything ----------------------------------------------------------------
@@ -622,9 +641,26 @@ class Renderer:
         out: list[FrameOut] = []
         latest_t = max(p.radar) if p.radar else None
         clutter = radar_eccc.Clutter(self._clutter_path(region), (region.height, region.width))
+        # The forecast, for the nowcast's hand-over and for what radar can't see.
+        model = _Model(self.dir, [f for f in old or [] if f.kind == "forecast"], region)
+        seen: np.ndarray | None = None
+        if model.frames and latest_t is not None:
+            seen = coverage.Coverage(self._coverage_path(region), region, self.now()).get(
+                self.net, latest_t
+            )
+
+        def filled(t: int, got: tuple[np.ndarray, np.ndarray]) -> tuple[Any, ...]:
+            """The frame with its blind spots filled from the forecast at t (if it has a
+            frame within the hour), and the share filled (None if not)."""
+            pair = model.pair(t) if seen is not None else None
+            ahead = model.at(t, pair) if pair else None
+            if seen is None or ahead is None:
+                return (*got, None)
+            return fill_gaps(got[0], got[1], ahead, seen)
+
         for t in p.radar:
             type_t = radar_eccc.type_time(t, p.types)
-            base = f"eccc|{FINE_KEY}|{RADAR_TYPING}|{t}|{type_t}|{region.key}"
+            base = f"eccc|{FINE_KEY}|{RADAR_TYPING}|{GAPS}|{t}|{type_t}|{region.key}"
             # Checked against MRMS ("m") when it had the scan; else as ECCC drew it ("n"),
             # tried against MRMS again next time.
             had = self._reusable(prev, f"{base}|m")
@@ -645,7 +681,10 @@ class Renderer:
                 continue
             if check is not None and t == latest_t and raw:
                 clutter.add(check.false_echo(raw[0]))
-            name, data = self._save_precip(*got, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR)
+            amount, kind, share = filled(t, got)
+            name, data = self._save_precip(
+                amount, kind, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR, share
+            )
             src = {"north": "radar-eccc", "south": "radar-eccc"}
             if check is not None:
                 src["check"] = "mrms"
@@ -658,15 +697,18 @@ class Renderer:
         type_t = radar_eccc.type_time(latest, p.types)
         types: np.ndarray | None = None
         src = {"north": "nowcast-eccc", "south": "nowcast-eccc"}
-        model = _Model(self.dir, [f for f in old or [] if f.kind == "forecast"], region)
         end = max(p.nowcast)
         for t in p.nowcast:
             # How much of the forecast shows: none at the latest scan, all of it by the
             # nowcast's last frame, easing in and out between.
             w = _ease((t - latest) / max(1, end - latest))
-            pair = model.pair(t) if w > 0 else None
+            pair = model.pair(t) if w > 0 or seen is not None else None
             mixed = f"{w:.2f}:{pair[0].data}:{pair[1].data}" if pair else "-"
-            key = f"now|{FINE_KEY}|{RADAR_TYPING}|{p.nowcast_ref}|{t}|{type_t}|{mixed}|{region.key}"
+            gaps = GAPS if seen is not None else "-"
+            key = (
+                f"now|{FINE_KEY}|{RADAR_TYPING}|{gaps}|{p.nowcast_ref}|{t}|{type_t}|{mixed}|"
+                f"{region.key}"
+            )
             had = self._reusable(prev, key)
             if had:
                 out.append(had)
@@ -678,15 +720,28 @@ class Renderer:
             )
             if got is None:
                 continue
-            if pair:
-                ahead = model.at(t, pair)
-                if ahead is not None:
-                    got = hand_over(got[0], got[1], ahead, w)
-            name, data = self._save_precip(*got, f"n{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR)
+            ahead = model.at(t, pair) if pair else None
+            share = None
+            if ahead is not None and seen is not None:
+                # Blind spots first: the hand-over then fades from a filled nowcast.
+                amount, kind, share = fill_gaps(got[0], got[1], ahead, seen)
+                got = (amount, kind)
+            if ahead is not None and w > 0:
+                got = hand_over(got[0], got[1], ahead, w)
+                # Where the frame is all forecast by now, nothing is "filled in".
+                share = None if share is None else share * (1 - w)
+            name, data = self._save_precip(
+                *got, f"n{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR, share
+            )
             out.append(
                 FrameOut(t, False, name, key, "", "nowcast", 0, src, FINE, data, DS_RADAR, t)
             )
         return out
+
+    def _coverage_path(self, region: Region) -> Path:
+        """Where the radar's coverage (coverage.py) is kept, by region."""
+        h = hashlib.sha1(region.key.encode()).hexdigest()[:16]
+        return self.grids_dir / f"coverage-{h}.npy"
 
     def _clutter_path(self, region: Region) -> Path:
         """Where the radar's clutter score is kept (radar_eccc.Clutter), by region."""
@@ -1287,6 +1342,29 @@ def hand_over(
     kinds[(share_m >= share_r) & (share_m > share_s)] = MIX_T
     kinds[(share_s >= share_r) & (share_s >= share_m)] = SNOW_T
     return out.astype(np.float32), kinds
+
+
+def fill_gaps(
+    amount: np.ndarray, kind: np.ndarray, ahead: Field, seen: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A radar or nowcast frame with what radar can't see filled from the forecast for
+    the same moment: where `seen` is 0 the forecast's rate, where it is 1 the radar's,
+    between a part of the forecast's. The forecast only adds (an echo radar does see is
+    never taken away), and where it is most of the water its type is the frame's.
+    Returns the rates, the types and the share of each pixel's water filled in."""
+    rate, snow, mix = ahead
+    now = np.nan_to_num(amount, nan=0.0)
+    add = (1 - seen) * np.maximum(0.0, rate - now)
+    out = (now + add).astype(np.float32)
+    share = np.zeros(out.shape, np.float32)
+    np.divide(add, out, out=share, where=out > 0)
+    rain = 1 - snow - mix
+    model_kind = np.full(kind.shape, RAIN_T, np.uint8)
+    model_kind[(mix >= rain) & (mix > snow)] = MIX_T
+    model_kind[(snow >= rain) & (snow >= mix)] = SNOW_T
+    take = (out > 0) & ((share >= 0.5) | (kind == NONE))
+    kinds = np.where(take, model_kind, kind).astype(np.uint8)
+    return out, kinds, share
 
 
 def _files(index: dict[str, Any]) -> set[str]:
