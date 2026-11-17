@@ -77,6 +77,9 @@ async function differ(page: Page, a: Buffer, b: Buffer): Promise<number> {
 }
 
 test('the slider moves the radar freely, in steps of less than a frame', async ({ page }) => {
+	// A dozen full-screen screenshots at a phone's pixel density: more than the default 30 s
+	// on a slow machine.
+	test.setTimeout(90_000);
 	const slider = await open(page);
 	expect(Number(await slider.getAttribute('step'))).toBeLessThan(1);
 	const seen = new Set<string>();
