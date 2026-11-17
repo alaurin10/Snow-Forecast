@@ -184,7 +184,8 @@
 					<span
 						class="span faint"
 						title={adjusted ? `${TERRAIN_NOTE} ${pick.sources}` : pick.sources}
-						>{pick.span}{#if adjusted}<span class="adj">&nbsp;· adjusted to terrain</span
+						>{#if waiting}<i class="spin" aria-label="Loading"
+							></i>{/if}{pick.span}{#if adjusted}<span class="adj">&nbsp;· adjusted to terrain</span
 							>{/if}</span
 					>
 				</div>

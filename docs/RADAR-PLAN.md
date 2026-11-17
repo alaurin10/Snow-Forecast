@@ -123,12 +123,14 @@ New `frontend/src/lib/map/precip/`:
 
 ### M4 — Fixes that need no new architecture
 
-- [ ] **Snow total** (`map/layers/snowtiles.ts`): source and layer ids carry the tiles id;
+- [x] **Snow total** (landed without the server pre-drawing tiles round locations; add it if
+  first views are still slow) (`map/layers/snowtiles.ts`): source and layer ids carry the tiles id;
   the previous window stays until the new source has loaded (as `layers/sat.ts` does);
   errored tiles retried with backoff; a spinner in pick mode; other windows' pictures
   prefetched. Server: snow tiles get their own rate limiter, 503 carries `Retry-After`,
   and tiles z8–10 round saved locations are drawn ahead after each totals run.
-- [ ] **Sun & shade** (`map/style.ts`, `terrain/shade.ts`, `layers/terrain.ts`): one light
+- [x] **Sun & shade** (landed as: `dusk()` in `terrain/shade.ts`, a straight ramp from 8°
+  to 0.25°, shared with `sunPaint`'s highlight; slider ends unchanged) (`map/style.ts`, `terrain/shade.ts`, `layers/terrain.ts`): one light
   model from 10° up to 6° below the horizon: `sunPaint` throughout, highlight and shadow
   easing with altitude; `paintShade` dims lit ground smoothly as the sun nears the
   horizon so it meets the shadow at sunset; one threshold constant; the slider ends on
@@ -176,3 +178,9 @@ New `frontend/src/lib/map/precip/`:
   frames (MRMS/ECCC seam, Rainier, the hand-over, the 48 h join at Snoqualmie).
 - Browser: Playwright at phone and desktop sizes, flat and 3D; `perf.spec.ts` numbers in
   each PR.
+
+## Found along the way
+
+- 3D terrain near Whistler shows a wall with stretched stripes along a band (with no
+  weather layer at all, 17 Nov 2026, SwiftShader): elevation tiles from different
+  sources not meeting? To look into separately (`terrain/dem.ts`).

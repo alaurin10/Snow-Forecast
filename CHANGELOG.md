@@ -30,6 +30,18 @@ Notable changes to Snow Watch. The format follows
   - The radar is kept, not cleared, when no radar source answers.
 
 ### Fixed
+- **Snow total: a new window shows at once in 3D.** Choosing another window (7 days to
+  10 days) used to leave the map blank, or showing the old window, until it was moved:
+  the map took the new window's tiles for the old ones' drape. Each window is now a layer
+  of its own; the old one stays until the new one's tiles are in, tiles that fail are
+  asked for again, a spinner shows while a window loads, and the other windows' pictures
+  load in the background. The server gives these tiles an allowance of their own, apart
+  from the base map's.
+- **Sun & shade: the last frames before sunset only get darker.** The final step used to
+  switch the hill shading to another method and light direction and lay a full dark veil
+  over the view, so the map looked completely different. Now the light keeps its
+  direction and fades, and sunlit ground dims a little each step from about 8° above the
+  horizon until it meets the shade as the sun sets.
 - **No more "rain" on Mt. Rainier's summit on the radar.**
   - What it was: the radar beam strikes the mountain, which shows as a strong, unmoving
     echo. Environment Canada leaves it untyped, and the map used to call any untyped echo

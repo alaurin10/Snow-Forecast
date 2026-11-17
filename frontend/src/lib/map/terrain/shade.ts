@@ -20,7 +20,20 @@ export const SHADE_REACH_M = 15000;
 /** Shadow this deep over the ground counts as full shade; shallower fades out (a soft edge). */
 export const SOFT_M = 1.5;
 /** The sun this low is treated as set: its light is skimming and mostly lost in haze. */
-const MIN_ALTITUDE = 0.25;
+export const MIN_ALTITUDE = 0.25;
+/** From this altitude down, sunlit ground dims, reaching full shade as the sun sets. */
+export const DUSK_ALTITUDE = 8;
+
+/**
+ * How dark sunlit ground is as the sun nears the horizon: 0 at DUSK_ALTITUDE and above,
+ * rising evenly to 1 at MIN_ALTITUDE (set), where all is in shade. So the last half hour
+ * or so of sun darkens the map a little each step (a quarter of the way per 15 minutes
+ * here in winter) instead of switching it to night.
+ */
+export function dusk(altitude: number): number {
+	const x = (DUSK_ALTITUDE - altitude) / (DUSK_ALTITUDE - MIN_ALTITUDE);
+	return Math.min(1, Math.max(0, x));
+}
 const DARK = 1e4;
 
 /**
@@ -159,18 +172,25 @@ function rgb(hex: string): [number, number, number] {
 
 export const SHADE_COLOR = '#0b1430';
 
-/** Shade as a dark veil; sunlit ground stays clear. */
-export function paintShade(g: Grid, ceil: Float32Array): Uint8ClampedArray<ArrayBuffer> {
+/** Shade as a dark veil; sunlit ground stays clear, dimming as the sun sets (`dusk`). */
+export function paintShade(
+	g: Grid,
+	ceil: Float32Array,
+	altitude = 90
+): Uint8ClampedArray<ArrayBuffer> {
 	const out = new Uint8ClampedArray(g.data.length * 4);
 	const [cr, cg, cb] = rgb(SHADE_COLOR);
+	const lit = Math.round(dusk(altitude) * 255);
 	const e = g.data;
 	for (let i = 0, j = 0; i < e.length; i++, j += 4) {
 		const d = ceil[i] - e[i];
-		if (d <= 0) continue;
+		const a = d <= 0 ? 0 : d >= SOFT_M ? 255 : Math.round((d / SOFT_M) * 255);
+		const alpha = a > lit ? a : lit;
+		if (!alpha) continue;
 		out[j] = cr;
 		out[j + 1] = cg;
 		out[j + 2] = cb;
-		out[j + 3] = d >= SOFT_M ? 255 : Math.round((d / SOFT_M) * 255);
+		out[j + 3] = alpha;
 	}
 	return out;
 }

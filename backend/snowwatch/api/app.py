@@ -284,6 +284,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tiles already cached are free; each visitor may cause a burst of 300 upstream
     # fetches (a few map screens), then 10 a second.
     tile_misses = RateLimiter(rate=10, burst=300)
+    # Snow-total tiles drawn on request have an allowance of their own: a 3D view of a few
+    # windows asks for hundreds, and they mustn't use up the base map's (or it theirs).
+    snow_tile_draws = RateLimiter(rate=20, burst=600)
 
     def tiles() -> TileCache:
         nonlocal tile_cache
@@ -314,12 +317,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         work = settings.map_work_dir
         drawn = (work / "snowtiles" / tiles_id / str(z) / str(x) / f"{y}.png").exists()
         if not drawn and not snow_tiles.known_empty(tiles_id, z, x, y):
-            tile_misses.check(request)  # drawing one costs a little, and may fetch elevation
+            snow_tile_draws.check(request)  # drawing one costs a little, may fetch elevation
         try:
             data = snow_tiles.tile(work / "totals", work / "snowtiles", tiles(), tiles_id, z, x, y)
         except snow_tiles.Unavailable as e:
             raise HTTPException(
-                503, "elevation tiles unavailable", headers={"Cache-Control": "no-store"}
+                503,
+                "elevation tiles unavailable",
+                headers={"Cache-Control": "no-store", "Retry-After": "2"},
             ) from e
         if data is None:
             raise HTTPException(404)

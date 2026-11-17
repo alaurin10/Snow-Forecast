@@ -521,10 +521,9 @@
 			(windOn && zoom < WIND_MIN_ZOOM) ||
 			(concernOn && zoom < CONCERN_MIN_ZOOM)
 	);
-	/** Hill shading lit from where the sun is, while the shade is showing. */
-	const sunLight = $derived(
-		sunOn && sunMode === 'shade' && sunPos && sunPos.altitude > 0 && !areaTooFar ? sunPos : null
-	);
+	/** Hill shading lit from where the sun is, while the shade is showing: below the
+	 *  horizon too, so the last step of the day only darkens (style.ts, sunPaint). */
+	const sunLight = $derived(sunOn && sunMode === 'shade' && sunPos && !areaTooFar ? sunPos : null);
 	/** The map's own forecast at the centre: the wind-effect layer's wind away from locations. */
 	let centrePoint = $state.raw<PointOut | null>(null);
 	let pointTried = $state(false);
@@ -1660,6 +1659,8 @@
 			firstFrame = true;
 			performance.mark('map:frame');
 		}
+		// The layer's other windows, so choosing one shows it at once.
+		if (pick) for (const p of view.picks) if (p.file !== want.file) void store.blob(p);
 		// Have the next one decoded before it's asked for.
 		const next = looping ? frames[(frame + 1) % count] : undefined;
 		if (next) void store.bitmap(next);

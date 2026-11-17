@@ -11,6 +11,7 @@ import type { UnitSystem } from '../units';
 import type { MapBase, MapOverlay, MapShade } from '../prefs.svelte';
 import { AWS_DEM, MAX_ZOOM } from './terrain/dem';
 import { ANALYSIS_ZOOM } from './terrain/analysis';
+import { dusk } from './terrain/shade';
 
 /** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
 export const DETAIL_ZOOM = 12;
@@ -256,18 +257,24 @@ export function imageryShade(k: number): ExpressionSpecification {
 	return ['interpolate', ['linear'], ['zoom'], 7, r(0.12), 11, r(0.25), 14, r(0.45)];
 }
 
-/** Hill shading lit by the sun where it really is (compass degrees, degrees up). */
+/**
+ * Hill shading lit by the sun where it really is (compass degrees, degrees up). One way of
+ * shading from sunrise to sunset and on below the horizon: as the sun drops the light
+ * keeps its direction (it never falls below 8°, where every slope turned slightly away
+ * would go black) and its warm highlights fade, so the map only grows darker.
+ */
 export function sunPaint(azimuth: number, altitude: number, dark: boolean) {
+	// Full in daylight, none once the sun has set, as the shade darkens (shade.ts).
+	const hi = (dark ? 0.2 : 0.45) * (1 - dusk(altitude));
 	return {
 		// Brightness by the angle the light strikes the ground at.
 		'hillshade-method': 'basic' as const,
 		'hillshade-exaggeration': 0.3,
 		'hillshade-illumination-direction': Math.round(azimuth) % 360,
-		// Very low light would blacken every slope turned slightly away.
 		'hillshade-illumination-altitude': Math.min(90, Math.max(8, altitude)),
 		'hillshade-illumination-anchor': 'map' as const,
 		'hillshade-shadow-color': dark ? '#000000' : '#1d2333',
-		'hillshade-highlight-color': dark ? 'rgba(255,244,214,0.2)' : 'rgba(255,244,214,0.45)',
+		'hillshade-highlight-color': `rgba(255,244,214,${Math.round(hi * 1000) / 1000})`,
 		'hillshade-accent-color': dark ? '#000000' : '#3b3f4a'
 	};
 }

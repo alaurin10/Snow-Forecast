@@ -5,6 +5,8 @@ import {
 	elevationLadder,
 	setSnowTiles,
 	SNOWTILES_ID,
+	snowTileLayers,
+	snowTilesId,
 	SNOWTILES_ZOOM,
 	snowAtElevation,
 	snowTilesUrl
@@ -45,20 +47,38 @@ describe('snow totals adjusted to terrain', () => {
 		expect(ft).toEqual([4500, 6000, 7500, 9000]);
 	});
 
-	it('adds the tiles once, swaps them with the window, and keeps the picture out of their way', () => {
-		const layers = new Set<string>(['precip', 'precip-b']);
-		const sources = new Map<string, { tiles: string[] }>();
+	it('adds a window once, puts the next over it, and drops the old once the new is in', () => {
+		vi.useFakeTimers();
+		const order: string[] = ['precip', 'precip-b'];
+		const sources = new Map<string, { tiles: string[]; setTiles: ReturnType<typeof vi.fn> }>();
+		const handlers: Record<string, ((e: { sourceId?: string }) => void)[]> = {};
+		const loaded = new Set<string>();
 		const map = {
-			getLayer: (id: string) => (layers.has(id) ? { id } : undefined),
+			getLayer: (id: string) => (order.includes(id) ? { id } : undefined),
+			getLayersOrder: () => [...order],
 			getSource: (id: string) => sources.get(id),
-			addSource: vi.fn((id: string, spec: { tiles: string[] }) => sources.set(id, spec)),
-			addLayer: vi.fn((spec: { id: string }) => layers.add(spec.id)),
-			removeLayer: vi.fn((id: string) => layers.delete(id)),
-			removeSource: vi.fn((id: string) => sources.delete(id))
+			addSource: vi.fn((id: string, spec: { tiles: string[] }) =>
+				sources.set(id, { ...spec, setTiles: vi.fn() })
+			),
+			addLayer: vi.fn((spec: { id: string }, before?: string) =>
+				order.splice(before ? order.indexOf(before) : order.length, 0, spec.id)
+			),
+			removeLayer: vi.fn((id: string) => order.splice(order.indexOf(id), 1)),
+			removeSource: vi.fn((id: string) => sources.delete(id)),
+			isSourceLoaded: (id: string) => loaded.has(id),
+			on: (ev: string, f: (e: { sourceId?: string }) => void) => (handlers[ev] ??= []).push(f),
+			off: (ev: string, f: (e: { sourceId?: string }) => void) =>
+				handlers[ev]?.splice(handlers[ev].indexOf(f), 1),
+			fire: (ev: string, e: { sourceId?: string }) => [...(handlers[ev] ?? [])].forEach((f) => f(e))
 		};
-		const opts = { bounds: BOUNDS, opacity: TOTAL_OPACITY };
+		const opts = { bounds: BOUNDS, opacity: TOTAL_OPACITY, beforeId: 'precip' };
 		const set = (tiles: string | null) => setSnowTiles(map as never, tiles, opts);
-		set('/a/{z}/{x}/{y}.png');
+		const A = '/api/snowtiles/aaaaaaaaaaaaaaaa/{z}/{x}/{y}.png';
+		const B = '/api/snowtiles/bbbbbbbbbbbbbbbb/{z}/{x}/{y}.png';
+		const a = snowTilesId(A);
+		const b = snowTilesId(B);
+		expect(a).toBe(`${SNOWTILES_ID}-aaaaaaaaaaaaaaaa`);
+		set(A);
 		expect(map.addSource).toHaveBeenCalledTimes(1);
 		expect(map.addSource.mock.calls[0][1]).toMatchObject({
 			type: 'raster',
@@ -67,18 +87,41 @@ describe('snow totals adjusted to terrain', () => {
 			maxzoom: 11,
 			bounds: [-134, 31, -102, 57]
 		});
-		// Up to where the opacity reaches 0.
-		expect(map.addLayer.mock.calls[0][0]).toMatchObject({
-			id: SNOWTILES_ID,
-			minzoom: 8,
-			maxzoom: 15
-		});
-		set('/a/{z}/{x}/{y}.png'); // the same: nothing redone
+		// Up to where the opacity reaches 0, under the precipitation.
+		expect(map.addLayer.mock.calls[0][0]).toMatchObject({ id: a, minzoom: 8, maxzoom: 15 });
+		expect(snowTileLayers(map as never)).toEqual([a]);
+		set(A); // the same: nothing redone
 		expect(map.addSource).toHaveBeenCalledTimes(1);
-		set('/b/{z}/{x}/{y}.png'); // another window
-		expect(map.removeSource).toHaveBeenCalledTimes(1);
-		expect(sources.get(SNOWTILES_ID)?.tiles).toEqual(['/b/{z}/{x}/{y}.png']);
+
+		// Another window: on top, the old one kept until the new one's tiles are in.
+		set(B);
+		expect(snowTileLayers(map as never)).toEqual([a, b]);
+		map.fire('sourcedata', { sourceId: b });
+		expect(snowTileLayers(map as never)).toEqual([a, b]); // not loaded yet
+		loaded.add(b);
+		map.fire('sourcedata', { sourceId: b });
+		expect(snowTileLayers(map as never)).toEqual([b]);
+
+		// A tile that fails is asked for again, a few times.
+		map.fire('error', { sourceId: b });
+		map.fire('error', { sourceId: b }); // one retry at a time
+		vi.advanceTimersByTime(1500);
+		expect(sources.get(b)!.setTiles).toHaveBeenCalledTimes(1);
+		expect(sources.get(b)!.setTiles).toHaveBeenCalledWith([B]);
+		for (const ms of [4000, 10000, 30000]) {
+			map.fire('error', { sourceId: b });
+			vi.advanceTimersByTime(ms);
+		}
+		expect(sources.get(b)!.setTiles).toHaveBeenCalledTimes(3);
+
+		// Slow tiles: the old window goes after a while anyway.
+		set(A);
+		expect(snowTileLayers(map as never)).toEqual([b, a]);
+		vi.advanceTimersByTime(8000);
+		expect(snowTileLayers(map as never)).toEqual([a]);
+
 		set(null); // another layer, or no tiles
-		expect(layers.has(SNOWTILES_ID)).toBe(false);
+		expect(snowTileLayers(map as never)).toEqual([]);
+		vi.useRealTimers();
 	});
 });
