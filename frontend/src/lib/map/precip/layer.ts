@@ -48,6 +48,9 @@ export interface RadarOptions {
 const UPLOAD_BUDGET = 8_000_000;
 /** Frames kept in full on a lean device: the one at rest and the last few rested on. */
 const SHARP_KEPT = 3;
+/** In 3D, the radar's picture changes at most this often (ms): each change redraws every
+ *  terrain tile under it, base map and all. */
+const TERRAIN_MS = 80;
 /** The slider must rest this long before a frame is fetched in full. */
 const SETTLE_MS = 180;
 
@@ -86,6 +89,9 @@ export class RadarLayer {
 	private box: { x0: number; y0: number; dx: number; dy: number };
 	private opts: RadarOptions;
 	private gone = false;
+	/** When 3D's terrain tiles were last asked to redraw, and the redraw waiting its turn. */
+	private lastTerrain = 0;
+	private trailing: ReturnType<typeof setTimeout> | undefined;
 	/** For the timings e2e/perf.spec.ts reads (and DevTools shows): the first frame drawn,
 	 *  and each new picture's cost on the main thread. */
 	private marked = false;
@@ -320,9 +326,21 @@ export class RadarLayer {
 		if (this.gone) return;
 		const sig = this.signature();
 		if (force || sig !== this.drawn) {
-			this.drawn = sig;
-			this.layer.terrainTileRevision = (this.layer.terrainTileRevision ?? 0) + 1;
-			this.map.triggerRepaint();
+			// In 3D a new picture redraws every terrain tile with the layers round it: at
+			// most every TERRAIN_MS while the slider moves or plays, and always the last.
+			const wait = this.map.terrain ? this.lastTerrain + TERRAIN_MS - performance.now() : 0;
+			if (wait > 0 && !force) {
+				if (!this.trailing)
+					this.trailing = setTimeout(() => {
+						this.trailing = undefined;
+						this.changed();
+					}, wait);
+			} else {
+				this.drawn = sig;
+				this.lastTerrain = performance.now();
+				this.layer.terrainTileRevision = (this.layer.terrainTileRevision ?? 0) + 1;
+				this.map.triggerRepaint();
+			}
 		}
 		this.opts.onChange?.();
 	}
@@ -418,6 +436,7 @@ export class RadarLayer {
 	remove() {
 		this.gone = true;
 		clearTimeout(this.settle);
+		clearTimeout(this.trailing);
 		this.map.off('webglcontextlost', this.onLost);
 		this.map.off('webglcontextrestored', this.onRestored);
 		this.loader.dispose();

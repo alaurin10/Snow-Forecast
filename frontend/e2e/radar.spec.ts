@@ -12,7 +12,8 @@ async function open(page: Page) {
 	await page.addInitScript(() => localStorage.setItem('sw.mapWeather', 'radar'));
 	await page.goto('/map', { waitUntil: 'networkidle' });
 	const slider = page.getByRole('slider', { name: 'Time' });
-	await expect(slider).toBeVisible();
+	// The timeline may take a while on a busy machine.
+	await expect(slider).toBeVisible({ timeout: 30_000 });
 	const pause = page.getByRole('button', { name: 'Pause' });
 	if (await pause.count()) await pause.click();
 	// Every frame on hand: the track shows no "still loading" stripes.
@@ -79,14 +80,19 @@ test('the slider moves the radar freely, in steps of less than a frame', async (
 	const slider = await open(page);
 	expect(Number(await slider.getAttribute('step'))).toBeLessThan(1);
 	const seen = new Set<string>();
+	const canvas = page.locator('canvas.maplibregl-canvas');
+	let at2: Buffer | null = null;
 	for (const v of [2, 2.5, 3, 6, 9]) {
 		await slide(page, v);
 		seen.add(await look(page));
+		if (v === 2) at2 = await canvas.screenshot();
 	}
 	// Between two frames is neither of them.
 	expect(seen.size).toBe(5);
+	// Back on a frame: the same picture (give or take a pixel's rounding).
 	await slide(page, 2);
-	expect(seen.has(await look(page))).toBe(true);
+	await look(page);
+	expect(await differ(page, at2!, await canvas.screenshot())).toBeLessThan(0.002);
 });
 
 test('in 3D every frame change is drawn, and comes back the same', async ({ page }, info) => {
