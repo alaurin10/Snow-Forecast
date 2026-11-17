@@ -116,7 +116,7 @@ New `frontend/src/lib/map/precip/`:
   while surroundings and the model are dry; on disk, with decay); frame sanity checks
   (wet-area jump, stale scan) that reject a frame and keep the last good one.
   `health.json` per source on the Status page.
-- [ ] One ownership rule (`blend.py`, `render.py:forecast/_extended`): south of the
+- [x] One ownership rule (`blend.py`, `render.py:forecast/_extended`): south of the
   border zone HRRR → NBM hourly → NBM 6 h; north HRDPS → RDPS → GDPS; `north_weight` at
   every lead time; RDPS fills where neither reaches; two frames cross-faded where one
   model hands to the next in time.

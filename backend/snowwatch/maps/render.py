@@ -134,6 +134,9 @@ FORECAST_KINDS = {"forecast"}
 # at 1 km is worth every pixel; HRDPS, HRRR and NBM (2.5–3 km) half; RDPS and GDPS
 # (10–15 km) a quarter.
 DS_RADAR, DS_HOURLY, DS_EXTENDED = 1, 2, 4
+# Which model draws where, in each hourly frame's key: "b1", NOAA's south of the border and
+# Canada's north of it at every lead time (before, HRDPS wherever it reached for 48 h).
+OWNERS = "b1"
 
 
 @dataclass
@@ -682,6 +685,14 @@ class Renderer:
         """A source's weight from where it has data: 1 inside, fading to 0 at its edge."""
         return self._once(name, region, lambda: feather(np.isfinite(amount), feather_px(region)))
 
+    def _south_weight(self, name: str, region: Region, amount: np.ndarray) -> np.ndarray:
+        """A US model's weight in the hourly frames: its domain, south of the border."""
+        return self._once(
+            f"south-{name}",
+            region,
+            lambda: feather(np.isfinite(amount), feather_px(region)) * (1 - north_weight(region)),
+        )
+
     def _us_weight(self, region: Region, amount: np.ndarray) -> np.ndarray:
         """NOAA's weight beyond the hourly frames and for totals: its domain, and south of
         the border (fading out between 48.5 and 49.5°N)."""
@@ -768,7 +779,7 @@ class Renderer:
                 south = ("nbm", us.run, us.lead(t))
             south_key = ":".join(map(str, south)) if south else "none"
             fill_key = f"rdps:{fill.ref}" if fill is not None and t in fill.times else "none"
-            key = f"fb|{FINE_KEY}|{t}|{hrdps.ref}|{south_key}|{fill_key}|{region.key}"
+            key = f"fb|{FINE_KEY}|{OWNERS}|{t}|{hrdps.ref}|{south_key}|{fill_key}|{region.key}"
             had = self._reusable(prev, key)
             if had:
                 frames.append(had)
@@ -786,8 +797,11 @@ class Renderer:
             north = rdps_gdps.fields(self.net, hrdps, t, region, self.wcs_dir)
             if north is None:
                 return None  # try again next time rather than keep a frame without HRDPS
-            layers = [Layer("hrdps", north.rate, w_hrdps, north.kind)]
-            left = 1 - w_hrdps
+            # One rule at every lead time (docs/RADAR-PLAN.md): NOAA's models in the US,
+            # Canada's in Canada, cross-faded over 48.5–49.5°N; HRDPS also wherever the US
+            # model has no data, and RDPS under both.
+            layers: list[Layer] = []
+            left: np.ndarray | float = 1.0
             kind = ""
             got: tuple[np.ndarray, np.ndarray] | None = None
             if south is not None and south[0] == "hrrr":
@@ -801,13 +815,15 @@ class Renderer:
                 if got is not None:
                     kind = "nbm"
             if kind and got is not None:
-                w = self._domain_weight(kind, region, got[0])
+                w = self._south_weight(kind, region, got[0])
                 rate, k = soften(got[0], got[1], GRIB_SIGMA)
                 layers.append(Layer(kind, rate, w, k))
-                left = left * (1 - w)
+                left = 1 - w
+            layers.append(Layer("hrdps", north.rate, w_hrdps, north.kind))
+            left = left * (1 - w_hrdps)
             # RDPS covers everything: it takes whatever the finer models leave.
             filled = False
-            if fill is not None and t in fill.times and float(left.max()) > 0.02:
+            if fill is not None and t in fill.times and float(np.max(left)) > 0.02:
                 under = rdps_gdps.fields(self.net, fill, t, region, self.wcs_dir)
                 if under is not None:
                     layers.append(Layer("rdps", under.rate, 1.0, under.kind))

@@ -28,6 +28,11 @@ Notable changes to Snow Watch. The format follows
   - A forecast hour is placed at its middle, not its end, and none shows in the middle of
     the nowcast any more (the loop used to go nowcast, model, nowcast).
   - The radar is kept, not cleared, when no radar source answers.
+- **One rule for which model draws where, at every lead time:** NOAA's models in the US
+  and Canada's in Canada, blended across the border zone (48.5–49.5°N). For the first two
+  days Washington, Idaho and Montana used to show Canada's HRDPS, then switch to NOAA's
+  blend at 48 h; now they show NOAA's models (HRRR, then the National Blend) all along, as
+  the snow totals, snow level and wind already did.
 
 ### Fixed
 - **Snow total: a new window shows at once in 3D.** Choosing another window (7 days to

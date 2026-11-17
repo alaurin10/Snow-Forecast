@@ -1,14 +1,14 @@
 // Precipitation for the map: one timeline from three hours ago to ten days ahead, in one
 // set of colours for rain, mix/ice and snow by rate.
 //
-// The server draws every frame (backend/snowwatch/maps/) as one picture over western
-// North America, and lists them in /api/precip. The browser only downloads and swaps
-// pictures, so scrubbing is instant and a phone's memory stays low.
+// The server draws every frame (backend/snowwatch/maps/) over western North America and
+// lists them in /api/precip, each as numbers the map colours itself (./map/precip/).
 // Sources: Environment Canada's North American radar composite (past 3 h, typed) and its
-// nowcast (next 72 min, handing over to the forecast as it goes); hourly to ~48 h, Environment Canada's HRDPS (Canada and the
-// northern US) and NOAA HRRR for the rest of the US; then 3-hourly to ~84 h (Canadian
-// RDPS) and 6-hourly to 10 days (Canadian GDPS) in Canada, with NOAA's National Blend in
-// the US. The server blends the sources as numbers, so there are no joins to see.
+// nowcast (next 72 min, handing over to the forecast as it goes). Then the forecast, with
+// NOAA's models in the US and Canada's in Canada at every lead time, blended across the
+// border: hourly to ~48 h (HRRR, then NBM's hourly fields; HRDPS), 3-hourly to ~84 h (NBM;
+// RDPS) and 6-hourly to 10 days (NBM; GDPS). The server blends the sources as numbers, so
+// there are no joins to see.
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -401,8 +401,10 @@ export function frameSource(f: Frame): string {
 		return `${avg}: ${modelName(north)} model in Canada, ${modelName(south)} in the US, blended across the border.`;
 	}
 	if (!south) return `Forecast: ${modelName(north)} model where it reaches.`;
-	const beyond = f.src.fill ? `${modelName(south)} and ${modelName(f.src.fill)}` : modelName(south);
-	return `Forecast: ${modelName(north)} model where it reaches (Canada and the northern US), ${beyond} beyond, blended where they meet.`;
+	if (south === north || south === f.src.fill || south === 'rdps')
+		return `Forecast: ${modelName(north)} model where it reaches, ${modelName(south)} beyond.`;
+	const fill = f.src.fill ? ` ${modelName(f.src.fill)} fills in where neither reaches.` : '';
+	return `Forecast: ${modelName(north)} model in Canada, ${modelName(south)} in the US, blended across the border.${fill}`;
 }
 
 /** Shown with radar and nowcast frames. */

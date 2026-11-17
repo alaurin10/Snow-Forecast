@@ -516,6 +516,25 @@ def test_forecast_runs_to_ten_days(tmp_path: Path, monkeypatch: Any) -> None:
     assert [f["file"] for f in again["frames"]] == [f["file"] for f in fr]
 
 
+def test_hourly_frames_take_noaa_in_the_us_and_canada_in_canada(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """One rule at every lead time: HRDPS reaches well into the US, but south of the border
+    the hourly frames are NOAA's (here NBM's 1 mm/h), north of it HRDPS's 0.6, with the
+    same cross-fade as the frames beyond 48 h. So the US doesn't switch models at 48 h."""
+    region = box_region(44, -125, 54, -110, 30)
+    monkeypatch.setattr(hrrr, "slots", lambda net, now: {})
+    monkeypatch.setattr(Renderer, "_nbm", lambda self, region: FakeNbm(T0, region))
+    ix = Renderer(tmp_path, ModelsNet(), now=lambda: T0 + 4 * H + 600).forecast(region)
+    hourly = [f for f in ix["frames"] if f["span_h"] == 1]
+    three = [f for f in ix["frames"] if f["span_h"] == 3]
+    for f in (hourly[0], hourly[-1], three[0]):
+        value, kind = rates(tmp_path / f["file"])
+        assert near(float(value[0, 5]), 0.6) and near(float(value[-1, 5]), 1.0)
+        assert (kind == SNOW_T).all()
+    assert "|b1|" in hourly[0]["key"]
+
+
 def test_extended_frames_without_nbm_use_the_canadian_model(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
