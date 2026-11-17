@@ -7,9 +7,15 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
-- **The snow total is picked on a slider**, like the radar, rather than a row of buttons:
-  it stops at each window (12 hours to 10 days), the arrow keys step one at a time, and
-  beside it the window and when it ends ("Next 3 days, to Fri 1 PM").
+- **The snow total is picked on a slider**, like the radar, rather than a row of buttons,
+  and it slides smoothly from 12 hours to 10 days ("Next 2½ days, to Fri 1 PM"): the
+  server sends the total every 6 hours for two days, then every 12 and 24, and the map
+  blends between them. The arrow keys step from window to window.
+- **The snow total draws like the radar, flat and in 3D**: the numbers come once and the
+  phone's graphics chip colours them, so the map pans, zooms and tilts without waiting.
+  Zoomed in, the terrain adjustment (more snow on the peaks than in the valleys) is worked
+  out on the phone from the elevation the map already has; it used to be tiles the server
+  drew on request, slow to come, worst in 3D, and fetched again for every window.
 - **Radar's blind spots filled from the forecast** (docs/RADAR-PLAN.md M3): where no
   radar sees the ground (behind ridges, high over far valleys, out of range), the radar
   and nowcast frames take the forecast for the same moment, drawn lighter and hatched.

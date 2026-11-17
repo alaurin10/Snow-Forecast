@@ -80,6 +80,34 @@ let dem = new DemCache({ decode, online: () => self.navigator.onLine !== false }
 /** Requests under way, each with its own way to call it off. */
 const running = new Map<number, AbortController>();
 
+/** A square grid at `to` px each way: each output pixel the mean of the block it covers
+ *  (or the nearest value, enlarging). */
+function shrink(src: Float32Array, from: number, to: number): Float32Array {
+	if (to === from) return src;
+	const out = new Float32Array(to * to);
+	const k = from / to;
+	if (k < 1) {
+		for (let r = 0; r < to; r++)
+			for (let c = 0; c < to; c++)
+				out[r * to + c] = src[Math.floor(r * k) * from + Math.floor(c * k)];
+		return out;
+	}
+	const n = Math.floor(k);
+	for (let r = 0; r < to; r++) {
+		const r0 = Math.floor(r * k);
+		for (let c = 0; c < to; c++) {
+			const c0 = Math.floor(c * k);
+			let sum = 0;
+			for (let i = 0; i < n; i++) {
+				const row = (r0 + i) * from + c0;
+				for (let j = 0; j < n; j++) sum += src[row + j];
+			}
+			out[r * to + c] = sum / (n * n);
+		}
+	}
+	return out;
+}
+
 function bitmap(rgba: Uint8ClampedArray<ArrayBuffer>, size: number): Promise<ImageBitmap> {
 	return createImageBitmap(new ImageData(rgba, size, size), { premultiplyAlpha: 'none' });
 }
@@ -474,6 +502,13 @@ async function handle(
 			}
 			const bmp = await bitmap(encodeTerrarium(t.data), t.size);
 			return { res: { id, ok: true, bitmap: bmp, fallback }, transfer: [bmp] };
+		}
+		case 'elev': {
+			const e = await dem.elev(msg.z, msg.x, msg.y, signal);
+			if (signal.aborted) throw aborted();
+			const rgba = encodeTerrarium(shrink(e.data, e.size, msg.size));
+			const bytes = rgba.buffer as ArrayBuffer;
+			return { res: { id, ok: true, bytes }, transfer: [bytes] };
 		}
 		case 'tile': {
 			const rgba = await overlayTile(msg, signal);

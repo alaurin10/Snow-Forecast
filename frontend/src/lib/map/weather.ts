@@ -115,6 +115,8 @@ export interface WeatherView {
 	nowcastEnd: number;
 	extendedFrom: number;
 	picks: Pick[];
+	/** The snow total as numbers (a continuous slider): its start and each step's hours. */
+	steps: { start: number; hours: number[] } | null;
 }
 
 const NONE: WeatherView = {
@@ -123,7 +125,8 @@ const NONE: WeatherView = {
 	now: -1,
 	nowcastEnd: -1,
 	extendedFrom: -1,
-	picks: []
+	picks: [],
+	steps: null
 };
 
 /** Which layer of the index a weather choice shows. */
@@ -219,11 +222,16 @@ export function weatherView(tl: Timeline | null, weather: MapWeather, wind: MapW
 			now: tl.now,
 			nowcastEnd: tl.nowcastEnd,
 			extendedFrom: tl.extendedFrom,
-			picks: []
+			picks: [],
+			steps: null
 		};
 	}
 	if (weather === 'totals' || weather === 'depth' || weather === 'snowfall') {
-		return { ...NONE, mode: 'pick', picks: picks(tl, weather) };
+		const steps =
+			weather === 'totals' && tl.steps
+				? { start: tl.steps.start, hours: tl.steps.steps.map((x) => x.hours) }
+				: null;
+		return { ...NONE, mode: 'pick', picks: picks(tl, weather), steps };
 	}
 	const name = layerName(weather, wind)!;
 	const frames = (tl.layers[name] ?? []).map(asFrame);
@@ -324,3 +332,51 @@ export const WEATHER_CHOICES: { id: MapWeather; label: string }[] = [
 	{ id: 'snowfall', label: 'Observed snow' },
 	{ id: 'clouds', label: 'Clouds' }
 ];
+
+// ---- The snow total's continuous slider ------------------------------------------------
+
+/** The windows the slider marks, evenly spaced along it (between them it is continuous). */
+export const TOTAL_MARKS = [12, 24, 48, 72, 120, 168, 240];
+
+/** The marks a total's steps reach (the last may stop short of a window: it is the end). */
+export function totalMarks(stepHours: number[]): number[] {
+	const last = Math.max(0, ...stepHours);
+	const marks = TOTAL_MARKS.filter((h) => h <= last);
+	if (!marks.length) return last ? [last] : [];
+	if (marks[marks.length - 1] < last && last - marks[marks.length - 1] >= 6) marks.push(last);
+	return marks;
+}
+
+/** Hours at a slider position (0 … marks − 1, the marks evenly spaced). */
+export function hoursAt(pos: number, marks: number[]): number {
+	if (!marks.length) return 0;
+	const p = Math.min(Math.max(pos, 0), marks.length - 1);
+	const i = Math.min(Math.floor(p), marks.length - 2);
+	if (i < 0) return marks[0];
+	return marks[i] + (marks[i + 1] - marks[i]) * (p - i);
+}
+
+/** The slider position for a number of hours (hoursAt's inverse). */
+export function posAt(hours: number, marks: number[]): number {
+	if (marks.length < 2) return 0;
+	if (hours <= marks[0]) return 0;
+	for (let i = 0; i < marks.length - 1; i++)
+		if (hours <= marks[i + 1]) return i + (hours - marks[i]) / (marks[i + 1] - marks[i]);
+	return marks.length - 1;
+}
+
+/** "Next 18 hours", "Next 2½ days". */
+export function totalWords(hours: number): string {
+	if (hours < 47.5) return `Next ${Math.round(hours)} hours`;
+	const halves = Math.round(hours / 12);
+	const whole = Math.floor(halves / 2);
+	return `Next ${whole}${halves % 2 ? '½' : ''} days`;
+}
+
+/** A mark's tick: "12h", "3d". */
+export const markTick = (h: number) => (h < 48 ? `${h}h` : `${Math.round(h / 24)}d`);
+
+/** "to Fri 4 PM": when a total of so many hours from `start` ends. */
+export function totalUntil(start: number, hours: number): string {
+	return `to ${dayHour(start + Math.round(hours) * HOUR)}`;
+}

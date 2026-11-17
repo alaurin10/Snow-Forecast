@@ -156,7 +156,8 @@ def north_totals(
                 out.runs[covering[1].model.name] = covering[1].ref
         total += cm
         if b in want:
-            out.cm[b] = total.copy()
+            # Half precision: the slider's steps keep a grid per step (totaldata.py).
+            out.cm[b] = total.astype(np.float16)
         # Drop grids the walk has passed.
         for k in [k for k in cache if k[1] < b]:
             del cache[k]
@@ -182,7 +183,7 @@ def south_totals(nbm: Nbm | None, t0: int, ends: list[int]) -> dict[int, np.ndar
             log.info("snow totals: NBM stops before %s", ts_iso(end))
             break
         total = part if total is None else total + part
-        out[end] = total.copy()
+        out[end] = total.astype(np.float16)
         lead = stop
     return out
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -301,8 +302,20 @@ def test_snow_totals_subtract_running_totals(tmp_path: Path) -> None:
     assert g is not None and g.dlon == 0.25 and g.lon0 == -126.0 and g.data.shape == (40, 60)
 
     r = Renderer(tmp_path, net, now=lambda: now + 600)
-    totals = r._snow_totals(region, now + 600)
+    totals, steps = r._snow_totals(region, now + 600)
     assert [t.hours for t in totals] == [12, 24, 30]  # the run ends 30 h out
+    # The slider's steps, every 6 h to where the run ends, each as numbers.
+    assert steps is not None and steps["start"] == now
+    assert [x["hours"] for x in steps["steps"]] == [6, 12, 18, 24, 30]
+    from snowwatch.maps import totaldata
+
+    got = totaldata.decode((tmp_path / steps["steps"][3]["data"]).read_bytes())
+    assert got is not None
+    # 24 h: about 24 cm over the box, as the 24 h picture says.
+    assert float(totaldata.code_cm(got.area[12, 15])) == pytest.approx(24, rel=0.05)
+    # Asked again with nothing new: the same steps, nothing drawn.
+    _again, same = r._snow_totals(region, now + 600, steps)
+    assert same is steps
     assert [t.window for t in totals] == [12, 24, 48]
     assert all(t.start == now for t in totals)
     img = np.asarray(Image.open(tmp_path / totals[1].file).convert("RGBA"))

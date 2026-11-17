@@ -41,7 +41,15 @@ import numpy as np
 from PIL import Image
 
 from snowwatch.config import SlrBand
-from snowwatch.maps import bins, coverage, dataframe, grib, terrain_totals, totals
+from snowwatch.maps import (
+    bins,
+    coverage,
+    dataframe,
+    grib,
+    terrain_totals,
+    totaldata,
+    totals,
+)
 from snowwatch.maps.blend import (
     Layer,
     Mosaic,
@@ -113,6 +121,8 @@ SPLIT_SOFT_MM = 0.25
 TOTAL_HOURS = totals.WINDOWS
 # Part of every grid by elevation's name: change it when how they're built changes.
 BINS_DRAWING = 1
+# Part of the snow total's steps' key (totaldata.py): change it when how they're drawn does.
+STEPS_DRAWING = 1
 TILES_URL = "/api/snowtiles/{id}/{{z}}/{{x}}/{{y}}.png"
 SN_TOTAL_LAYER = HRDPS.accum  # water equivalent (mm) since the run began
 
@@ -351,9 +361,10 @@ class Renderer:
         frames: list[FrameOut] | None = None,
         totals: list[TotalOut] | None = None,
         layers: dict[str, list[LayerFrame]] | None = None,
+        steps: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Replace the index's frames of these kinds (and the totals, and the named
-        layers, if given)."""
+        """Replace the index's frames of these kinds (and the totals, the named layers
+        and the snow total's steps, if given)."""
         with self._locked():
             cur = self._read()
             old_frames = self._frames_of(cur, region)
@@ -361,7 +372,10 @@ class Renderer:
             new_frames = [f for f in old_frames if f.kind not in kinds] + (frames or [])
             new_totals = old_totals if totals is None else totals
             new_layers = {**self._layers_of(cur, region), **(layers or {})}
-            index = self._index(region, new_frames, new_totals, new_layers)
+            old_steps = cur.get("steps") if cur.get("region") == region.key else None
+            index = self._index(
+                region, new_frames, new_totals, new_layers, old_steps if steps is None else steps
+            )
             keep = _files(index)
             was = _files(cur)
             # Files leaving the index get a fresh clock: pages may still ask for them.
@@ -381,6 +395,7 @@ class Renderer:
         frames: list[FrameOut],
         totals: list[TotalOut],
         layers: dict[str, list[LayerFrame]] | None = None,
+        steps: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now = max((f.t for f in frames if f.kind == "radar"), default=None)
         if now is not None:
@@ -425,6 +440,9 @@ class Renderer:
             "under": [asdict(f) for f in under],
             "totals": [asdict(t) for t in sorted(totals, key=lambda t: (t.window, t.hours))],
             "layers": {k: {"frames": [asdict(f) for f in v]} for k, v in layers.items()},
+            # The snow total as numbers, from `start` to each step's `end`
+            # (totaldata.py): {"start", "key", "steps": [{"end", "hours", "data"}]}.
+            "steps": steps,
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
         }
 
@@ -1059,22 +1077,34 @@ class Renderer:
 
     def snow_totals(self, region: Region) -> dict[str, Any]:
         """Redraw the snow totals that changed and list them in the index."""
-        self._prev_totals = {t.key: t for t in self._totals_of(self._read(), region)}
-        self.totals = self._snow_totals(region, int(self.now()))
+        cur = self._read()
+        self._prev_totals = {t.key: t for t in self._totals_of(cur, region)}
+        prev_steps = cur.get("steps") if cur.get("region") == region.key else None
+        self.totals, steps = self._snow_totals(region, int(self.now()), prev_steps)
         if not self.totals and self._prev_totals:
             return self._read()  # GeoMet didn't answer: keep what we have
-        index = self._commit(region, set(), None, self.totals)
+        index = self._commit(region, set(), None, self.totals, None, steps or {})
         self._prune_bins({t.tiles_id for t in self.totals if t.tiles_id})
         self._prune_work()
         return index
 
-    def _snow_totals(self, region: Region, now: int) -> list[TotalOut]:
+    def _steps_ok(self, steps: Any, key: str) -> bool:
+        """The index's steps were drawn from these runs, and their files are there."""
+        if not isinstance(steps, dict) or steps.get("key") != key:
+            return False
+        names = [x.get("data") for x in steps.get("steps", []) if isinstance(x, dict)]
+        return bool(names) and all(isinstance(n, str) and (self.dir / n).exists() for n in names)
+
+    def _snow_totals(
+        self, region: Region, now: int, prev_steps: Any = None
+    ) -> tuple[list[TotalOut], dict[str, Any] | None]:
         """Snow over the next 12 h to 10 days: Canada's models chained in Canada, NBM in
         the US, cross-faded across the border (see totals.py); and the same by elevation,
-        for the terrain-adjusted map (see bins.py and terrain_totals.py)."""
+        for the terrain-adjusted map (see bins.py and terrain_totals.py). Also the same as
+        numbers at every step the slider runs through (totaldata.py)."""
         hrdps = run_of(self.net, HRDPS, HRDPS.accum)
         if hrdps is None:
-            return []
+            return [], None
         past = [t for t in hrdps.times if t <= now]
         t0 = past[-1] if past else hrdps.times[0]
         chain = [hrdps]
@@ -1089,9 +1119,12 @@ class Renderer:
         if us is not None:
             last = min(last, us.run + nbm.LAST_H * HOUR)
         wins = totals.window_ends(t0, last)
+        step_ends = [e for _, e in totals.window_ends(t0, last, totaldata.STEP_WINDOWS)]
         runs_key = "|".join(f"{r.model.name}:{r.ref}" for r in chain)
         runs_key += f"|nbm:{us.run if us else ''}"
         runs_key += "|" + ",".join(f"{lv.name}:{lv.ref}" for lv in levels)
+        steps_key = f"ts{STEPS_DRAWING}|{t0}|{runs_key}|{region.key}"
+        steps_done = self._steps_ok(prev_steps, steps_key)
 
         out: list[TotalOut] = []
         todo: list[tuple[int, int, str]] = []
@@ -1102,10 +1135,10 @@ class Renderer:
                 out.append(had)
             else:
                 todo.append((w, end, key))
-        if not todo:
-            return out
+        if not todo and steps_done:
+            return out, prev_steps
 
-        ends = [end for _, end, _ in todo]
+        ends = sorted({end for _, end, _ in todo} | (set() if steps_done else set(step_ends)))
         # HRDPS only needs help from RDPS if its domain stops short of where Canada's
         # models are used (it doesn't over the default box).
         north_w = north_weight(region)
@@ -1122,13 +1155,26 @@ class Renderer:
         used = {k: _run_ts(v) for k, v in north.runs.items()}
         us_weight: np.ndarray | float = 0.0
         made: list[TotalOut] = []
-        for w, end, key in todo:
-            n, s = north.cm.get(end), south.get(end)
+        # The steps' plain totals as codes, until their snow by elevation is ready.
+        areas: dict[int, np.ndarray] = {}
+        wanted_steps = set() if steps_done else set(step_ends)
+        by_window = {end: (w, key) for w, end, key in todo}
+        for end in ends:
+            n, s = north.cm.pop(end, None), south.pop(end, None)
             if n is None and s is None:
                 continue
             if s is not None:
                 us_weight = self._us_weight(region, s)
-            cm = totals.join(n, s, us_weight if s is not None else 0.0)
+            cm = totals.join(
+                None if n is None else n.astype(np.float32),
+                None if s is None else s.astype(np.float32),
+                us_weight if s is not None else 0.0,
+            )
+            if end in wanted_steps:
+                areas[end] = totaldata.area_plane(cm)
+            if end not in by_window:
+                continue
+            w, key = by_window[end]
             runs = dict(used) if n is not None else {}
             if s is not None and us is not None:
                 runs["nbm"] = us.run
@@ -1136,13 +1182,49 @@ class Renderer:
             span = round((end - t0) / HOUR)
             name = self._save(paint_total(cm), region, f"t{span}")
             made.append(TotalOut(span, t0, end, name, key, "+".join(runs), None, w, runs))
-        del north, south  # (a picture-sized grid per window each side)
-        if made:
+        del north, south
+        written: dict[int, str] = {}
+
+        def step_file(end: int, grid: np.ndarray | None) -> None:
+            area = areas.get(end)
+            if area is None or end in written:
+                return
+            data = totaldata.encode(area, grid)
+            hours = round((end - t0) / HOUR)
+            name = f"s{hours}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+            self._store(name, data)
+            written[end] = name
+
+        if made or areas:
             try:
-                self._snow_bins(region, t0, made, chain, us, levels, w_hrdps, domain, us_weight)
+                self._snow_bins(
+                    region,
+                    t0,
+                    made,
+                    sorted(areas),
+                    chain,
+                    us,
+                    levels,
+                    w_hrdps,
+                    domain,
+                    us_weight,
+                    step_file,
+                )
             except Exception:
                 log.exception("snow totals by elevation failed; the plain totals stand")
-        return sorted(out + made, key=lambda t: t.window)
+        for end in sorted(areas):
+            step_file(end, None)  # no snow by elevation: the plain total alone
+        steps: dict[str, Any] | None = prev_steps if steps_done else None
+        if written:
+            steps = {
+                "start": t0,
+                "key": steps_key,
+                "steps": [
+                    {"end": e, "hours": round((e - t0) / HOUR), "data": written[e]}
+                    for e in sorted(written)
+                ],
+            }
+        return sorted(out + made, key=lambda t: t.window), steps
 
     # ---- Snow totals by elevation (the terrain-adjusted map) -------------------------
 
@@ -1159,18 +1241,20 @@ class Renderer:
         region: Region,
         t0: int,
         made: list[TotalOut],
+        step_ends: list[int],
         chain: list[Run],
         us: Nbm | None,
         levels: list[terrain_totals.LevelRun],
         w_hrdps: np.ndarray | None,
         domain: dict[str, np.ndarray] | None,
         us_weight: np.ndarray | float,
+        on_step: Callable[[int, np.ndarray], None] | None = None,
     ) -> None:
         """The windows' snow by elevation: the US walk first (each window's grid parked
         on disk), then Canada's, joining each window as it is reached. Sets each total's
-        `tiles` once its grid is written."""
+        `tiles` once its grid is written; hands each of `step_ends` to `on_step`."""
         by_end = {t.end: t for t in made}
-        ends = sorted(by_end)
+        ends = sorted(set(by_end) | set(step_ends))
         parts = self.totals_dir / ".parts"
         parts.mkdir(parents=True, exist_ok=True)
         south_parts: dict[int, Path] = {}
@@ -1192,7 +1276,11 @@ class Renderer:
             if acc is None and south is None:
                 return
             grid = bins.join(acc, south, w_us if south is not None else 0.0)
-            t = by_end[end]
+            if on_step is not None and end in step_ends:
+                on_step(end, grid)
+            t = by_end.get(end)
+            if t is None:
+                return
             tid = hashlib.sha1(f"{t.key}|bins@{BINS_DRAWING}".encode()).hexdigest()[:16]
             bins.save(self._bins_path(tid), grid)
             write_atomic(self.totals_dir / f"bins-{tid}.json", json.dumps(meta).encode())
@@ -1376,4 +1464,7 @@ def _files(index: dict[str, Any]) -> set[str]:
     for layer in (index.get("layers") or {}).values():
         if isinstance(layer, dict):
             out |= {f.get("file") for f in layer.get("frames", [])}
+    steps = index.get("steps")
+    if isinstance(steps, dict):
+        out |= {s.get("data") for s in steps.get("steps", []) if isinstance(s, dict)}
     return {n for n in out if isinstance(n, str)}
