@@ -40,6 +40,15 @@ Notable changes to Snow Watch. The format follows
   (HRDPS, RDPS, then GDPS) in Canada and NOAA's National Blend in the US, blended across
   the border like the other layers.
 
+- **Radar over the US is checked against NOAA's MRMS**, NOAA's own quality-controlled
+  mosaic of the same radars: echoes it finds false (ground clutter, the beam striking a
+  mountain, echoes that don't reach the ground) are left out, echoes it has that
+  Environment Canada's composite missed are added, and it says rain or snow (Environment
+  Canada's "mixed" stands). Canada keeps Environment Canada's own checks and types. Echoes
+  found false scan after scan are remembered and left out of the nowcast too. On live
+  scans (17 Nov 2026) about 13% of the US echo was removed and 7% added. The radar job
+  peaks about 70 MB higher (MRMS is read straight from its PNG, not the 200 MB grid).
+
 ### Fixed
 - **Snow total: a new window shows at once in 3D.** Choosing another window (7 days to
   10 days) used to leave the map blank, or showing the old window, until it was moved:

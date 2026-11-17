@@ -103,11 +103,14 @@ New `frontend/src/lib/map/precip/`:
 
 ### M3 — Sources, blending, accuracy
 
-- [ ] `maps/sources/mrms.py`: NOAA MRMS from `noaa-mrms-pds` (`CONUS/PrecipRate_00.00`,
+- [x] `maps/sources/mrms.py`: NOAA MRMS from `noaa-mrms-pds` (`CONUS/PrecipRate_00.00`,
   `PrecipFlag_00.00`, `RadarQualityIndex_00.00`; 20–55°N, 130–60°W, 0.01°, every 2 min).
   Decode with `gribberish`; crop to the region before converting to floats (the 650 MB
   peak noted in MAP-PLAN came from the whole grid).
-- [ ] Radar frame = `mosaic([MRMS, ECCC composite])`, feathered at MRMS's edge. Types:
+- [x] (Landed differently: ECCC's rates stay the base, so the nowcast, which extrapolates
+  ECCC, carries on from the last scan without a jump; MRMS checks them in the US:
+  `radar_eccc.Check`, `apply_check`, `Clutter`. Its quality index isn't readable by
+  gribberish; MRMS is read from its PNG packing directly.) Radar frame = `mosaic([MRMS, ECCC composite])`, feathered at MRMS's edge. Types:
   MRMS `PrecipFlag`, then ECCC's type picture, then the forecast. RainViewer last.
 - [ ] Coverage plane (¼ res) in the data frame from MRMS's quality index and GeoMet's
   `RADAR_COVERAGE_RRAI`. Where no radar sees, fill from the current forecast hour, drawn

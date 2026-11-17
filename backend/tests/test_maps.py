@@ -684,3 +684,101 @@ def test_radar_is_kept_when_no_source_answers(tmp_path: Path) -> None:
     (tmp_path / "r1-aaaaaaaaaaaa.png").write_bytes(b"x")
     r._commit(region, {"radar"}, [frame(1000, "radar", "r1-aaaaaaaaaaaa.png", region.key)])
     assert [f["t"] for f in r.radar(region)["frames"]] == [1000]
+
+
+# ---- MRMS's check over the US (sources/mrms.py) --------------------------------------------
+
+
+def test_mrms_check_drops_clutter_adds_missed_echoes_and_types() -> None:
+    from snowwatch.maps.sources.mrms import Scan
+
+    h, w = 40, 80
+    nan = np.float32(np.nan)
+    # MRMS covers the left half; the right half is beyond it (Canada, say).
+    m_rate = np.full((h, w), nan, np.float32)
+    m_rate[:, :40] = 0.0
+    m_kind = np.zeros((h, w), np.uint8)
+    m_rate[5:15, 5:15], m_kind[5:15, 5:15] = 2.0, SNOW_T  # snow both see
+    m_rate[25:35, 5:15], m_kind[25:35, 5:15] = 1.5, RAIN_T  # rain only MRMS sees
+    check = rx.Check.of(Scan(0, m_rate, m_kind))
+    rain = np.zeros((h, w), np.float32)
+    snow = np.zeros((h, w), np.float32)
+    snow[5:15, 5:15] = 1.8
+    rain[18:22, 20:24] = 9.0  # a summit's clutter: MRMS dry there
+    rain[18:22, 70:74] = 3.0  # beyond MRMS: left as it is
+    types = np.zeros((h, w), np.uint8)
+    types[5:15, 5:15] = RAIN_T  # ECCC thought rain; MRMS says snow
+    types[18:22, 70:74] = RAIN_T
+    out = rx.compose(rain, snow, types, None, check)
+    assert out is not None
+    amount, kind = out
+    assert amount[10, 10] == pytest.approx(1.8) and kind[10, 10] == SNOW_T
+    assert amount[20, 22] == 0 and kind[20, 22] == NONE  # clutter gone
+    assert amount[30, 10] == pytest.approx(1.5) and kind[30, 10] == RAIN_T  # added
+    assert amount[20, 72] == 3.0 and kind[20, 72] == RAIN_T  # outside: untouched
+    # ECCC's "mixed" stands: MRMS has no such class.
+    types[5:15, 5:15] = MIX_T
+    _, kind = rx.compose(rain, snow, types, None, check)  # type: ignore[misc]
+    assert kind[10, 10] == MIX_T
+    # Its false echoes, for the clutter memory.
+    false = check.false_echo((rain > 0) | (snow > 0))
+    assert false[20, 22] and not false[10, 10] and not false[20, 72]
+    # With the region: south of the border only (Canada's radar decides in Canada).
+    region = box_region(44, -125, 54, -115, w)
+    dry = np.zeros((region.height, region.width), np.float32)
+    north = rx.Check.of(Scan(0, dry, dry.astype(np.uint8)), region)
+    assert north.weight[0].max() == 0 and north.weight[-1].min() > 0.9
+    # A lone speck only MRMS has isn't added.
+    speck = np.full((h, w), 0.0, np.float32)
+    speck[20, 30] = 3.0
+    lone = rx.Check.of(Scan(0, speck, np.zeros((h, w), np.uint8)))
+    assert not lone.wet.any()
+
+
+def test_clutter_seen_scan_after_scan_is_left_out_of_the_nowcast(tmp_path: Path) -> None:
+    path = tmp_path / "clutter.npy"
+    echo = np.zeros((20, 20), bool)
+    echo[8:10, 8:10] = True
+    c = rx.Clutter(path, (20, 20))
+    c.add(echo)
+    assert not c.mask.any()  # once might be weather
+    for _ in range(3):
+        rx.Clutter(path, (20, 20)).add(echo)  # each run reads it back from disk
+    mask = rx.Clutter(path, (20, 20)).mask
+    assert mask[8, 8] and mask[7, 8] and not mask[0, 0]  # a pixel round it too
+    # Gone quiet: it fades.
+    for _ in range(8):
+        rx.Clutter(path, (20, 20)).add(np.zeros((20, 20), bool))
+    assert not rx.Clutter(path, (20, 20)).mask.any()
+
+
+def test_mrms_scan_on_the_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    from snowwatch.maps.sources import mrms
+
+    region = box_region(45, -125, 50, -115, 40)
+    asked: list[str] = []
+
+    def get(net: Any, product: str, t: int) -> bytes | None:
+        asked.append(f"{product}@{t}")
+        return None if t == 1000 else product.encode()  # the newest not out yet
+
+    def sample(raw: bytes, region: Any) -> np.ndarray:
+        shape = (region.height, region.width)
+        if raw.startswith(b"PrecipRate"):
+            out = np.full(shape, 0.0, np.float32)
+            out[:, :5] = -3.0  # no coverage offshore
+            out[10:20, 10:20] = 2.5
+            return out
+        out = np.zeros(shape, np.float32)
+        out[10:20, 10:20] = 3  # snow
+        return out
+
+    monkeypatch.setattr(mrms, "_get", get)
+    monkeypatch.setattr(mrms, "_sample", sample)
+    scan = mrms.scan(Net(httpx.Client()), 1000, region)
+    assert scan is not None and scan.t == 1000 - mrms.EVERY_S
+    assert np.isnan(scan.rate[:, :5]).all() and scan.rate[15, 15] == 2.5
+    assert scan.kind[15, 15] == SNOW_T and scan.kind[0, 30] == NONE
+    assert not scan.covered[0, 0] and scan.covered[0, 30]
+    assert "/CONUS/PrecipRate_00.00/" in mrms.url(mrms.RATE, 1_800_000_000)
+    assert mrms.url(mrms.RATE, 1_800_000_000).endswith("_20270115-080000.grib2.gz")

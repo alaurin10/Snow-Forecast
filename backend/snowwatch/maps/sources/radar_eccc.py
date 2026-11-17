@@ -22,6 +22,12 @@ picture can't blank the map.
 
 The nowcast (`…PrecipRate-Extrapolation`) moves the latest echoes forward with no growth
 or decay, and is typed by the latest observed type picture.
+
+Over the US each scan is checked against NOAA's MRMS (sources/mrms.py), which has the same
+radars with quality control: an echo MRMS calls dry (clutter, the beam striking a
+mountain) is left out, an echo only MRMS has is added, and MRMS's rain or snow types it
+(ECCC's "mixed" stands: MRMS has no such class). Echoes left out scan after scan are
+remembered (`Clutter`) and left out of the nowcast too, which extrapolates ECCC's echoes.
 """
 
 from __future__ import annotations
@@ -29,9 +35,11 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
+from snowwatch.maps.blend import feather, north_weight
 from snowwatch.maps.geomet import (
     Net,
     capabilities_dims,
@@ -43,6 +51,8 @@ from snowwatch.maps.geomet import (
 )
 from snowwatch.maps.palette import MIX_T, NONE, RAIN_T, SNOW_T, hex_rgb
 from snowwatch.maps.region import Region, spread
+from snowwatch.maps.smooth import blur
+from snowwatch.maps.sources.mrms import Scan
 
 log = logging.getLogger("snowwatch.precip")
 
@@ -126,20 +136,62 @@ def fill_types(
     return out
 
 
+# MRMS's check: how far its edge fades (pixels, ~20 km), how far round an MRMS echo
+# ECCC's is taken as the same echo (pixels, ~5 km: the two place an edge a little apart),
+# and the lightest MRMS rate that counts as wet.
+CHECK_FEATHER_PX = 13
+CHECK_NEAR_PX = 3
+CHECK_WET_MM = 0.1
+
+
+@dataclass
+class Check:
+    """What MRMS says over the region, ready to apply to an ECCC scan."""
+
+    weight: np.ndarray  # how much MRMS decides: 1 well inside its coverage, 0 outside
+    wet: np.ndarray  # MRMS has echo here
+    near: np.ndarray  # MRMS has echo here or within CHECK_NEAR_PX
+    rate: np.ndarray  # MRMS's rate (0 where it has none)
+    kind: np.ndarray  # MRMS's type where wet
+
+    @classmethod
+    def of(cls, scan: Scan, region: Region | None = None) -> Check:
+        """MRMS's view, deciding in the US only (with `region`): it takes in Canada's
+        radars near the border too, but Canada's own types and checks stand there."""
+        covered = scan.covered
+        rate = np.nan_to_num(scan.rate, nan=0.0)
+        wet = rate >= CHECK_WET_MM
+        near = spread(wet.astype(np.uint8), CHECK_NEAR_PX) > 0
+        weight = feather(covered, CHECK_FEATHER_PX)
+        if region is not None:
+            weight = weight * (1 - north_weight(region))
+        # An echo only MRMS has is added only where it isn't a speck on its own.
+        solid = blur(wet.astype(np.float32), 1.5) >= 0.25
+        return cls(weight.astype(np.float32), wet & solid, near, rate, scan.kind)
+
+    def false_echo(self, echo: np.ndarray) -> np.ndarray:
+        """ECCC's echoes MRMS says are dry, well inside MRMS's coverage."""
+        out: np.ndarray = echo & ~self.near & (self.weight > 0.5)
+        return out
+
+
 def compose(
     rain: np.ndarray | None,
     snow: np.ndarray | None,
     types: np.ndarray | None,
     fallback: np.ndarray | None = None,
+    check: Check | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """One rate (mm of water an hour, 0 where dry) and type per pixel from the rain and
-    snow rates (geomet.code_rates) and the type codes."""
+    snow rates (geomet.code_rates) and the type codes, checked against MRMS if given."""
     if rain is None and snow is None:
         return None
     shape = (rain if rain is not None else snow).shape  # type: ignore[union-attr]
     blank = np.zeros(shape, np.float32)
     rain = blank if rain is None else rain
     snow = blank if snow is None else snow
+    if check is not None:
+        rain, snow, types = apply_check(rain, snow, types, check)
     rain_on, snow_on = rain > 0, snow > 0
     kind = fill_types(types, rain_on | snow_on, fallback)
     amount = np.zeros(shape, np.float32)
@@ -150,6 +202,58 @@ def compose(
     amount[is_mix] = np.where(rain_on, rain, snow)[is_mix]
     kind = np.where(amount > 0, kind, NONE).astype(np.uint8)
     return amount, kind
+
+
+def apply_check(
+    rain: np.ndarray, snow: np.ndarray, types: np.ndarray | None, check: Check
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """ECCC's rain and snow rates and types with MRMS's view applied (see the module's
+    doc): its weight fades over its last ~20 km, so there is no seam where it ends."""
+    w = check.weight
+    keep = 1 - w * ~check.near  # 0 for an echo MRMS calls dry, inside its coverage
+    rain = rain * keep
+    snow = snow * keep
+    # MRMS's echoes that ECCC lacks, as rain or snow by MRMS's type (rain if untyped).
+    add = check.wet & ~((rain > 0) | (snow > 0))
+    as_snow = add & (check.kind == SNOW_T)
+    rain = np.where(add & ~as_snow, check.rate * w, rain).astype(np.float32)
+    snow = np.where(as_snow, check.rate * w, snow).astype(np.float32)
+    # Types: MRMS's rain or snow where it is wet and decides, unless ECCC says mixed.
+    out = np.zeros(rain.shape, np.uint8) if types is None else types.copy()
+    take = check.wet & (check.kind != NONE) & (w > 0.5) & (out != MIX_T)
+    out[take] = check.kind[take]
+    return rain, snow, out
+
+
+class Clutter:
+    """Where ECCC shows echoes that MRMS has called dry scan after scan: a score per pixel
+    kept on disk, raised by each new scan's false echoes and decaying otherwise. The
+    nowcast (ECCC's echoes moved on) leaves out echoes over pixels scoring AT."""
+
+    DECAY = 0.85
+    AT = 2.5  # about three scans in a row
+
+    def __init__(self, path: Path, shape: tuple[int, int]) -> None:
+        self.path = path
+        self.score = np.zeros(shape, np.float32)
+        try:
+            old = np.load(path)
+            if old.shape == shape:
+                self.score = old.astype(np.float32)
+        except (OSError, ValueError):
+            pass
+
+    def add(self, false_echo: np.ndarray) -> None:
+        self.score = self.score * self.DECAY + false_echo.astype(np.float32)
+        from snowwatch.maps.files import save_npy
+
+        save_npy(self.path, self.score.astype(np.float16))
+
+    @property
+    def mask(self) -> np.ndarray:
+        # Two pixels wider than the pixels themselves: an edge wanders scan to scan.
+        out: np.ndarray = spread((self.score >= self.AT).astype(np.uint8), 2) > 0
+        return out
 
 
 # ---- Which times ------------------------------------------------------------------
@@ -216,9 +320,16 @@ def _pictures(
 
 
 def draw_radar(
-    net: Net, t: int, type_t: int | None, region: Region, fallback: np.ndarray | None
+    net: Net,
+    t: int,
+    type_t: int | None,
+    region: Region,
+    fallback: np.ndarray | None,
+    check: Check | None = None,
+    raw_echo: list[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """One observed frame: rate and type. None if GeoMet sent neither rate picture."""
+    """One observed frame: rate and type, checked against MRMS if given (`raw_echo` gets
+    ECCC's own echoes, before the check). None if GeoMet sent neither rate picture."""
     jobs: list[Job] = [
         (RRAI, code_sld(RRAI), ts_iso(t)),
         (RSNO, code_sld(RSNO), ts_iso(t)),
@@ -229,8 +340,10 @@ def draw_radar(
     rain, snow = code_rates(pics[0]), code_rates(pics[1])
     if rain is None or snow is None:
         return None  # half a picture would show the wrong type: skip this scan
+    if raw_echo is not None:
+        raw_echo.append((rain > 0) | (snow > 0))
     types = classify_types(pics[2]) if type_t is not None else None
-    return compose(rain, snow, types, fallback)
+    return compose(rain, snow, types, fallback, check)
 
 
 def type_codes(net: Net, type_t: int | None, region: Region) -> np.ndarray | None:
@@ -247,8 +360,10 @@ def draw_nowcast(
     types: np.ndarray | None,
     region: Region,
     fallback: np.ndarray | None,
+    clutter: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """One nowcast frame (rate and type) from the extrapolated rain and snow rates."""
+    """One nowcast frame (rate and type) from the extrapolated rain and snow rates, less
+    the echoes over known clutter."""
     pics = _pictures(
         net,
         [(NOW_RAIN, code_sld(NOW_RAIN), ts_iso(t)), (NOW_SNOW, code_sld(NOW_SNOW), ts_iso(t))],
@@ -258,4 +373,7 @@ def draw_nowcast(
     rain, snow = code_rates(pics[0]), code_rates(pics[1])
     if rain is None or snow is None:
         return None
+    if clutter is not None and clutter.shape == rain.shape:
+        rain = np.where(clutter, 0.0, rain).astype(np.float32)
+        snow = np.where(clutter, 0.0, snow).astype(np.float32)
     return compose(rain, snow, types, fallback)

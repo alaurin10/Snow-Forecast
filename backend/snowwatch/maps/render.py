@@ -75,7 +75,7 @@ from snowwatch.maps.palette import (
 from snowwatch.maps.point import PROBE_STEP
 from snowwatch.maps.region import Region, stitch
 from snowwatch.maps.smooth import soften
-from snowwatch.maps.sources import hrrr, nbm, radar_eccc, rainviewer, rdps_gdps
+from snowwatch.maps.sources import hrrr, mrms, nbm, radar_eccc, rainviewer, rdps_gdps
 from snowwatch.maps.sources.nbm import Nbm
 from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run, run_of
 
@@ -93,7 +93,7 @@ FINE_KEY = "f6"
 # interpolated already.
 # Radar frames drawn with the current typing (radar_eccc.fill_types: echoes nothing types
 # are left out): in their keys, so older radar frames are drawn again.
-RADAR_TYPING = "t2"
+RADAR_TYPING = "t4"
 RADAR_SIGMA = 0.8
 GRIB_SIGMA = 1.2
 # Radar's types come from a coarser product, and echoes it leaves untyped take the
@@ -117,6 +117,7 @@ ATTRIBUTION = {
     "radar-eccc": "Radar: Environment and Climate Change Canada (North American composite)",
     "nowcast-eccc": "Nowcast: Environment and Climate Change Canada radar extrapolation",
     "rainviewer": "Radar: RainViewer",
+    "mrms": "Radar quality control and types (US): NOAA MRMS (NOAA Open Data Dissemination)",
     "hrdps": "Forecast: Environment and Climate Change Canada HRDPS",
     "rdps": "Forecast: Environment and Climate Change Canada RDPS",
     "gdps": "Forecast: Environment and Climate Change Canada GDPS",
@@ -619,19 +620,38 @@ class Renderer:
         if p is None:
             return []
         out: list[FrameOut] = []
-        src = {"north": "radar-eccc", "south": "radar-eccc"}
+        latest_t = max(p.radar) if p.radar else None
+        clutter = radar_eccc.Clutter(self._clutter_path(region), (region.height, region.width))
         for t in p.radar:
             type_t = radar_eccc.type_time(t, p.types)
-            key = f"eccc|{FINE_KEY}|{RADAR_TYPING}|{t}|{type_t}|{region.key}"
-            had = self._reusable(prev, key)
+            base = f"eccc|{FINE_KEY}|{RADAR_TYPING}|{t}|{type_t}|{region.key}"
+            # Checked against MRMS ("m") when it had the scan; else as ECCC drew it ("n"),
+            # tried against MRMS again next time.
+            had = self._reusable(prev, f"{base}|m")
             if had:
                 out.append(had)
                 continue
-            got = radar_eccc.draw_radar(self.net, t, type_t, region, fallback)
+            scan = mrms.scan(self.net, t, region)
+            if scan is None:
+                had = self._reusable(prev, f"{base}|n")
+                if had:
+                    out.append(had)
+                    continue
+            check = radar_eccc.Check.of(scan, region) if scan is not None else None
+            raw: list[np.ndarray] = []
+            got = radar_eccc.draw_radar(self.net, t, type_t, region, fallback, check, raw)
+            del scan
             if got is None:
                 continue
+            if check is not None and t == latest_t and raw:
+                clutter.add(check.false_echo(raw[0]))
             name, data = self._save_precip(*got, f"r{t}", RADAR_SIGMA, RADAR_KIND_SIGMA, DS_RADAR)
+            src = {"north": "radar-eccc", "south": "radar-eccc"}
+            if check is not None:
+                src["check"] = "mrms"
+            key = f"{base}|{'m' if check is not None else 'n'}"
             out.append(FrameOut(t, True, name, key, "", "radar", 0, src, FINE, data, DS_RADAR, t))
+            del check, got
         if not out or not p.nowcast:
             return out
         latest = max(f.t for f in out)
@@ -653,7 +673,9 @@ class Renderer:
                 continue
             if types is None:
                 types = radar_eccc.type_codes(self.net, type_t, region)
-            got = radar_eccc.draw_nowcast(self.net, t, p.nowcast_ref, types, region, fallback)
+            got = radar_eccc.draw_nowcast(
+                self.net, t, p.nowcast_ref, types, region, fallback, clutter.mask
+            )
             if got is None:
                 continue
             if pair:
@@ -665,6 +687,11 @@ class Renderer:
                 FrameOut(t, False, name, key, "", "nowcast", 0, src, FINE, data, DS_RADAR, t)
             )
         return out
+
+    def _clutter_path(self, region: Region) -> Path:
+        """Where the radar's clutter score is kept (radar_eccc.Clutter), by region."""
+        h = hashlib.sha1(region.key.encode()).hexdigest()[:16]
+        return self.grids_dir / f"clutter-{h}.npy"
 
     def _radar_rainviewer(self, region: Region, prev: dict[str, FrameOut]) -> list[FrameOut]:
         out = []
@@ -1225,18 +1252,18 @@ class _Model:
         return self._read[f.data]
 
     def at(self, t: int, pair: tuple[FrameOut, FrameOut]) -> Field | None:
-        """The forecast at t on the region's grid, between the pair's two frames."""
+        """The forecast at t on the region's grid, between the pair's two frames (mixed
+        at their own resolution, then enlarged once)."""
         a, b = pair
         fa, fb = self._frame(a), self._frame(b)
         if fa is None or fb is None:
             return None
-        h, w = self.region.height, self.region.width
-        ra, sa, ma = dataframe.on_grid(fa, h, w)
-        if a is b or b.valid <= a.valid:
-            return ra, sa, ma
-        f = (t - a.valid) / (b.valid - a.valid)
-        rb, sb, mb = dataframe.on_grid(fb, h, w)
-        return ra + (rb - ra) * f, sa + (sb - sa) * f, ma + (mb - ma) * f
+        f = 0.0 if a is b or b.valid <= a.valid else (t - a.valid) / (b.valid - a.valid)
+        same = fa.rate.shape == fb.rate.shape and fa.snow.shape == fb.snow.shape
+        if not same:
+            fb, f = (fb, 1.0) if f >= 0.5 else (fa, 0.0)
+        frame = dataframe.mixed(fa, fb, f) if same else fb if f else fa
+        return dataframe.on_grid(frame, self.region.height, self.region.width)
 
 
 def hand_over(

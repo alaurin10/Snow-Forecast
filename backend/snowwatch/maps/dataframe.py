@@ -218,22 +218,41 @@ def decode(data: bytes) -> DataFrame | None:
     )
 
 
+def _axis(n_out: int, n_in: int, span: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For each of n_out cells along an axis that n_in cells cover `span` of: the two
+    source cells either side of its centre and the weight of the second."""
+    pos = (np.arange(n_out) + 0.5) * n_in / span - 0.5
+    i0 = np.clip(np.floor(pos).astype(np.int64), 0, n_in - 1)
+    i1 = np.minimum(i0 + 1, n_in - 1)
+    f = np.clip(pos - i0, 0, 1).astype(np.float32)
+    return i0, i1, f
+
+
 def _resize(a: np.ndarray, height: int, width: int, span: tuple[float, float]) -> np.ndarray:
     """`a` sampled bilinearly onto a (height, width) grid of which it covers `span`
-    (rows, columns) pixels, cell centres lining up."""
+    (rows, columns) pixels, cell centres lining up. Rows first, then columns, so only a
+    few arrays of the output's size exist at once."""
     h, w = a.shape
-    rows = (np.arange(height) + 0.5) * h / span[0] - 0.5
-    cols = (np.arange(width) + 0.5) * w / span[1] - 0.5
-    r0 = np.clip(np.floor(rows).astype(int), 0, h - 1)
-    c0 = np.clip(np.floor(cols).astype(int), 0, w - 1)
-    r1, c1 = np.minimum(r0 + 1, h - 1), np.minimum(c0 + 1, w - 1)
-    fr = np.clip(rows - r0, 0, 1).astype(np.float32)[:, None]
-    fc = np.clip(cols - c0, 0, 1).astype(np.float32)[None, :]
+    r0, r1, fr = _axis(height, h, span[0])
     a = a.astype(np.float32)
-    top = a[r0][:, c0] * (1 - fc) + a[r0][:, c1] * fc
-    bottom = a[r1][:, c0] * (1 - fc) + a[r1][:, c1] * fc
-    out: np.ndarray = top * (1 - fr) + bottom * fr
+    tall = a[r0] * (1 - fr)[:, None]
+    tall += a[r1] * fr[:, None]
+    c0, c1, fc = _axis(width, w, span[1])
+    out: np.ndarray = tall[:, c0] * (1 - fc)[None, :]
+    out += tall[:, c1] * fc[None, :]
     return out
+
+
+def mixed(a: DataFrame, b: DataFrame, f: float) -> DataFrame:
+    """Two frames kept at the same resolution mixed (rates as mm an hour, then coded
+    again), f of the way from a to b: at their own size, before anything is enlarged."""
+    if f <= 0 or a is b:
+        return a
+    ra = code_rates(a.rate)
+    rate = rate_codes(ra + (code_rates(b.rate) - ra) * f)
+    snow = np.rint(a.snow + (b.snow.astype(np.float32) - a.snow) * f).astype(np.uint8)
+    mix = np.rint(a.mix + (b.mix.astype(np.float32) - a.mix) * f).astype(np.uint8)
+    return DataFrame(rate, snow, mix, a.ds)
 
 
 def on_grid(frame: DataFrame, height: int, width: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

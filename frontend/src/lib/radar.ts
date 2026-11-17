@@ -91,7 +91,7 @@ export interface Frame {
 	 * The sources blended into the frame: the main one for Canada (`north`) and for the US
 	 * (`south`), e.g. "hrdps", "nbm", and one filling in where neither reaches (`fill`).
 	 */
-	src: { north?: string; south?: string; fill?: string };
+	src: { north?: string; south?: string; fill?: string; check?: string };
 	/**
 	 * The instant the frame stands for (Unix seconds): a scan's or a nowcast's time, the
 	 * middle of a forecast frame's span. Frames are ordered and blended by it.
@@ -386,9 +386,12 @@ const modelName = (s: string | undefined) => (s && MODEL_NAMES[s]) || s || '';
 /** Where a frame came from, in a sentence for the map's info panel. */
 export function frameSource(f: Frame): string {
 	if (f.kind === 'radar') {
-		return f.src.north === 'rainviewer'
-			? 'Observed by radar (RainViewer).'
-			: "Observed by radar: Environment Canada's North American composite, which includes the US radars.";
+		if (f.src.north === 'rainviewer') return 'Observed by radar (RainViewer).';
+		const base =
+			"Observed by radar: Environment Canada's North American composite, which includes the US radars.";
+		return f.src.check === 'mrms'
+			? `${base} In the US, checked against NOAA's MRMS: echoes it finds false (ground clutter, the beam hitting a mountain) are left out, and it says rain or snow.`
+			: base;
 	}
 	if (f.kind === 'nowcast') {
 		return 'Nowcast: the latest radar echoes moved forward by Environment Canada, without growth or decay.';

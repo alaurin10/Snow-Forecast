@@ -153,6 +153,13 @@ describe('frameLabel', () => {
 describe('frameSource', () => {
 	it('names where each frame came from', () => {
 		expect(frameSource(f(1, true))).toMatch(/Environment Canada/);
+		expect(frameSource(f(1, true))).not.toMatch(/MRMS/);
+		expect(
+			frameSource({
+				...f(1, true),
+				src: { north: 'radar-eccc', south: 'radar-eccc', check: 'mrms' }
+			})
+		).toMatch(/checked against NOAA's MRMS/);
 		expect(frameSource({ ...f(1, true), src: { north: 'rainviewer' } })).toMatch(/RainViewer/);
 		expect(frameSource(nc(1))).toMatch(/^Nowcast/);
 		expect(frameSource(f(1, false, 'hrrr'))).toBe(
