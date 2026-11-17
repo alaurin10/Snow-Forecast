@@ -151,11 +151,13 @@ New `frontend/src/lib/map/precip/`:
 
 ### M6 — Bigger area
 
-- [ ] A second, coarse region `wide` (North America, about 15–72°N, 170–50°W, ~6 km a
+- [x] A second, coarse region `wide` (North America, about 15–72°N, 170–50°W, ~6 km a
   pixel; `config/forecast.yaml: map.wide`), drawn by a second `Renderer` into
   `precip/wide/` at a slower pace. Radar: ECCC composite + MRMS (CONUS and Alaska);
   forecast: the same ownership rule, RDPS/GDPS where no fine model reaches.
-- [ ] App: the wide frames draw beneath the home box and load when the view leaves it;
+- [x] (Landed as radar and nowcast only, via the same `Renderer.radar` into `precip/wide/`,
+  served at `/api/precip/wide`; 1800 × 1356 px, 23 frames of ~31 KB, a 90 s cold build at
+  317 MB. Taps outside the box aren't read from it yet.) App: the wide frames draw beneath the home box and load when the view leaves it;
   frames pair by `valid` time; taps outside the home box read the wide probes.
 
 ## Verified facts about the sources (16 Nov 2026)

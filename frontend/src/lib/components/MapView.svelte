@@ -54,6 +54,9 @@
 	import { RAIL_FOLDED_DROP, RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
 		dataUrl,
+		loadWide,
+		posAt,
+		timeAt,
 		frameLabel,
 		frameMs,
 		frameSource,
@@ -1608,6 +1611,70 @@
 			ready_ = dataReady();
 		});
 	}
+	// ---- The radar beyond the box (docs/RADAR-PLAN.md M6) ------------------------------
+	// A coarser loop over most of North America, beneath the box's own (which it leaves
+	// undrawn), fetched once the view reaches beyond the box. It has radar and nowcast
+	// only, so it shows while the slider is in them and hides in the forecast.
+	let wide = $state.raw<Timeline | null>(null);
+	let wideLayer: RadarLayer | null = null;
+	let wideAsked = false;
+	/** The view reaches beyond the box the frames cover. */
+	const beyondBox = $derived.by(() => {
+		void viewTick;
+		const tl = timeline;
+		if (!map || !tl || !ready) return false;
+		const b = map.getBounds();
+		const [[s_, w], [n, e]] = tl.bounds;
+		return b.getWest() < w || b.getEast() > e || b.getSouth() < s_ || b.getNorth() > n;
+	});
+	$effect(() => {
+		if (!glRadar || !beyondBox || wideAsked) return;
+		wideAsked = true;
+		void loadWide().then((w) => (wide = w));
+	});
+	$effect(() => {
+		const w = wide;
+		const tl = timeline;
+		const use = glRadar && !!w;
+		if (!ready || !map || !tl) return;
+		if (!use || !w) {
+			wideLayer?.remove();
+			wideLayer = null;
+			return;
+		}
+		const o = weatherOpacity('radar');
+		wideLayer ??= new RadarLayer(map, {
+			id: 'radar-wide',
+			bounds: w.bounds,
+			width: w.width,
+			height: w.height,
+			hole: tl.bounds,
+			beforeId: RadarLayer.ID,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			lean: phone
+		});
+		wideLayer.setFrames(
+			w.frames
+				.filter((f) => f.data)
+				.map((f) => ({
+					file: f.data!,
+					url: dataUrl(f, '/api/precip/wide'),
+					full: (f.ds ?? 1) === 1
+				}))
+		);
+	});
+	// The wide loop follows the slider by time.
+	$effect(() => {
+		const p = pos;
+		const w = wide;
+		if (!wideLayer || !w) return;
+		const t = timeAt(frames, p);
+		const at = t == null ? null : posAt(w.frames, t);
+		wideLayer.setHidden(at == null);
+		if (at != null) wideLayer.setPosition(at);
+	});
+
 	/** The frames whose numbers are on hand, by picture name (as the slider's track wants). */
 	function dataReady(): Set<string> {
 		const have = radarLayer?.ready() ?? new Set<string>();
@@ -1735,6 +1802,7 @@
 			const atNow = !timeline || frame === Math.max(0, view.now);
 			const tl = await loadTimeline();
 			loadError = null;
+			if (wideAsked) void loadWide().then((w) => (wide = w ?? wide));
 			// The pictures' box only changes when locations do.
 			const sameBox = timeline && JSON.stringify(timeline.bounds) === JSON.stringify(tl.bounds);
 			const next = weatherView(tl, weather, prefs.mapWind);

@@ -102,6 +102,11 @@ map:
   region: [31, -134, 57, -102]
   width: 1700            # pixels; about 1.5 km a pixel over this box
   radar_minutes: 6       # radar and nowcast (a new scan every 6 minutes)
+  # Radar beyond the box: a coarser loop (radar and nowcast) over most of North America,
+  # drawn beneath the box's own when the map looks further afield.
+  wide_region: [15, -170, 72, -50]
+  wide_width: 1800       # pixels; about 4-7 km a pixel
+  wide_minutes: 12
   forecast_minutes: 30   # forecast frames (hourly to 48 h, then 3- and 6-hourly to 10 days)
   totals_minutes: 60     # snow totals (12 h to 10 days)
   layers_minutes: 30     # snow level, wind, snow on the ground, observed snowfall, clouds

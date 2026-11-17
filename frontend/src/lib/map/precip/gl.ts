@@ -42,6 +42,7 @@ uniform vec2 u_tspan_b;
 uniform float u_mix;     // 0: frame a, 1: frame b
 uniform float u_opacity;
 uniform vec3 u_draw;     // code drawn from, code at full strength, strength at the first
+uniform vec4 u_hole;     // a box (uv x0, y0, x1, y1) left undrawn: another layer draws it
 out vec4 o_color;
 
 // The rate code at uv, smoothed with a cubic B-spline over the 4x4 texels round it:
@@ -76,6 +77,7 @@ float side(float d) {
 }
 
 void main() {
+	if (all(greaterThan(v_uv, u_hole.xy)) && all(lessThan(v_uv, u_hole.zw))) discard;
 	float a = smoothCode(u_rate_a, v_uv * u_span_a, u_size_a);
 	float b = smoothCode(u_rate_b, v_uv * u_span_b, u_size_b);
 	float code = mix(a, b, u_mix);
@@ -133,7 +135,8 @@ const UNIFORMS = [
 	'u_tspan_b',
 	'u_mix',
 	'u_opacity',
-	'u_draw'
+	'u_draw',
+	'u_hole'
 ] as const;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -164,7 +167,9 @@ export class PrecipGl {
 		readonly gl: WebGL2RenderingContext,
 		/** The frames' box in the region's own pixels. */
 		private boxWidth: number,
-		private boxHeight: number
+		private boxHeight: number,
+		/** A box (uv x0, y0, x1, y1 of the frames' box) left undrawn; none by default. */
+		private hole: [number, number, number, number] = [2, 2, 2, 2]
 	) {
 		const vs = compile(gl, gl.VERTEX_SHADER, VERT);
 		const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
@@ -303,6 +308,7 @@ export class PrecipGl {
 		gl.uniform1f(u.u_mix, mix);
 		gl.uniform1f(u.u_opacity, opacity);
 		gl.uniform3f(u.u_draw, CODE_FROM, CODE_SOLID, ALPHA_FROM);
+		gl.uniform4f(u.u_hole, ...this.hole);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		gl.bindVertexArray(null);
 		gl.activeTexture(gl.TEXTURE0);

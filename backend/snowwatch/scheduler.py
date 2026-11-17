@@ -45,7 +45,7 @@ class Worker:
         # The map's pictures are separate files: they don't wait for runs. Each map job
         # skips a turn if its previous one is still going.
         self.map_locks = {
-            name: threading.Lock() for name in ("radar", "forecast", "totals", "layers")
+            name: threading.Lock() for name in ("radar", "forecast", "totals", "layers", "wide")
         }
         self.sat_lock = threading.Lock()
         self._ping = ping
@@ -229,7 +229,7 @@ class Worker:
     def _map_job(self, name: str) -> None:
         """Redraw one part of the map's pictures (only what changed) and update the index."""
         from snowwatch.maps.geomet import Net
-        from snowwatch.maps.region import region_for
+        from snowwatch.maps.region import box_region, region_for
         from snowwatch.maps.render import Renderer
 
         lock = self.map_locks[name]
@@ -239,17 +239,25 @@ class Worker:
             conn = connect(self.settings.database)
             points = [(b.lat, b.lon) for loc in list_locations(conn) for b in loc.bands[:1]]
             region = region_for(points, self.cfg.map.region, self.cfg.map.width)
+            out_dir, work_dir = self.settings.precip_dir, self.settings.map_work_dir
+            if name == "wide":
+                # The same radar job over the wide box, into a folder of its own.
+                if self.cfg.map.wide_region is None:
+                    return
+                region = box_region(*self.cfg.map.wide_region, self.cfg.map.wide_width)
+                out_dir, work_dir = out_dir / "wide", work_dir / "wide"
             headers = {"User-Agent": self.settings.user_agent}
             with httpx.Client(headers=headers, follow_redirects=True) as client:
                 r = Renderer(
-                    self.settings.precip_dir,
+                    out_dir,
                     Net(client),
-                    work_dir=self.settings.map_work_dir,
+                    work_dir=work_dir,
                     nbm_cycles=tuple(self.cfg.map.nbm_cycles),
                     slr_bands=self.cfg.slr_bands,
                 )
                 job = {
                     "radar": r.radar,
+                    "wide": r.radar,
                     "forecast": r.forecast,
                     "totals": r.snow_totals,
                     "layers": r.layers,
@@ -274,6 +282,10 @@ class Worker:
     def radar(self) -> None:
         """Radar and nowcast frames (a new scan every 6 minutes)."""
         self._map_job("radar")
+
+    def wide_radar(self) -> None:
+        """Radar and nowcast over most of North America, coarser (beyond the box)."""
+        self._map_job("wide")
 
     def forecast_frames(self) -> None:
         """Forecast frames to 10 days (new model runs hourly or slower)."""
@@ -444,6 +456,7 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
     mc = worker.cfg.map
     for job, minutes, name in (
         (worker.radar, mc.radar_minutes, "radar"),
+        (worker.wide_radar, mc.wide_minutes, "wide_radar"),
         (worker.forecast_frames, mc.forecast_minutes, "forecast_frames"),
         (worker.totals_fields, mc.totals_minutes, "totals_fields"),
         (worker.weather_layers, mc.layers_minutes, "weather_layers"),

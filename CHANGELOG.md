@@ -34,6 +34,11 @@ Notable changes to Snow Watch. The format follows
   blend at 48 h; now they show NOAA's models (HRRR, then the National Blend) all along, as
   the snow totals, snow level and wind already did.
 
+- **Radar beyond the West box.** Zoom out or pan away and the radar and nowcast carry on
+  over most of North America (Alaska to the Gulf, the Pacific to the Atlantic coast), from a
+  coarser loop (about 4–7 km a pixel, 0.7 MB in all) drawn beneath the West box's own and
+  fetched only when the map looks past the box. It follows the slider by time and hides
+  in the forecast (the models stay on the West box).
 - **Clouds: a forecast after the satellite loop.** The Clouds layer's slider now runs
   on past "now" to about 10 days ahead: the forecast's cloud cover, every 3 hours to
   3½ days, then every 6 hours, drawn as cloud (the thicker, the greyer). Canada's models

@@ -4,6 +4,8 @@ import {
 	frameMs,
 	frameSource,
 	loadTimeline,
+	posAt,
+	timeAt,
 	RAMPS,
 	rampTop,
 	toTimeline,
@@ -253,5 +255,20 @@ describe('frameMs', () => {
 		expect(frameMs(3600)).toBe(450);
 		expect(frameMs(3 * 3600)).toBe(550);
 		expect(frameMs(6 * 3600)).toBe(650);
+	});
+});
+
+describe('timeAt and posAt', () => {
+	const fr = [{ valid: 100 }, { valid: 200 }, { valid: 400 }];
+	it('turns a slider position into an instant and back', () => {
+		expect(timeAt(fr, 0)).toBe(100);
+		expect(timeAt(fr, 1.5)).toBe(300);
+		expect(timeAt(fr, 9)).toBe(400);
+		expect(timeAt([], 1)).toBeNull();
+		expect(posAt(fr, 300)).toBe(1.5);
+		expect(posAt(fr, 100)).toBe(0);
+		expect(posAt(fr, 50)).toBe(0); // within the slack
+		expect(posAt(fr, 400 + 601)).toBeNull(); // beyond the loop: hidden
+		expect(posAt(fr, 100 - 601)).toBeNull();
 	});
 });

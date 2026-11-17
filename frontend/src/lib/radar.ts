@@ -301,7 +301,44 @@ export async function loadTimeline(): Promise<Timeline> {
 
 export const frameUrl = (f: { file: string }) => `/api/precip/${f.file}`;
 
-export const dataUrl = (f: { data?: string }) => `/api/precip/${f.data}`;
+export const dataUrl = (f: { data?: string }, base = '/api/precip') => `${base}/${f.data}`;
+
+/** The radar beyond the box (docs/RADAR-PLAN.md M6): radar and nowcast over most of North
+ *  America, coarser; null if the server has none. */
+export async function loadWide(): Promise<Timeline | null> {
+	try {
+		const res = await fetch('/api/precip/wide', { cache: 'no-cache' });
+		if (!res.ok) return null;
+		const tl = toTimeline((await res.json()) as PrecipIndex);
+		return tl.frames.some((f) => f.data) ? tl : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The instant (Unix seconds) at a slider position: a frame's index, or between two. */
+export function timeAt(frames: Pick<Frame, 'valid'>[], pos: number): number | null {
+	if (!frames.length) return null;
+	const p = Math.min(Math.max(pos, 0), frames.length - 1);
+	const i = Math.floor(p);
+	const a = frames[i].valid;
+	const b = frames[Math.min(i + 1, frames.length - 1)].valid;
+	return a + (b - a) * (p - i);
+}
+
+/** Where an instant falls among frames (an index, or between two); null if more than
+ *  `slack` seconds outside them. */
+export function posAt(frames: Pick<Frame, 'valid'>[], t: number, slack = 600): number | null {
+	const n = frames.length;
+	if (!n || t < frames[0].valid - slack || t > frames[n - 1].valid + slack) return null;
+	if (t <= frames[0].valid) return 0;
+	for (let i = 0; i < n - 1; i++) {
+		const a = frames[i].valid;
+		const b = frames[i + 1].valid;
+		if (t <= b) return b > a ? i + (t - a) / (b - a) : i + 1;
+	}
+	return n - 1;
+}
 
 /** How long a frame stays on screen while playing, by the time to the next one: quick
  *  through 6- and 12-minute radar, slower through hourly and 3- and 6-hourly forecast,

@@ -38,6 +38,10 @@ export interface RadarOptions {
 	maxzoom: number;
 	/** Hold the radar loop at half resolution (see RadarFrame.full). */
 	lean: boolean;
+	/** The layer's id (default RadarLayer.ID): two can be on the map at once. */
+	id?: string;
+	/** A box ([[south, west], [north, east]]) left undrawn: another layer draws it. */
+	hole?: [[number, number], [number, number]];
 	/** Frames arrived, or what is drawn changed: the controls may want to look again. */
 	onChange?: () => void;
 	/** For tests. */
@@ -74,6 +78,7 @@ export function bracket(pos: number, count: number): { i0: number; i1: number; f
 
 export class RadarLayer {
 	static readonly ID = 'radar';
+	readonly id: string;
 	private frames: RadarFrame[] = [];
 	private pos = 0;
 	private gfx: PrecipGl | null = null;
@@ -89,6 +94,7 @@ export class RadarLayer {
 	private box: { x0: number; y0: number; dx: number; dy: number };
 	private opts: RadarOptions;
 	private gone = false;
+	private hidden = false;
 	/** When 3D's terrain tiles were last asked to redraw, and the redraw waiting its turn. */
 	private lastTerrain = 0;
 	private trailing: ReturnType<typeof setTimeout> | undefined;
@@ -113,6 +119,7 @@ export class RadarLayer {
 		opts: RadarOptions
 	) {
 		this.opts = opts;
+		this.id = opts.id ?? RadarLayer.ID;
 		const [[south, west], [north, east]] = opts.bounds;
 		this.box = {
 			x0: mercX(west),
@@ -126,7 +133,7 @@ export class RadarLayer {
 			(key) => this.tex.has(key) || this.queue.has(key)
 		);
 		this.layer = {
-			id: RadarLayer.ID,
+			id: this.id,
 			type: 'custom',
 			renderingMode: '2d',
 			terrainTileRevision: 0,
@@ -144,7 +151,7 @@ export class RadarLayer {
 	/** Into the map's style, if it isn't there. */
 	private attach() {
 		const map = this.map;
-		if (this.gone || map.getLayer(RadarLayer.ID)) return;
+		if (this.gone || map.getLayer(this.id)) return;
 		const before = this.opts.beforeId;
 		try {
 			map.addLayer(this.layer, before && map.getLayer(before) ? before : undefined);
@@ -153,7 +160,8 @@ export class RadarLayer {
 			map.once('style.load', () => this.attach());
 			return;
 		}
-		map.setLayerZoomRange(RadarLayer.ID, 0, this.opts.maxzoom);
+		map.setLayerZoomRange(this.id, 0, this.opts.maxzoom);
+		if (this.hidden) map.setLayoutProperty(this.id, 'visibility', 'none');
 	}
 
 	// ---- What to show ---------------------------------------------------------------
@@ -186,6 +194,23 @@ export class RadarLayer {
 		this.changed();
 	}
 
+	/** Show or hide the layer (its frames stay on hand). */
+	setHidden(hidden: boolean) {
+		if (hidden === this.hidden) return;
+		this.hidden = hidden;
+		if (this.map.getLayer(this.id))
+			this.map.setLayoutProperty(this.id, 'visibility', hidden ? 'none' : 'visible');
+	}
+
+	/** The hole as uv of the frames' box (x east, y south), or none. */
+	private holeUv(): [number, number, number, number] {
+		const h = this.opts.hole;
+		if (!h) return [2, 2, 2, 2];
+		const [[s, w], [n, e]] = h;
+		const { x0, y0, dx, dy } = this.box;
+		return [(mercX(w) - x0) / dx, (mercY(n) - y0) / dy, (mercX(e) - x0) / dx, (mercY(s) - y0) / dy];
+	}
+
 	setOpacity(opacity: (zoom: number) => number) {
 		this.opts.opacity = opacity;
 		this.changed(true);
@@ -194,7 +219,7 @@ export class RadarLayer {
 	setMaxZoom(maxzoom: number) {
 		if (maxzoom === this.opts.maxzoom) return;
 		this.opts.maxzoom = maxzoom;
-		if (this.map.getLayer(RadarLayer.ID)) this.map.setLayerZoomRange(RadarLayer.ID, 0, maxzoom);
+		if (this.map.getLayer(this.id)) this.map.setLayerZoomRange(this.id, 0, maxzoom);
 	}
 
 	/** Frames ready to draw (by file). */
@@ -353,7 +378,7 @@ export class RadarLayer {
 			performance.measure?.('map:draw', { start: this.tileFrom, duration: this.tileMs });
 			this.tileMs = 0;
 		}
-		this.gfx ??= new PrecipGl(gl, this.opts.width, this.opts.height);
+		this.gfx ??= new PrecipGl(gl, this.opts.width, this.opts.height, this.holeUv());
 		if (!this.queue.size) return;
 		let spent = 0;
 		for (const [key, planes] of this.queue) {
@@ -445,7 +470,7 @@ export class RadarLayer {
 			this.gfx.dispose();
 		}
 		this.forget();
-		if (this.map.getLayer(RadarLayer.ID)) this.map.removeLayer(RadarLayer.ID);
+		if (this.map.getLayer(this.id)) this.map.removeLayer(this.id);
 	}
 }
 

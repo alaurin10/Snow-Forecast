@@ -222,15 +222,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path, media_type="application/json", headers={"Cache-Control": "no-cache"}
         )
 
+    @app.get("/api/precip/wide")
+    def precip_wide_index() -> FileResponse:
+        """The radar beyond the box: radar and nowcast over most of North America, coarser
+        (the same index format; docs/RADAR-PLAN.md M6)."""
+        path = settings.precip_dir / "wide" / "index.json"
+        if not path.exists():
+            raise HTTPException(503, "wide radar frames not ready yet")
+        return FileResponse(
+            path, media_type="application/json", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/api/precip/wide/{name}")
+    def precip_wide_frame(name: str) -> FileResponse:
+        """One frame of the radar beyond the box (as /api/precip/{name})."""
+        return _precip_file(name, settings.precip_dir / "wide")
+
     @app.get("/api/precip/{name}")
     def precip_frame(name: str) -> FileResponse:
         """One file: a precipitation frame (as a picture, or as numbers), a snow total or a
         frame of another weather layer. Names carry a hash of the contents, so they never
         change."""
+        return _precip_file(name, settings.precip_dir)
+
+    def _precip_file(name: str, folder: Path) -> FileResponse:
+        """A picture or frame file from `folder` (never from the request: only the
+        routes above choose it), checked by name."""
         m = re.fullmatch(r"[a-z]{1,2}\d+-[0-9a-f]{12}\.(png|webp|bin)", name)
         if not m:
             raise HTTPException(404)
-        path = settings.precip_dir / name
+        path = folder / name
         if not path.exists():
             raise HTTPException(404)
         ext = m.group(1)
