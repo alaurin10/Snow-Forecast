@@ -167,8 +167,11 @@
 		...(snap?.location.kind === 'backcountry'
 			? (['forecast', 'backcountry', 'confidence', 'observed'] as const)
 			: (['forecast', 'confidence', 'backcountry', 'observed'] as const)),
-		// Webcams only where the owner added some (on the Manage page).
-		...(snap?.location.webcams?.length ? (['webcams'] as const) : [])
+		// Webcams where the owner added some (on the Manage page), or where recent field
+		// reports nearby have photos.
+		...(snap?.location.webcams?.length || nearby?.photo_reports?.length
+			? (['webcams'] as const)
+			: [])
 	]);
 	// Webcams open, then a location without any: back to its forecast.
 	$effect(() => {
@@ -758,7 +761,7 @@
 	{:else if tab === 'backcountry'}
 		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} />
 	{:else if tab === 'webcams'}
-		<WebcamsTab cams={snap.location.webcams ?? []} />
+		<WebcamsTab cams={snap.location.webcams ?? []} {nearby} {units} tz={snap.location.tz} />
 	{:else}
 		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} />
 	{/if}

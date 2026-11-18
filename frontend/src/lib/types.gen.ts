@@ -578,6 +578,7 @@ export interface MetaOut {
  */
 export interface NearbyOut {
 	location_id: string;
+	photo_reports?: NearbyReport[];
 	radius_km: number;
 	reports: NearbyReport[];
 	reports_at: string | null;
@@ -601,10 +602,22 @@ export interface ObsProps {
 	id: string;
 	images: number;
 	kinds: string[];
+	photos?: ObsPhoto[];
 	region: string;
 	time: string;
 	title: string;
 	url: string | null;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsPhoto".
+ */
+export interface ObsPhoto {
+	caption?: string;
+	height?: number | null;
+	thumb: string;
+	url: string;
+	width?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

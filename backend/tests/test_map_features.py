@@ -184,9 +184,32 @@ def min_item(i: int, lat: float, lon: float, when: str, **counts: int) -> dict[s
     }
 
 
-def min_transport(pages: list[list[dict[str, Any]]], status: int = 200) -> httpx.MockTransport:
+CLOUD = "https://res.cloudinary.com/avcan-min/image/upload/"
+
+
+def min_detail(sid: str) -> dict[str, Any]:
+    return {
+        "id": sid,
+        "username": "A Person",
+        "images": [
+            {"url": CLOUD + "v1/min/prod/abc.jpg", "caption": "Wind slab", "width": 2000},
+            {"url": "https://evil.example/x.jpg", "caption": "not theirs"},
+            {"url": CLOUD + "v1/min/prod/x.jpg?x=1", "caption": "query"},
+            {"url": "javascript:alert(1)"},
+        ],
+    }
+
+
+def min_transport(
+    pages: list[list[dict[str, Any]]], status: int = 200, details: list[str] | None = None
+) -> httpx.MockTransport:
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.url.host == "api.avalanche.ca"
+        if req.url.path.startswith("/min/en/submissions/"):
+            sid = req.url.path.rsplit("/", 1)[1]
+            if details is not None:
+                details.append(sid)
+            return httpx.Response(200, json=min_detail(sid))
         assert req.url.params["fromdate"] == "2026-10-29"
         if status != 200:
             return httpx.Response(status, json={"error": "nope"})
@@ -225,6 +248,20 @@ def test_observations_keep_reports_in_the_box_without_names(tmp_path: Path) -> N
     )
     text = path.read_text()
     assert "A Person" not in text and "auth0" not in text
+    # Photos: only Avalanche Canada's own image addresses, a small copy for the tab.
+    assert [(ph.thumb, ph.url, ph.caption, ph.width) for ph in props[0].photos] == [
+        (
+            CLOUD + "c_limit,w_480/v1/min/prod/abc.jpg",
+            CLOUD + "c_limit,w_1600/v1/min/prod/abc.jpg",
+            "Wind slab",
+            2000,
+        )
+    ]
+    # The next refresh takes the photos from the file: no report is asked twice.
+    asked: list[str] = []
+    with Fetcher(user_agent="t", transport=min_transport(pages, details=asked), tries=1) as f:
+        again = observations.refresh(path, f, BOX, 14, NOW)
+    assert asked == [] and again.features[0].properties.photos == props[0].photos
     # The network failing keeps the file as it was.
     with Fetcher(user_agent="t", transport=min_transport([], status=500), tries=1) as f:
         again = observations.refresh(path, f, BOX, 14, NOW)
@@ -431,11 +468,24 @@ def test_nearby_lists_close_stations_and_reports(
         ).model_dump_json()
     )
 
-    def report(rid: str, lat: float, lon: float, time: str) -> observations.ObsFeature:
+    def report(
+        rid: str, lat: float, lon: float, time: str, photos: int = 0
+    ) -> observations.ObsFeature:
+        pics = [
+            observations.ObsPhoto(url=f"{CLOUD}a{i}.jpg", thumb=f"{CLOUD}t{i}.jpg")
+            for i in range(photos)
+        ]
         return observations.ObsFeature(
             geometry={"type": "Point", "coordinates": [lon, lat]},
             properties=observations.ObsProps(
-                id=rid, title=rid, time=time, region="x", kinds=["quick"], images=0, url=None
+                id=rid,
+                title=rid,
+                time=time,
+                region="x",
+                kinds=["quick"],
+                images=photos,
+                url=None,
+                photos=pics,
             ),
         )
 
@@ -445,9 +495,9 @@ def test_nearby_lists_close_stations_and_reports(
             generated_at="2026-11-12T18:00:00+00:00",
             days=14,
             features=[
-                report("old", 47.4, -121.4, "2026-11-01T19:00+00:00"),
+                report("old", 47.4, -121.4, "2026-11-01T19:00+00:00", photos=2),
                 report("new", 47.5, -121.5, "2026-11-11T19:00+00:00"),
-                report("away", 51.3, -117.1, "2026-11-12T19:00+00:00"),
+                report("away", 51.3, -117.1, "2026-11-12T19:00+00:00", photos=1),
             ],
         ).model_dump_json()
     )
@@ -456,6 +506,9 @@ def test_nearby_lists_close_stations_and_reports(
     assert body["stations"][0]["distance_km"] < body["stations"][1]["distance_km"] < 60
     assert [r["report"]["id"] for r in body["reports"]] == ["new", "old"]
     assert body["reports_days"] == 14 and body["radius_km"] == 60
+    # The Webcams tab: only the nearby reports with photos.
+    assert [r["report"]["id"] for r in body["photo_reports"]] == ["old"]
+    assert len(body["photo_reports"][0]["report"]["photos"]) == 2
 
 
 def test_owner_manages_ates_files(client: TestClient, settings: Settings) -> None:

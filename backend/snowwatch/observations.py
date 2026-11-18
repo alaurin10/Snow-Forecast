@@ -3,12 +3,16 @@
 
 The worker writes the last two weeks of reports in the map's box to
 `data/avalanche/observations.geojson` every hour: where, when, the title, which kinds of
-observation it has (avalanche, snowpack, weather, incident, quick) and a link to the full
-report on avalanche.ca. The reporter's name and account aren't kept. Reports are what
-people saw, unchecked; the map says so.
+observation it has (avalanche, snowpack, weather, incident, quick), its photos (address,
+a small copy and the caption, for the Webcams tab) and a link to the full report on
+avalanche.ca. The reporter's name and account aren't kept. Reports are what people saw,
+unchecked; the map and the Webcams tab say so.
 
-US centers' observations need an API key (avalanche.org answers 401), so the map links
-to each center instead.
+Photos are listed only in each report's own record, so a report with photos costs one
+more request, once: the next refresh takes them from the file it wrote.
+
+US centers' observations need an API key (avalanche.org's observation API answers only
+the centers' own sites), so the map links to each center instead.
 """
 
 from __future__ import annotations
@@ -27,14 +31,27 @@ from snowwatch.urls import clean_url
 log = logging.getLogger("snowwatch.observations")
 
 URL = "https://api.avalanche.ca/min/en/submissions"
+DETAIL = URL + "/{id}"
 SOURCE = "avalanche-ca-min"
 REPORT = "https://avalanche.ca/mountain-information-network/submissions/{id}"
 MAX_DAYS = 30  # the API refuses more than 31 days, counting both ends
 PAGE_SIZE = 500
 MAX_PAGES = 6
 KINDS = ("avalanche", "incident", "snowpack", "weather", "quick")
+MAX_DETAILS = 40  # reports whose photos are fetched in one refresh (newest first)
+MAX_PHOTOS = 6  # per report
+# MIN photos live on Avalanche Canada's Cloudinary account; anything else is dropped.
+PHOTO_PREFIX = "https://res.cloudinary.com/avcan-min/image/upload/"
 
 Box = tuple[float, float, float, float]  # south, west, north, east
+
+
+class ObsPhoto(BaseModel):
+    url: str  # a large copy (at most 1600 px wide)
+    thumb: str  # a small copy (480 px wide) for the Webcams tab
+    caption: str = ""
+    width: int | None = None  # of the original, when the report says
+    height: int | None = None
 
 
 class ObsProps(BaseModel):
@@ -45,6 +62,7 @@ class ObsProps(BaseModel):
     kinds: list[str]  # which observation forms it has, most telling first
     images: int
     url: str | None
+    photos: list[ObsPhoto] = Field(default_factory=list)  # empty until fetched
 
 
 class ObsFeature(BaseModel):
@@ -111,6 +129,57 @@ def parse(blob: Any, box: Box) -> list[ObsFeature]:
     return out
 
 
+def _sized(url: str, transform: str) -> str:
+    return PHOTO_PREFIX + transform + "/" + url[len(PHOTO_PREFIX) :]
+
+
+def parse_photos(blob: Any) -> list[ObsPhoto]:
+    """The photos in one report's record: only Avalanche Canada's own image addresses."""
+    images = blob.get("images") if isinstance(blob, dict) else None
+    out = []
+    for im in images if isinstance(images, list) else []:
+        url = clean_url(im.get("url")) if isinstance(im, dict) else None
+        rest = url[len(PHOTO_PREFIX) :] if url and url.startswith(PHOTO_PREFIX) else ""
+        if url is None or not rest or any(c in rest for c in "?#,") or ".." in rest:
+            continue
+        w, h = im.get("width"), im.get("height")
+        out.append(
+            ObsPhoto(
+                url=_sized(url, "c_limit,w_1600"),
+                thumb=_sized(url, "c_limit,w_480"),
+                caption=str(im.get("caption") or "")[:200],
+                width=w if isinstance(w, int) and w > 0 else None,
+                height=h if isinstance(h, int) and h > 0 else None,
+            )
+        )
+        if len(out) >= MAX_PHOTOS:
+            break
+    return out
+
+
+def _add_photos(fetcher: Fetcher, feats: list[ObsFeature], old: ObsOut | None) -> None:
+    """Fill in each report's photos: from the last file when it has them, else from the
+    report's own record (a few dozen at most per refresh; the rest wait for the next)."""
+    known = {f.properties.id: f.properties.photos for f in (old.features if old else [])}
+    budget = MAX_DETAILS
+    for f in feats:
+        p = f.properties
+        if p.images <= 0:
+            continue
+        if known.get(p.id):
+            p.photos = known[p.id]
+            continue
+        if budget <= 0:
+            continue
+        budget -= 1
+        try:
+            blob = fetch(fetcher, Request(f"min_submission_{p.id}", SOURCE, DETAIL.format(id=p.id)))
+        except FetchError as e:
+            log.warning("photos for report %s: %s", p.id, e)
+            continue
+        p.photos = parse_photos(blob)
+
+
 def read(path: Path) -> ObsOut | None:
     try:
         return ObsOut.model_validate_json(path.read_bytes())
@@ -148,6 +217,7 @@ def refresh(
         seen.add(f.properties.id)
         keep.append(f)
     keep.sort(key=lambda f: f.properties.time, reverse=True)
+    _add_photos(fetcher, keep, read(path))
     out = ObsOut(generated_at=now.isoformat(timespec="seconds"), days=days, features=keep)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")

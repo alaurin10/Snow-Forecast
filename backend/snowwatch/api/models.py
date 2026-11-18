@@ -191,6 +191,8 @@ class NearbyOut(BaseModel):
     reports_at: str | None
     reports_days: int | None  # how far back the reports go
     reports: list[NearbyReport]  # newest first
+    # The reports in the same radius with photos (the Webcams tab), newest first.
+    photo_reports: list[NearbyReport] = []
 
 
 class RunOut(BaseModel):

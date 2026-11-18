@@ -4,19 +4,26 @@
   video plays it right here on "Live", from the camera's host, one at a time and across
   the whole row. "Play all live" starts every camera at once, and this device remembers
   it, so the next visit starts them too. Otherwise nothing loads from a video host.
+  Below them, photos from recent field reports nearby (FieldPhotos).
 -->
 <script lang="ts">
 	import { safeHref, safeImage } from '../links';
 	import { embedFor, freshImage, playSrc } from '../webcams';
-	import type { Webcam } from '../types.gen';
+	import type { NearbyOut, Webcam } from '../types.gen';
+	import type { UnitSystem } from '../units';
+	import FieldPhotos from './FieldPhotos.svelte';
 	import { prefs } from '../prefs.svelte';
 	import { untrack } from 'svelte';
 
 	interface Props {
 		cams: Webcam[];
+		/** Field reports around the location, for their photos (loaded with the page). */
+		nearby?: NearbyOut | null;
+		units?: UnitSystem;
+		tz?: string | null;
 	}
 
-	let { cams }: Props = $props();
+	let { cams, nearby = null, units = 'imperial', tz = null }: Props = $props();
 
 	const REFRESH_MS = 5 * 60_000;
 	let broken = $state<Record<number, boolean>>({});
@@ -81,83 +88,88 @@
 	}
 </script>
 
-{#if lives.length > 1}
-	<div class="bar">
-		<button
-			type="button"
-			class="btn small"
-			aria-pressed={all}
-			title="Remembered on this device. Live video uses more data, mostly on phones."
-			onclick={() => playAll(!all)}
-		>
-			{all ? 'Stop all' : `Play all live (${lives.length})`}
-		</button>
-		<span class="faint small">
-			{all
-				? 'Live video starts by itself on this device.'
-				: 'Starts every camera at once; this device remembers it.'}
-		</span>
-	</div>
-{/if}
-<div class="cams">
-	{#each rows as { cam, embed, still }, i (i)}
-		<article class="card cam" class:wide={wide === i}>
-			<div class="media">
-				{#if playing.has(i) && embed}
-					<!-- Only the hosts in webcams.ts get here, and the site's CSP frames only those. -->
-					<iframe
-						src={playSrc(embed)}
-						title={`${cam.name} live video`}
-						allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-						allowfullscreen
-						referrerpolicy="strict-origin-when-cross-origin"
-						sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
-					></iframe>
-				{:else}
-					{#if still && !broken[i]}
-						<img
-							src={plain[i] ? still : freshImage(still, tick)}
-							alt={`${cam.name} webcam`}
-							loading="lazy"
-							referrerpolicy="no-referrer"
-							onerror={() => failed(i)}
-						/>
-					{:else if !embed}
-						<div class="none faint">No picture right now</div>
-					{/if}
-					{#if embed}
-						<button
-							type="button"
-							class="play"
-							aria-label={`Play ${cam.name} live`}
-							onclick={() => play(i)}
-						>
-							<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
-								><path d="M7 5v14l12-7z" fill="currentColor" /></svg
+{#if cams.length}
+	{#if lives.length > 1}
+		<div class="bar">
+			<button
+				type="button"
+				class="btn small"
+				aria-pressed={all}
+				title="Remembered on this device. Live video uses more data, mostly on phones."
+				onclick={() => playAll(!all)}
+			>
+				{all ? 'Stop all' : `Play all live (${lives.length})`}
+			</button>
+			<span class="faint small">
+				{all
+					? 'Live video starts by itself on this device.'
+					: 'Starts every camera at once; this device remembers it.'}
+			</span>
+		</div>
+	{/if}
+	<div class="cams">
+		{#each rows as { cam, embed, still }, i (i)}
+			<article class="card cam" class:wide={wide === i}>
+				<div class="media">
+					{#if playing.has(i) && embed}
+						<!-- Only the hosts in webcams.ts get here, and the site's CSP frames only those. -->
+						<iframe
+							src={playSrc(embed)}
+							title={`${cam.name} live video`}
+							allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+							allowfullscreen
+							referrerpolicy="strict-origin-when-cross-origin"
+							sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
+						></iframe>
+					{:else}
+						{#if still && !broken[i]}
+							<img
+								src={plain[i] ? still : freshImage(still, tick)}
+								alt={`${cam.name} webcam`}
+								loading="lazy"
+								referrerpolicy="no-referrer"
+								onerror={() => failed(i)}
+							/>
+						{:else if !embed}
+							<div class="none faint">No picture right now</div>
+						{/if}
+						{#if embed}
+							<button
+								type="button"
+								class="play"
+								aria-label={`Play ${cam.name} live`}
+								onclick={() => play(i)}
 							>
-							Live
-						</button>
+								<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
+									><path d="M7 5v14l12-7z" fill="currentColor" /></svg
+								>
+								Live
+							</button>
+						{/if}
 					{/if}
-				{/if}
-			</div>
-			<div class="foot">
-				<h2>{cam.name}</h2>
-				{#if playing.has(i)}
-					<button type="button" class="btn small" onclick={() => stop(i)}>Stop</button>
-				{/if}
-				<!-- External sites: resolve() is only for routes in this app. -->
-				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-				<a class="site" href={safeHref(cam.url)} target="_blank" rel="noopener noreferrer"
-					>Open site ↗</a
-				>
-			</div>
-		</article>
-	{/each}
-</div>
-<p class="faint small note">
-	Pictures load from each camera's own website. Live video loads from its host (YouTube, Brownrice,
-	CamStreamer, Roundshot or Ozolio) only when you press Live or Play all.
-</p>
+				</div>
+				<div class="foot">
+					<h2>{cam.name}</h2>
+					{#if playing.has(i)}
+						<button type="button" class="btn small" onclick={() => stop(i)}>Stop</button>
+					{/if}
+					<!-- External sites: resolve() is only for routes in this app. -->
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<a class="site" href={safeHref(cam.url)} target="_blank" rel="noopener noreferrer"
+						>Open site ↗</a
+					>
+				</div>
+			</article>
+		{/each}
+	</div>
+	<p class="faint small note">
+		Pictures load from each camera's own website. Live video loads from its host (YouTube,
+		Brownrice, CamStreamer, Roundshot or Ozolio) only when you press Live or Play all.
+	</p>
+{/if}
+{#if nearby}
+	<FieldPhotos data={nearby} {units} {tz} />
+{/if}
 
 <style>
 	.cams {

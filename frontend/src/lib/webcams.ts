@@ -3,6 +3,7 @@
 // same way; keep the two in step). The server already stores each video as its host's
 // embed address; reading it again here keeps anything else out of an <iframe>.
 import { safeHref, safeImage } from './links';
+import { monthDay, weekday } from './time';
 
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_CHANNEL = /^UC[A-Za-z0-9_-]{22}$/;
@@ -119,4 +120,43 @@ export function freshImage(url: string | null | undefined, tick: number): string
 	const u = new URL(href);
 	u.searchParams.set('_sw', String(tick));
 	return u.href;
+}
+
+/** The calendar date ("2026-11-18") of an instant in `tz` (the location's zone). */
+export function localDate(iso: string, tz?: string | null): string {
+	return new Intl.DateTimeFormat('en-CA', {
+		timeZone: tz ?? undefined,
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit'
+	}).format(new Date(iso));
+}
+
+/** Items with a `time`, grouped by their local date, newest day first, each day keeping
+ *  the items' order. `label` is "Today", "Yesterday" or "Tue Nov 17". */
+export function byDay<T>(
+	items: T[],
+	time: (t: T) => string,
+	tz?: string | null,
+	now: number = Date.now()
+): { date: string; label: string; items: T[] }[] {
+	const today = localDate(new Date(now).toISOString(), tz);
+	const yesterday = localDate(new Date(now - 86_400_000).toISOString(), tz);
+	const days = new Map<string, T[]>();
+	for (const it of items) {
+		const d = localDate(time(it), tz);
+		days.set(d, [...(days.get(d) ?? []), it]);
+	}
+	return [...days.entries()]
+		.sort(([a], [b]) => (a < b ? 1 : -1))
+		.map(([date, list]) => ({
+			date,
+			label:
+				date === today
+					? 'Today'
+					: date === yesterday
+						? 'Yesterday'
+						: `${weekday(date)} ${monthDay(date)}`,
+			items: list
+		}));
 }

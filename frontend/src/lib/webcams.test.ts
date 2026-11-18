@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { embedFor, freshImage, playSrc } from './webcams';
+import { byDay, embedFor, freshImage, playSrc } from './webcams';
 
 const NOCOOKIE = 'https://www.youtube-nocookie.com/embed/vhO8nNqg9iw';
 
@@ -82,5 +82,25 @@ describe('freshImage', () => {
 			'https://x.example/c.jpg?w=640&_sw=42'
 		);
 		expect(freshImage('http://x.example/c.jpg', 42)).toBeUndefined();
+	});
+});
+
+describe('byDay', () => {
+	it('groups by the location’s calendar day, newest first, naming today and yesterday', () => {
+		const now = Date.parse('2026-11-18T20:00:00Z'); // noon in Vancouver
+		const items = [
+			{ id: 'a', time: '2026-11-18T18:00+00:00' }, // 10 AM Pacific, today
+			{ id: 'b', time: '2026-11-18T06:00+00:00' }, // 10 PM Pacific, yesterday
+			{ id: 'c', time: '2026-11-17T19:00+00:00' }, // 11 AM Pacific, yesterday
+			{ id: 'd', time: '2026-11-15T19:00+00:00' }
+		];
+		const days = byDay(items, (i) => i.time, 'America/Vancouver', now);
+		expect(days.map((d) => [d.label, d.items.map((i) => i.id)])).toEqual([
+			['Today', ['a']],
+			['Yesterday', ['b', 'c']],
+			['Sun Nov 15', ['d']]
+		]);
+		// In UTC the same instants fall on other days.
+		expect(byDay(items, (i) => i.time, 'UTC', now)[0].items.map((i) => i.id)).toEqual(['a', 'b']);
 	});
 });
