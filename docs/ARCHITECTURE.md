@@ -127,6 +127,13 @@ older than `STALE_AFTER_H` (12 h).
   headline one, so changing `depth_method` shows no step, and the scorecard scores
   both, marks the headline (`headline` in the response) and says which has been closer.
   Each model's and the ensemble's records stay at their own 7:1.
+  The scorecard has two checks. Snow depth: the station's depth gain against each
+  source, plus the consensus as settled snow (`cons_settled`, its snow water at
+  `verify_settled_ratio`, 8:1), leaving out days the depth can't measure (no snowpack,
+  or above freezing all day). Precipitation: the gauge's catch against each source's
+  total water (`water_mm`), on every day, bare ground and rain included. SNOTEL dates
+  its daily depth, snow water and gauge total by the day they close; the parser moves
+  them to the day they open (`snotel.start_of_day`), as the BC stations are read.
 - **Bands**: everything is computed at base, mid and summit at each band's own
   coordinates; freezing level comes from the model or from the upper-air levels.
 - **Backcountry** (no safety judgement, with two bounded exceptions below): avalanche

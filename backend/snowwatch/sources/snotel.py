@@ -34,7 +34,7 @@ def daily_request(triplet: str, begin: date, end: date) -> Request:
         f"{BASE}/data",
         {
             "stationTriplets": triplet,
-            "elements": "SNWD,WTEQ,TOBS,PREC",
+            "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
             "duration": "DAILY",
             "beginDate": begin.isoformat(),
             "endDate": end.isoformat(),
@@ -96,22 +96,32 @@ def parse_snotel(
     hourly: list[dict[str, Any]],
     station: Mapping[str, Any] | None = None,
 ) -> Snotel:
-    """Observed depth and SWE (ported from `pull_snotel`), converted to metric."""
+    """Observed depth and SWE (ported from `pull_snotel`), converted to metric.
+
+    Depth, snow water, the season's precipitation and TOBS are midnight readings, moved
+    to the day they open (`start_of_day`); the low and high are the day's own.
+    """
     depth = dict(_series(daily, "SNWD"))
     swe = dict(_series(daily, "WTEQ"))
     tobs = dict(_series(daily, "TOBS"))
     prec = dict(_series(daily, "PREC"))
+    tmin = {d[:10]: v for d, v in _series(daily, "TMIN")}
+    tmax = {d[:10]: v for d, v in _series(daily, "TMAX")}
     dates = sorted(set(depth) | set(swe))
-    rows = [
-        SnotelDay(
-            date=start_of_day(d),
-            depth_cm=_scale(depth.get(d), IN_TO_CM),
-            swe_mm=_scale(swe.get(d), IN_TO_MM),
-            temp_c=_f_to_c(tobs.get(d)),
-            precip_mm=_scale(prec.get(d), IN_TO_MM),
+    rows = []
+    for d in dates:
+        day = start_of_day(d)
+        rows.append(
+            SnotelDay(
+                date=day,
+                depth_cm=_scale(depth.get(d), IN_TO_CM),
+                swe_mm=_scale(swe.get(d), IN_TO_MM),
+                temp_c=_f_to_c(tobs.get(d)),
+                precip_mm=_scale(prec.get(d), IN_TO_MM),
+                tmin_c=_f_to_c(tmin.get(day)),
+                tmax_c=_f_to_c(tmax.get(day)),
+            )
         )
-        for d in dates
-    ]
     hv = [(t, v) for t, v in _series(hourly, "SNWD") if v is not None]
 
     def change(hours: int) -> float | None:

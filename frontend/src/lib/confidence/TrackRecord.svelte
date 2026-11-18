@@ -8,7 +8,15 @@
 	import { hscroll } from '../hscroll';
 	import type { VerificationOut } from '../types.gen';
 	import type { LoadState } from '../load';
-	import { closerMethod, closest, headlineRow, sourceName, sourceShort } from '../scores';
+	import {
+		closerMethod,
+		closest,
+		closestWater,
+		headlineRow,
+		sourceName,
+		sourceShort,
+		waterRow
+	} from '../scores';
 	import { monthDay } from '../time';
 	import { converters, elevation, type UnitSystem } from '../units';
 
@@ -32,6 +40,28 @@
 		// No sign on a rounded zero ("-0.0").
 		return Number(text) === 0 ? text : `${v > 0 ? '+' : '−'}${text}`;
 	};
+	const wnum = (mm: number | null | undefined) =>
+		c.water(mm ?? null)?.toFixed(c.waterDigits) ?? '–';
+	const wsigned = (mm: number | null | undefined) => {
+		const v = c.water(mm ?? null);
+		if (v === null) return '–';
+		const text = Math.abs(v).toFixed(c.waterDigits);
+		return Number(text) === 0 ? text : `${v > 0 ? '+' : '−'}${text}`;
+	};
+	const bigWater = $derived(units === 'imperial' ? '0.5 in' : '13 mm');
+	const waterRows = $derived(data?.water_rows ?? []);
+	const wBest = $derived(closestWater(waterRows));
+	const wOurs = $derived(data ? waterRow(data) : null);
+	const wWorst = $derived(Math.max(0.1, ...waterRows.map((r) => r.mae_mm ?? 0)));
+	const waterSummary = $derived.by(() => {
+		if (!wOurs || wOurs.mae_mm === null) return null;
+		const lean =
+			wOurs.bias_mm === null || Math.abs(wOurs.bias_mm) < 1
+				? 'with no lean either way'
+				: `and runs ${wnum(Math.abs(wOurs.bias_mm))} ${c.waterUnit} ${wOurs.bias_mm > 0 ? 'high' : 'low'}`;
+		return `Against the gauge, the consensus’s precipitation misses by ${wnum(wOurs.mae_mm)} ${c.waterUnit} a day on average ${lean}.`;
+	});
+	const skipped = $derived((data?.skipped_bare ?? 0) + (data?.skipped_warm ?? 0));
 	const best = $derived(data ? closest(data.rows) : null);
 	const ours = $derived(data ? headlineRow(data) : null);
 	const better = $derived(data ? closerMethod(data) : null);
@@ -71,6 +101,7 @@
 		</p>
 	{:else}
 		{#if summary}<p class="lede">{summary}</p>{/if}
+		{#if waterSummary}<p class="lede">{waterSummary}</p>{/if}
 		<p class="muted small">
 			Next-day forecasts since {monthDay(data.since ?? '')} ({data.n_days} days) against {data.station_name}
 			{#if data.station_elev_m !== null}
@@ -80,45 +111,92 @@
 				)}){/if}.
 			{#if better}<strong>Model snowfall vs temperature-based depth: {better}.</strong>{/if}
 		</p>
-		<div class="table-wrap" use:hscroll>
-			<table class="data scores">
-				<thead>
-					<tr>
-						<th>Source</th>
-						<th title="Average size of the miss">Average miss</th>
-						<th title="Average forecast minus observed">Bias</th>
-						<th title={`Days of ${bigDay} or more: caught / missed / false alarms`}>Big days</th>
-						<th title="Days compared">Days</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each data.rows as r (r.source)}
-						<tr class:hl={r.source === headline}>
-							<th scope="row">{name(r.source)}</th>
-							<td class="miss">
-								<span class="bar" aria-hidden="true"
-									><i
-										class:best={best?.source === r.source}
-										style:width="{(100 * (r.mae_cm ?? 0)) / worst}%"
-									></i></span
-								>
-								<span class="num">{num(r.mae_cm)}</span>
-							</td>
-							<td class="num">{signed(r.bias_cm)}</td>
-							<td class="num">{r.hits} / {r.misses} / {r.false_alarms}</td>
-							<td class="num">{r.n}</td>
+		{#if data.rows.length}
+			<h3>New snow</h3>
+			<div class="table-wrap" use:hscroll>
+				<table class="data scores">
+					<thead>
+						<tr>
+							<th>Source</th>
+							<th title="Average size of the miss">Average miss</th>
+							<th title="Average forecast minus observed">Bias</th>
+							<th title={`Days of ${bigDay} or more: caught / missed / false alarms`}>Big days</th>
+							<th title="Days compared">Days</th>
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-		<p class="faint small key">
-			{c.snowUnit} per day. The app's snow totals use the
-			{headline === 'cons_slr' ? 'temperature-based depth' : 'model snowfall'}; models and the
-			ensemble are their own 7:1 snowfall. Bias: forecast minus observed. Big days ({bigDay}
-			or more): caught / missed / false alarms. The station sits at its own elevation, so read bias over
-			weeks, not days.
-		</p>
+					</thead>
+					<tbody>
+						{#each data.rows as r (r.source)}
+							<tr class:hl={r.source === headline}>
+								<th scope="row">{name(r.source)}</th>
+								<td class="miss">
+									<span class="bar" aria-hidden="true"
+										><i
+											class:best={best?.source === r.source}
+											style:width="{(100 * (r.mae_cm ?? 0)) / worst}%"
+										></i></span
+									>
+									<span class="num">{num(r.mae_cm)}</span>
+								</td>
+								<td class="num">{signed(r.bias_cm)}</td>
+								<td class="num">{r.hits} / {r.misses} / {r.false_alarms}</td>
+								<td class="num">{r.n}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			<p class="faint small key">
+				{c.snowUnit} per day. The app's snow totals use the
+				{headline === 'cons_slr' ? 'temperature-based depth' : 'model snowfall'}; models and the
+				ensemble are their own 7:1 snowfall; settled snow is the consensus's snow water at
+				{data.settled_ratio ?? 8}:1, closest to what a depth sensor sees. Bias: forecast minus
+				observed. Big days ({bigDay} or more): caught / missed / false alarms. The station sits at its
+				own elevation, so read bias over weeks, not days.{skipped
+					? ` ${skipped} day${skipped === 1 ? '' : 's'} with no snowpack or above freezing all day are left out: the depth can't measure them.`
+					: ''}
+			</p>
+		{/if}
+		{#if waterRows.length}
+			<h3>Precipitation</h3>
+			<div class="table-wrap" use:hscroll>
+				<table class="data scores">
+					<thead>
+						<tr>
+							<th>Source</th>
+							<th title="Average size of the miss">Average miss</th>
+							<th title="Average forecast minus observed">Bias</th>
+							<th title={`Days of ${bigWater} or more: caught / missed / false alarms`}>Big days</th
+							>
+							<th title="Days compared">Days</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each waterRows as r (r.source)}
+							<tr class:hl={r.source === 'cons'}>
+								<th scope="row">{r.source === 'cons' ? 'Consensus' : sourceName(r.source)}</th>
+								<td class="miss">
+									<span class="bar" aria-hidden="true"
+										><i
+											class:best={wBest?.source === r.source}
+											style:width="{(100 * (r.mae_mm ?? 0)) / wWorst}%"
+										></i></span
+									>
+									<span class="num">{wnum(r.mae_mm)}</span>
+								</td>
+								<td class="num">{wsigned(r.bias_mm)}</td>
+								<td class="num">{r.hits} / {r.misses} / {r.false_alarms}</td>
+								<td class="num">{r.n}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			<p class="faint small key">
+				{c.waterUnit} of water per day, rain and snow alike, against the rise in the station's gauge ({data.n_water_days ??
+					0} days). This checks the amount without the snow ratio, on bare ground too. Gauges catch less
+				than falls in wind-driven snow. Big days ({bigWater} or more): caught / missed / false alarms.
+			</p>
+		{/if}
 	{/if}
 </div>
 
@@ -128,6 +206,10 @@
 	}
 	.small {
 		font-size: 0.85rem;
+	}
+	h3 {
+		margin: 12px 0 4px;
+		font-size: 0.95rem;
 	}
 	.lede {
 		margin: 0 0 6px;

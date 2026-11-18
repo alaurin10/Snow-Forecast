@@ -4880,6 +4880,28 @@
               "type": "null"
             }
           ]
+        },
+        "tmax_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tmin_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5276,6 +5298,10 @@
         "n_days": {
           "type": "integer"
         },
+        "n_water_days": {
+          "default": 0,
+          "type": "integer"
+        },
         "needs_days": {
           "type": "integer"
         },
@@ -5294,6 +5320,10 @@
           },
           "type": "array"
         },
+        "settled_ratio": {
+          "default": 8,
+          "type": "number"
+        },
         "since": {
           "anyOf": [
             {
@@ -5303,6 +5333,14 @@
               "type": "null"
             }
           ]
+        },
+        "skipped_bare": {
+          "default": 0,
+          "type": "integer"
+        },
+        "skipped_warm": {
+          "default": 0,
+          "type": "integer"
         },
         "station": {
           "anyOf": [
@@ -5333,6 +5371,13 @@
               "type": "null"
             }
           ]
+        },
+        "water_rows": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/WaterRow"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -5363,6 +5408,17 @@
             }
           ]
         },
+        "cons_settled_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cons_slr_cm": {
           "anyOf": [
             {
@@ -5372,6 +5428,17 @@
               "type": "null"
             }
           ]
+        },
+        "cons_water_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "date": {
           "type": "string"
@@ -5388,6 +5455,32 @@
               "type": "null"
             }
           ]
+        },
+        "observed_water_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "skip": {
+          "anyOf": [
+            {
+              "enum": [
+                "bare",
+                "warm"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5512,6 +5605,57 @@
         "rain_on_snow_mm"
       ],
       "title": "WarmingOut",
+      "type": "object"
+    },
+    "WaterRow": {
+      "description": "A source's precipitation forecasts against the station's gauge.",
+      "properties": {
+        "bias_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "false_alarms": {
+          "type": "integer"
+        },
+        "hits": {
+          "type": "integer"
+        },
+        "mae_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "misses": {
+          "type": "integer"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "n",
+        "bias_mm",
+        "mae_mm",
+        "hits",
+        "misses",
+        "false_alarms"
+      ],
+      "title": "WaterRow",
       "type": "object"
     },
     "Webcam": {

@@ -165,6 +165,8 @@ class SnotelDay(BaseModel):
     swe_mm: float | None
     temp_c: float | None
     precip_mm: float | None
+    tmin_c: float | None = None  # the day's own low and high
+    tmax_c: float | None = None
 
 
 class Snotel(BaseModel):

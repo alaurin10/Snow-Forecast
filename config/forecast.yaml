@@ -45,6 +45,11 @@ slr_bands:
 # the snapshot keeps both as snow_cm_raw / snow_cm_slr.
 depth_method: slr
 
+# The scorecard: a depth sensor sees new snow after it has settled for up to a day,
+# denser than the fresh snow the headline ratio describes. The consensus is also scored
+# as settled snow at this ratio (cm of snow per cm of water).
+verify_settled_ratio: 8
+
 schedule:
   runs_utc: ["03:30", "09:30", "15:30", "21:30"]
   ensemble_runs_utc: ["09:30", "21:30"]

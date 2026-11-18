@@ -33,6 +33,9 @@ def test_daily_values_land_on_the_day_they_open() -> None:
                 awdb("SNWD", [("2026-11-13", 7), ("2026-11-14", 6), ("2026-11-15", 8)]),
                 awdb("WTEQ", [("2026-11-13", 2.7), ("2026-11-14", 2.7), ("2026-11-15", 2.8)]),
                 awdb("PREC", [("2026-11-13", 6.3), ("2026-11-14", 6.7), ("2026-11-15", 7.4)]),
+                # The day's own low and high: 15 Nov's are 15 Nov's.
+                awdb("TMIN", [("2026-11-14", 33.8), ("2026-11-15", 30.7)]),
+                awdb("TMAX", [("2026-11-14", 37.4), ("2026-11-15", 37.9)]),
             ],
         }
     ]
@@ -42,6 +45,9 @@ def test_daily_values_land_on_the_day_they_open() -> None:
     assert by["2026-11-15"].depth_cm == pytest.approx(6 * 2.54)
     assert by["2026-11-16"].depth_cm == pytest.approx(8 * 2.54)
     assert by["2026-11-16"].precip_mm == pytest.approx(7.4 * 25.4)
+    assert by["2026-11-15"].tmin_c == pytest.approx((30.7 - 32) * 5 / 9)
+    assert by["2026-11-15"].tmax_c == pytest.approx((37.9 - 32) * 5 / 9)
+    assert by["2026-11-16"].tmin_c is None
     # With no hourly readings the depth now is the latest daily one.
     assert out.depth_cm == pytest.approx(8 * 2.54)
 
