@@ -109,7 +109,7 @@
 </div>
 <p class="faint small note">
 	Pictures load from each camera's own website. Live video loads from its host (YouTube, Brownrice,
-	CamStreamer or Roundshot) only when you press Live.
+	CamStreamer, Roundshot or Ozolio) only when you press Live.
 </p>
 
 <style>

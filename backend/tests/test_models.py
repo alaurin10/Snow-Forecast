@@ -142,6 +142,9 @@ def test_webcam_video_links_become_embed_addresses() -> None:
     cs = "https://camstreamer.com/embed/PZyoJBnQWsgYwwHoRAmjihHkxPi4lD8yZSOFkJZk"
     assert embed_url(cs + "?enablejsapi=1") == cs
     assert embed_url("https://crystal.roundshot.com/#/") == "https://crystal.roundshot.com/"
+    oz = "https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_NJJN000010BA"
+    assert embed_url(oz) == oz
+    assert embed_url("https://relay.ozolio.com/pub.api?cmd=poster&oid=EMB_NJJN000010BA") == oz
     for bad in (
         "https://www.youtube.com/@TheSummitatSnoqualmie",
         "https://www.youtube.com/watch?v=short",
@@ -150,6 +153,8 @@ def test_webcam_video_links_become_embed_addresses() -> None:
         "http://crystal.roundshot.com/",
         "https://roundshot.com.evil.example/",
         "https://www.nps.gov/webcams-mora/mountain.jpg",
+        "https://relay.ozolio.com/pub.api?cmd=embed&oid=<script>",
+        "https://relay.ozolio.com.evil.example/pub.api?cmd=embed&oid=EMB_NJJN000010BA",
         "javascript:alert(1)",
     ):
         assert embed_url(bad) is None, bad

@@ -19,6 +19,7 @@ _YT_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _YT_CHANNEL = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _YT_HOSTS = {"youtube.com", "m.youtube.com", "youtube-nocookie.com"}
+_OZOLIO_ID = re.compile(r"^EMB_[A-Z0-9]{4,40}$")
 
 # Hosts a webcam player may load in a frame. CamStreamer's embed redirects to
 # YouTube's own player (www.youtube.com/embed), so that host is listed too.
@@ -28,6 +29,7 @@ frame_hosts: tuple[str, ...] = (
     "https://player.brownrice.com",
     "https://camstreamer.com",
     "https://*.roundshot.com",
+    "https://relay.ozolio.com",
 )
 
 
@@ -95,11 +97,21 @@ def _roundshot(u: str) -> str | None:
     return None
 
 
+def _ozolio(u: str) -> str | None:
+    parts = urlsplit(u)
+    if _host(u) != "relay.ozolio.com" or parts.path != "/pub.api":
+        return None
+    oid = (parse_qs(parts.query).get("oid") or [""])[0]
+    if _OZOLIO_ID.match(oid):
+        return f"https://relay.ozolio.com/pub.api?cmd=embed&oid={oid}"
+    return None
+
+
 def embed_url(link: str | None) -> str | None:
     """The player address for a link to a supported webcam host, or None."""
     if not link or not is_http_url(link):
         return None
-    for read in (_youtube, _brownrice, _camstreamer, _roundshot):
+    for read in (_youtube, _brownrice, _camstreamer, _roundshot, _ozolio):
         if got := read(link):
             return got
     return None
@@ -109,5 +121,7 @@ def check_video_url(value: str) -> str:
     """Pydantic validator: a supported player link, stored as its embed address."""
     got = embed_url(value)
     if got is None:
-        raise ValueError("live video must be a YouTube, Brownrice, CamStreamer or Roundshot link")
+        raise ValueError(
+            "live video must be a YouTube, Brownrice, CamStreamer, Roundshot or Ozolio link"
+        )
     return got

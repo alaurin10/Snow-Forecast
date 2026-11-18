@@ -221,7 +221,7 @@
 					value={cam.video_url ?? ''}
 					oninput={(e) => (cam.video_url = e.currentTarget.value.trim() || null)}
 					type="url"
-					placeholder="https://… (YouTube, Brownrice, CamStreamer or Roundshot)"
+					placeholder="https://… (YouTube, Brownrice, CamStreamer, Roundshot or Ozolio)"
 				/></label
 			>
 			<button
@@ -234,8 +234,8 @@
 	{/each}
 	{#if !camsOk}<p class="bad">
 			Each webcam needs a name and a link; image links must start with https://, and live video must
-			be a YouTube, Brownrice, CamStreamer or Roundshot link (the video's own page or its embed
-			link). Other players can only open on their own site.
+			be a YouTube, Brownrice, CamStreamer, Roundshot or Ozolio link (the video's own page or its
+			embed link). Other players can only open on their own site.
 		</p>{/if}
 	<button type="button" class="btn small addcam" onclick={addCam}>+ Add a webcam</button>
 

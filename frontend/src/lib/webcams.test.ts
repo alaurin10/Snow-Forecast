@@ -24,7 +24,7 @@ describe('embedFor', () => {
 		);
 	});
 
-	it('reads Brownrice, CamStreamer and Roundshot players', () => {
+	it('reads Brownrice, CamStreamer, Roundshot and Ozolio players', () => {
 		const br = embedFor('https://live9.brownrice.com/?sn=whistlerpeak&em=1');
 		expect(br).toEqual({
 			player: 'brownrice',
@@ -37,6 +37,11 @@ describe('embedFor', () => {
 		expect(embedFor('https://crystal.roundshot.com/#/')?.src).toBe(
 			'https://crystal.roundshot.com/'
 		);
+		expect(embedFor('https://relay.ozolio.com/pub.api?cmd=poster&oid=EMB_NJJN000010BA')).toEqual({
+			player: 'ozolio',
+			src: 'https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_NJJN000010BA',
+			poster: 'https://relay.ozolio.com/pub.api?cmd=poster&oid=EMB_NJJN000010BA'
+		});
 	});
 
 	it('leaves every other link as a plain link', () => {
@@ -48,6 +53,8 @@ describe('embedFor', () => {
 			'http://crystal.roundshot.com/',
 			'https://roundshot.com.evil.example/',
 			'https://www.nps.gov/webcams-mora/mountain.jpg',
+			'https://relay.ozolio.com/pub.api?cmd=embed&oid=%3Cscript%3E',
+			'https://relay.ozolio.com.evil.example/pub.api?cmd=embed&oid=EMB_NJJN000010BA',
 			'javascript:alert(1)',
 			'',
 			null

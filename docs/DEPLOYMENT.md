@@ -149,6 +149,7 @@ location with webcams gets a Webcams tab. Each webcam has:
   | CamStreamer | `https://camstreamer.com/embed/…` | The player on the resort's page (see below). It plays the resort's YouTube stream and follows it if the stream restarts |
   | Brownrice | `https://player.brownrice.com/embed/NAME` | The player on the resort's page (many Vail Resorts mountains). A picture from `…/snapshot/NAME` is used automatically |
   | Roundshot | `https://NAME.roundshot.com/…` | Open the resort's 360° cam; copy the address |
+  | Ozolio | `https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_…` | The player on the resort's page (e.g. Revelstoke, Palisades Tahoe). A picture is used automatically; the player has its own play button |
 
   A YouTube or Brownrice camera with no image link shows the host's own picture. Other
   players (or a page full of cameras) can't play inside the app; leave the field empty
@@ -160,6 +161,17 @@ location with webcams gets a Webcams tab. Each webcam has:
 
 Changes to webcams (or links) start a forecast refresh for that location, so they show a
 minute or two after saving.
+
+Many at once: list them by location id in a YAML file (see
+[`config/webcams.yaml`](../config/webcams.yaml), the home installation's cameras) and run
+
+```bash
+docker compose run --rm worker snowwatch locations webcams
+```
+
+It reads `config/webcams.yaml` (or a path you give), replaces the webcams of each location
+listed (nothing else about them, and no other location), and refreshes those locations.
+Every entry is checked first; one bad link or unknown id and nothing is saved.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1

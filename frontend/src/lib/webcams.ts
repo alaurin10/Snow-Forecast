@@ -8,8 +8,9 @@ const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_CHANNEL = /^UC[A-Za-z0-9_-]{22}$/;
 const NAME = /^[A-Za-z0-9_-]{1,80}$/;
 const YT_HOSTS = new Set(['youtube.com', 'm.youtube.com', 'youtube-nocookie.com']);
+const OZOLIO_ID = /^EMB_[A-Z0-9]{4,40}$/;
 
-export type Player = 'youtube' | 'brownrice' | 'camstreamer' | 'roundshot';
+export type Player = 'youtube' | 'brownrice' | 'camstreamer' | 'roundshot' | 'ozolio';
 
 export interface Embed {
 	player: Player;
@@ -81,11 +82,19 @@ function roundshot(u: URL): Embed | null {
 	return { player: 'roundshot', src: u.href };
 }
 
+function ozolio(u: URL): Embed | null {
+	const oid = u.searchParams.get('oid');
+	if (host(u) !== 'relay.ozolio.com' || u.pathname !== '/pub.api' || !oid || !OZOLIO_ID.test(oid))
+		return null;
+	const at = (cmd: string) => `https://relay.ozolio.com/pub.api?cmd=${cmd}&oid=${oid}`;
+	return { player: 'ozolio', src: at('embed'), poster: at('poster') };
+}
+
 /** The player for a link to a supported webcam host, or null. */
 export function embedFor(link: string | null | undefined): Embed | null {
 	const u = parse(link);
 	if (!u) return null;
-	for (const read of [youtube, brownrice, camstreamer, roundshot]) {
+	for (const read of [youtube, brownrice, camstreamer, roundshot, ozolio]) {
 		const got = read(u);
 		if (got) return got;
 	}

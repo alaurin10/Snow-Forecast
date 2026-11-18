@@ -118,7 +118,7 @@ Run from `backend/` with `uv run snowwatch …`, or on a server with
 | `worker [--run-now]` | The scheduler (what the worker container runs) |
 | `rebuild [--from FOLDER]` | Rebuild forecasts from cached or saved responses, with no API calls |
 | `backup` | Write a database backup and a `locations.yaml` copy now |
-| `locations list\|import\|export\|stations`, `budget` | Manage the list from the terminal; estimated Open-Meteo use |
+| `locations list\|import\|export\|stations\|webcams`, `budget` | Manage the list from the terminal (`webcams` loads `config/webcams.yaml`); estimated Open-Meteo use |
 | `avalanche refresh`, `lookups refresh`, `precip`, `ski-map` | Refresh one kind of data now |
 | `map radar\|forecast\|totals\|all` | Redraw one part of the map's pictures now (`precip` is `map all`) |
 | `owner logout-all` | End every owner session (after changing the password) |
