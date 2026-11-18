@@ -25,7 +25,13 @@ from pydantic import BaseModel
 from snowwatch.http import Fetcher, FetchError
 from snowwatch.sources import bc_asws
 from snowwatch.sources.base import Request, fetch
-from snowwatch.sources.snotel import BASE, IN_TO_CM, SOURCE, all_stations_request
+from snowwatch.sources.snotel import (
+    BASE,
+    IN_TO_CM,
+    SOURCE,
+    all_stations_request,
+    start_of_day,
+)
 
 log = logging.getLogger("snowwatch.stations")
 
@@ -149,7 +155,9 @@ def snotel_stations(
         series.sort()
         if not series or now - series[-1][0] > timedelta(hours=STALE_H):
             continue
-        daily_rows = [StationDay(date=d[:10], depth_cm=_cm(v)) for d, v in days.get(trip, [])]
+        daily_rows = [
+            StationDay(date=start_of_day(d), depth_cm=_cm(v)) for d, v in days.get(trip, [])
+        ]
         elev_ft = s.get("elevation")
         out.append(
             MapStation(

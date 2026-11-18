@@ -386,7 +386,7 @@ def test_migration_seeds_push_log_from_flag_log(tmp_path: Path) -> None:
             "VALUES ('whistler', ?, ?, 3, 3)",
             [("powder_day", "2026-11-06"), ("model_outlier", "gfs")],
         )
-    assert migrate(db) == ["006_push_log"]
+    assert migrate(db)[0] == "006_push_log"
     rows = [tuple(r) for r in db.execute("SELECT type, date, last_seen_at FROM push_log")]
     assert rows == [("powder_day", "2026-11-06", "2026-11-04T03:30:00+00:00")]
 

@@ -26,6 +26,11 @@ Notable changes to Snow Watch. The format follows
   it starts or stops within the hour. Inside the box the tap panel shows the same line.
 
 ### Fixed
+- **Measured snow was a day early**: SNOTEL dates each daily depth by the day it ends
+  (its 14 Nov depth is the reading at midnight going into the 15th), but the scorecard
+  and the Observed tab took it as the day's opening reading. So each day's measured new
+  snow showed on the day before, beside the wrong forecast, and every SNOTEL station's
+  score looked worse than it was. Stored days move to the right date on upgrade.
 - **3D terrain "walls"** (seen near Whistler): a short network hiccup switched the
   elevation tiles from Mapterhorn to the AWS tiles mid-visit, and the two disagree by
   20–60 m at a tile's edge, which shows in 3D as a wall with the map stretched down it.

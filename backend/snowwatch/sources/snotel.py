@@ -66,6 +66,18 @@ def _f_to_c(f: float | None) -> float | None:
     return None if f is None else (f - 32) * 5 / 9
 
 
+def start_of_day(reading_date: str) -> str:
+    """The day a SNOTEL daily depth, snow water or precipitation total opens.
+
+    AWDB dates each daily value by the day it closes: the value for 14 Nov is the
+    midnight reading that ends it (the hourly reading at 15 Nov 00:00, local standard
+    time). Snow Watch's days hold the reading at the start of the day, as the BC
+    network's do, so the value moves to the next date. Without this, each day's new
+    snow (tomorrow's depth − today's) was the next day's.
+    """
+    return (date.fromisoformat(reading_date[:10]) + timedelta(days=1)).isoformat()
+
+
 def _series(blob: list[dict[str, Any]], element: str) -> list[tuple[str, float | None]]:
     for station in blob or []:
         for d in station.get("data", []):
@@ -92,7 +104,7 @@ def parse_snotel(
     dates = sorted(set(depth) | set(swe))
     rows = [
         SnotelDay(
-            date=d[:10],
+            date=start_of_day(d),
             depth_cm=_scale(depth.get(d), IN_TO_CM),
             swe_mm=_scale(swe.get(d), IN_TO_MM),
             temp_c=_f_to_c(tobs.get(d)),
