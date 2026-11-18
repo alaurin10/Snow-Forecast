@@ -157,6 +157,8 @@ def parse_station(
                     swe_mm=_at_or_after(sw, midnight),
                     temp_c=round(sum(temps) / len(temps), 1) if temps else None,
                     precip_mm=None,
+                    tmin_c=round(min(temps), 1) if temps else None,
+                    tmax_c=round(max(temps), 1) if temps else None,
                 )
             )
             d += timedelta(days=1)

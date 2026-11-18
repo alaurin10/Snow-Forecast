@@ -152,8 +152,10 @@ class ForecastConfig(BaseModel):
     flags: FlagConfig = FlagConfig()
     map: MapConfig = MapConfig()
     terrain: TerrainConfig = TerrainConfig()
-    # Verification: the snow-to-water ratio for the observed-SWE depth estimate.
+    # Verification: the snow-to-water ratio for the observed-SWE depth estimate, and the
+    # one that turns forecast snow water into settled snow, as a depth sensor sees it.
     verify_swe_ratio: float = 10
+    verify_settled_ratio: float = Field(8, gt=0)
 
     @field_validator("slr_bands")
     @classmethod

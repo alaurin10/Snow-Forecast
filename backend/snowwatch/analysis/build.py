@@ -27,6 +27,7 @@ from snowwatch.analysis.series import (
     ensemble_members,
     local,
     mean,
+    median,
     r,
     split_models,
     total,
@@ -74,6 +75,7 @@ class ForecastInputs:
     alerts: list[Alert] = field(default_factory=list)
     snotel: Snotel | None = None
     warnings: list[str] = field(default_factory=list)
+    station: PointData | None = None  # each model at the snow station (scorecard only)
 
 
 @dataclass(frozen=True)
@@ -1171,7 +1173,31 @@ def _daily(
             # scorecard can compare the two depth methods.
             slr = sum(_depth(mid.hourly_sw[h], ratio_at[h], k) or 0.0 for h in hs)
             records.append(DailyRecord(d, "cons_slr", r(slr), r(swe + liq)))
+    if inputs.station is not None:
+        records += _station_records(inputs.station, models, days, day_hours, cfg)
     return rows, records
+
+
+def _station_records(
+    point: PointData,
+    models: Sequence[str],
+    days: Sequence[str],
+    day_hours: Sequence[Sequence[int]],
+    cfg: ForecastConfig,
+) -> list[DailyRecord]:
+    """The consensus at the snow station (`stn_cons`): per calendar day, the median of
+    the models' snowfall (Open-Meteo's 7:1, like `cons`) and of their precipitation, once
+    at least `consensus_min_models` models cover the whole day. The station response
+    shares the bands' timezone, so the same hours make the same days."""
+    md = split_models(point, models)
+    out = []
+    for d, hs in zip(days, day_hours, strict=True):
+        snow = [t for v in md.values() if (t := total(v.get("snowfall", {}), hs)) is not None]
+        water = [t for v in md.values() if (t := total(v.get("precipitation", {}), hs)) is not None]
+        if len(snow) < cfg.consensus_min_models or len(water) < cfg.consensus_min_models:
+            continue
+        out.append(DailyRecord(d, "stn_cons", r(median(snow)), r(median(water))))
+    return out
 
 
 def _sun(blend_mid: PointData, tz: ZoneInfo) -> list[SunDay]:

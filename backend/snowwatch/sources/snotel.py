@@ -34,7 +34,7 @@ def daily_request(triplet: str, begin: date, end: date) -> Request:
         f"{BASE}/data",
         {
             "stationTriplets": triplet,
-            "elements": "SNWD,WTEQ,TOBS,PREC",
+            "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
             "duration": "DAILY",
             "beginDate": begin.isoformat(),
             "endDate": end.isoformat(),
@@ -66,6 +66,18 @@ def _f_to_c(f: float | None) -> float | None:
     return None if f is None else (f - 32) * 5 / 9
 
 
+def start_of_day(reading_date: str) -> str:
+    """The day a SNOTEL daily depth, snow water or precipitation total opens.
+
+    AWDB dates each daily value by the day it closes: the value for 14 Nov is the
+    midnight reading that ends it (the hourly reading at 15 Nov 00:00, local standard
+    time). Snow Watch's days hold the reading at the start of the day, as the BC
+    network's do, so the value moves to the next date. Without this, each day's new
+    snow (tomorrow's depth − today's) was the next day's.
+    """
+    return (date.fromisoformat(reading_date[:10]) + timedelta(days=1)).isoformat()
+
+
 def _series(blob: list[dict[str, Any]], element: str) -> list[tuple[str, float | None]]:
     for station in blob or []:
         for d in station.get("data", []):
@@ -84,22 +96,32 @@ def parse_snotel(
     hourly: list[dict[str, Any]],
     station: Mapping[str, Any] | None = None,
 ) -> Snotel:
-    """Observed depth and SWE (ported from `pull_snotel`), converted to metric."""
+    """Observed depth and SWE (ported from `pull_snotel`), converted to metric.
+
+    Depth, snow water, the season's precipitation and TOBS are midnight readings, moved
+    to the day they open (`start_of_day`); the low and high are the day's own.
+    """
     depth = dict(_series(daily, "SNWD"))
     swe = dict(_series(daily, "WTEQ"))
     tobs = dict(_series(daily, "TOBS"))
     prec = dict(_series(daily, "PREC"))
+    tmin = {d[:10]: v for d, v in _series(daily, "TMIN")}
+    tmax = {d[:10]: v for d, v in _series(daily, "TMAX")}
     dates = sorted(set(depth) | set(swe))
-    rows = [
-        SnotelDay(
-            date=d[:10],
-            depth_cm=_scale(depth.get(d), IN_TO_CM),
-            swe_mm=_scale(swe.get(d), IN_TO_MM),
-            temp_c=_f_to_c(tobs.get(d)),
-            precip_mm=_scale(prec.get(d), IN_TO_MM),
+    rows = []
+    for d in dates:
+        day = start_of_day(d)
+        rows.append(
+            SnotelDay(
+                date=day,
+                depth_cm=_scale(depth.get(d), IN_TO_CM),
+                swe_mm=_scale(swe.get(d), IN_TO_MM),
+                temp_c=_f_to_c(tobs.get(d)),
+                precip_mm=_scale(prec.get(d), IN_TO_MM),
+                tmin_c=_f_to_c(tmin.get(day)),
+                tmax_c=_f_to_c(tmax.get(day)),
+            )
         )
-        for d in dates
-    ]
     hv = [(t, v) for t, v in _series(hourly, "SNWD") if v is not None]
 
     def change(hours: int) -> float | None:

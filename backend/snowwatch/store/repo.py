@@ -121,9 +121,18 @@ def save_obs(conn: sqlite3.Connection, location_id: str, snotel: Snotel) -> None
         conn.executemany(
             "INSERT OR REPLACE INTO obs_daily "
             "(location_id, station, date, depth_cm, swe_mm, tmin_c, tmax_c, precip_mm) "
-            "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                (location_id, snotel.triplet, d.date, d.depth_cm, d.swe_mm, d.precip_mm)
+                (
+                    location_id,
+                    snotel.triplet,
+                    d.date,
+                    d.depth_cm,
+                    d.swe_mm,
+                    d.tmin_c,
+                    d.tmax_c,
+                    d.precip_mm,
+                )
                 for d in snotel.daily
             ],
         )

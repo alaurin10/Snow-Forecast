@@ -1272,6 +1272,8 @@ export interface SnotelDay {
 	precip_mm: number | null;
 	swe_mm: number | null;
 	temp_c: number | null;
+	tmax_c?: number | null;
+	tmin_c?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -1349,14 +1351,19 @@ export interface VerificationOut {
 	headline?: string;
 	location_id: string;
 	n_days: number;
+	n_water_days?: number;
 	needs_days: number;
 	pairs: VerificationPair[];
 	ready: boolean;
 	rows: VerificationRow[];
+	settled_ratio?: number;
 	since: string | null;
+	skipped_bare?: number;
+	skipped_warm?: number;
 	station: string | null;
 	station_elev_m: number | null;
 	station_name: string | null;
+	water_rows?: WaterRow[];
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -1364,10 +1371,16 @@ export interface VerificationOut {
  */
 export interface VerificationPair {
 	cons_cm: number | null;
+	cons_settled_cm?: number | null;
 	cons_slr_cm: number | null;
+	cons_water_mm?: number | null;
 	date: string;
 	from_swe: boolean;
 	observed_cm: number | null;
+	observed_water_mm?: number | null;
+	skip?: ('bare' | 'warm') | null;
+	stn_settled_cm?: number | null;
+	stn_water_mm?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -1378,6 +1391,21 @@ export interface VerificationRow {
 	false_alarms: number;
 	hits: number;
 	mae_cm: number | null;
+	misses: number;
+	n: number;
+	source: string;
+}
+/**
+ * A source's precipitation forecasts against the station's gauge.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "WaterRow".
+ */
+export interface WaterRow {
+	bias_mm: number | null;
+	false_alarms: number;
+	hits: number;
+	mae_mm: number | null;
 	misses: number;
 	n: number;
 	source: string;

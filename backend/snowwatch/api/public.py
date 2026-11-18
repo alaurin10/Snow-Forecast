@@ -444,7 +444,12 @@ def make_router() -> APIRouter:
             raise HTTPException(404, f"unknown location {location_id!r}")
         cfg = request.app.state.forecast_config
         return verification(
-            conn, loc, swe_ratio=cfg.verify_swe_ratio, headline=headline_source(cfg)
+            conn,
+            loc,
+            swe_ratio=cfg.verify_swe_ratio,
+            headline=headline_source(cfg),
+            snowfall_cm_per_mm=cfg.snowfall_cm_per_mm,
+            settled_ratio=cfg.verify_settled_ratio,
         )
 
     @router.get("/locations/{location_id}/nearby", response_model=NearbyOut)

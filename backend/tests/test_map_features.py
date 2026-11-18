@@ -141,7 +141,9 @@ def test_stations_refresh_reads_both_networks(tmp_path: Path) -> None:
     assert s.obs_time == "2026-11-12T17:00+00:00"
     assert s.depth_cm == pytest.approx(16 * 2.54, abs=0.1)
     assert s.change24_cm == pytest.approx(6 * 2.54, abs=0.1)
-    assert [d.date for d in s.daily] == [f"2026-11-{d:02d}" for d in range(4, 12)]
+    # AWDB dates a daily depth by the day it closes; each moves to the day it opens.
+    assert [d.date for d in s.daily] == [f"2026-11-{d:02d}" for d in range(5, 13)]
+    assert s.daily[0].depth_cm == pytest.approx(4 * 2.54, abs=0.1)
     assert s.url == "https://wcc.sc.egov.usda.gov/nwcc/site?sitenum=908"
     bc = by["3A25P:BC:ASWS"]
     assert bc.network == "bc" and bc.elev_m == 1340 and bc.depth_cm == 28

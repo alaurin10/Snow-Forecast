@@ -146,6 +146,64 @@ describe('track record', () => {
 		expect(row.closest('tr')?.classList.contains('hl')).toBe(true);
 		expect(container.textContent).toMatch(/temperature-based depth is closer/);
 	});
+	it('scores precipitation against the gauge and says which days the depth left out', () => {
+		const data = {
+			...scores,
+			n_water_days: 30,
+			skipped_warm: 3,
+			water_rows: [
+				{ source: 'cons', n: 30, bias_mm: 2.5, mae_mm: 4, hits: 2, misses: 1, false_alarms: 2 },
+				{
+					source: 'gfs_seamless',
+					n: 30,
+					bias_mm: 6,
+					mae_mm: 7,
+					hits: 1,
+					misses: 1,
+					false_alarms: 4
+				}
+			]
+		};
+		const { container, getByText } = render(TrackRecord, { data, units: 'metric' });
+		const ledes = [...container.querySelectorAll('.lede')].map((p) => p.textContent);
+		expect(ledes[1]).toBe(
+			'Against the gauge, the consensus’s precipitation misses by 4.0 mm a day on average and runs 2.5 mm high.'
+		);
+		const row = getByText('Consensus at mid-mountain').closest('tr')!;
+		expect(row.classList.contains('hl')).toBe(true);
+		expect(row.querySelector('.best')).toBeTruthy();
+		expect([...row.querySelectorAll('td')].map((td) => td.textContent?.trim())).toEqual([
+			'4.0',
+			'+2.5',
+			'2 / 1 / 2',
+			'30'
+		]);
+		expect(container.textContent?.replace(/\s+/g, ' ')).toMatch(
+			/3 days with no snowpack or above freezing all day are left out/
+		);
+	});
+
+	it('sums up the precipitation forecast at the station once it has a week', () => {
+		const data = {
+			...scores,
+			n_water_days: 9,
+			water_rows: [
+				{ source: 'cons', n: 9, bias_mm: 6, mae_mm: 7, hits: 0, misses: 0, false_alarms: 2 },
+				{ source: 'stn_cons', n: 8, bias_mm: -0.4, mae_mm: 3, hits: 0, misses: 0, false_alarms: 0 }
+			]
+		};
+		const { container, getByText } = render(TrackRecord, { data, units: 'metric' });
+		const ledes = [...container.querySelectorAll('.lede')].map((p) => p.textContent);
+		expect(ledes[1]).toBe(
+			'Against the gauge, the precipitation forecast for the station’s own elevation misses by 3.0 mm a day on average with no lean either way.'
+		);
+		const row = getByText('Consensus at the station’s elevation').closest('tr')!;
+		expect(row.classList.contains('hl')).toBe(true);
+		expect(getByText('Consensus at mid-mountain').closest('tr')!.classList.contains('hl')).toBe(
+			false
+		);
+	});
+
 	it('never shows a signed zero', () => {
 		const { getByText } = render(TrackRecord, { data: scores, units: 'imperial' });
 		const cells = [...getByText('ECMWF').closest('tr')!.querySelectorAll('td')];

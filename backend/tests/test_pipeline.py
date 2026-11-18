@@ -45,6 +45,15 @@ def test_full_run_stores_every_location(seeded: sqlite3.Connection) -> None:
     assert n_daily > 500
     assert seeded.execute("SELECT COUNT(*) FROM obs_daily").fetchone()[0] >= 90
     assert seeded.execute("SELECT COUNT(*) FROM ensemble_cache").fetchone()[0] == 18
+    # A forecast at each SNOTEL station's own spot and elevation, for the scorecard: the
+    # days its models cover in full (the first day is partial, the third runs out).
+    stn = seeded.execute(
+        "SELECT location_id, COUNT(*) n FROM forecast_daily WHERE source = 'stn_cons' "
+        "GROUP BY location_id ORDER BY location_id"
+    ).fetchall()
+    assert [r["location_id"] for r in stn] == ["crystal", "rainy", "snoqualmie"]
+    assert all(r["n"] >= 1 for r in stn)
+    assert "crystal/station" in calls
 
 
 def test_ensembles_are_reused_between_ensemble_runs(seeded: sqlite3.Connection) -> None:

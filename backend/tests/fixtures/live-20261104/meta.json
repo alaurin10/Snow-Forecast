@@ -471,7 +471,7 @@
       "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
       "params": {
         "stationTriplets": "642:WA:SNTL",
-        "elements": "SNWD,WTEQ,TOBS,PREC",
+        "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
         "duration": "DAILY",
         "beginDate": "2026-09-20",
         "endDate": "2026-11-04"
@@ -644,7 +644,7 @@
       "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
       "params": {
         "stationTriplets": "672:WA:SNTL",
-        "elements": "SNWD,WTEQ,TOBS,PREC",
+        "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
         "duration": "DAILY",
         "beginDate": "2026-09-20",
         "endDate": "2026-11-04"
@@ -817,7 +817,7 @@
       "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
       "params": {
         "stationTriplets": "711:WA:SNTL",
-        "elements": "SNWD,WTEQ,TOBS,PREC",
+        "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
         "duration": "DAILY",
         "beginDate": "2026-09-20",
         "endDate": "2026-11-04"
@@ -1251,6 +1251,51 @@
         "models": "ecmwf_ifs025"
       },
       "bytes_gz": 3305
+    },
+    "crystal/station": {
+      "url": "https://api.open-meteo.com/v1/forecast",
+      "params": {
+        "latitude": "46.9059",
+        "longitude": "-121.483",
+        "elevation": "1646",
+        "timezone": "auto",
+        "timeformat": "unixtime",
+        "hourly": "snowfall,precipitation",
+        "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+        "forecast_days": "3"
+      },
+      "bytes_gz": 720,
+      "derived_from": "multi (the mid point, first 3 days): recorded before this request existed"
+    },
+    "snoqualmie/station": {
+      "url": "https://api.open-meteo.com/v1/forecast",
+      "params": {
+        "latitude": "47.3741",
+        "longitude": "-121.442",
+        "elevation": "1222",
+        "timezone": "auto",
+        "timeformat": "unixtime",
+        "hourly": "snowfall,precipitation",
+        "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+        "forecast_days": "3"
+      },
+      "bytes_gz": 784,
+      "derived_from": "multi (the mid point, first 3 days): recorded before this request existed"
+    },
+    "rainy/station": {
+      "url": "https://api.open-meteo.com/v1/forecast",
+      "params": {
+        "latitude": "48.5187",
+        "longitude": "-120.736",
+        "elevation": "1487",
+        "timezone": "auto",
+        "timeformat": "unixtime",
+        "hourly": "snowfall,precipitation",
+        "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+        "forecast_days": "3"
+      },
+      "bytes_gz": 878,
+      "derived_from": "multi (the mid point, first 3 days): recorded before this request existed"
     }
   },
   "errors": []

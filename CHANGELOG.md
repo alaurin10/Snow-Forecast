@@ -46,7 +46,28 @@ Notable changes to Snow Watch. The format follows
 - **Taps beyond the West box read the wider radar** (M6): what's falling now and whether
   it starts or stops within the hour. Inside the box the tap panel shows the same line.
 
+- **The forecast checked against the station's precipitation gauge**: the Observed
+  tab charts each day's rain and melted snow in the gauge beside the forecast's water,
+  and the Confidence tab scores every model on it. It works where the depth can't, on
+  bare ground and in rain, and without the snow ratio, so it says whether the models had
+  the amount right.
+- **New snow scored as settled snow**: a depth sensor sees snow that has settled for up
+  to a day, so the depth chart sets it beside the forecast's snow water at 8:1
+  (`verify_settled_ratio`) rather than the fresh-snow ratio of the app's totals. Days
+  the depth can't measure (no snowpack on the ground, or above freezing all day) are
+  shaded and left out of its score; the gauge still scores them.
+- **The forecast scored at the snow station's own elevation**: each run also asks the
+  models for the station's own spot and elevation (scoring only: the base, mid and
+  summit bands stay where they are), so a station below or beside mid-mountain is
+  compared with a forecast for where it is. Once that has a week of days, the charts
+  and summaries lead with it; the mid band's scores stay alongside.
+
 ### Fixed
+- **Measured snow was a day early**: SNOTEL dates each daily depth by the day it ends
+  (its 14 Nov depth is the reading at midnight going into the 15th), but the scorecard
+  and the Observed tab took it as the day's opening reading. So each day's measured new
+  snow showed on the day before, beside the wrong forecast, and every SNOTEL station's
+  score looked worse than it was. Stored days move to the right date on upgrade.
 - **3D terrain "walls"** (seen near Whistler): a short network hiccup switched the
   elevation tiles from Mapterhorn to the AWS tiles mid-visit, and the two disagree by
   20–60 m at a tile's edge, which shows in 3D as a wall with the map stretched down it.
