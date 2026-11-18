@@ -51,9 +51,7 @@
 		playing = new Set(all ? [...playing, i] : [i]);
 	}
 	function stop(i: number) {
-		const next = new Set(playing);
-		next.delete(i);
-		playing = next;
+		playing = new Set([...playing].filter((j) => j !== i));
 	}
 	function playAll(on: boolean) {
 		prefs.setCamsAutoplay(on);
