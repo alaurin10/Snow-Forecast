@@ -111,3 +111,63 @@ def test_old_stored_rows_with_bad_links_still_load(conn: object) -> None:
         )
     (loc,) = service.list_locations(conn)
     assert loc.links == {"Good": "https://ok.example"} and loc.webcams == []
+
+
+def test_webcam_video_links_become_embed_addresses() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from snowwatch.webcams import embed_url
+    from tests.conftest import make_location
+
+    nocookie = "https://www.youtube-nocookie.com/embed/vhO8nNqg9iw"
+    for link in (
+        "https://www.youtube.com/watch?v=vhO8nNqg9iw",
+        "https://youtube.com/watch?v=vhO8nNqg9iw&t=3",
+        "https://m.youtube.com/watch?v=vhO8nNqg9iw",
+        "https://youtu.be/vhO8nNqg9iw?si=abc",
+        "https://www.youtube.com/live/vhO8nNqg9iw",
+        "https://www.youtube.com/embed/vhO8nNqg9iw?autoplay=1",
+        nocookie,
+    ):
+        assert embed_url(link) == nocookie, link
+    channel = "UCabcdefghijklmnopqrstuv"
+    assert embed_url(f"https://www.youtube.com/channel/{channel}/live") == (
+        f"https://www.youtube.com/embed/live_stream?channel={channel}"
+    )
+    br = "https://player.brownrice.com/embed/whistlerpeak"
+    assert embed_url(br) == br
+    assert embed_url("https://player.brownrice.com/snapshot/whistlerpeak") == br
+    assert embed_url("https://live9.brownrice.com/?sn=whistlerpeak&em=1") == br
+    cs = "https://camstreamer.com/embed/PZyoJBnQWsgYwwHoRAmjihHkxPi4lD8yZSOFkJZk"
+    assert embed_url(cs + "?enablejsapi=1") == cs
+    assert embed_url("https://crystal.roundshot.com/#/") == "https://crystal.roundshot.com/"
+    oz = "https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_NJJN000010BA"
+    assert embed_url(oz) == oz
+    assert embed_url("https://relay.ozolio.com/pub.api?cmd=poster&oid=EMB_NJJN000010BA") == oz
+    for bad in (
+        "https://www.youtube.com/@TheSummitatSnoqualmie",
+        "https://www.youtube.com/watch?v=short",
+        "https://evil.example/embed/vhO8nNqg9iw",
+        "https://youtube.com.evil.example/watch?v=vhO8nNqg9iw",
+        "http://crystal.roundshot.com/",
+        "https://roundshot.com.evil.example/",
+        "https://www.nps.gov/webcams-mora/mountain.jpg",
+        "https://relay.ozolio.com/pub.api?cmd=embed&oid=<script>",
+        "https://relay.ozolio.com.evil.example/pub.api?cmd=embed&oid=EMB_NJJN000010BA",
+        "javascript:alert(1)",
+    ):
+        assert embed_url(bad) is None, bad
+
+    cam = make_location(
+        webcams=[
+            {"name": "Cam", "url": "https://x.example", "video_url": "https://youtu.be/vhO8nNqg9iw"}
+        ]
+    ).webcams[0]
+    assert cam.video_url == nocookie
+    with pytest.raises(ValidationError):
+        make_location(
+            webcams=[
+                {"name": "Cam", "url": "https://x.example", "video_url": "https://x.example/v"}
+            ]
+        )

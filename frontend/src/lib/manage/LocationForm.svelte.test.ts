@@ -95,7 +95,35 @@ describe('LocationForm webcams', () => {
 		expect(submit(container).disabled).toBe(false);
 		await fireEvent.submit(container.querySelector('form') as HTMLFormElement);
 		expect(onsave.mock.calls[0][0].webcams).toEqual([
-			{ name: 'Summit', url: 'https://example.com/cam', image_url: null }
+			{ name: 'Summit', url: 'https://example.com/cam', image_url: null, video_url: null }
 		]);
+	});
+
+	it('takes a live video only from a host that can play in the app', async () => {
+		const onsave = vi.fn();
+		const { container, getByText } = render(LocationForm, {
+			initial: loc([950, 1200, 1500]),
+			isNew: true,
+			onsave,
+			oncancel: () => {}
+		});
+		await fireEvent.click(getByText('+ Add a webcam'));
+		flushSync();
+		const cam = container.querySelector('.cam') as HTMLElement;
+		const [name, page, , video] = cam.querySelectorAll('input');
+		await fireEvent.input(name, { target: { value: 'Summit West' } });
+		await fireEvent.input(page, { target: { value: 'https://example.com/cams' } });
+		await fireEvent.input(video, { target: { value: 'https://example.com/player' } });
+		flushSync();
+		expect(submit(container).disabled).toBe(true);
+		await fireEvent.input(video, {
+			target: { value: 'https://www.youtube.com/watch?v=vhO8nNqg9iw' }
+		});
+		flushSync();
+		expect(submit(container).disabled).toBe(false);
+		await fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+		expect(onsave.mock.calls[0][0].webcams[0].video_url).toBe(
+			'https://www.youtube.com/watch?v=vhO8nNqg9iw'
+		);
 	});
 });

@@ -90,6 +90,7 @@ export interface Webcam {
 	image_url?: string | null;
 	name: string;
 	url: string;
+	video_url?: string | null;
 }
 /**
  * Every ATES file the owner has supplied, as one collection.

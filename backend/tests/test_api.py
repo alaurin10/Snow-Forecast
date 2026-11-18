@@ -67,6 +67,8 @@ def test_security_headers_and_inline_script_hash(settings: Settings, tmp_path: P
     digest = base64.b64encode(hashlib.sha256(boot.encode()).digest()).decode()
     assert f"'sha256-{digest}'" in csp and "'unsafe-inline'" not in csp.split("style-src")[0]
     assert "frame-ancestors 'none'" in csp
+    frames = csp.split("frame-src")[1].split(";")[0]
+    assert "https://www.youtube-nocookie.com" in frames and "https://player.brownrice.com" in frames
     assert "https://tiles.mapterhorn.com" in csp.split("connect-src")[1].split(";")[0]
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["cache-control"] == "no-cache"

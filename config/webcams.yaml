@@ -1,0 +1,255 @@
+# Webcams for the home installation's locations, gathered from each resort's webcam
+# page, the National Park Service and WSDOT (18 Nov 2026). Load them with
+#
+#   docker compose run --rm worker snowwatch locations webcams
+#
+# which replaces the webcams of each location listed here (and nothing else about it)
+# and refreshes those locations so the cameras show within a few minutes. A location
+# that isn't listed keeps its webcams. After that, edit them on the Manage page as usual.
+#
+# Each webcam: name, url (the page "Open site" opens), and optionally image_url (a
+# picture the camera updates) and video_url (a live player: YouTube, CamStreamer,
+# Brownrice, Roundshot or Ozolio). See docs/DEPLOYMENT.md → Webcams.
+#
+# No public cameras found: Maple Pass (WSDOT has none on SR 20 near Rainy Pass this
+# season) and Mt. Baker (the ski area publishes none; no WSDOT cameras on SR 542).
+# Mt. Gasworks is left as it is.
+
+crystal:
+  - name: Summit 360°
+    url: https://www.crystalmountainresort.com/the-mountain/mountain-report-and-webcams/webcams
+    image_url: https://crystalmountainresort.roundshot.com/cams/1011/medium
+    video_url: https://crystalmountainresort.roundshot.com/summit/
+
+snoqualmie-pass:
+  # The Summit at Snoqualmie streams on YouTube through CamStreamer, which follows a
+  # stream when the resort restarts it. The pictures are the streams' YouTube stills.
+  - name: Alpental Base
+    url: https://www.summitatsnoqualmie.com/webcams
+    image_url: https://i.ytimg.com/vi/8wk81COX2cg/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/NGuSbRSJyOJLLfafRPZsW8AR5KwumAsKQehw7Gwy
+  - name: Alpental Mid-Mountain
+    url: https://www.summitatsnoqualmie.com/webcams
+    image_url: https://i.ytimg.com/vi/c_XLrUYV8tk/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/1YTKigZZMcTdoGQChDNXgUCOKbiPlb1IpAszCo7p
+  - name: Alpental Top
+    url: https://www.summitatsnoqualmie.com/webcams
+    video_url: https://camstreamer.com/embed/a9V1ciODovvZjDVJ7ySHFMBhfRq5Z8Dhs4wYbBMw
+  - name: Summit West
+    url: https://www.summitatsnoqualmie.com/webcams
+    image_url: https://i.ytimg.com/vi/vhO8nNqg9iw/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/PZyoJBnQWsgYwwHoRAmjihHkxPi4lD8yZSOFkJZk
+  - name: Silver Fir Base
+    url: https://www.summitatsnoqualmie.com/webcams
+    image_url: https://i.ytimg.com/vi/H7HwsNLqVC8/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/QOEw0n5iYoDuo29nGI2ROCZhB3nwB2KSF5jEPy99
+  - name: Central Express
+    url: https://www.summitatsnoqualmie.com/webcams
+    image_url: https://i.ytimg.com/vi/w4Sno8NIjmU/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/QmtJtO3Wu8E9ENHmhB7piw3WgETrtRAW18bz69ib
+  - name: I-90 Snoqualmie Summit
+    url: https://wsdot.com/travel/real-time/mountainpasses/snoqualmie
+    image_url: https://images.wsdot.wa.gov/sc/090VC05200.jpg
+  - name: I-90 East Summit
+    url: https://wsdot.com/travel/real-time/mountainpasses/snoqualmie
+    image_url: https://images.wsdot.wa.gov/sc/090VC05347.jpg
+  - name: I-90 Denny Creek
+    url: https://wsdot.com/travel/real-time/mountainpasses/snoqualmie
+    image_url: https://images.wsdot.wa.gov/sc/090VC04680.jpg
+
+mt-rainer-paradise:
+  - name: Paradise – Mountain
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/mountain.jpg
+  - name: Paradise – Visitor Center
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/gh.jpg
+  - name: Paradise – Tatoosh Range
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/tatoosh.jpg
+  - name: Paradise – East
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/east.jpg
+  - name: Paradise – West
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/west.jpg
+  - name: Longmire
+    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm
+    image_url: https://www.nps.gov/webcams-mora/longmire.jpg
+
+whistler:
+  - name: Roundhouse Lodge
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlerroundhouse
+  - name: Whistler Peak
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlerpeak
+  - name: Rendezvous Lodge, Blackcomb
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlerblackcomb
+  - name: 7th Heaven, Blackcomb
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistler7thheaven
+  - name: Snow Stake
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlersnowstack
+  - name: Whistler Village
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlervillagefitz
+  - name: Blackcomb Base, Upper Village
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlervillage
+  - name: Creekside
+    url: https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/whistlercreekside
+
+revelstoke:
+  - name: Stoke Top
+    url: https://www.revelstokemountainresort.com/mountain/conditions/webcams/
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_KPMC000010BF
+  - name: Stellar
+    url: https://www.revelstokemountainresort.com/mountain/conditions/webcams/
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_SWUG000010C4
+  - name: Gnome
+    url: https://www.revelstokemountainresort.com/mountain/conditions/webcams/
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_NJJN000010BA
+  - name: Outpost
+    url: https://www.revelstokemountainresort.com/mountain/conditions/webcams/
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_NDZZ000010B5
+  - name: Village
+    url: https://www.revelstokemountainresort.com/mountain/conditions/webcams/
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_PVWK000010B0
+
+banff-sunshine-village:
+  - name: Standish and Strawberry (live)
+    url: https://www.skibanff.com/webcams
+    video_url: https://www.youtube.com/watch?v=GJIVtrdDHas
+  - name: Village from Wardens Cabin (live)
+    url: https://www.skibanff.com/webcams
+    video_url: https://www.youtube.com/watch?v=zYMNTmi8PDw
+  - name: Strawberry and Standish Express Load
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/136m
+  - name: Standish Express Unload
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/15m
+  - name: Strawberry Express Unload
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/14m
+  - name: Sunshine Mountain Lodge and Village
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/131m
+  - name: Mount Assiniboine
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/17m
+  - name: Aurora Cam
+    url: https://www.skibanff.com/webcams
+    image_url: https://cameras.skibanff.com/dynamic/10m
+
+stevens-pass:
+  - name: Snow Stake
+    url: https://www.stevenspass.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/stevenspasssnowstake
+  - name: Skyline
+    url: https://www.stevenspass.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/stevenspassskyline
+  - name: Jupiter
+    url: https://www.stevenspass.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/stevenspassjupiter
+  - name: Courtyard
+    url: https://www.stevenspass.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/stevenspasscourtyard
+  - name: Ski and Snowboard School
+    url: https://www.stevenspass.com/the-mountain/mountain-conditions/mountain-cams.aspx
+    video_url: https://player.brownrice.com/embed/stevenspassschool
+  - name: US 2 Stevens Pass (Ski Lodge)
+    url: https://wsdot.com/travel/real-time/mountainpasses/stevens
+    image_url: https://images.wsdot.wa.gov/nc/002vc06430.jpg
+  - name: US 2 East Stevens Pass Summit
+    url: https://wsdot.com/travel/real-time/mountainpasses/stevens
+    image_url: https://images.wsdot.wa.gov/nc/002vc06458.jpg
+
+mt-bachelor:
+  - name: Snow Stake (live)
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://i.ytimg.com/vi/ORlXPRywWd4/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/yjcHJseJyObWi2YvoWLlmU8inSaI5aY19Jq6Hcoz
+  - name: Mid-Mountain (live)
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://i.ytimg.com/vi/lyN2JG7zowo/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/UrNT6OriCimffScyTuLZhqgCZAtHSsjHZrgotFNU
+  - name: Cloudchaser (live)
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://i.ytimg.com/vi/gAftCYziGW4/hqdefault_live.jpg
+    video_url: https://camstreamer.com/embed/7WfyGuaHvti06WYRCx5L1XdgpKWyxHqN0iaDpKR4
+  - name: The Cone
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/3
+  - name: Tumalo Mountain and Top of Pine Marten
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/12
+  - name: Outback Lift Line
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/11
+  - name: Pine Marten Lodge
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/9
+  - name: Base of Pine Marten Lift
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/1
+  - name: Sunrise Base
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/5
+  - name: West Village Base and Parking
+    url: https://www.mtbachelor.com/the-mountain/webcams/
+    image_url: https://api.mtbachelor.com/api/v1/cams/mtn/13
+
+palisades-tahoe-olympic-valley:
+  - name: Palisades Base (6,200 ft)
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_ZIGI00000147
+  - name: Palisades Scope (8,200 ft)
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_EIFC0000015B
+  - name: Siberia
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_OBCE00000ECB
+  - name: Far East
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_EMST000001C4
+  - name: Alpine Peak
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_VPAY0000014C
+  - name: Alpine Race
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_KIYV000003C2
+  - name: Alpine Chalet
+    url: https://www.palisadestahoe.com/mountain-information/webcams
+    video_url: https://relay.ozolio.com/pub.api?cmd=embed&oid=EMB_FPOI000010AB
+
+snowbird:
+  - name: Hidden Peak 360°
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/hidden-peak-360-webcam/
+    image_url: https://backend.roundshot.com/cams/09123258cc29cd6e86d3af9a3836c150/medium
+    video_url: https://snowbird.roundshot.com/
+  - name: Hidden Peak
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/hidden-peak-webcam/
+    image_url: https://backend.roundshot.com/cams/44cfff4ff2a218a1178dbb105d95846a/medium
+  - name: Powder Paradise
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/powder-paradise-webcam/
+    image_url: https://backend.roundshot.com/cams/48fc223c0ed88474ecc2f884bf39de63/medium
+  - name: Snowstake
+    url: https://www.snowbird.com/the-mountain/webcams/snowstake-webcam/
+    image_url: https://manage.hdrelay.com/snapshot/8611e276-7ee5-42c0-b8cd-d9e1890e1cd4
+  - name: Mineral Basin
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/top-mineral-basin-webcam/
+    image_url: https://manage.hdrelay.com/snapshot/5780754f-8da1-4223-ab8a-6755d84cbc10
+  - name: Peruvian Gulch
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/peruvian-gulch-webcam/
+    image_url: https://manage.hdrelay.com/snapshot/544432bd-3910-4888-aa9f-14b6f51a7eb5
+  - name: Little Cloud
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/little-cloud-webcam/
+    image_url: https://manage.hdrelay.com/snapshot/db2a69c5-66e9-4c48-a713-919eaf191fc1
+  - name: Tram Bullpen
+    url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/tram-bullpen-webcam/
+    image_url: https://manage.hdrelay.com/snapshot/61b2490be101c00b9c48374f

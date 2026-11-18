@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.gzip import GZipMiddleware
 
-from snowwatch import __version__, overlays
+from snowwatch import __version__, overlays, webcams
 from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.models import MetaOut
@@ -80,13 +80,15 @@ def inline_script_hashes(index: Path) -> list[str]:
 def content_security_policy(script_hashes: list[str]) -> str:
     """What the page may load. Third parties: Mapterhorn elevation tiles (with AWS terrain
     tiles as the fallback) for 3D, shading, slope and contours (fetched),
-    and any https image (webcam stills come from each resort's own server)."""
+    any https image (webcam stills come from each resort's own server), and the
+    webcam video players in `webcams.frame_hosts` (framed, only when a visitor presses play)."""
     return "; ".join(
         [
             "default-src 'self'",
             "script-src 'self' " + " ".join(script_hashes),
             "worker-src 'self' blob:",
             "child-src 'self' blob:",
+            "frame-src " + " ".join(webcams.frame_hosts),
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "font-src 'self' data:",

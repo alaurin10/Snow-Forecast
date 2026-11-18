@@ -7,6 +7,22 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Webcams get their own tab, with live video in the app.** A location with webcams
+  shows a Webcams tab (after Observed; key 5) instead of a card at the foot of Forecast.
+  Each camera shows its picture, refreshed every 5 minutes while the page is in view, and
+  a camera with a live stream plays it in place on "Live", one camera at a time. On the
+  Manage page, a webcam's new "Live video link" takes a YouTube, Brownrice, CamStreamer,
+  Roundshot or Ozolio link (the video's page or its embed link) and stores it as that host's
+  player. Only those hosts may be framed (a new `frame-src` in the CSP); other players
+  still open on their own site. Nothing loads from a video host until Live is pressed.
+  Saving a change to a location's webcams or links now refreshes its forecast, so they
+  show a minute or two later rather than at the next scheduled run. How to find each
+  host's link: docs/DEPLOYMENT.md → Webcams.
+- **`snowwatch locations webcams`** sets many locations' webcams from a YAML file
+  (`config/webcams.yaml` by default) without touching anything else about them, and
+  refreshes them. `config/webcams.yaml` holds 69 cameras for the home installation's
+  locations: resort cams, Mount Rainier's NPS cams and WSDOT pass cams.
+- **Ozolio** players (Revelstoke, Palisades Tahoe) play in the app too.
 - **The snow total is picked on a slider**, like the radar, rather than a row of buttons,
   and it slides smoothly from 12 hours to 10 days ("Next 2½ days, to Fri 1 PM"): the
   server sends the total every 6 hours for two days, then every 12 and 24, and the map

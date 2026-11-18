@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from snowwatch import cli
 from snowwatch.scheduler import Worker, build_scheduler
@@ -41,6 +42,49 @@ def test_budget_and_locations(
     assert "crystal" in out.read_text()
     assert cli.main(["backup"]) == 0
     assert list(env.backup_dir.glob("snowwatch-*.db"))
+
+
+def test_webcams_from_a_file_change_nothing_else(env: Settings, tmp_path: Path) -> None:
+    from snowwatch.locations import service
+    from snowwatch.store.db import connect
+
+    cli.main(["init"])
+    conn = connect(env.database)
+    before = service.get_location(conn, "crystal")
+    f = tmp_path / "webcams.yaml"
+    f.write_text(
+        "crystal:\n"
+        "  - name: Summit 360\n"
+        "    url: https://crystalmountainresort.roundshot.com/summit/\n"
+        "    video_url: https://crystalmountainresort.roundshot.com/summit/\n"
+        "  - name: Paradise\n"
+        "    url: https://www.nps.gov/mora/learn/photosmultimedia/webcams.htm\n"
+        "    image_url: https://www.nps.gov/webcams-mora/mountain.jpg\n"
+        "whistler:\n"
+        "  - name: Peak\n"
+        "    url: https://www.whistlerblackcomb.com/\n"
+        "    video_url: https://live9.brownrice.com/?sn=whistlerpeak\n"
+    )
+    assert cli.main(["locations", "webcams", str(f)]) == 0
+    after = service.get_location(conn, "crystal")
+    assert before is not None and after is not None
+    assert [w.name for w in after.webcams] == ["Summit 360", "Paradise"]
+    assert after.model_copy(update={"webcams": before.webcams}) == before
+    whistler = service.get_location(conn, "whistler")
+    assert whistler is not None
+    assert whistler.webcams[0].video_url == "https://player.brownrice.com/embed/whistlerpeak"
+    queued = {r["location_id"] for r in conn.execute("SELECT location_id FROM jobs")}
+    assert queued == {"crystal", "whistler"}
+
+    # One bad entry (or an unknown location) and nothing is saved.
+    f.write_text("crystal: []\nnowhere: []\n")
+    with pytest.raises(ValueError, match="nowhere"):
+        cli.main(["locations", "webcams", str(f)])
+    f.write_text("crystal: []\nwhistler:\n  - {name: X, url: 'javascript:alert(1)'}\n")
+    with pytest.raises(ValidationError):
+        cli.main(["locations", "webcams", str(f)])
+    after = service.get_location(conn, "crystal")
+    assert after is not None and len(after.webcams) == 2
 
 
 def test_scheduler_jobs(env: Settings) -> None:

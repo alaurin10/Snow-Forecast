@@ -5534,6 +5534,17 @@
         },
         "url": {
           "type": "string"
+        },
+        "video_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

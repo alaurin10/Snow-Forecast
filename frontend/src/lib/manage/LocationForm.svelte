@@ -1,6 +1,7 @@
 <!-- Review and edit a location before saving (new from auto-detect, or existing). -->
 <script lang="ts">
 	import { safeHref, safeImage } from '../links';
+	import { embedFor } from '../webcams';
 	import { hscroll } from '../hscroll';
 	import type { Location, SnotelCandidate } from '../types.gen';
 	import { prefs } from '../prefs.svelte';
@@ -40,12 +41,15 @@
 	const idOk = $derived(/^[a-z0-9][a-z0-9-]{1,39}$/.test(loc.id));
 	const urlOk = (u: string | null | undefined) => !u || !!safeHref(u);
 	const imageOk = (u: string | null | undefined) => !u || !!safeImage(u);
+	const videoOk = (u: string | null | undefined) => !u || !!embedFor(u);
 	const camsOk = $derived(
-		(loc.webcams ?? []).every((w) => w.name.trim() && urlOk(w.url) && w.url && imageOk(w.image_url))
+		(loc.webcams ?? []).every(
+			(w) => w.name.trim() && urlOk(w.url) && w.url && imageOk(w.image_url) && videoOk(w.video_url)
+		)
 	);
 	const canSave = $derived(rising && idOk && camsOk && loc.name.trim().length > 0 && !saving);
 	function addCam() {
-		loc.webcams = [...(loc.webcams ?? []), { name: '', url: '', image_url: null }];
+		loc.webcams = [...(loc.webcams ?? []), { name: '', url: '', image_url: null, video_url: null }];
 	}
 
 	function setElev(i: number, raw: string) {
@@ -212,6 +216,14 @@
 					placeholder="https://… (a .jpg that updates)"
 				/></label
 			>
+			<label
+				>Live video link (optional) <input
+					value={cam.video_url ?? ''}
+					oninput={(e) => (cam.video_url = e.currentTarget.value.trim() || null)}
+					type="url"
+					placeholder="https://… (YouTube, Brownrice, CamStreamer, Roundshot or Ozolio)"
+				/></label
+			>
 			<button
 				type="button"
 				class="x"
@@ -221,7 +233,9 @@
 		</div>
 	{/each}
 	{#if !camsOk}<p class="bad">
-			Each webcam needs a name and a link; image links must start with https://
+			Each webcam needs a name and a link; image links must start with https://, and live video must
+			be a YouTube, Brownrice, CamStreamer, Roundshot or Ozolio link (the video's own page or its
+			embed link). Other players can only open on their own site.
 		</p>{/if}
 	<button type="button" class="btn small addcam" onclick={addCam}>+ Add a webcam</button>
 
