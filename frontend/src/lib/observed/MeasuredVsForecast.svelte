@@ -9,7 +9,7 @@
 	import { scaleBand, scaleLinear } from 'd3-scale';
 	import type { VerificationOut, VerificationPair } from '../types.gen';
 	import { depthRow, waterRow } from '../scores';
-	import { converters, type UnitSystem } from '../units';
+	import { converters, elevation, type UnitSystem } from '../units';
 	import { monthDay } from '../time';
 	import type { LoadState } from '../load';
 	import Frame from '../charts/Frame.svelte';
@@ -27,7 +27,15 @@
 	const c = $derived(converters(units));
 	const snowRow = $derived(data ? depthRow(data) : null);
 	const rainRow = $derived(data ? waterRow(data) : null);
-	const settled = $derived(snowRow?.source === 'cons_settled');
+	const settled = $derived(snowRow?.source === 'cons_settled' || snowRow?.source === 'stn_settled');
+	// The forecast for the station's own spot and elevation, once it has a week of days.
+	const atStation = $derived(snowRow?.source === 'stn_settled');
+	const wAtStation = $derived(rainRow?.source === 'stn_cons');
+	const where = $derived(
+		data?.station_elev_m != null
+			? ` for the station’s own elevation (${elevation(data.station_elev_m, units)})`
+			: ' for the station’s own spot'
+	);
 	const num = (cm: number | null | undefined) => c.snow(cm ?? null)?.toFixed(c.snowDigits) ?? '–';
 	const wnum = (mm: number | null | undefined) =>
 		c.water(mm ?? null)?.toFixed(c.waterDigits) ?? '–';
@@ -66,7 +74,9 @@
 	);
 	const bw = $derived(x.bandwidth() / 2);
 	const fcSnow = (p: VerificationPair) =>
-		p.cons_settled_cm ?? (data?.headline === 'cons_slr' ? p.cons_slr_cm : p.cons_cm);
+		atStation
+			? p.stn_settled_cm
+			: (p.cons_settled_cm ?? (data?.headline === 'cons_slr' ? p.cons_slr_cm : p.cons_cm));
 	const obs = $derived(pairs.map((p) => (p.skip ? null : c.snow(p.observed_cm))));
 	const fc = $derived(pairs.map((p) => c.snow(fcSnow(p) ?? null)));
 	const y = $derived(
@@ -77,7 +87,9 @@
 	);
 	const hasWater = $derived(pairs.some((p) => p.observed_water_mm != null));
 	const wObs = $derived(pairs.map((p) => c.water(p.observed_water_mm ?? null)));
-	const wFc = $derived(pairs.map((p) => c.water(p.cons_water_mm ?? null)));
+	const wFc = $derived(
+		pairs.map((p) => c.water((wAtStation ? p.stn_water_mm : p.cons_water_mm) ?? null))
+	);
 	const yw = $derived(
 		scaleLinear()
 			.domain([0, maxOf([...wObs, ...wFc], units === 'imperial' ? 0.5 : 10)])
@@ -127,9 +139,9 @@
 			{#if data.n_days > 0}
 				<p class="muted small">
 					The depth gain at {data.station_name ?? 'the station'} beside the forecast made the evening
-					before{settled
+					before{atStation ? where : ''}{settled
 						? `, as settled snow (${ratio}:1)`
-						: ''}{#if snowRow && snowRow.mae_cm !== null}. Over {data.n_days} days it has missed by {num(
+						: ''}{#if snowRow && snowRow.mae_cm !== null}. Over {snowRow.n} days it has missed by {num(
 							snowRow.mae_cm
 						)}
 						{c.snowUnit} a day on average{snowLean ? `, with ${snowLean}` : ''}{/if}.
@@ -177,8 +189,11 @@
 			{#if hasWater}
 				<h3>Precipitation</h3>
 				<p class="muted small">
-					Rain and melted snow in the station’s gauge beside the forecast’s{#if rainRow && rainRow.mae_mm !== null}.
-						Over {data.n_water_days} days it has missed by {wnum(rainRow.mae_mm)}
+					Rain and melted snow in the station’s gauge beside the forecast’s{wAtStation
+						? where
+						: ''}{#if rainRow && rainRow.mae_mm !== null}. Over {rainRow.n} days it has missed by {wnum(
+							rainRow.mae_mm
+						)}
 						{c.waterUnit} a day on average{waterLean ? `, with ${waterLean}` : ''}{/if}.
 				</p>
 				<Frame

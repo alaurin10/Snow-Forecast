@@ -35,6 +35,11 @@ Notable changes to Snow Watch. The format follows
   (`verify_settled_ratio`) rather than the fresh-snow ratio of the app's totals. Days
   the depth can't measure (no snowpack on the ground, or above freezing all day) are
   shaded and left out of its score; the gauge still scores them.
+- **The forecast scored at the snow station's own elevation**: each run also asks the
+  models for the station's own spot and elevation (scoring only: the base, mid and
+  summit bands stay where they are), so a station below or beside mid-mountain is
+  compared with a forecast for where it is. Once that has a week of days, the charts
+  and summaries lead with it; the mid band's scores stay alongside.
 
 ### Fixed
 - **Measured snow was a day early**: SNOTEL dates each daily depth by the day it ends

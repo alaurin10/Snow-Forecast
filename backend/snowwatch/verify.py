@@ -14,6 +14,11 @@ Two checks, each day d (local time, midnight to midnight):
   and it doesn't depend on the snow ratio, so it says whether the models had the
   amount right. Gauges catch less than falls in wind-driven snow.
 
+Both checks also score the consensus at the station itself (`stn_cons`, and as settled
+snow `stn_settled`): the models asked for the station's own spot and elevation, so a
+station below or beside the mid band is compared with a forecast for where it is. The
+bands are unchanged; this forecast is only for the scorecard.
+
 The forecast is the one from the last run issued before d began, so every score is a
 1-day lead. Sources: the consensus (model snowfall at 7:1, `cons`; the temperature-based
 snow ratio, `cons_slr`; settled, `cons_settled`; `headline` names the one the app
@@ -49,7 +54,7 @@ Skip = Literal["bare", "warm"]
 
 
 class VerificationRow(BaseModel):
-    source: str  # cons, cons_slr, cons_settled, ens_p50, or a model id
+    source: str  # cons, cons_slr, cons_settled, stn_settled, ens_p50, or a model id
     n: int
     bias_cm: float | None  # mean forecast − observed
     mae_cm: float | None
@@ -61,7 +66,7 @@ class VerificationRow(BaseModel):
 class WaterRow(BaseModel):
     """A source's precipitation forecasts against the station's gauge."""
 
-    source: str  # cons, or a model id
+    source: str  # cons, stn_cons, or a model id
     n: int
     bias_mm: float | None  # mean forecast − observed
     mae_mm: float | None
@@ -80,6 +85,8 @@ class VerificationPair(BaseModel):
     cons_settled_cm: float | None = None
     observed_water_mm: float | None = None  # the gauge's catch
     cons_water_mm: float | None = None  # the consensus's water, snow and rain
+    stn_settled_cm: float | None = None  # the consensus at the station, settled
+    stn_water_mm: float | None = None  # …and its water
 
 
 class VerificationOut(BaseModel):
@@ -181,8 +188,11 @@ def _forecasts(
     return out
 
 
+ORDER = ("cons", "cons_slr", "cons_settled", "stn_settled", "stn_cons", "ens_p50")
+
+
 def _order(source: str) -> tuple[int, str]:
-    return {"cons": 0, "cons_slr": 1, "cons_settled": 2, "ens_p50": 3}.get(source, 4), source
+    return ORDER.index(source) if source in ORDER else len(ORDER), source
 
 
 def _score(
@@ -224,8 +234,9 @@ def verification(
     forecasts = _forecasts(conn, loc.id, tz)
     # The consensus as settled snow: its snow water (7:1 snowfall ÷ 0.7) × the ratio.
     for fc in forecasts.values():
-        if (cons := fc.get("cons")) and cons[0] is not None:
-            fc["cons_settled"] = (round(cons[0] / snowfall_cm_per_mm * settled_ratio / 10, 1), None)
+        for src, settled in (("cons", "cons_settled"), ("stn_cons", "stn_settled")):
+            if (got := fc.get(src)) and got[0] is not None:
+                fc[settled] = (round(got[0] / snowfall_cm_per_mm * settled_ratio / 10, 1), None)
     days = sorted(d for d in observed if d in forecasts)
     depth_days = [d for d in days if observed[d].snow_cm is not None and observed[d].skip is None]
     water_days = [d for d in days if observed[d].water_mm is not None]
@@ -235,7 +246,8 @@ def verification(
         snow = observed[d].snow_cm
         assert snow is not None
         for source, (f, _) in forecasts[d].items():
-            if f is not None and source not in NOT_SCORED:
+            # The station's 7:1 snow is scored settled, as stn_settled.
+            if f is not None and source not in (*NOT_SCORED, "stn_cons"):
                 snow_pairs[source].append((f, snow))
     water_pairs: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for d in water_days:
@@ -293,6 +305,8 @@ def verification(
             cons_settled_cm=fc.get("cons_settled", (None, None))[0],
             observed_water_mm=r1(o.water_mm),
             cons_water_mm=fc.get("cons", (None, None))[1],
+            stn_settled_cm=fc.get("stn_settled", (None, None))[0],
+            stn_water_mm=fc.get("stn_cons", (None, None))[1],
         )
 
     return VerificationOut(

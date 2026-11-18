@@ -63,6 +63,10 @@ UPPER_HOURLY = [
     *[f"geopotential_height_{p}hPa" for p in PRESSURE_LEVELS],
 ]
 
+# Per model at the snow station's own spot and elevation, for the scorecard only: the
+# bands stay where the location puts them.
+STATION_HOURLY = ["snowfall", "precipitation"]
+
 ENSEMBLE_HOURLY = ["snowfall"]
 ENSEMBLE_MEMBERS = {"gfs_seamless": 31, "ecmwf_ifs025": 51, "gem_global": 21, "icon_seamless": 40}
 
@@ -136,6 +140,25 @@ def upper_air_request(
         points=1, days=forecast_days + past_days, variables=len(UPPER_HOURLY) * len(models)
     )
     return Request("upper", SOURCE, FORECAST_URL, params, w)
+
+
+def station_request(
+    lat: float, lon: float, elev_m: float, models: list[str], *, forecast_days: int = 3
+) -> Request:
+    """Each model's snowfall and precipitation at the snow station, so the scorecard
+    compares the station with a forecast for where it is, not for the mid band. Three
+    days covers every forecast the scorecard keeps (up to two days ahead)."""
+    params = {
+        "latitude": f"{lat:g}",
+        "longitude": f"{lon:g}",
+        "elevation": f"{elev_m:.0f}",
+        **_common(),
+        "hourly": ",".join(STATION_HOURLY),
+        "models": ",".join(models),
+        "forecast_days": str(forecast_days),
+    }
+    w = estimate_weight(points=1, days=forecast_days, variables=len(STATION_HOURLY) * len(models))
+    return Request("station", SOURCE, FORECAST_URL, params, w)
 
 
 def ensemble_request(loc: Location, system: str, *, forecast_days: int = 16) -> Request:

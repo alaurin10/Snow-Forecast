@@ -15,7 +15,8 @@
 		headlineRow,
 		sourceName,
 		sourceShort,
-		waterRow
+		waterRow,
+		waterSourceName
 	} from '../scores';
 	import { monthDay } from '../time';
 	import { converters, elevation, type UnitSystem } from '../units';
@@ -59,7 +60,11 @@
 			wOurs.bias_mm === null || Math.abs(wOurs.bias_mm) < 1
 				? 'with no lean either way'
 				: `and runs ${wnum(Math.abs(wOurs.bias_mm))} ${c.waterUnit} ${wOurs.bias_mm > 0 ? 'high' : 'low'}`;
-		return `Against the gauge, the consensus’s precipitation misses by ${wnum(wOurs.mae_mm)} ${c.waterUnit} a day on average ${lean}.`;
+		const who =
+			wOurs.source === 'stn_cons'
+				? 'the precipitation forecast for the station’s own elevation'
+				: 'the consensus’s precipitation';
+		return `Against the gauge, ${who} misses by ${wnum(wOurs.mae_mm)} ${c.waterUnit} a day on average ${lean}.`;
 	});
 	const skipped = $derived((data?.skipped_bare ?? 0) + (data?.skipped_warm ?? 0));
 	const best = $derived(data ? closest(data.rows) : null);
@@ -151,7 +156,8 @@
 				ensemble are their own 7:1 snowfall; settled snow is the consensus's snow water at
 				{data.settled_ratio ?? 8}:1, closest to what a depth sensor sees. Bias: forecast minus
 				observed. Big days ({bigDay} or more): caught / missed / false alarms. The station sits at its
-				own elevation, so read bias over weeks, not days.{skipped
+				own elevation, so read bias over weeks, not days; the rows “at the station’s elevation” ask the
+				models for the station’s own spot, so they compare like with like.{skipped
 					? ` ${skipped} day${skipped === 1 ? '' : 's'} with no snowpack or above freezing all day are left out: the depth can't measure them.`
 					: ''}
 			</p>
@@ -172,8 +178,8 @@
 					</thead>
 					<tbody>
 						{#each waterRows as r (r.source)}
-							<tr class:hl={r.source === 'cons'}>
-								<th scope="row">{r.source === 'cons' ? 'Consensus' : sourceName(r.source)}</th>
+							<tr class:hl={r.source === wOurs?.source}>
+								<th scope="row">{waterSourceName(r.source)}</th>
 								<td class="miss">
 									<span class="bar" aria-hidden="true"
 										><i

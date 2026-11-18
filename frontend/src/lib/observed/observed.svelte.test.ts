@@ -180,6 +180,59 @@ describe('measured against the forecast', () => {
 		expect(container.querySelectorAll('rect.skip').length).toBe(0); // no depth chart
 	});
 
+	it('leads with the forecast at the station once it has a week of days', () => {
+		const withStation = (n: number) => {
+			const data = scores(true);
+			data.rows.push(
+				{
+					source: 'cons_settled',
+					n: 8,
+					bias_cm: 5,
+					mae_cm: 6,
+					hits: 0,
+					misses: 0,
+					false_alarms: 0
+				},
+				{ source: 'stn_settled', n, bias_cm: 0, mae_cm: 1, hits: 0, misses: 0, false_alarms: 0 }
+			);
+			data.water_rows = [
+				{ source: 'cons', n: 8, bias_mm: 6, mae_mm: 7, hits: 0, misses: 0, false_alarms: 0 },
+				{ source: 'stn_cons', n, bias_mm: 0.2, mae_mm: 2, hits: 0, misses: 0, false_alarms: 0 }
+			];
+			data.pairs = data.pairs.map((p) => ({
+				...p,
+				cons_settled_cm: 20,
+				stn_settled_cm: 5,
+				observed_water_mm: 10,
+				cons_water_mm: 30,
+				stn_water_mm: 12
+			}));
+			return data;
+		};
+		const tallest = (container: HTMLElement) =>
+			Math.max(...[...container.querySelectorAll('.tick')].map((t) => Number(t.textContent) || 0));
+		// Six days at the station: not yet; the mid band's 20 cm sets the scale.
+		const a = render(MeasuredVsForecast, { data: withStation(6), units: 'metric', width: 380 });
+		let text = a.container.textContent?.replace(/\s+/g, ' ');
+		expect(text).toMatch(
+			/evening before, as settled snow \(8:1\)\. Over 8 days it has missed by 6 cm/
+		);
+		expect(text).not.toMatch(/station’s own elevation/);
+		expect(tallest(a.container)).toBeGreaterThanOrEqual(20);
+		cleanup();
+		// A week: the forecast for the station's own elevation, in both charts.
+		const b = render(MeasuredVsForecast, { data: withStation(7), units: 'metric', width: 380 });
+		text = b.container.textContent?.replace(/\s+/g, ' ');
+		expect(text).toMatch(
+			/evening before for the station’s own elevation \(1,650 m\), as settled snow \(8:1\)\. Over 7 days it has missed by 1 cm a day on average, with no lean/
+		);
+		expect(text).toMatch(
+			/forecast’s for the station’s own elevation \(1,650 m\)\. Over 7 days it has missed by 2\.0 mm/
+		);
+		expect(tallest(b.container)).toBeLessThan(20);
+		expectMarksInside(b.container);
+	});
+
 	it('says so while loading, after an error, and without a station', () => {
 		const a = render(MeasuredVsForecast, { data: null, units: 'metric', load: 'loading' });
 		expect(a.container.textContent).toMatch(/Loading/);

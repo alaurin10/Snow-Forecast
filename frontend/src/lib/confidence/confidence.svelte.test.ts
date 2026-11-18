@@ -169,7 +169,7 @@ describe('track record', () => {
 		expect(ledes[1]).toBe(
 			'Against the gauge, the consensus’s precipitation misses by 4.0 mm a day on average and runs 2.5 mm high.'
 		);
-		const row = getByText('Consensus').closest('tr')!;
+		const row = getByText('Consensus at mid-mountain').closest('tr')!;
 		expect(row.classList.contains('hl')).toBe(true);
 		expect(row.querySelector('.best')).toBeTruthy();
 		expect([...row.querySelectorAll('td')].map((td) => td.textContent?.trim())).toEqual([
@@ -180,6 +180,27 @@ describe('track record', () => {
 		]);
 		expect(container.textContent?.replace(/\s+/g, ' ')).toMatch(
 			/3 days with no snowpack or above freezing all day are left out/
+		);
+	});
+
+	it('sums up the precipitation forecast at the station once it has a week', () => {
+		const data = {
+			...scores,
+			n_water_days: 9,
+			water_rows: [
+				{ source: 'cons', n: 9, bias_mm: 6, mae_mm: 7, hits: 0, misses: 0, false_alarms: 2 },
+				{ source: 'stn_cons', n: 8, bias_mm: -0.4, mae_mm: 3, hits: 0, misses: 0, false_alarms: 0 }
+			]
+		};
+		const { container, getByText } = render(TrackRecord, { data, units: 'metric' });
+		const ledes = [...container.querySelectorAll('.lede')].map((p) => p.textContent);
+		expect(ledes[1]).toBe(
+			'Against the gauge, the precipitation forecast for the station’s own elevation misses by 3.0 mm a day on average with no lean either way.'
+		);
+		const row = getByText('Consensus at the station’s elevation').closest('tr')!;
+		expect(row.classList.contains('hl')).toBe(true);
+		expect(getByText('Consensus at mid-mountain').closest('tr')!.classList.contains('hl')).toBe(
+			false
 		);
 	});
 

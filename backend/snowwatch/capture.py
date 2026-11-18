@@ -15,12 +15,19 @@ from snowwatch.http import Fetcher, FetchError
 from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us, nws, snotel
 from snowwatch.sources.base import Request, fetch
-from snowwatch.sources.openmeteo import location_requests
+from snowwatch.sources.openmeteo import location_requests, station_request
+
+Position = tuple[float, float, float]  # lat, lon, elevation (m)
 
 
-def location_capture_requests(loc: Location, cfg: ForecastConfig, today: date) -> list[Request]:
+def location_capture_requests(
+    loc: Location, cfg: ForecastConfig, today: date, station: Position | None = None
+) -> list[Request]:
+    """station: where the location's snow station is, for its scorecard forecast."""
     mid = loc.band("mid")
     reqs = list(location_requests(loc, cfg))
+    if station is not None:
+        reqs.append(station_request(*station, cfg.models_for(loc.country)))
     if loc.country == "US":
         reqs += [nws.alerts_request(mid.lat, mid.lon), nws.points_request(mid.lat, mid.lon)]
     if loc.snotel:
@@ -72,30 +79,47 @@ def capture_fixtures(
         "errors": [],
     }
 
-    def save(folder: str, req: Request) -> None:
+    def save(folder: str, req: Request) -> Any:
         key = f"{folder}/{req.name}"
         try:
             data = fetch(fetcher, req)
         except FetchError as e:
             meta["errors"].append(f"{key}: {e}")
             log(f"  ! {key}: {e}")
-            return
+            return None
         size = write_gz(out_dir / folder / f"{req.name}.json.gz", data)
         meta["requests"][key] = {"url": req.url, "params": req.params, "bytes_gz": size}
         log(f"  {key} ({size / 1024:.0f} KB)")
+        return data
 
     log("shared")
+    positions: dict[str, Position] = {}
     for req in shared_capture_requests(locs):
-        save("shared", req)
+        data = save("shared", req)
+        if req.name.startswith("snotel_stations_") and isinstance(data, list):
+            positions |= station_positions(data)
     for i, loc in enumerate(locs):
         if i:
             sleep(spacing_s)
         log(loc.id)
-        for req in location_capture_requests(loc, cfg, today):
+        station = positions.get(loc.snotel) if loc.snotel else None
+        for req in location_capture_requests(loc, cfg, today, station):
             save(loc.id, req)
 
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False) + "\n")
     return meta
+
+
+def station_positions(stations: list[Any]) -> dict[str, Position]:
+    """{triplet: (lat, lon, elevation m)} from an AWDB station list (elevation in feet)."""
+    out: dict[str, Position] = {}
+    for s in stations:
+        if not isinstance(s, dict):
+            continue
+        lat, lon, ft = s.get("latitude"), s.get("longitude"), s.get("elevation")
+        if s.get("stationTriplet") and lat is not None and lon is not None and ft is not None:
+            out[s["stationTriplet"]] = (float(lat), float(lon), float(ft) * 0.3048)
+    return out
 
 
 def load_fixture(path: Path) -> Any:

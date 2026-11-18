@@ -241,3 +241,35 @@ def test_depth_method_switches_every_depth(loc_id: str) -> None:
         assert (slr.daily[4].pooled_cum.p90 or 0) > (raw.daily[4].pooled_cum.p90 or 0)
         cum = [(slr.daily[4].models_cum.get(m), raw.daily[4].models_cum.get(m)) for m in raw.models]
         assert any(a > b for a, b in cum if a is not None and b is not None)
+
+
+def test_station_records_take_the_models_median_per_day() -> None:
+    from snowwatch.analysis.build import _station_records
+    from snowwatch.analysis.series import PointData
+
+    hours = list(range(48))
+    day = [hours[:24], hours[24:]]
+
+    def flat(v: float | None, upto: int = 48) -> dict[int, float | None]:
+        return {h: v if h < upto else None for h in hours}
+
+    point = PointData(
+        tz="America/Los_Angeles",
+        utc_offset_s=-28800,
+        hourly={
+            "snowfall_gfs_seamless": flat(0.1),
+            "precipitation_gfs_seamless": flat(0.2),
+            "snowfall_ecmwf_ifs025": flat(0.3),
+            "precipitation_ecmwf_ifs025": flat(0.4),
+            # HRRR ends partway through the second day.
+            "snowfall_ncep_hrrr_conus": flat(0.5, upto=30),
+            "precipitation_ncep_hrrr_conus": flat(0.6, upto=30),
+        },
+    )
+    models = ["gfs_seamless", "ecmwf_ifs025", "ncep_hrrr_conus"]
+    out = _station_records(point, models, ["2026-11-15", "2026-11-16"], day, config())
+    # Day 1: median of 2.4 / 7.2 / 12 cm and 4.8 / 9.6 / 14.4 mm. Day 2: only two
+    # models cover it all, fewer than the consensus needs.
+    assert [(x.target_date, x.source, x.snow_cm, x.water_mm) for x in out] == [
+        ("2026-11-15", "stn_cons", 7.2, 9.6)
+    ]

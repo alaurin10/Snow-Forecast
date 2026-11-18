@@ -202,3 +202,32 @@ def test_ready_on_the_gauge_alone(hill: sqlite3.Connection) -> None:
     assert out.n_days == 0 and out.rows == []
     assert out.n_water_days == MIN_DAYS and out.ready
     assert out.water_rows[0].mae_mm == 0.0
+
+
+def test_the_forecast_at_the_station_is_scored_beside_the_mid_band(
+    hill: sqlite3.Connection,
+) -> None:
+    # The mid band sits above the station and forecasts more; the forecast for the
+    # station's own spot and elevation is closer.
+    add_station_days(
+        hill,
+        [{"depth": 50 + 10 * i, "tmin": -3, "precip": 100 + 12.0 * i} for i in range(3)],
+    )
+    for i in range(2):
+        add_water(
+            hill,
+            10 + i,
+            START + timedelta(days=i),
+            cons=(14.0, 20.0),
+            stn_cons=(8.75, 12.0),
+        )
+    out = verification(hill, make_location(snotel=STATION), settled_ratio=8)
+    rows = {r.source: r for r in out.rows}
+    # 8.75 cm at 7:1 is 12.5 mm of snow water; settled at 8:1, 10 cm: observed 10, 10.
+    assert [r.source for r in out.rows] == ["cons", "cons_settled", "stn_settled"]
+    assert (rows["stn_settled"].n, rows["stn_settled"].mae_cm) == (2, 0.0)
+    assert rows["cons_settled"].bias_cm == 6.0  # 16 cm settled at mid
+    water = {r.source: r for r in out.water_rows}
+    assert [r.source for r in out.water_rows] == ["cons", "stn_cons"]
+    assert (water["cons"].bias_mm, water["stn_cons"].bias_mm) == (8.0, 0.0)
+    assert [(p.stn_settled_cm, p.stn_water_mm) for p in out.pairs] == [(10.0, 12.0)] * 2

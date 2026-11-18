@@ -46,6 +46,8 @@ def inputs_from_responses(
         },
         warnings=list(warnings or []),
     )
+    if isinstance(responses.get("station"), dict):
+        inputs.station = parse_point(responses["station"])
     if "nws_alerts" in responses:
         inputs.alerts = parse_alerts(responses["nws_alerts"])
     station = (stations or {}).get(loc.snotel) if loc.snotel else None

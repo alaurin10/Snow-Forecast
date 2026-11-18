@@ -1378,6 +1378,8 @@ export interface VerificationPair {
 	observed_cm: number | null;
 	observed_water_mm?: number | null;
 	skip?: ('bare' | 'warm') | null;
+	stn_settled_cm?: number | null;
+	stn_water_mm?: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

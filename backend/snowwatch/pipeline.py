@@ -31,6 +31,7 @@ from snowwatch.sources.openmeteo import (
     blend_request,
     ensemble_request,
     multimodel_request,
+    station_request,
     upper_air_request,
 )
 from snowwatch.store import repo
@@ -137,6 +138,13 @@ def fetch_responses(
             )
             if stations:
                 repo.save_stations(conn, stations)
+    if loc.snotel and (meta := repo.station_meta(conn, loc.snotel)):
+        lat, lon, elev_ft = meta.get("latitude"), meta.get("longitude"), meta.get("elevation")
+        if lat is not None and lon is not None and elev_ft is not None:
+            req = station_request(lat, lon, elev_ft * 0.3048, cfg.models_for(loc.country))
+            data = _try(fetcher, req, key("station"), errors)
+            if data is not None:
+                out["station"] = data
     return out, errors
 
 

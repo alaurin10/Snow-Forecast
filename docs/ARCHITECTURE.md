@@ -131,7 +131,12 @@ older than `STALE_AFTER_H` (12 h).
   source, plus the consensus as settled snow (`cons_settled`, its snow water at
   `verify_settled_ratio`, 8:1), leaving out days the depth can't measure (no snowpack,
   or above freezing all day). Precipitation: the gauge's catch against each source's
-  total water (`water_mm`), on every day, bare ground and rain included. SNOTEL dates
+  total water (`water_mm`), on every day, bare ground and rain included. Both checks
+  also score a forecast for the station's own spot and elevation (`stn_cons`, and
+  settled `stn_settled`): each run asks Open-Meteo for every model's snowfall and
+  precipitation there, 3 days ahead (`station_request`, about 1.2 calls), and stores
+  the models' daily median. The bands don't move; the charts lead with this forecast
+  once it has a week of days. SNOTEL dates
   its daily depth, snow water and gauge total by the day they close; the parser moves
   them to the day they open (`snotel.start_of_day`), as the BC stations are read.
 - **Bands**: everything is computed at base, mid and summit at each band's own
