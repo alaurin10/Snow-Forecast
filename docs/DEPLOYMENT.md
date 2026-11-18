@@ -132,8 +132,34 @@ the existing sessions:
 docker compose run --rm worker snowwatch owner logout-all
 ```
 
-**Webcams:** Manage → Edit a location → Add a webcam. The page link opens when
-tapped; an optional `https://` image link that updates shows a thumbnail.
+**Webcams:** Manage → Edit a location → Add a webcam, once per camera (up to 12). A
+location with webcams gets a Webcams tab. Each webcam has:
+
+- **Name** and **Page link** (required): any `http(s)://` page; "Open site" opens it.
+- **Image link** (optional): an `https://` picture that the camera updates. It shows on
+  the tab and refreshes every 5 minutes. To get one, right-click the camera's picture on
+  its website → *Copy image address* (e.g. `https://www.nps.gov/webcams-mora/mountain.jpg`).
+- **Live video link** (optional): plays in the app when someone presses Live. It must
+  come from one of these hosts. The form refuses anything else, because the site's
+  security policy lets only these players into the page:
+
+  | Host | What to paste | Where to find it |
+  |---|---|---|
+  | YouTube | `youtube.com/watch?v=…`, `youtu.be/…`, `youtube.com/live/…`, an embed link, or `youtube.com/channel/UC…/live` | The resort's YouTube channel → Live; or "Watch on YouTube" on the player |
+  | CamStreamer | `https://camstreamer.com/embed/…` | The player on the resort's page (see below). It plays the resort's YouTube stream and follows it if the stream restarts |
+  | Brownrice | `https://player.brownrice.com/embed/NAME` | The player on the resort's page (many Vail Resorts mountains). A picture from `…/snapshot/NAME` is used automatically |
+  | Roundshot | `https://NAME.roundshot.com/…` | Open the resort's 360° cam; copy the address |
+
+  A YouTube or Brownrice camera with no image link shows the host's own picture. Other
+  players (or a page full of cameras) can't play inside the app; leave the field empty
+  and the camera opens on its own site.
+
+  Finding a player's link on a resort's page: right-click the video → *Inspect*, then look
+  for the `<iframe src="…">` around it and copy that address. A YouTube link changes when
+  a resort restarts its stream; a CamStreamer link or a channel's `/live` link follows it.
+
+Changes to webcams (or links) start a forecast refresh for that location, so they show a
+minute or two after saving.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1

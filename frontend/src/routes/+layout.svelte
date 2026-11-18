@@ -171,7 +171,7 @@
 			'input, textarea, select, [contenteditable="true"]'
 		);
 		if (typing || e.metaKey || e.ctrlKey || e.altKey || palette) return;
-		// 1–4: the open location's sections, in the order its tabs show them.
+		// 1–5: the open location's sections, in the order its tabs show them.
 		if (sections.id && /^[1-9]$/.test(e.key)) {
 			const s = sections.list[Number(e.key) - 1];
 			if (s) sections.tab = s;

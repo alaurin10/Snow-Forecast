@@ -8,8 +8,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from snowwatch.urls import check_url
+from snowwatch.webcams import check_video_url
 
 Link = Annotated[str, AfterValidator(check_url)]
+VideoLink = Annotated[str, AfterValidator(check_url), AfterValidator(check_video_url)]
 
 BandName = Literal["base", "mid", "summit"]
 BAND_ORDER: tuple[BandName, ...] = ("base", "mid", "summit")
@@ -35,6 +37,9 @@ class Webcam(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     url: Link  # the webcam's page
     image_url: Link | None = None  # a still image, if any (https, or browsers block it)
+    # Live video the page plays in place: a YouTube, Brownrice, CamStreamer or Roundshot
+    # link, stored as that host's embed address (see snowwatch.webcams).
+    video_url: VideoLink | None = None
 
 
 class Location(BaseModel):

@@ -311,6 +311,9 @@ def test_create_update_archive_and_jobs(client: TestClient, conn: sqlite3.Connec
     loc["name"] = "Testpeak"
     r = client.put("/api/admin/locations/testpeak-ski-area", json=loc, headers=H)
     assert r.status_code == 200 and r.json()["job_id"] is None  # name only: no re-pull
+    loc["webcams"] = [{"name": "Base", "url": "https://example.com/base"}]
+    r = client.put("/api/admin/locations/testpeak-ski-area", json=loc, headers=H)
+    assert r.json()["job_id"]  # a new webcam shows with the next snapshot: pulled now
     loc["active"] = False
     client.put("/api/admin/locations/testpeak-ski-area", json=loc, headers=H)
     ids = [x["id"] for x in client.get("/api/admin/locations", headers=H).json()]

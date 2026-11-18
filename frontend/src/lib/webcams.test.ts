@@ -1,0 +1,79 @@
+import { describe, expect, it } from 'vitest';
+import { embedFor, freshImage, playSrc } from './webcams';
+
+const NOCOOKIE = 'https://www.youtube-nocookie.com/embed/vhO8nNqg9iw';
+
+describe('embedFor', () => {
+	it('reads every way of linking a YouTube video', () => {
+		for (const link of [
+			'https://www.youtube.com/watch?v=vhO8nNqg9iw',
+			'https://youtube.com/watch?v=vhO8nNqg9iw&t=3',
+			'https://m.youtube.com/watch?v=vhO8nNqg9iw',
+			'https://youtu.be/vhO8nNqg9iw?si=abc',
+			'https://www.youtube.com/live/vhO8nNqg9iw',
+			'https://www.youtube.com/embed/vhO8nNqg9iw?autoplay=1',
+			NOCOOKIE
+		]) {
+			const e = embedFor(link);
+			expect(e?.src, link).toBe(NOCOOKIE);
+			expect(e?.poster).toBe('https://i.ytimg.com/vi/vhO8nNqg9iw/hqdefault.jpg');
+		}
+		const ch = 'UCabcdefghijklmnopqrstuv';
+		expect(embedFor(`https://www.youtube.com/channel/${ch}/live`)?.src).toBe(
+			`https://www.youtube.com/embed/live_stream?channel=${ch}`
+		);
+	});
+
+	it('reads Brownrice, CamStreamer and Roundshot players', () => {
+		const br = embedFor('https://live9.brownrice.com/?sn=whistlerpeak&em=1');
+		expect(br).toEqual({
+			player: 'brownrice',
+			src: 'https://player.brownrice.com/embed/whistlerpeak',
+			poster: 'https://player.brownrice.com/snapshot/whistlerpeak'
+		});
+		expect(embedFor('https://camstreamer.com/embed/PZyoJBnQWsgYw?enablejsapi=1')?.src).toBe(
+			'https://camstreamer.com/embed/PZyoJBnQWsgYw'
+		);
+		expect(embedFor('https://crystal.roundshot.com/#/')?.src).toBe(
+			'https://crystal.roundshot.com/'
+		);
+	});
+
+	it('leaves every other link as a plain link', () => {
+		for (const bad of [
+			'https://www.youtube.com/@TheSummitatSnoqualmie',
+			'https://www.youtube.com/watch?v=short',
+			'https://evil.example/embed/vhO8nNqg9iw',
+			'https://youtube.com.evil.example/watch?v=vhO8nNqg9iw',
+			'http://crystal.roundshot.com/',
+			'https://roundshot.com.evil.example/',
+			'https://www.nps.gov/webcams-mora/mountain.jpg',
+			'javascript:alert(1)',
+			'',
+			null
+		])
+			expect(embedFor(bad), String(bad)).toBeNull();
+	});
+});
+
+describe('playSrc', () => {
+	it('starts YouTube muted and inline; other players as they are', () => {
+		const yt = new URL(playSrc(embedFor(NOCOOKIE)!));
+		expect(yt.origin + yt.pathname).toBe(NOCOOKIE);
+		expect(yt.searchParams.get('autoplay')).toBe('1');
+		expect(yt.searchParams.get('mute')).toBe('1');
+		expect(yt.searchParams.get('playsinline')).toBe('1');
+		const br = embedFor('https://player.brownrice.com/embed/whistlerpeak')!;
+		expect(playSrc(br)).toBe(br.src);
+	});
+});
+
+describe('freshImage', () => {
+	it('marks a refresh, keeping the camera’s own query', () => {
+		expect(freshImage('https://x.example/c.jpg?w=640', 0)).toBe('https://x.example/c.jpg?w=640');
+		expect(freshImage('https://x.example/c.jpg?w=640', 42)).toBe(
+			'https://x.example/c.jpg?w=640&_sw=42'
+		);
+		expect(freshImage('http://x.example/c.jpg', 42)).toBeUndefined();
+	});
+});
