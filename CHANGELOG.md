@@ -7,6 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Webcams are bigger, and can all play at once.** Cards are wider (two across on a
+  desktop), a camera playing on its own spans the whole row (Crystal's 360° view is now
+  usable), and a single camera always does. "Play all live" starts every camera's video
+  at once, muted; the device remembers it and starts them by itself next time, until
+  "Stop all". Off by default, since a page of live video is heavy on a phone's data.
 - **Webcams get their own tab, with live video in the app.** A location with webcams
   shows a Webcams tab (after Observed; key 5) instead of a card at the foot of Forecast.
   Each camera shows its picture, refreshed every 5 minutes while the page is in view, and

@@ -149,6 +149,14 @@ class Prefs {
 	/** Overview order on phones: the order set on the Manage page, or most snow first. */
 	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
 
+	/** Webcams tab: start every camera's live video on opening it (this device only). */
+	camsAutoplay = $state<'on' | 'off'>(load('sw.camsAutoplay', ['on', 'off'] as const, 'off'));
+
+	setCamsAutoplay(on: boolean) {
+		this.camsAutoplay = on ? 'on' : 'off';
+		save('sw.camsAutoplay', this.camsAutoplay);
+	}
+
 	setSort(s: 'mine' | 'snow') {
 		this.sort = s;
 		save('sw.sort', s);
