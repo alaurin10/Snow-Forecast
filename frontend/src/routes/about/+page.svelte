@@ -154,7 +154,11 @@
 				Turning on alerts stores your browser’s push address and your alert choices on the server,
 				and nothing else. Turning alerts off deletes them.
 			</li>
-			<li>Webcam pictures load straight from each resort’s own website.</li>
+			<li>
+				Webcam pictures load straight from each resort’s own website. A webcam’s live video loads
+				from its host (YouTube, Brownrice, CamStreamer, Roundshot or Ozolio) only when you press
+				Live.
+			</li>
 			<li>The server keeps ordinary request logs for troubleshooting.</li>
 		</ul>
 		{#if meta}

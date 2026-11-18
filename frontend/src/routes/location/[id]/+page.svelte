@@ -1,6 +1,6 @@
 <!-- One location. Desktop and tablet: the name on the sky with its conditions, then the
      sections' tabs and the elevation, the outlook card, and the section (Forecast,
-     Confidence, Backcountry, Observed; keys 1–4 switch them too). On every screen, once the
+     Confidence, Backcountry, Observed, and Webcams when it has any; keys 1–5 switch them too). On every screen, once the
      elevation picker has scrolled away, a compact one (numbers only) stays at the top
      right, or stacked in the empty margin beside the page on wide windows. Phones: the name, a "now" pill and the elevation numbers, tabs, and the
      chart first. The sky behind shows this location's weather now. -->
@@ -47,7 +47,7 @@
 	import BackcountryTab from '../../../lib/backcountry/BackcountryTab.svelte';
 	import ConfidenceTab from '../../../lib/confidence/ConfidenceTab.svelte';
 	import ObservedTab from '../../../lib/observed/ObservedTab.svelte';
-	import Webcams from '../../../lib/components/Webcams.svelte';
+	import WebcamsTab from '../../../lib/webcams/WebcamsTab.svelte';
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
 	import { compass, DANGER_WORDS } from '../../../lib/conditions';
@@ -163,11 +163,17 @@
 		return () => (live = false);
 	});
 
-	const tabs = $derived<Section[]>(
-		snap?.location.kind === 'backcountry'
-			? ['forecast', 'backcountry', 'confidence', 'observed']
-			: ['forecast', 'confidence', 'backcountry', 'observed']
-	);
+	const tabs = $derived<Section[]>([
+		...(snap?.location.kind === 'backcountry'
+			? (['forecast', 'backcountry', 'confidence', 'observed'] as const)
+			: (['forecast', 'confidence', 'backcountry', 'observed'] as const)),
+		// Webcams only where the owner added some (on the Manage page).
+		...(snap?.location.webcams?.length ? (['webcams'] as const) : [])
+	]);
+	// Webcams open, then a location without any: back to its forecast.
+	$effect(() => {
+		if (snap && !tabs.includes(sections.tab)) sections.tab = 'forecast';
+	});
 	// The rail shows this location's sections; the sky shows its weather now.
 	$effect(() => {
 		sections.id = snap ? id : null;
@@ -186,7 +192,7 @@
 		skyState.set('page', null);
 	});
 	const tab = $derived(sections.tab);
-	// Switching section (keys 1–4) from further down: back up to the tabs, so the new
+	// Switching section (keys 1–5) from further down: back up to the tabs, so the new
 	// section starts at its top rather than somewhere in its middle.
 	let toolsEl = $state<HTMLElement>();
 	let lastTab: Section | null = null;
@@ -695,7 +701,6 @@
 				{@render elevationsCard()}
 				{@render headsUpCard()}
 				{@render aboutCard()}
-				<Webcams cams={snap.location.webcams ?? []} />
 			{:else}
 				{#if backcountry}
 					<section class="card thin">
@@ -746,13 +751,14 @@
 					{@render headsUpCard()}
 					{@render aboutCard()}
 				</div>
-				<Webcams cams={snap.location.webcams ?? []} />
 			{/if}
 		</div>
 	{:else if tab === 'confidence'}
 		<ConfidenceTab {snap} {band} {trend} {scores} {scoresLoad} {units} />
 	{:else if tab === 'backcountry'}
 		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} />
+	{:else if tab === 'webcams'}
+		<WebcamsTab cams={snap.location.webcams ?? []} />
 	{:else}
 		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} />
 	{/if}
@@ -1322,9 +1328,9 @@
 		backdrop-filter: none;
 		-webkit-backdrop-filter: none;
 	}
+	/* Never narrower than the name: with five tabs on a small phone, the row scrolls. */
 	.tabs.under button {
-		flex: 1 1 auto;
-		min-width: 0;
+		flex: 1 0 auto;
 		border-radius: 0;
 		padding: 12px 6px;
 		font-size: 0.88rem;

@@ -69,6 +69,18 @@ def cmd_locations(args: argparse.Namespace, settings: Settings) -> int:
             Path(args.path).write_text(text)
         else:
             sys.stdout.write(text)
+    elif args.action == "webcams":
+        # Each listed location's webcams, then a forecast run so they show on its page.
+        from snowwatch import jobs
+
+        path = Path(args.path) if args.path else settings.config_dir / "webcams.yaml"
+        counts = service.set_webcams_yaml(conn, path)
+        active = {loc.id for loc in service.list_locations(conn)}
+        for loc_id, n in counts.items():
+            if loc_id in active:
+                jobs.enqueue(conn, "pull", loc_id, "webcams")
+            print(f"{loc_id:30s} {n} webcam{'' if n == 1 else 's'}")
+        print("the worker refreshes these locations in the next minute; they show after that")
     elif args.action == "stations":
         # Fill in the nearest snow station for every location that has none.
         from snowwatch.locations.resolve import has_stations, rank_stations
@@ -399,10 +411,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser(
         "locations",
-        help="list, import or export locations; `stations` fills in missing snow stations",
+        help=(
+            "list, import or export locations; `stations` fills in missing snow stations;"
+            " `webcams` sets webcams from a file (default: config/webcams.yaml)"
+        ),
     )
-    s.add_argument("action", choices=["list", "import", "export", "stations"])
-    s.add_argument("path", nargs="?", help="YAML file for import/export")
+    s.add_argument("action", choices=["list", "import", "export", "stations", "webcams"])
+    s.add_argument("path", nargs="?", help="YAML file for import/export/webcams")
     s.set_defaults(func=cmd_locations)
 
     s = sub.add_parser("budget", help="estimated daily Open-Meteo usage")

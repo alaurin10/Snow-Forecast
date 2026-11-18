@@ -1,13 +1,15 @@
-// The open location's sections (Forecast, Confidence, Backcountry, Observed). The
+// The open location's sections (Forecast, Confidence, Backcountry, Observed, and
+// Webcams when it has any). The
 // location page owns them and shows them as its tabs on every screen; the shell's keys
-// 1–4 pick one, and the rail marks which location is open. All read and set the same state.
-export type Section = 'forecast' | 'confidence' | 'backcountry' | 'observed';
+// 1–5 pick one, and the rail marks which location is open. All read and set the same state.
+export type Section = 'forecast' | 'confidence' | 'backcountry' | 'observed' | 'webcams';
 
 export const SECTION_NAMES: Record<Section, string> = {
 	forecast: 'Forecast',
 	confidence: 'Confidence',
 	backcountry: 'Backcountry',
-	observed: 'Observed'
+	observed: 'Observed',
+	webcams: 'Webcams'
 };
 
 class Sections {

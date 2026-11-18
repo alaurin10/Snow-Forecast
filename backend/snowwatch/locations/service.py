@@ -182,6 +182,35 @@ def import_yaml(conn: sqlite3.Connection, path: Path, *, max_locations: int) -> 
     return len(locs)
 
 
+def set_webcams_yaml(conn: sqlite3.Connection, path: Path) -> dict[str, int]:
+    """Replace the webcams of each location the file lists, leaving everything else as it
+    is. The file maps a location id to its webcams (a list, as on the Manage page). Every
+    entry is checked before anything is saved; an unknown id is an error."""
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected location ids, each with a list of webcams")
+    plan: list[Location] = []
+    for loc_id, cams in raw.items():
+        loc = get_location(conn, str(loc_id))
+        if loc is None:
+            raise ValueError(f"{path}: unknown location {loc_id!r}")
+        data = loc.model_dump()
+        data["webcams"] = cams or []
+        plan.append(Location.model_validate(data))
+    for loc in plan:
+        conn.execute(
+            "UPDATE locations SET webcams_json = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+            (
+                json.dumps([w.model_dump(exclude_none=True) for w in loc.webcams]),
+                utcnow_iso(),
+                "webcams",
+                loc.id,
+            ),
+        )
+    conn.commit()
+    return {loc.id: len(loc.webcams) for loc in plan}
+
+
 def export_yaml(conn: sqlite3.Connection) -> str:
     locs = list_locations(conn, include_inactive=True)
     # Order is implied by list position, so sort_order is left out.

@@ -178,7 +178,9 @@ def make_admin_router() -> APIRouter:
             raise HTTPException(400, "the id can't be changed")
         loc = loc.model_copy(update={"sort_order": old.sort_order})
         _upsert(request, conn, loc, "owner")
-        changed = (old.bands, old.country, old.active) != (loc.bands, loc.country, loc.active)
+        # Links and webcams travel in the forecast snapshot, so they show after a new one.
+        shown = ("bands", "country", "active", "links", "webcams")
+        changed = any(getattr(old, k) != getattr(loc, k) for k in shown)
         job = jobs.enqueue(conn, "pull", loc.id, "owner") if loc.active and changed else None
         return SaveOut(location=loc, job_id=job)
 
