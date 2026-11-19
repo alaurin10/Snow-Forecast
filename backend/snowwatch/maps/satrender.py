@@ -29,7 +29,7 @@ import io
 import logging
 import math
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,7 +38,7 @@ from urllib.parse import quote
 
 import httpx
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 if TYPE_CHECKING:
     from snowwatch.maps.sat import Pass
@@ -47,7 +47,7 @@ log = logging.getLogger("snowwatch.sat")
 
 PC_BBOX = "https://planetarycomputer.microsoft.com/api/data/v1/item/bbox"
 # Bumped whenever the drawing changes, so every view is drawn afresh (new names).
-RENDER = 5
+RENDER = 6
 TILE = 512
 WORLD = 40075016.685578488  # Web Mercator metres round the equator
 MODES = {
@@ -75,6 +75,13 @@ CLEAR_MASK = (
     + "&rescale=0,255"
 )
 QUALITY = 85
+# A pass's mask (see Renderer.mask): no data, cloud or its shadow, clear.
+M_NODATA, M_CLOUD, M_CLEAR = 0, 1, 2
+# Stitched views: parts' borders are curved over about this much ground, and joins
+# between passes fade over about this much (less than the cloud margin, so a fade never
+# reaches into cloud).
+PART_SOFTEN_M = 120
+FEATHER_M = 50
 
 
 @dataclass(frozen=True)
@@ -177,30 +184,38 @@ class Renderer:
         Image.fromarray(out, "RGBA").save(path, "WEBP", quality=95, method=4)
         return out
 
-    def clear(self, key: str, p: Pass, box: Box, area: Area) -> np.ndarray:
-        """Where a pass saw the ground clearly, at half the picture's size (20 m at the
-        centre): no cloud, cloud shadow or no data, less the margin round cloud."""
-        margin, speck = area.cloud_margin, area.cloud_speck
-        path = self.crops / key / p.id / f"clear{margin}s{speck}b.png"
+    def mask(self, key: str, p: Pass, box: Box, area: Area) -> np.ndarray:
+        """What a pass saw, at half the picture's size (20 m at the centre): M_NODATA,
+        M_CLOUD (cloud or its shadow) or M_CLEAR, from the cache or fetched. Kept as it
+        came, so changing how it is cleaned up (`clear`) fetches nothing."""
+        path = self.crops / key / p.id / "mask.png"
         if path.exists():
-            m = np.asarray(Image.open(path).convert("L")) > 0
-        else:
-            n = area.half
-            clear = np.zeros((n, n), bool)
-            cloud = np.zeros((n, n), bool)
-            for it in p.items:
-                a = self._assemble(
-                    self._quarters(it.id, box, n // 2, "png", CLEAR_MASK), n // 2, "LA"
-                )
-                seen = (a[..., 1] > 0) & ~(clear | cloud)  # not decided by an earlier tile
-                clear |= seen & (a[..., 0] > 0)
-                cloud |= seen & (a[..., 0] == 0)
-            seen = clear | cloud
-            cloud = grow(~grow(~cloud, speck), speck)  # opened: specks gone
-            m = seen & ~grow(cloud, margin)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            Image.fromarray((m * 255).astype(np.uint8), "L").save(path, "PNG", optimize=True)
-        return m
+            return np.asarray(Image.open(path).convert("L"))
+        n = area.half
+        out = np.zeros((n, n), np.uint8)
+        for it in p.items:
+            a = self._assemble(self._quarters(it.id, box, n // 2, "png", CLEAR_MASK), n // 2, "LA")
+            new = (a[..., 1] > 0) & (out == M_NODATA)  # not decided by an earlier tile
+            out[new & (a[..., 0] > 0)] = M_CLEAR
+            out[new & (a[..., 0] == 0)] = M_CLOUD
+            if (out != M_NODATA).all():
+                break
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(out, "L").save(path, "PNG", optimize=True)
+        for old in path.parent.glob("clear*.png"):  # the cleaned-up masks kept before
+            old.unlink(missing_ok=True)
+        return out
+
+    def clear(self, key: str, p: Pass, box: Box, area: Area) -> np.ndarray:
+        """Where a pass saw the ground clearly, at half the picture's size: seen and not
+        cloud, less a margin round cloud (specks of "cloud" first left out: SCL calls some
+        bright rock and snow cloud). Both are grown roughly round, so the holes they leave
+        are blobs, not boxes."""
+        m = self.mask(key, p, box, area)
+        speck = area.cloud_speck
+        cloud = grow(~grow(m != M_CLOUD, speck), speck)  # opened: specks gone
+        out: np.ndarray = (m != M_NODATA) & ~grow(cloud, area.cloud_margin)
+        return out
 
     # --- views ----------------------------------------------------------------------
 
@@ -232,14 +247,17 @@ class Renderer:
             has = self.picture(key, p, "natural", box, area)[..., 3] > 0
             seen.append(has)
             ok.append(upsample2(self.clear(key, p, box, area)) & has)
-        choice = choose(owner, ok, seen, area.px)
-        del ok, seen
+        res = (box[2] - box[0]) / area.px
+        choice = choose(owner, ok, seen, area.px, round(PART_SOFTEN_M / res))
+        del seen
+        weights = feather_weights(choice, ok, max(1, round(FEATHER_M / res)))
+        del ok
         for mode in MODES:
-            out = np.zeros((area.px, area.px, 4), np.uint8)
-            for i, p in enumerate(layers):
-                sel = choice == i
-                if sel.any():
-                    out[sel] = self.picture(key, p, mode, box, area)[sel]
+            pictures = (
+                self.picture(key, p, mode, box, area) if w is not None else None
+                for p, w in zip(layers, weights, strict=True)
+            )
+            out = blend(pictures, weights, area.px)
             self.cut(out, box, self.views / view / mode, area.zooms)
         (self.views / view / "done").touch()
         return view
@@ -293,15 +311,64 @@ class Renderer:
 
 
 def grow(m: np.ndarray, r: int) -> np.ndarray:
-    """A mask grown by `r` pixels (a square window)."""
-    if r <= 0:
-        return m
-    h, w = m.shape
-    a = np.pad(m, r).astype(np.int32)
-    cs = np.cumsum(np.pad(a, ((0, 0), (1, 0))), axis=1)
-    rows = cs[:, 2 * r + 1 :] - cs[:, :w]
-    cs = np.cumsum(np.pad(rows, ((1, 0), (0, 0))), axis=0)
-    out: np.ndarray = (cs[2 * r + 1 :, :] - cs[:h, :]) > 0
+    """A mask grown by `r` pixels, roughly round: the steps alternate a 3 x 3 square and
+    a plus, so a dot grows into an octagon rather than a box."""
+    out = m.copy()
+    for step in range(max(0, r)):
+        p = np.pad(out, 1)
+        nxt = out | p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]
+        if step % 2 == 0:
+            nxt |= p[:-2, :-2] | p[:-2, 2:] | p[2:, :-2] | p[2:, 2:]
+        out = nxt
+    return out
+
+
+def blur(m: np.ndarray, radius: float) -> np.ndarray:
+    """A 0/1 (or 0-255) mask blurred, as 0-255."""
+    a = m.astype(np.uint8) * (255 if m.dtype == bool else 1)
+    if radius <= 0:
+        return a
+    out: np.ndarray = np.asarray(Image.fromarray(a, "L").filter(ImageFilter.GaussianBlur(radius)))
+    return out
+
+
+def feather_weights(
+    choice: np.ndarray, ok: Sequence[np.ndarray], radius: int
+) -> list[np.ndarray | None]:
+    """How much of each layer goes into each pixel (0-255), so joins between passes fade
+    over about `radius` pixels instead of being cut sharp. A layer reaches past its own
+    pixels only where it saw the ground clearly, so the fade never brings in its cloud;
+    inside a cloud gap there is only the pass that fills it (the gap's margin is wider
+    than the fade)."""
+    out: list[np.ndarray | None] = []
+    for i, m in enumerate(ok):
+        sel = choice == i
+        if not sel.any():
+            out.append(None)
+            continue
+        w = blur(sel, radius / 2)  # Gaussian: about all of it within twice the radius
+        out.append(np.where(sel | m, w, 0).astype(np.uint8))
+    return out
+
+
+def blend(
+    pictures: Iterable[np.ndarray | None], weights: Sequence[np.ndarray | None], size: int
+) -> np.ndarray:
+    """The layers' pictures (RGBA, given one at a time so only one is in memory) mixed by
+    `weights` (see `feather_weights`), opaque wherever any of them has data."""
+    acc = np.zeros((size, size, 3), np.uint32)
+    tot = np.zeros((size, size), np.uint32)
+    for pic, w in zip(pictures, weights, strict=True):
+        if w is None or pic is None:
+            continue
+        for r0 in range(0, size, 256):  # in strips, to keep the products small
+            rows = slice(r0, min(size, r0 + 256))
+            ww = w[rows].astype(np.uint32) * (pic[rows, :, 3] > 0)
+            acc[rows] += pic[rows, :, :3].astype(np.uint32) * ww[..., None]
+            tot[rows] += ww
+    out = np.zeros((size, size, 4), np.uint8)
+    out[..., :3] = (acc // np.maximum(tot, 1)[..., None]).astype(np.uint8)
+    out[..., 3] = np.where(tot > 0, 255, 0)
     return out
 
 
@@ -316,15 +383,22 @@ def choose(
     ok: Sequence[np.ndarray],
     seen: Sequence[np.ndarray] | None = None,
     px: int = CENTRE.px,
+    soften: int = 0,
 ) -> np.ndarray:
     """Which layer each pixel comes from (-1: none).
 
-    First the layer whose part it is in (the grid's parts scaled up smoothly, so the
-    joins aren't 250 m stairs), if that layer saw it clearly; then the layer nearest in
-    time to that one (layers are newest first) that did, so a gap looks like its
-    surroundings. Given `seen` (where each layer has data at all), what's still left (cloud in
-    every layer) comes from its part's layer, else the newest with data: a pass's own
-    sharp picture of the cloud beats a hole showing the 375 m mosaic."""
+    First the layer whose part it is in, if that layer saw it clearly. The grid's parts
+    are scaled up and blurred by `soften` pixels before the parts are drawn, so their
+    borders curve with the ground rather than follow the 250 m cells.
+
+    Then each part's cloud gaps are filled from as few other passes as can be: the one
+    nearest in time (layers are newest first) that saw at least half of what the best
+    one did, for all of the part's gaps at once, then the next for what's left. So a
+    part's gaps all look alike instead of a scatter of passes, and alike its own ground.
+
+    Given `seen` (where each layer has data at all), what's still left (cloud in every
+    layer) comes from its part's layer, else the newest with data: a pass's own sharp
+    picture of the cloud beats a hole showing the 375 m mosaic."""
     size = ok[0].shape[0] if ok else px
     choice = np.full((size, size), -1, np.int8)
     if not ok:
@@ -337,6 +411,7 @@ def choose(
                 (size, size), Image.Resampling.BILINEAR
             )
         )
+        w = blur(w, soften)
         better = w > best
         pref[better] = i
         best = np.maximum(best, w)
@@ -345,9 +420,14 @@ def choose(
     n = len(ok)
     for i in range(n):
         gap = (choice < 0) & (pref == i)
-        for j in sorted(range(n), key=lambda j: (abs(j - i), j)):
-            if not gap.any():
+        while gap.any():
+            seen_by = [int((gap & ok[j]).sum()) if j != i else 0 for j in range(n)]
+            top = max(seen_by)
+            if top == 0:
                 break
+            j = next(
+                j for j in sorted(range(n), key=lambda j: (abs(j - i), j)) if seen_by[j] * 2 >= top
+            )
             take = gap & ok[j]
             choice[take] = j
             gap &= ~take

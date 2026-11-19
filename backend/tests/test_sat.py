@@ -332,11 +332,98 @@ def test_gaps_are_filled_from_the_pass_nearest_in_time() -> None:
     assert (choice[:8, :8] == 1).all() and (choice[8:, 8:] == 2).all()
 
 
+def test_a_parts_gaps_come_from_as_few_passes_as_can_be() -> None:
+    owner = np.full((N, N), 0, np.int16)  # all the newest pass's part
+    size = 48
+    gaps = np.ones((size, size), bool)
+    gaps[4:12, 4:12] = gaps[30:40, 20:30] = gaps[20:24, 40:44] = False
+    # Pass 1 (nearest in time) saw only the first gap; pass 2 saw them all. Pass 1 saw
+    # under half of what pass 2 did, so pass 2 fills every gap: one look, not a mix.
+    near = np.ones((size, size), bool)
+    near[30:40, 20:30] = near[20:24, 40:44] = False
+    choice = satrender.choose(owner, [gaps, near, np.ones((size, size), bool)])
+    assert (choice[~gaps] == 2).all() and (choice[gaps] == 0).all()
+    # Seeing at least half as much as the best is enough for the nearer pass.
+    near[30:40, 20:30] = True
+    choice = satrender.choose(owner, [gaps, near, np.ones((size, size), bool)])
+    assert (choice[4:12, 4:12] == 1).all() and (choice[30:40, 20:30] == 1).all()
+    assert (choice[20:24, 40:44] == 2).all()
+
+
+def test_softened_parts_curve_instead_of_following_the_grid() -> None:
+    owner = np.zeros((N, N), np.int16)
+    owner[: N // 2, : N // 2] = 1  # a square part in one corner
+    full = [np.ones((240, 240), bool)] * 2
+    hard = satrender.choose(owner, full)
+    soft = satrender.choose(owner, full, soften=8)
+    assert hard[117, 117] == 1 and soft[117, 117] == 0  # the corner is rounded off
+    assert soft[60, 117] == 1  # while a straight edge stays put
+    assert soft[60, 60] == 1 and soft[200, 200] == 0
+
+
+def test_joins_fade_but_never_bring_in_cloud() -> None:
+    size = 40
+    choice = np.zeros((size, size), np.int8)
+    choice[:, 20:] = 1
+    ok0 = np.ones((size, size), bool)
+    ok1 = np.ones((size, size), bool)
+    ok1[:, :20] = False  # pass 1 is cloudy wherever pass 0 is shown
+    w = satrender.feather_weights(choice, [ok0, ok1], 4)
+    assert w[0] is not None and w[1] is not None
+    assert w[0][5, 22] > 0  # pass 0 fades into pass 1's side...
+    assert w[1][5, 17] == 0  # ...but pass 1's cloud never fades into pass 0's
+    red = np.zeros((size, size, 4), np.uint8)
+    red[..., 0], red[..., 3] = 200, 255
+    blue = np.zeros((size, size, 4), np.uint8)
+    blue[..., 2], blue[..., 3] = 200, 255
+    out = satrender.blend(iter([red, blue]), w, size)
+    assert (out[..., 3] == 255).all()
+    assert out[5, 2, 0] == 200 and out[5, 37, 2] == 200  # far from the join: one pass
+    assert 0 < out[5, 21, 0] < 200 and 0 < out[5, 21, 2] < 200  # at it: a mix
+
+
 def test_grow_and_upsample() -> None:
     m = np.zeros((9, 9), bool)
     m[4, 4] = True
-    assert satrender.grow(m, 2).sum() == 25 and satrender.grow(m, 0).sum() == 1
+    # Roughly round: an octagon (5 x 5 less its corners), not a 5 x 5 box.
+    assert satrender.grow(m, 2).sum() == 21 and satrender.grow(m, 0).sum() == 1
+    assert not satrender.grow(m, 2)[2, 2] and satrender.grow(m, 2)[2, 3]
     assert satrender.upsample2(m).shape == (18, 18) and satrender.upsample2(m).sum() == 4
+
+
+def test_masks_are_kept_as_fetched_and_cleaned_up_on_use(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        a = np.full((16, 16), 255, np.uint8)
+        a[8, 8] = 0  # one speck of "cloud"
+        a[0:6, 0:6] = 0  # and a real cloud
+        buf = io.BytesIO()
+        Image.fromarray(np.stack([a, np.full_like(a, 255)], -1), "LA").save(buf, "PNG")
+        return httpx.Response(200, content=buf.getvalue())
+
+    r = satrender.Renderer(tmp_path, httpx.Client(transport=httpx.MockTransport(answer)))
+    area = replace(satrender.CENTRE, px=64)  # masks of 32 px, fetched as 16 px quarters
+    t = datetime(2026, 11, 1, tzinfo=UTC)
+    p = sat.Pass(
+        "S2A_MSIL2A_20261101T182539_R127",
+        t,
+        "Sentinel-2A",
+        [sat.SatItem(id="i", bbox=[0, 0, 1, 1])],
+    )
+    box = sat.area_box(47.0, -121.0)
+    stale = tmp_path / "crops" / "k" / p.id / "clear4s2b.png"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"old")
+    m = r.mask("k", p, box, area)
+    assert set(np.unique(m)) == {satrender.M_CLOUD, satrender.M_CLEAR} and len(calls) == 4
+    assert (tmp_path / "crops" / "k" / p.id / "mask.png").exists() and not stale.exists()
+    clear = r.clear("k", p, box, area)
+    assert not clear[2, 2] and not clear[7, 7]  # the cloud and its margin
+    assert clear[8 + 16, 8 + 16] and clear[31, 31]  # the speck is ignored
+    r.clear("k", p, box, replace(area, cloud_margin=1))
+    assert len(calls) == 4  # cleaning it up differently fetches nothing
 
 
 def test_cut_puts_the_picture_in_the_right_tiles(tmp_path: Path) -> None:
@@ -512,6 +599,29 @@ def test_refresh_chooses_and_draws_views(tmp_path: Path, small: None) -> None:
     assert again.locations[0].wide == wide and "(wide)" in res.errors[1]
     assert (views / co.view / "done").exists()  # its views are kept too
     assert (views / wide.view / "done").exists()
+
+
+def test_the_wide_view_never_changes_the_10_m_views(tmp_path: Path, small: None) -> None:
+    """The 10 m views come first: the same passes, dates and pictures with or without
+    the wide view looking for its own."""
+    up = Upstream()
+    without = sat.refresh(
+        tmp_path / "a",
+        httpx.Client(transport=httpx.MockTransport(up)),
+        [make_location()],
+        now=NOW,
+        wide_km=0,
+    )
+    with_wide = sat.refresh(
+        tmp_path / "b", httpx.Client(transport=httpx.MockTransport(up)), [make_location()], now=NOW
+    )
+    assert without.errors == with_wide.errors == []
+    a = sat.read_index(tmp_path / "a" / "index.json")
+    b = sat.read_index(tmp_path / "b" / "index.json")
+    assert a is not None and b is not None
+    sa, sb = a.locations[0], b.locations[0]
+    assert sa.wide is None and sb.wide is not None
+    assert sa.composite == sb.composite and sa.scenes == sb.scenes
 
 
 def test_refresh_forgets_moved_locations(tmp_path: Path, small: None) -> None:

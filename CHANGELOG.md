@@ -110,6 +110,12 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **Tidier recent satellite.** The stitched newest-clear view no longer looks like a
+  patchwork of boxes: cloud gaps are round rather than square, the parts' borders curve
+  instead of following a 250 m grid, each part's gaps are filled from one or two passes
+  rather than a scatter of them, and the joins between passes fade instead of being cut
+  sharp. The 10 m views stay first: the 30 m view round them never changes which passes
+  they use.
 - **The Recent satellite bar leads with the dates.** Folded, it now starts with the span of
   the passes ("21 Oct–4 Nov", or "2–9 Nov" within a month) or a scene's day ("9 Nov · 9
   days ago · 92% clear"), so the dates show even on a phone where the line is cut short.
