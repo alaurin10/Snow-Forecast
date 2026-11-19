@@ -84,14 +84,17 @@
 		peakLabel,
 		peakText,
 		placeLabel,
+		PEAK_DOT,
 		PEAK_LAYERS,
+		peakDot,
 		PLACE_LAYERS,
 		SKI_DATA,
 		ANALYSIS_OPACITY,
 		CONCERN_MIN_ZOOM,
 		OVERLAY_MIN_ZOOM,
 		PRECIP_BEFORE,
-		SAT_LABEL_LAYERS,
+		SAT_BORDER_LAYERS,
+		SAT_NAME_LAYERS,
 		sky,
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
@@ -244,6 +247,8 @@
 	const peaksOn = $derived(!radar || prefs.mapFeatures.has('peaks'));
 	const placesOn = $derived(radar && prefs.mapFeatures.has('places'));
 	const glaciersOn = $derived(radar && prefs.mapFeatures.has('glaciers'));
+	/** Place, water and park names over imagery. */
+	const namesOn = $derived(!radar || prefs.mapFeatures.has('names'));
 	const stationsOn = $derived(radar && prefs.mapFeatures.has('stations'));
 	const reportsOn = $derived(radar && prefs.mapFeatures.has('obs'));
 	/** Contours show on imagery: the topo maps draw their own. */
@@ -414,8 +419,11 @@
 		map.setLayerZoomRange('otm', off ? 0 : DETAIL_ZOOM - 0.5, 24);
 		map.setPaintProperty('otm', 'raster-opacity', off ? 1 : OTM_OPACITY);
 		map.setLayoutProperty('sat', 'visibility', sat ? 'visible' : 'none');
-		for (const id of SAT_LABEL_LAYERS)
+		const names = img && namesOn;
+		for (const id of SAT_BORDER_LAYERS)
 			map.setLayoutProperty(id, 'visibility', img ? 'visible' : 'none');
+		for (const id of SAT_NAME_LAYERS)
+			map.setLayoutProperty(id, 'visibility', names ? 'visible' : 'none');
 	});
 
 	// Rivers, lakes and hamlets round the locations are named from the server's own file;
@@ -462,7 +470,8 @@
 		map.setPaintProperty('peak-labels', 'text-halo-color', halo(d));
 		map.setPaintProperty('run-casing', 'line-color', halo(d));
 		map.setPaintProperty('peak-labels', 'text-color', peakText(d));
-		map.setPaintProperty('peaks', 'circle-color', peakColor(d));
+		map.setPaintProperty('peak-labels', 'icon-color', peakColor(d));
+		map.setPaintProperty('peak-labels', 'icon-halo-color', halo(d));
 		if (radar) setTerrainUnits(map, u);
 		if (map.getLayer('place-labels')) {
 			map.setLayoutProperty('place-labels', 'text-field', placeLabel(u));
@@ -2148,6 +2157,7 @@
 					peaks: prefs.mapFeatures.has('peaks'),
 					places: prefs.mapFeatures.has('places'),
 					glaciers: prefs.mapFeatures.has('glaciers'),
+					names: prefs.mapFeatures.has('names'),
 					contours: contoursOn,
 					shade: prefs.mapShade,
 					overlay: overlayMode,
@@ -2262,6 +2272,12 @@
 					pendingTap = undefined;
 					onTap(e);
 				}, TAP_WAIT_MS);
+			});
+			// The peaks' dot, made here (the style has no sprite); asked for again if a
+			// style change drops it.
+			map.on('styleimagemissing', (e: { id: string }) => {
+				if (e.id === PEAK_DOT && !map?.hasImage(PEAK_DOT))
+					map?.addImage(PEAK_DOT, peakDot(), { sdf: true, pixelRatio: 2 });
 			});
 			map.on('load', () => {
 				if (cancelled) return;

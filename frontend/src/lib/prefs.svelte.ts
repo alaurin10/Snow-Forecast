@@ -46,7 +46,16 @@ export const MAP_OVERLAYS: readonly MapOverlay[] = [
 ] as const;
 /** Things drawn on top that can each be on or off. */
 export type MapFeature =
-	'runs' | 'peaks' | 'contours' | 'zones' | 'places' | 'glaciers' | 'stations' | 'obs' | 'ates';
+	| 'runs'
+	| 'peaks'
+	| 'contours'
+	| 'zones'
+	| 'places'
+	| 'glaciers'
+	| 'stations'
+	| 'obs'
+	| 'ates'
+	| 'names';
 export const MAP_FEATURES: readonly MapFeature[] = [
 	'runs',
 	'peaks',
@@ -56,11 +65,15 @@ export const MAP_FEATURES: readonly MapFeature[] = [
 	'glaciers',
 	'stations',
 	'obs',
-	'ates'
+	'ates',
+	'names'
 ] as const;
 /** Features added later that are on for everyone once, like the ones before them. */
-const NEW_FEATURES: readonly MapFeature[] = ['places', 'glaciers'];
-const FEATURES_VERSION = '2';
+const NEW_FEATURES: readonly MapFeature[] = ['places', 'glaciers', 'names'];
+/** The features version each of those arrived in: a browser that saw an older one gets
+ *  only what came after it, so a feature switched off stays off. */
+const ADDED_IN: Partial<Record<MapFeature, number>> = { places: 2, glaciers: 2, names: 3 };
+const FEATURES_VERSION = '3';
 export type MapShade = 'off' | 'light' | 'strong';
 /** The base map: Esri/OpenTopoMap topo, Esri's undated imagery, or recent satellite views. */
 export type MapBase = 'topo' | 'satellite' | 'recent';
@@ -106,9 +119,11 @@ function loadFeatures(): Set<MapFeature> {
 	const got = new Set(
 		v.split(',').filter((f): f is MapFeature => (MAP_FEATURES as readonly string[]).includes(f))
 	);
-	// Huts, trailheads, passes, glaciers and cliffs arrived later: on once for everyone.
-	if (read('sw.mapFeaturesV') !== FEATURES_VERSION) {
-		for (const f of NEW_FEATURES) got.add(f);
+	// Huts, trailheads, passes, glaciers, cliffs and names arrived later: on once for
+	// everyone.
+	const seen = Number(read('sw.mapFeaturesV') ?? '1') || 1;
+	if (String(seen) !== FEATURES_VERSION) {
+		for (const f of NEW_FEATURES) if ((ADDED_IN[f] ?? 0) > seen) got.add(f);
 		save('sw.mapFeatures', [...got].join(','));
 		save('sw.mapFeaturesV', FEATURES_VERSION);
 	}

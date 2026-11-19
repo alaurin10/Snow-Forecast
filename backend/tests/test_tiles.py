@@ -199,7 +199,7 @@ OVERPASS_SAMPLE = {
 
 
 def test_osm_to_geojson_keeps_runs_lifts_and_peaks() -> None:
-    from snowwatch.osm import to_geojson
+    from snowwatch.osm import ISO_MAX, to_geojson
 
     fc = to_geojson(OVERPASS_SAMPLE["elements"])
     props = [f["properties"] for f in fc["features"]]
@@ -212,7 +212,7 @@ def test_osm_to_geojson_keeps_runs_lifts_and_peaks() -> None:
         "osm": "w1",
     }
     assert props[1]["name"] == "Slot Couloir" and props[1]["type"] == "skitour"
-    assert props[3] == {"kind": "peak", "name": "Snoqualmie Mountain", "ele": 2014}
+    assert props[3] == {"kind": "peak", "name": "Snoqualmie Mountain", "ele": 2014, "iso": ISO_MAX}
     assert "ele" not in props[4]
     assert fc["features"][0]["geometry"]["coordinates"][0] == [-121.44, 47.44]
 
@@ -545,3 +545,38 @@ def test_osm_query_asks_for_the_new_features() -> None:
     assert '"tourism"~"^(alpine_hut|wilderness_hut)$"' in q
     assert 'relation["route"~"^(ski|piste)$"]' in q
     assert q.count("out tags geom;") == 1 and q.endswith("out geom;")
+
+
+def test_peaks_get_their_isolation_and_old_files_get_it_without_a_fetch(tmp_path: Path) -> None:
+    import httpx
+
+    from snowwatch import osm
+
+    def peak(name: str, lon: float, lat: float, ele: str | None) -> dict[str, Any]:
+        tags = {"natural": "peak", "name": name} | ({"ele": ele} if ele else {})
+        return {"type": "node", "id": hash(name) % 10**6, "lat": lat, "lon": lon, "tags": tags}
+
+    fc = osm.to_geojson(
+        [
+            peak("Big", -121.40, 47.40, "2100"),
+            peak("Shoulder", -121.40, 47.41, "1900"),  # ~1.1 km from Big
+            peak("Far", -121.00, 47.40, "1800"),  # ~30 km from Big
+            peak("Nameless height", -121.30, 47.40, None),
+        ]
+    )
+    iso = {f["properties"]["name"]: f["properties"]["iso"] for f in fc["features"]}
+    assert iso["Big"] == osm.ISO_MAX and iso["Nameless height"] == 0
+    assert 1.0 <= iso["Shoulder"] <= 1.2 and 29 <= iso["Far"] <= 31
+
+    # A fresh file from before isolation is updated in place, with no Overpass call.
+    path = tmp_path / "ski.geojson"
+    for f in fc["features"]:
+        f["properties"].pop("iso")
+    path.write_text(json.dumps(fc))
+    pts = [(47.4, -121.4)]
+    key = json.dumps({"v": osm.QUERY_VERSION, "boxes": osm.boxes(pts)})
+    path.with_suffix(".meta.json").write_text(json.dumps({"key": key, "at": 1000.0, "features": 4}))
+    dead = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    assert osm.refresh(path, pts, dead, now=1000.0 + 60, pause=0)
+    assert all("iso" in f["properties"] for f in json.loads(path.read_text())["features"])
+    assert not osm.refresh(path, pts, dead, now=1000.0 + 120, pause=0)  # nothing more to do

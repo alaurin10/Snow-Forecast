@@ -197,6 +197,12 @@
 				]
 			: []),
 		{
+			id: 'names',
+			label: 'Names',
+			name: 'Place names',
+			about: 'Towns, lakes, rivers and parks over imagery; the topo map has its own.'
+		},
+		{
 			id: 'contours',
 			label: 'Contours',
 			about: 'Contours over imagery; the topo map draws its own.',
@@ -555,8 +561,10 @@
 			background: var(--text-3);
 			opacity: 0.45;
 		}
+		/* Room for a fourth row of Show tiles (ATES and Names both offered) on a
+		   375 x 667 phone. */
 		.body {
-			gap: 10px;
+			gap: 8px;
 			padding-top: 8px;
 		}
 		.body :global(.mp-tiles button) {
