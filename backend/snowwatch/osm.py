@@ -364,7 +364,11 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
 def fetch_box(client: httpx.Client, box: tuple[float, float, float, float]) -> list[Any] | None:
     """One location's runs, lifts, peaks and features, from the first server that answers
     in full."""
-    q = query([box])
+    return fetch_query(client, query([box]))
+
+
+def fetch_query(client: httpx.Client, q: str) -> list[Any] | None:
+    """An Overpass query's elements, from the first server that answers in full."""
     for url in OVERPASS:
         try:
             r = client.post(url, data={"data": q}, timeout=180)

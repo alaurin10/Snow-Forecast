@@ -12,6 +12,7 @@ import type { MapBase, MapOverlay, MapShade } from '../prefs.svelte';
 import { AWS_DEM, MAX_ZOOM } from './terrain/dem';
 import { ANALYSIS_ZOOM } from './terrain/analysis';
 import { dusk } from './terrain/shade';
+import { BIG_PARKS, PLACES_MAX_ZOOM, PLACES_TILES } from './placeTiles';
 
 /** From here in, OpenTopoMap's detail (contours, trails, peaks, lifts) takes over. */
 export const DETAIL_ZOOM = 12;
@@ -130,14 +131,36 @@ export const PEAK_LAYERS = ['peaks', 'peak-labels'];
 export const PLACE_LAYERS = ['places', 'place-labels'];
 export const GLACIER_LAYERS = ['glaciers', 'glacier-lines', 'cliffs', 'glacier-labels'];
 export const CONTOUR_LAYERS = ['contour-lines', 'contour-labels'];
+/** Names and borders over imagery (OpenStreetMap vector tiles): what Esri's Boundaries
+ *  & Places pictures showed but county lines. State, province and country lines; park,
+ *  wilderness and forest names; rivers, creeks and lakes; state and town names. Bottom
+ *  first, so towns win when names collide. (Peaks are the ski map's own layer.) */
+export const SAT_LABEL_LAYERS = [
+	'satlabels',
+	'satlabels-borders',
+	'satlabels-countries',
+	'satlabels-parks',
+	'satlabels-park-areas',
+	'satlabels-small-parks',
+	'satlabels-local-parks',
+	'satlabels-rivers',
+	'satlabels-lakes',
+	'satlabels-lake-lines',
+	'satlabels-own-rivers',
+	'satlabels-own-lakes',
+	'satlabels-states',
+	'satlabels-towns'
+];
 /** The precipitation overlay goes under this layer (over the base and terrain overlays). */
-export const PRECIP_BEFORE = 'satlabels';
+export const PRECIP_BEFORE = SAT_LABEL_LAYERS[0];
 
 export const ELEVATION_ATTRIBUTION =
 	'Elevation © <a href="https://mapterhorn.com/attribution/">Mapterhorn</a> (USGS 3DEP, NRCan HRDEM, Copernicus and others)';
 
 /** The ski map's features (runs, routes, huts …), as the server serves them. */
 export const SKI_DATA = '/api/osm/ski.geojson';
+/** Rivers, creeks and lakes round the locations, named over imagery. */
+export const OSM_LABELS = '/api/osm/labels.geojson';
 /** GeoJSON sources are cut into tiles to this zoom (MapLibre's default is 18) and
  *  stretched beyond it. Tiles at a source's maxzoom aren't simplified, so what's drawn
  *  is the same. */
@@ -363,13 +386,27 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			attribution:
 				'Imagery © <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics, USDA, USGS'
 		},
-		satlabels: {
-			type: 'raster',
-			tiles: tiles('satlabels'),
-			tileSize: 256,
-			maxzoom: 18,
-			attribution: 'Labels © <a href="https://www.esri.com">Esri</a>'
+		labels: {
+			type: 'vector',
+			tiles: ['/api/tiles/labels/{z}/{x}/{y}.pbf'],
+			maxzoom: 14,
+			attribution:
+				'Labels: <a href="https://openfreemap.org">OpenFreeMap</a>, <a href="https://www.openmaptiles.org/">© OpenMapTiles</a>, data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 		},
+		// The same tiles stretched from zoom 8: only those name every national park and
+		// forest and wilderness (later tiles keep a park's name point in one tile, and
+		// drop the big ones), so these names stay on as the map zooms in.
+		'labels-z8': {
+			type: 'vector',
+			tiles: ['/api/tiles/labels/{z}/{x}/{y}.pbf'],
+			maxzoom: 8
+		},
+		// Towns and hamlets from the next zoom's tiles (placeTiles.ts): those list the
+		// smaller places a zoom sooner (zoom 8's leave out Redmond, zoom 10's the hamlets).
+		'labels-fine': { type: 'vector', tiles: [PLACES_TILES], maxzoom: PLACES_MAX_ZOOM },
+		// Rivers, creeks and lakes round the locations, which the tiles name too late or
+		// in pieces (backend/snowwatch/osmlabels.py).
+		osmlabels: { type: 'geojson', data: OSM_LABELS, maxzoom: GEOJSON_ZOOM, tolerance: 0.5 },
 		// Runs, lifts, peaks, huts, glaciers and more from OpenStreetMap, fetched weekly by
 		// the server.
 		ski: {
@@ -453,13 +490,7 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			});
 		}
 	}
-	layers.push({
-		id: 'satlabels',
-		type: 'raster',
-		source: 'satlabels',
-		layout: { visibility: vis(imagery) },
-		paint: { 'raster-fade-duration': 150 }
-	});
+	layers.push(...satLabelLayers(imagery));
 	if (full && o.contourTiles) {
 		sources.contours = { type: 'vector', tiles: [o.contourTiles], maxzoom: 15 };
 		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
@@ -897,6 +928,379 @@ export function placeLayers(dark: boolean, units: UnitSystem, on: boolean): Laye
 			paint: {
 				'text-color': peakText(dark),
 				'text-halo-color': halo(dark),
+				'text-halo-width': 1.5
+			}
+		}
+	];
+}
+
+/** Borders of states, provinces and countries: not counties (admin_level 6) or sea
+ *  limits. */
+/** The tiles' river and lake names, which the map leaves out round the locations, where
+ *  `osmlabels` names them whole (layers/labels.ts). */
+export const TILE_WATER_LAYERS = ['satlabels-rivers', 'satlabels-lakes', 'satlabels-lake-lines'];
+
+/** Parks named from the zoom-8 tiles (`labels-z8`), and in each quarter they cover. */
+
+const BORDERS = [
+	'all',
+	['<=', ['coalesce', ['get', 'admin_level'], 99], 4],
+	['!=', ['get', 'maritime'], 1]
+] as ExpressionSpecification;
+
+/** Water names: light blue on a dark halo, as Esri drew them. */
+const WATER_TEXT = {
+	'text-color': '#a9dcff',
+	'text-halo-color': 'rgba(10, 25, 45, 0.9)',
+	'text-halo-width': 1.4
+};
+
+/**
+ * Names and borders over imagery, from OpenStreetMap, at about the zooms Esri's label
+ * pictures showed them: state and country lines (light, on a dark casing, dashed for
+ * states); park, wilderness and national forest names (green, zoom 8 to 12); rivers
+ * from 11 and creeks from 13 along their lines; lakes; state names when zoomed out; and
+ * towns, more of them as the map zooms in.
+ */
+export function satLabelLayers(on: boolean): LayerSpecification[] {
+	const v = vis(on);
+	const country = ['==', ['coalesce', ['get', 'admin_level'], 99], 2] as ExpressionSpecification;
+	return [
+		{
+			id: 'satlabels',
+			type: 'line',
+			source: 'labels',
+			'source-layer': 'boundary',
+			filter: BORDERS,
+			layout: { visibility: v, 'line-join': 'round' },
+			paint: {
+				'line-color': 'rgba(15, 20, 30, 0.55)',
+				'line-width': [
+					'interpolate',
+					['linear'],
+					['zoom'],
+					4,
+					['case', country, 3, 2.2],
+					12,
+					['case', country, 5, 3.6]
+				]
+			}
+		},
+		{
+			id: 'satlabels-borders',
+			type: 'line',
+			source: 'labels',
+			'source-layer': 'boundary',
+			filter: ['all', BORDERS, ['>', ['coalesce', ['get', 'admin_level'], 99], 2]],
+			layout: { visibility: v, 'line-join': 'round' },
+			paint: {
+				'line-color': 'rgba(255, 255, 255, 0.85)',
+				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 12, 1.8],
+				'line-dasharray': [4, 2.5]
+			}
+		},
+		{
+			// Country lines solid, over the dashes, so a state line along one doesn't dash it.
+			id: 'satlabels-countries',
+			type: 'line',
+			source: 'labels',
+			'source-layer': 'boundary',
+			filter: ['all', BORDERS, country],
+			layout: { visibility: v, 'line-join': 'round' },
+			paint: {
+				'line-color': 'rgba(255, 255, 255, 0.9)',
+				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 12, 2.4]
+			}
+		},
+		{
+			// National parks and forests, wildernesses and protected areas, by their label
+			// points (polygons would be named again in every tile they cross), from the
+			// zoom-8 tiles (see `labels-z8`).
+			id: 'satlabels-parks',
+			type: 'symbol',
+			source: 'labels-z8',
+			'source-layer': 'park',
+			minzoom: 8,
+			maxzoom: 10,
+			filter: [
+				'all',
+				['==', ['geometry-type'], 'Point'],
+				['in', ['get', 'class'], ['literal', BIG_PARKS]]
+			],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 11.5,
+				'text-max-width': 7,
+				'text-padding': 6,
+				'text-optional': true
+			},
+			paint: {
+				'text-color': '#c9eba6',
+				'text-halo-color': 'rgba(12, 30, 12, 0.85)',
+				'text-halo-width': 1.3
+			}
+		},
+		{
+			// From zoom 10 the big parks are named in each 256 px quarter they cover, as
+			// Esri's pictures did (placeTiles.ts), so a national forest's name is on screen
+			// wherever it is (it has one name point, often far away).
+			id: 'satlabels-park-areas',
+			type: 'symbol',
+			source: 'labels-fine',
+			'source-layer': 'park_label',
+			minzoom: 10,
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 11.5,
+				'text-max-width': 7,
+				'text-padding': 30,
+				'text-optional': true
+			},
+			paint: {
+				'text-color': '#c9eba6',
+				'text-halo-color': 'rgba(12, 30, 12, 0.85)',
+				'text-halo-width': 1.3
+			}
+		},
+		{
+			// Smaller parks, state forests and reserves, from the tiles of the map's zoom.
+			id: 'satlabels-small-parks',
+			type: 'symbol',
+			source: 'labels',
+			'source-layer': 'park',
+			minzoom: 9,
+			// By their name points to zoom 12; then inside each tile they cover (later
+			// tiles keep a park's name point in one tile only).
+			filter: [
+				'all',
+				['!', ['in', ['get', 'class'], ['literal', BIG_PARKS]]],
+				[
+					'any',
+					['all', ['==', ['geometry-type'], 'Point'], ['<', ['zoom'], 12]],
+					['all', ['==', ['geometry-type'], 'Polygon'], ['>=', ['zoom'], 12]]
+				]
+			],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 10.5,
+				'text-max-width': 7,
+				'text-padding': 6,
+				'text-optional': true
+			},
+			paint: {
+				'text-color': '#c9eba6',
+				'text-halo-color': 'rgba(12, 30, 12, 0.85)',
+				'text-halo-width': 1.2
+			}
+		},
+		{
+			// Town parks and golf courses from zoom 13, from the next zoom's tiles
+			// (placeTiles.ts), which list them.
+			id: 'satlabels-local-parks',
+			type: 'symbol',
+			source: 'labels-fine',
+			'source-layer': 'poi',
+			minzoom: 13,
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 11,
+				'text-max-width': 7,
+				'text-padding': 2,
+				// Beside the place when the middle is taken (a town's name is often there).
+				'text-variable-anchor': ['center', 'left', 'right', 'top', 'bottom'],
+				'text-radial-offset': 0.4,
+				'text-justify': 'auto'
+			},
+			paint: {
+				'text-color': '#c9eba6',
+				'text-halo-color': 'rgba(12, 30, 12, 0.85)',
+				'text-halo-width': 1.2
+			}
+		},
+		{
+			id: 'satlabels-rivers',
+			type: 'symbol',
+			source: 'labels',
+			'source-layer': 'waterway',
+			minzoom: 11,
+			filter: [
+				'any',
+				['==', ['get', 'class'], 'river'],
+				['all', ['==', ['get', 'class'], 'stream'], ['>=', ['zoom'], 13]]
+			],
+			layout: {
+				visibility: v,
+				'symbol-placement': 'line',
+				// OpenStreetMap's streams wind more than the default 45° a letter allows.
+				'text-max-angle': 85,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': ['match', ['get', 'class'], 'river', 12, 11],
+				'text-letter-spacing': 0.05,
+				'symbol-spacing': 400
+			},
+			paint: { ...WATER_TEXT }
+		},
+		{
+			// Small lakes come as points…
+			id: 'satlabels-lakes',
+			type: 'symbol',
+			source: 'labels',
+			'source-layer': 'water_name',
+			minzoom: 11,
+			filter: ['==', ['geometry-type'], 'Point'],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 11.5,
+				'text-max-width': 7
+			},
+			paint: { ...WATER_TEXT }
+		},
+		{
+			// …big ones as a line along the lake, the name written along it, again every
+			// 250 px of a long lake as Esri's were.
+			id: 'satlabels-lake-lines',
+			type: 'symbol',
+			source: 'labels',
+			'source-layer': 'water_name',
+			minzoom: 9,
+			filter: ['==', ['geometry-type'], 'LineString'],
+			layout: {
+				visibility: v,
+				'symbol-placement': 'line',
+				'symbol-spacing': 250,
+				'text-max-angle': 85,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': 12,
+				'text-letter-spacing': 0.05
+			},
+			paint: { ...WATER_TEXT }
+		},
+		{
+			// Round the locations: rivers from zoom 10 and creeks from 12, along their
+			// whole length (the tiles cut them into pieces too short for a name).
+			id: 'satlabels-own-rivers',
+			type: 'symbol',
+			source: 'osmlabels',
+			minzoom: 10,
+			filter: [
+				'all',
+				['==', ['get', 'kind'], 'water'],
+				['any', ['==', ['get', 'class'], 'river'], ['>=', ['zoom'], 12]]
+			],
+			layout: {
+				visibility: v,
+				'symbol-placement': 'line',
+				'text-max-angle': 85,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': ['match', ['get', 'class'], 'river', 12, 11],
+				'text-letter-spacing': 0.05,
+				'symbol-spacing': 150
+			},
+			paint: { ...WATER_TEXT }
+		},
+		{
+			// Lakes by size: 5 km² and more from zoom 10, 1 km² from 11, 0.1 km² from 12,
+			// the rest from 13.
+			id: 'satlabels-own-lakes',
+			type: 'symbol',
+			source: 'osmlabels',
+			minzoom: 10,
+			filter: [
+				'all',
+				['==', ['get', 'kind'], 'lake'],
+				[
+					'any',
+					['>=', ['zoom'], 13],
+					['all', ['>=', ['zoom'], 12], ['>=', ['get', 'area'], 0.1]],
+					['all', ['>=', ['zoom'], 11], ['>=', ['get', 'area'], 1]],
+					['>=', ['get', 'area'], 5]
+				]
+			],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': ['Noto Sans Regular'],
+				'text-size': ['interpolate', ['linear'], ['get', 'area'], 0, 11, 5, 12.5],
+				'text-max-width': 7
+			},
+			paint: { ...WATER_TEXT }
+		},
+		{
+			id: 'satlabels-states',
+			type: 'symbol',
+			source: 'labels',
+			'source-layer': 'place',
+			maxzoom: 8,
+			filter: ['in', ['get', 'class'], ['literal', ['state', 'province']]],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': FONT,
+				'text-size': 12,
+				'text-letter-spacing': 0.12,
+				'text-transform': 'uppercase',
+				'text-max-width': 8
+			},
+			paint: {
+				'text-color': 'rgba(255, 255, 255, 0.85)',
+				'text-halo-color': 'rgba(15, 20, 30, 0.8)',
+				'text-halo-width': 1.4
+			}
+		},
+		{
+			// From the next zoom's tiles (`labels-fine`), which list more places; the more
+			// important first where names would overlap.
+			id: 'satlabels-towns',
+			type: 'symbol',
+			source: 'labels-fine',
+			'source-layer': 'place',
+			// Esri's set and zooms: cities always, towns from 7, villages from 9, hamlets
+			// from 10.
+			filter: [
+				'any',
+				['==', ['get', 'class'], 'city'],
+				['all', ['==', ['get', 'class'], 'town'], ['>=', ['zoom'], 7]],
+				['all', ['==', ['get', 'class'], 'village'], ['>=', ['zoom'], 9]],
+				['all', ['==', ['get', 'class'], 'hamlet'], ['>=', ['zoom'], 10]]
+			],
+			layout: {
+				visibility: v,
+				'text-field': ['get', 'name'],
+				'text-font': FONT,
+				// Small when zoomed out, as Esri's were, so the towns it named all fit; a
+				// name moves beside its place if the middle is taken.
+				'text-size': [
+					'interpolate',
+					['linear'],
+					['zoom'],
+					8,
+					['match', ['get', 'class'], 'city', 11.5, 9.5],
+					11,
+					['match', ['get', 'class'], 'city', 13, 'town', 12, 11]
+				],
+				'text-variable-anchor': ['center', 'left', 'right', 'top', 'bottom'],
+				'text-radial-offset': 0.4,
+				'text-justify': 'auto',
+				'text-max-width': 8,
+				'text-padding': 0,
+				'symbol-sort-key': ['coalesce', ['get', 'rank'], 20]
+			},
+			paint: {
+				'text-color': '#fff6e0',
+				'text-halo-color': 'rgba(15, 20, 30, 0.85)',
 				'text-halo-width': 1.5
 			}
 		}

@@ -91,6 +91,7 @@
 		CONCERN_MIN_ZOOM,
 		OVERLAY_MIN_ZOOM,
 		PRECIP_BEFORE,
+		SAT_LABEL_LAYERS,
 		sky,
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
@@ -161,6 +162,8 @@
 	import { addZones, setZones, ZONES_FADED_ZOOM } from '../map/layers/avalanche';
 	import { nearestSpot, recentSpec, satSummary, satViews, type RecentSpec } from '../map/sat';
 	import { setRecent, setRecentDates } from '../map/layers/sat';
+	import { useOwnLabels } from '../map/layers/labels';
+	import { placesProtocol } from '../map/placeTiles';
 	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
@@ -411,7 +414,17 @@
 		map.setLayerZoomRange('otm', off ? 0 : DETAIL_ZOOM - 0.5, 24);
 		map.setPaintProperty('otm', 'raster-opacity', off ? 1 : OTM_OPACITY);
 		map.setLayoutProperty('sat', 'visibility', sat ? 'visible' : 'none');
-		map.setLayoutProperty('satlabels', 'visibility', img ? 'visible' : 'none');
+		for (const id of SAT_LABEL_LAYERS)
+			map.setLayoutProperty(id, 'visibility', img ? 'visible' : 'none');
+	});
+
+	// Rivers, lakes and hamlets round the locations are named from the server's own file;
+	// the tiles' water names are left out there (once per map).
+	let ownLabels = false;
+	$effect(() => {
+		if (!ready || !map || !radar || ownLabels) return;
+		ownLabels = true;
+		void useOwnLabels(map);
 	});
 
 	$effect(() => {
@@ -2116,6 +2129,8 @@
 			// MapLibre 6 looks for its worker next to its own file, which bundling moves;
 			// point it at the copy Vite ships.
 			ml.setWorkerUrl(maplibreWorker);
+			// Town names over imagery, a zoom sooner than the tiles list them.
+			ml.addProtocol('places', placesProtocol);
 			// The terrain worker and contours only matter on the full map.
 			if (radar) releaseTerrain = retainTerrain();
 			const terrain = radar ? setupTerrain(ml) : { worker: false, contours: null };

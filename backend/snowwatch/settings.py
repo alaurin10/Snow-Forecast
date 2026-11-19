@@ -107,6 +107,11 @@ class Settings(BaseSettings):
         return self.data_dir / "osm" / "ski.geojson"
 
     @property
+    def osm_labels_path(self) -> Path:
+        """Rivers, creeks and lakes named over imagery (see snowwatch/osmlabels.py)."""
+        return self.data_dir / "osm" / "labels.geojson"
+
+    @property
     def zones_path(self) -> Path:
         """Every avalanche forecast zone in the map's box (see snowwatch/avalanche_zones.py)."""
         return self.data_dir / "avalanche" / "zones.geojson"

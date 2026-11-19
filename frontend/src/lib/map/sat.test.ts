@@ -11,7 +11,8 @@ import {
 	sceneLabel,
 	stitchedSpan
 } from './sat';
-import { mapStyle } from './style';
+import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
+import { mapStyle, OSM_LABELS, SAT_LABEL_LAYERS } from './style';
 
 describe('picking and labelling scenes', () => {
 	it('takes the nearest location within range', () => {
@@ -159,7 +160,61 @@ describe('what the base draws', () => {
 		const vis = (id: string) =>
 			(style.layers.find((l) => l.id === id)?.layout as { visibility?: string } | undefined)
 				?.visibility;
-		expect(vis('satlabels')).toBe('visible');
+		for (const id of SAT_LABEL_LAYERS) expect(vis(id)).toBe('visible');
+		// Names and borders come from vector tiles, so county lines can be left out.
+		expect(style.sources.labels).toMatchObject({ type: 'vector', maxzoom: 14 });
+		expect(style.sources.satlabels).toBeUndefined();
+		// In the order they're drawn, so the list's last is the top one.
+		expect(style.layers.filter((l) => l.id.startsWith('satlabels')).map((l) => l.id)).toEqual(
+			SAT_LABEL_LAYERS
+		);
+		// Big parks from the zoom-8 tiles (later tiles drop their names); rivers and lakes
+		// round the locations from the server's own file.
+		expect(style.sources['labels-z8']).toMatchObject({ type: 'vector', maxzoom: 8 });
+		expect(style.sources.osmlabels).toMatchObject({ type: 'geojson', data: OSM_LABELS });
+		const layer = (id: string) =>
+			style.layers.find((l) => l.id === id) as never as {
+				source: string;
+				filter: unknown;
+			};
+		expect(layer('satlabels-parks').source).toBe('labels-z8');
+		for (const id of ['satlabels-own-rivers', 'satlabels-own-lakes'])
+			expect(layer(id).source).toBe('osmlabels');
+		// Towns from the next zoom's tiles, merged in the browser (placeTiles.ts).
+		expect(layer('satlabels-towns').source).toBe('labels-fine');
+		expect(style.sources['labels-fine']).toMatchObject({
+			type: 'vector',
+			tiles: ['places://{z}/{x}/{y}']
+		});
+		const shown = (id: string, zoom: number, props: Record<string, unknown>, type = 1) =>
+			featureFilter(layer(id).filter as never, `layers.${id}.filter`).filter({ zoom }, {
+				type,
+				properties: props
+			} as never);
+		// Lakes by size: a big reservoir from zoom 10, a small lake from 12, a pond from 13.
+		const lake = (area: number) => ({ kind: 'lake', name: 'L', area });
+		expect(shown('satlabels-own-lakes', 10, lake(8))).toBe(true);
+		expect(shown('satlabels-own-lakes', 11, lake(0.6))).toBe(false);
+		expect(shown('satlabels-own-lakes', 12, lake(0.6))).toBe(true);
+		expect(shown('satlabels-own-lakes', 12, lake(0.02))).toBe(false);
+		expect(shown('satlabels-own-lakes', 13, lake(0.02))).toBe(true);
+		// Rivers from zoom 10, creeks from 12.
+		const water = (cls: string) => ({ kind: 'water', class: cls, name: 'W' });
+		expect(shown('satlabels-own-rivers', 10, water('river'), 2)).toBe(true);
+		expect(shown('satlabels-own-rivers', 11, water('stream'), 2)).toBe(false);
+		expect(shown('satlabels-own-rivers', 12, water('stream'), 2)).toBe(true);
+		const border = (props: Record<string, unknown>) =>
+			['satlabels', 'satlabels-borders', 'satlabels-countries'].filter((id) => {
+				const layer = style.layers.find((l) => l.id === id) as { filter: unknown };
+				return featureFilter(layer.filter as never, `layers.${id}.filter`).filter({ zoom: 10 }, {
+					type: 2,
+					properties: props
+				} as never);
+			});
+		expect(border({ admin_level: 6, maritime: 0 })).toEqual([]); // county
+		expect(border({ admin_level: 4, maritime: 1 })).toEqual([]); // at sea
+		expect(border({ admin_level: 4, maritime: 0 })).toEqual(['satlabels', 'satlabels-borders']);
+		expect(border({ admin_level: 2, maritime: 0 })).toEqual(['satlabels', 'satlabels-countries']);
 		expect(vis('contour-lines')).toBe('visible');
 		expect(vis('sat')).toBe('none');
 		expect(vis('esri')).toBe('none');
