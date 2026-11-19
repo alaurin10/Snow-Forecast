@@ -1,8 +1,8 @@
-// The Recent satellite base's layers, bottom first: the daily VIIRS mosaic, the 30 m
-// wide view round the location, the Sentinel-2 view over the location's area (each one
-// layer of finished tiles), and the stitched views' outlined, dated parts. A new view
-// goes on top of the old one of its kind, which stays until the new one's tiles are in,
-// so switching views or bands never flashes the coarse mosaic.
+// The Recent satellite base's layers, bottom first: the daily VIIRS mosaic, every
+// location's 30 m wide view, every location's 10 m view (each one layer of finished
+// tiles), and the nearest location's outlined, dated parts. New views go on top of the
+// ones they replace, which stay until the new ones' tiles are in, so switching views or
+// bands never flashes the coarse mosaic.
 import type { GeoJSONSource, Map as MlMap } from 'maplibre-gl';
 import type { RecentSource, RecentSpec } from '../sat';
 
@@ -49,57 +49,68 @@ function add(map: MlMap, id: string, src: RecentSource, before?: string) {
 	);
 }
 
-/** The view of each kind (VIEW, WIDE) each map is showing now, so a late handover never
- *  removes it. */
-const current = new WeakMap<MlMap, Record<string, string | null>>();
+/** The views each map is showing now, so a late handover never removes them. */
+const current = new WeakMap<MlMap, Set<string>>();
 
-/** Remove the views of `kind` other than the current one once its tiles are in (or soon). */
-function handOver(map: MlMap, id: string, kind: string) {
+/** Remove the views no longer wanted once the new ones' tiles are in (or soon), so a
+ *  change of view or bands never flashes what's under it. */
+function handOver(map: MlMap, fresh: string[]) {
 	let done = false;
 	const finish = () => {
 		if (done) return;
 		done = true;
 		map.off('sourcedata', onData);
 		clearTimeout(timer);
-		const keep = current.get(map)?.[kind];
-		for (const old of recentLayers(map)) if (old.startsWith(kind) && old !== keep) remove(map, old);
+		const keep = current.get(map) ?? new Set();
+		for (const old of recentLayers(map)) if (isView(old) && !keep.has(old)) remove(map, old);
 	};
+	const loaded = () => fresh.every((id) => !map.getSource(id) || map.isSourceLoaded(id));
 	const onData = (e: { sourceId?: string }) => {
-		if (e.sourceId === id && map.getSource(id) && map.isSourceLoaded(id)) finish();
+		if (e.sourceId && fresh.includes(e.sourceId) && loaded()) finish();
 	};
 	const timer = setTimeout(finish, HANDOVER_MS);
 	map.on('sourcedata', onData);
 }
 
 /**
- * Make the map draw `spec` (all nulls when the base isn't Recent satellite). `before`
- * is the layer the satellite goes under (the hill shading).
+ * Make the map draw `spec` (empty when the base isn't Recent satellite). `before` is the
+ * layer the satellite goes under (the hill shading).
  */
 export function setRecent(map: MlMap, spec: RecentSpec, before?: string) {
 	const under = before && map.getLayer(before) ? before : undefined;
 	const viirs = spec.viirs ? PREFIX + spec.viirs.id : null;
-	const wide = spec.wide ? PREFIX + spec.wide.id : null;
-	const view = spec.view ? PREFIX + spec.view.id : null;
-	for (const id of recentLayers(map)) {
-		const gone = id.startsWith(VIEW) ? !view : id.startsWith(WIDE) ? !wide : id !== viirs;
-		if (gone) remove(map, id);
-	}
+	// Source ids start `wide-` or `view-`, so these start WIDE or VIEW.
+	const wanted = [...spec.wides, ...spec.views].map((src) => ({ id: PREFIX + src.id, src }));
+	const ids = new Set(wanted.map((w) => w.id));
+	for (const id of recentLayers(map)) if (!isView(id) && id !== viirs) remove(map, id);
 	if (spec.viirs && viirs && !map.getLayer(viirs)) {
 		// At the bottom, under any view.
 		add(map, viirs, spec.viirs, recentLayers(map).find(isView) ?? under);
 	}
-	current.set(map, { [VIEW]: view, [WIDE]: wide });
-	if (spec.wide && wide && !map.getLayer(wide)) {
-		// Over the mosaic, under the centre's view.
-		add(map, wide, spec.wide, recentLayers(map).find((id) => id.startsWith(VIEW)) ?? under);
-		if (recentLayers(map).some((id) => id.startsWith(WIDE) && id !== wide))
-			handOver(map, wide, WIDE);
+	current.set(map, ids);
+	const fresh: string[] = [];
+	for (const { id, src } of wanted) {
+		if (!map.getLayer(id)) {
+			add(map, id, src, under);
+			fresh.push(id);
+		}
 	}
-	if (spec.view && view && !map.getLayer(view)) {
-		add(map, view, spec.view, under);
-		if (recentLayers(map).some((id) => id.startsWith(VIEW) && id !== view))
-			handOver(map, view, VIEW);
-	}
+	// Bottom first, just under `under` (each move puts the layer above the ones moved
+	// before it): views being replaced just under their own kind's new ones, so while
+	// the new tiles load the old 10 m view still covers the 30 m ones.
+	const stale = recentLayers(map).filter((id) => isView(id) && !ids.has(id));
+	const kind = (k: string) => (id: string) => id.startsWith(k);
+	const wantedIds = wanted.map((w) => w.id);
+	for (const id of [
+		...stale.filter(kind(WIDE)),
+		...wantedIds.filter(kind(WIDE)),
+		...stale.filter(kind(VIEW)),
+		...wantedIds.filter(kind(VIEW))
+	])
+		map.moveLayer(id, under);
+	if (!stale.length) return;
+	if (fresh.length) handOver(map, fresh);
+	else for (const id of stale) remove(map, id);
 }
 
 const DATES = 'satdates';

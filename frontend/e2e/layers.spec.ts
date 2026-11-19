@@ -136,7 +136,7 @@ test('phones: one row of tabs at the foot of the map, at most one control open o
 	await expect(page.getByRole('region', { name: 'Precipitation' })).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Recent satellite' })).toHaveCount(0);
 	// Another tab: that one instead.
-	await tabs.getByRole('button', { name: /^Satellite: / }).click();
+	await tabs.getByRole('button', { name: /^Base: / }).click();
 	const sat = page.getByRole('region', { name: 'Recent satellite' });
 	await expect(sat).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Precipitation' })).toHaveCount(0);
@@ -144,7 +144,8 @@ test('phones: one row of tabs at the foot of the map, at most one control open o
 	await expect(sat.getByRole('button', { name: 'About this view' })).toBeVisible();
 	expect((await sat.boundingBox())!.height).toBeLessThan(60);
 	// The open tab again: everything folded, just the row of tabs over the map.
-	await tabs.getByRole('button', { name: /^Satellite: / }).click();
+	await expect(page.getByRole('group', { name: 'Base map type' })).toBeVisible();
+	await tabs.getByRole('button', { name: /^Base: / }).click();
 	await expect(sat).toHaveCount(0);
 	await expect(tabs.getByRole('button', { pressed: true })).toHaveCount(0);
 	const dock = (await page.locator('.dock').boundingBox())!;
@@ -220,7 +221,7 @@ test('phones: Layers sits beside the tab bar, the other map buttons over it rise
 	const tabsRow = page.getByRole('group', { name: 'Map controls' });
 	const weather = tabsRow.getByRole('button', { name: /^Weather: / });
 	// Everything folded: Layers level with the tab bar and centred in the gap beside it;
-	// the column's lowest button level with the row of tabs, beside it.
+	// the column's lowest button above the row of tabs, which has the dock's width.
 	if ((await weather.getAttribute('aria-pressed')) === 'true') await weather.click();
 	await expect(weather).toHaveAttribute('aria-pressed', 'false');
 	await page.waitForTimeout(500);
@@ -234,8 +235,8 @@ test('phones: Layers sits beside the tab bar, the other map buttons over it rise
 	expect(Math.abs(gapL - gapR)).toBeLessThan(4);
 	const locate = (await locateBtn.boundingBox())!;
 	const tabs = (await tabsRow.boundingBox())!;
-	expect(Math.abs(locate.y + locate.height - (tabs.y + tabs.height))).toBeLessThan(4);
-	expect(locate.x).toBeGreaterThan(tabs.x + tabs.width);
+	expect(locate.y + locate.height).toBeLessThanOrEqual(tabs.y);
+	expect(tabs.y - (locate.y + locate.height)).toBeLessThan(20);
 	expect(Math.abs(locate.x - layers.x)).toBeLessThan(2);
 	// No zoom buttons (pinch, double tap); the compass stays.
 	await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();

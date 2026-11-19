@@ -47,7 +47,7 @@
 		ZoneFeature,
 		ZonesOut
 	} from '../types.gen';
-	import { prefs, type MapOverlay, type MapWeather } from '../prefs.svelte';
+	import { prefs, type MapBase, type MapOverlay, type MapWeather } from '../prefs.svelte';
 	import { tick, untrack } from 'svelte';
 	import { layerLabel, layerSource, WEATHER_WORDS, weatherView } from '../map/weather';
 	import { viewport } from '../viewport.svelte';
@@ -663,7 +663,7 @@
 		const views = satViews(satSpot);
 		return views.length ? views[Math.min(sceneIndex, views.length - 1)] : null;
 	});
-	const NO_RECENT: RecentSpec = { viirs: null, wide: null, view: null, dates: null };
+	const NO_RECENT: RecentSpec = { viirs: null, wides: [], views: [], dates: null };
 	$effect(() => {
 		const spec =
 			recent && !offline ? recentSpec(satData, satSpot, satView, prefs.satBands) : NO_RECENT;
@@ -1393,7 +1393,7 @@
 	// The server draws every picture; here we download them once and swap them.
 	const on = $derived(weather !== 'off');
 	// ---- The controls at the foot of the map (every screen) ------------------------------
-	// One row of tabs, Terrain and Weather always there (Satellite and Measure when in use),
+	// One row of tabs, Base, Terrain and Weather always there (Measure when in use),
 	// each saying what it shows; at most one open above it, so they never stack up over
 	// the map. An open one starts with a row of its types, None first, then that type's
 	// own controls. A tap on the open tab folds it, leaving only the row. The open tab is
@@ -1402,7 +1402,7 @@
 		(() => {
 			try {
 				const v = localStorage.getItem('sw.dockOpen');
-				return v === 'timeline' ? 'weather' : v === 'avy' ? 'terrain' : v;
+				return v === 'timeline' ? 'weather' : v === 'avy' ? 'terrain' : v === 'sat' ? 'base' : v;
 			} catch {
 				return null;
 			}
@@ -1417,9 +1417,7 @@
 		}
 	});
 	const docked = $derived(
-		[measuring && 'measure', recent && !offline && 'sat', 'terrain', 'weather'].filter(
-			(x): x is string => !!x
-		)
+		[measuring && 'measure', 'base', 'terrain', 'weather'].filter((x): x is string => !!x)
 	);
 	// A control opens when you choose what it controls (in Layers, or Measure).
 	let lastChoice = '';
@@ -1431,7 +1429,7 @@
 		const [base, overlay, weather_, meas] = before.split('|');
 		if (String(measuring) !== meas && measuring) dockOpen = 'measure';
 		else if (prefs.mapOverlay !== overlay && prefs.mapOverlay !== 'none') dockOpen = 'terrain';
-		else if (prefs.mapBase !== base && prefs.mapBase === 'recent') dockOpen = 'sat';
+		else if (prefs.mapBase !== base && prefs.mapBase === 'recent') dockOpen = 'base';
 		else if (prefs.mapWeather !== weather_ && prefs.mapWeather !== 'off') dockOpen = 'weather';
 	});
 	// 'none': every control folded away. With nothing remembered, Weather is open.
@@ -1474,6 +1472,13 @@
 				]
 			: [])
 	]);
+	/** Satellite and Recent need a connection (Esri's terms keep their tiles off the
+	 *  offline maps). */
+	const BASE_TYPES: (DockType<MapBase> & { online?: boolean })[] = [
+		{ id: 'topo', label: 'Topo', name: 'Topo map' },
+		{ id: 'satellite', label: 'Satellite', name: 'Satellite (detailed, undated)', online: true },
+		{ id: 'recent', label: 'Recent', name: 'Recent satellite', online: true }
+	];
 	const WEATHER_TYPES: DockType<MapWeather>[] = [
 		{ id: 'off', label: 'None', name: 'No weather layer' },
 		{ id: 'radar', label: 'Radar', name: 'Radar & forecast' },
@@ -1486,7 +1491,7 @@
 	];
 	const DOCK_TITLES: Record<string, string> = {
 		measure: 'Measure',
-		sat: 'Satellite',
+		base: 'Base',
 		terrain: 'Terrain',
 		weather: 'Weather'
 	};
@@ -1495,8 +1500,16 @@
 		switch (id) {
 			case 'measure':
 				return { value: '', status: measureTitle };
-			case 'sat':
-				return { value: '', status: satSummary(satData?.viirs_date, satSpot, sceneIndex, now) };
+			case 'base': {
+				const b = BASE_TYPES.find((x) => x.id === prefs.mapBase) ?? BASE_TYPES[0];
+				return {
+					value: b.label,
+					status:
+						recent && !offline
+							? `${b.name} · ${satSummary(satData?.viirs_date, satSpot, sceneIndex, now)}`
+							: b.name
+				};
+			}
 			case 'terrain': {
 				const t = TERRAIN_TYPES.find((x) => x.id === prefs.mapOverlay);
 				return {
@@ -1516,7 +1529,16 @@
 			}
 		}
 	};
-	const dockTabs = $derived(docked.map((id) => ({ id, title: DOCK_TITLES[id], ...dockValue(id) })));
+	/** The Measure tab is a ruler on phones, so four tabs still fit. */
+	const RULER = 'M3.5 16.5l13-13 4 4-13 13zM7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2';
+	const dockTabs = $derived(
+		docked.map((id) => ({
+			id,
+			title: DOCK_TITLES[id],
+			...dockValue(id),
+			...(id === 'measure' ? { icon: RULER } : {})
+		}))
+	);
 	let timeline = $state<Timeline | null>(null);
 	/** Why the weather isn't showing, in words; null when it is. */
 	let loadError = $state<string | null>(null);
@@ -2490,7 +2512,7 @@
 	class:sheet={!!target && !viewport.desktop}
 	style:--fill-top="{fillTop}px"
 	style:--map-inset="{inset}px"
-	style:--dock-lift="{openDock ? dockH + 10 : 0}px"
+	style:--dock-lift="{dockH + 10}px"
 	style:--tools-h="{toolsH}px"
 	style:--map-drop="{radar && viewport.desktop && railUi.folded ? RAIL_FOLDED_DROP : 0}px"
 	style:--map-panel="{radar && viewport.desktop && target ? 370 : 0}px"
@@ -2857,7 +2879,7 @@
 
 		{#snippet typeRow<T extends string>(
 			name: string,
-			types: { id: T; label: string; name: string; worker?: boolean }[],
+			types: { id: T; label: string; name: string; worker?: boolean; online?: boolean }[],
 			value: T,
 			pickType: (id: T) => void,
 			noWorker: boolean
@@ -2873,8 +2895,12 @@
 					<button
 						aria-pressed={value === t.id}
 						aria-label={t.name}
-						title={t.worker && noWorker ? 'Needs a newer browser' : t.name}
-						disabled={t.worker && noWorker}
+						title={t.worker && noWorker
+							? 'Needs a newer browser'
+							: t.online && offline
+								? 'Needs a connection'
+								: t.name}
+						disabled={(t.worker && noWorker) || (t.online && offline)}
 						onclick={() => pickType(t.id)}>{t.label}</button
 					>
 				{/each}
@@ -2900,8 +2926,15 @@
 					/>
 				</DockItem>
 			{/if}
-			{#if recent && !offline}
-				<DockItem open={openDock === 'sat'} ontouch={() => (dockOpen = 'sat')}>
+			<DockItem open={openDock === 'base'} ontouch={() => (dockOpen = 'base')}>
+				{@render typeRow(
+					'Base map type',
+					BASE_TYPES,
+					prefs.mapBase,
+					(id) => prefs.setMapBase(id),
+					false
+				)}
+				{#if recent && !offline}
 					<SatControls
 						data={satData}
 						loadState={satState}
@@ -2912,8 +2945,8 @@
 						{now}
 						onbands={(b) => prefs.setSatBands(b)}
 					/>
-				</DockItem>
-			{/if}
+				{/if}
+			</DockItem>
 			<DockItem open={openDock === 'terrain'} ontouch={() => (dockOpen = 'terrain')}>
 				{@render typeRow(
 					'Terrain type',
@@ -3111,6 +3144,9 @@
 		bottom: 10px;
 		z-index: 1000;
 		display: grid;
+		/* One column no wider than the dock, so a long row of tabs scrolls rather than
+		   spilling past the screen's edges. */
+		grid-template-columns: minmax(0, 1fr);
 		gap: 8px;
 		justify-items: center;
 		pointer-events: none;
@@ -3119,6 +3155,10 @@
 		width: 100%;
 		max-width: 640px;
 		pointer-events: auto;
+	}
+	/* The row of tabs no wider than the dock: on the narrowest phones it scrolls. */
+	.dock > :global(.docktabs) {
+		max-width: 100%;
 	}
 	/* An open control's types, None first: one row, sideways-scrolling if it must. */
 	.types {
@@ -3167,9 +3207,9 @@
 	/* Phones and tablets: the map's buttons at the bottom right, under the thumb, bigger,
 	   and centred in the gap between the tab bar (220 px wide on the map, centred) and the
 	   edge. Layers, the most used, is level with the tab bar, the easiest place to reach;
-	   it stays put whatever opens above it. The rest stand in a column above it, the
-	   lowest level with the row of tabs at the foot, rising above any of those controls
-	   that is open. The compass on top, the zoom buttons left to pinch and double tap.
+	   it stays put whatever opens above it. The rest stand in a column above it, above
+	   the row of tabs at the foot (so the row has the width for Base, Terrain and
+	   Weather) and any of those controls that is open. The compass on top, the zoom buttons left to pinch and double tap.
 	   The column is out of the way while the map panel is up. */
 	@media (max-width: 1099px) {
 		.wrap {
@@ -3239,11 +3279,6 @@
 		.wrap.sheet .tools,
 		.wrap.sheet .map :global(.maplibregl-ctrl-top-left) {
 			visibility: hidden;
-		}
-		/* The row of tabs keeps clear of the column beside it (scrolling sideways if it
-		   has more tabs than fit). */
-		.dock :global(.docktabs) {
-			max-width: calc(100% - 2 * (var(--tool-right) + var(--tool) - 4px));
 		}
 		.wrap .top,
 		.wrap .info {

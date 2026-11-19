@@ -845,6 +845,20 @@ with a rule that nothing Esri named may be lost:
   tiles' water names only: Overpass failed for them that day.
 - The tiles' text is Open Sans and Noto Sans through `/api/glyphs/`; places tiles cost
   four label tiles each (through the server's cache).
+- Follow-up (19 Nov 2026), **every location's views at once**: `recentSpec` returns all
+  locations' wide and 10 m views (`wides`, `views`), bottom first: the wides, then the
+  10 m views, the nearest location's last in each, so 10 m covers 30 m wherever it
+  reaches and the nearest is on top. Others show their first view (stitched if they
+  have one); only the nearest is outlined and dated. `layers/sat.ts` keeps the replaced
+  views, just under their own kind's new ones, until the new tiles are in.
+- Follow-up (19 Nov 2026), **the Base pill**: the dock's tabs are Base, Terrain and
+  Weather (Measure while measuring); Base's panel has Topo / Satellite / Recent (the last
+  two need a connection) and, for Recent, `SatControls`. The Satellite tab is gone. On
+  phones a tab with something chosen shows just its value, Measure is a ruler, and the
+  map's button column stands above the row of tabs (it used to stand beside it, which
+  left the row ~240 px on a 375 px phone). Measured: 246-289 px for the three tabs at
+  320-390 px wide; with Measure, 302-345 px (only 320 px with the longest choices
+  scrolls).
 - Follow-up (19 Nov 2026), fewer names zoomed out: towns by size (cities of rank 10 and
   under always, other cities from zoom 9, towns from 10, villages from 10.5, hamlets
   from 11, more important first, 4 px apart). Rivers and creeks round the locations are

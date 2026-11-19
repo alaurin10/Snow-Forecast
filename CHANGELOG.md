@@ -7,6 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **A Base pill at the foot of the map**, beside Terrain and Weather: Topo, Satellite or
+  Recent, with Recent's controls (colours, the view stepper) in its panel, as Radar has
+  its timeline. On phones a tab with something chosen shows just that ("Satellite",
+  "Snow total") and Measure is a ruler, so the row fits without scrolling; the map's
+  buttons now sit above the row instead of beside it.
 - **A Names switch** in the map's Show tiles turns the town, lake, river and park names
   over satellite imagery off (state and country lines stay).
 - **Recent satellite reaches past the 24 km square.** Round each location the map now
@@ -112,6 +117,9 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **Recent satellite shows every location's views at once**, so neighbouring areas that
+  touch or overlap read as one (the nearest location's on top, and 10 m always over
+  30 m). The controls and the dated outlines are still for the nearest location.
 - **The forecast updates every 3 hours**, up from every 6 (`schedule.runs_utc`: 00:30,
   03:30 … 21:30 UTC; the ensembles still come twice a day, at 09:30 and 21:30). The
   runs in between catch the hourly HRRR and NBM in the US and keep "now" and the last
