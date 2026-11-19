@@ -806,6 +806,46 @@ What shipped, and where it differs from the plan above:
   11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
   few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
 
+## Labels over imagery (19 Nov 2026)
+
+Names and borders over Satellite and Recent satellite were Esri's Boundaries & Places
+pictures: town, state and county names, county lines, parks and forests from zoom ~10,
+lakes from 12, rivers and creeks from 12-13. County lines can't be left out of a
+picture, so the labels are now drawn from OpenStreetMap (`style.ts`, `satLabelLayers`),
+with a rule that nothing Esri named may be lost:
+
+- **Borders**: state, province and country lines (`admin_level` 2 and 4, not at sea);
+  no county lines. State names to zoom 8.
+- **Towns** come from `places://` tiles made in the browser from the next zoom's four
+  tiles (`placeTiles.ts`): each zoom's tiles leave out smaller places (zoom 8's have no
+  Redmond, zoom 10's no hamlets like Snoqualmie Pass). Cities always, towns from 7,
+  villages from 9, hamlets from 10, small when zoomed out (as Esri's), moved beside the
+  place if the middle is taken, more important first.
+- **Parks and forests**: national parks and forests, wildernesses and protected areas
+  from the zoom-8 tiles' name points to zoom 10 (later tiles keep a big park's name in
+  one tile and drop it elsewhere), then named in each 256 px quarter tile whose middle
+  they cover, as Esri's pictures were (`park_label` in the places tiles). Smaller parks
+  from zoom 9; town parks and golf courses from zoom 13 (from the zoom-14 tiles' points
+  of interest).
+- **Rivers, creeks and lakes**: the tiles cut streams into pieces too short to name at
+  zooms 11-12 and name lakes late, so round each location the worker fetches them from
+  Overpass weekly (`snowwatch/osmlabels.py`, `/api/osm/labels.geojson`, with the ski map
+  job and `snowwatch ski-map`): streams joined into whole lines by name, lakes as one
+  point inside each with its area. Rivers from zoom 10, creeks from 12; lakes of 5 km²
+  from 10, 1 km² from 11, 0.1 km² from 12, the rest from 13. The tiles' water names are
+  left out inside those boxes (`layers/labels.ts`). Elsewhere, and until a location's
+  box is fetched, the tiles' names are drawn; big lakes' names repeat along the lake.
+- **Compared** with Esri at 19 views (six locations, zooms 8-14): every label Esri
+  showed is there except county and regional-district names (they go with the lines),
+  Blueberry Beach Park in Whistler (not in OpenStreetMap), and Rebagliati Park (zoom 13)
+  and Lost Lake Park (zoom 12) in Whistler village, which show a little further in
+  (some 20 parks are named there). Far more is named: ~45 towns round Seattle at zoom 8
+  against Esri's ~6, hamlets, lakes a zoom or two sooner, creeks along their length,
+  wildernesses and town parks. Crystal, Revelstoke and Sunshine were compared with the
+  tiles' water names only: Overpass failed for them that day.
+- The tiles' text is Open Sans and Noto Sans through `/api/glyphs/`; places tiles cost
+  four label tiles each (through the server's cache).
+
 ## Milestone 7 notes (done 12 Nov 2026)
 
 What shipped, and where it differs from the plan above:

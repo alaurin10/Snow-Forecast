@@ -12,6 +12,7 @@ import {
 	contourThresholds,
 	elevationBands,
 	overlayTiles,
+	SAT_LABEL_LAYERS,
 	shadePaint,
 	sunPaint
 } from '../style';
@@ -61,7 +62,8 @@ export function addContours(
 	const tiles = contourTiles(o.units);
 	if (!tiles) return false;
 	const order = map.getLayersOrder();
-	const before = order[order.indexOf('satlabels') + 1];
+	// Over the names and borders, as in the style (style.ts).
+	const before = order[order.indexOf(SAT_LABEL_LAYERS[SAT_LABEL_LAYERS.length - 1]) + 1];
 	map.addSource('contours', { type: 'vector', tiles: [tiles], maxzoom: 15 });
 	for (const layer of contourLayers(o.dark, o.units, o.on)) map.addLayer(layer, before);
 	return true;

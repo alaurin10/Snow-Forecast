@@ -211,25 +211,28 @@ def cmd_map(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_ski_map(args: argparse.Namespace, settings: Settings) -> int:
-    """Fetch the map's ski runs, lifts and peaks from OpenStreetMap now."""
+    """Fetch the map's ski runs, lifts and peaks, and the rivers, creeks and lakes named
+    over imagery, from OpenStreetMap now."""
     import httpx
 
-    from snowwatch import osm
+    from snowwatch import osm, osmlabels
 
     conn = connect(settings.database)
     points = [(b.lat, b.lon) for loc in service.list_locations(conn) for b in loc.bands[:1]]
     headers = {"User-Agent": settings.user_agent}
     with httpx.Client(headers=headers, follow_redirects=True) as client:
         wrote = osm.refresh(settings.osm_path, points, client, force=True)
-    if not wrote:
-        print("no new ski map data: every Overpass server failed (see the warnings above)")
-        return 1
-    kinds: dict[str, int] = {}
-    for f in json.loads(settings.osm_path.read_text())["features"]:
-        k = f["properties"]["kind"]
-        kinds[k] = kinds.get(k, 0) + 1
-    print(f"wrote {settings.osm_path}: " + ", ".join(f"{n} {k}s" for k, n in sorted(kinds.items())))
-    return 0
+        wrote_labels = osmlabels.refresh(settings.osm_labels_path, points, client, force=True)
+    for path, ok in ((settings.osm_path, wrote), (settings.osm_labels_path, wrote_labels)):
+        if not ok:
+            print(f"no new {path.name}: every Overpass server failed (see the warnings above)")
+            continue
+        kinds: dict[str, int] = {}
+        for f in json.loads(path.read_text())["features"]:
+            k = f["properties"]["kind"]
+            kinds[k] = kinds.get(k, 0) + 1
+        print(f"wrote {path}: " + ", ".join(f"{n} {k}s" for k, n in sorted(kinds.items())))
+    return 0 if wrote and wrote_labels else 1
 
 
 def cmd_rebuild(args: argparse.Namespace, settings: Settings) -> int:

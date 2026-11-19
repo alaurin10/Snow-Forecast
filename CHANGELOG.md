@@ -110,6 +110,15 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **No county lines over satellite imagery, and more names.** Place names and borders
+  over the Satellite and Recent satellite bases now come from OpenStreetMap and are
+  drawn by the app instead of Esri's label pictures, so county lines are gone (state,
+  province and country lines stay). More is named: smaller towns and hamlets a zoom
+  sooner, national forests and wildernesses at every zoom, town parks and golf courses
+  close in, lakes a zoom or two sooner, and rivers and creeks along their whole length
+  near your locations (fetched weekly with the ski map). Compared view by view with the
+  old labels, the only names lost are county names, one Whistler park OpenStreetMap
+  doesn't have, and two Whistler village parks that now appear a little further in.
 - **Tidier recent satellite.** The stitched newest-clear view no longer looks like a
   patchwork of boxes: cloud gaps are round rather than square, the parts' borders curve
   instead of following a 250 m grid, each part's gaps are filled from one or two passes

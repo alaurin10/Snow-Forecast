@@ -310,8 +310,10 @@ class Worker:
         self.weather_layers()
 
     def ski_map(self) -> None:
-        """Ski runs, lifts and peaks from OpenStreetMap: weekly, or when locations change."""
-        from snowwatch import osm
+        """Ski runs, lifts and peaks, and the rivers, creeks and lakes named over imagery,
+        from OpenStreetMap: weekly, or when locations change. Each file is kept if its
+        fetch fails."""
+        from snowwatch import osm, osmlabels
 
         try:
             conn = connect(self.settings.database)
@@ -319,6 +321,7 @@ class Worker:
             headers = {"User-Agent": self.settings.user_agent}
             with httpx.Client(headers=headers, follow_redirects=True) as client:
                 osm.refresh(self.settings.osm_path, points, client)
+                osmlabels.refresh(self.settings.osm_labels_path, points, client)
         except Exception:
             log.exception("ski map data failed")
 

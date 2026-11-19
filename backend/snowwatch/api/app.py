@@ -337,8 +337,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return tile_cache
 
     @app.get("/api/tiles/{layer}/{z}/{x}/{y}.png")
+    @app.get("/api/tiles/{layer}/{z}/{x}/{y}.pbf")
     def tile(layer: str, z: int, x: int, y: int, request: Request) -> Response:
-        """Base map and ski-run tiles, cached here (see snowwatch/tiles.py)."""
+        """Base map, label and ski-run tiles, cached here (see snowwatch/tiles.py)."""
         cache = tiles()
         if not cache.cached(layer, z, x, y):
             tile_misses.check(request)
@@ -517,6 +518,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Ski runs, lifts, peaks, huts, trailheads, passes, cliffs, glaciers and ski routes
         around the locations (refreshed weekly by the worker, see snowwatch/osm.py)."""
         return json_file(settings.osm_path, request, 3600, "ski map data not fetched yet")
+
+    @app.get("/api/osm/labels.geojson")
+    def map_labels(request: Request) -> Response:
+        """Rivers, creeks and lakes around the locations, named over imagery
+        (refreshed weekly by the worker, see snowwatch/osmlabels.py)."""
+        return json_file(settings.osm_labels_path, request, 3600, "map label data not fetched yet")
 
     if settings.owner_password and len(settings.owner_password) < MIN_PASSWORD:
         log.error(
