@@ -7,6 +7,13 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **A Base pill at the foot of the map**, beside Terrain and Weather: Topo, Satellite or
+  Recent, with Recent's controls (colours, the view stepper) in its panel, as Radar has
+  its timeline. On phones a tab with something chosen shows just that ("Satellite",
+  "Snow total") and Measure is a ruler, so the row fits without scrolling; the map's
+  buttons now sit above the row instead of beside it.
+- **A Names switch** in the map's Show tiles turns the town, lake, river and park names
+  over satellite imagery off (state and country lines stay).
 - **Recent satellite reaches past the 24 km square.** Round each location the map now
   also shows the newest clear Sentinel-2 view of the 72 x 72 km area at 30 m, stitched
   and dated like the 10 m view, which stays on top in the middle. Beyond it, and where
@@ -110,6 +117,9 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **Recent satellite shows every location's views at once**, so neighbouring areas that
+  touch or overlap read as one (the nearest location's on top, and 10 m always over
+  30 m). The controls and the dated outlines are still for the nearest location.
 - **The forecast updates every 3 hours**, up from every 6 (`schedule.runs_utc`: 00:30,
   03:30 … 21:30 UTC; the ensembles still come twice a day, at 09:30 and 21:30). The
   runs in between catch the hourly HRRR and NBM in the US and keep "now" and the last
@@ -117,6 +127,13 @@ Notable changes to Snow Watch. The format follows
   (`snowwatch budget` shows the total). The Confidence tab's trend takes one run per
   6 hours, so it still reaches back about as far and runs that repeat the same model
   data don't flatten it.
+- **Calmer map labels.** Zoomed out, only the major cities are named (Seattle, Tacoma,
+  Everett), then other cities from zoom 9, towns from 10, villages and hamlets from
+  10.5-11. Peaks are shown by how far each is from a higher one, so zoomed out you see
+  the big standalone peaks, and more as you zoom in (every named peak from zoom 14);
+  where names collide the highest wins, and a peak shows no dot without its name.
+  Rivers and creeks near your locations are named once along each stretch on screen
+  instead of every few hundred pixels.
 - **No county lines over satellite imagery, and more names.** Place names and borders
   over the Satellite and Recent satellite bases now come from OpenStreetMap and are
   drawn by the app instead of Esri's label pictures, so county lines are gone (state,

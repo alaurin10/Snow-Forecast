@@ -42,7 +42,7 @@ describe('prefs', () => {
 	it('saves map features as a list', async () => {
 		const { prefs } = await import('./prefs.svelte');
 		prefs.setMapFeature('contours', false);
-		expect(localStorage.getItem('sw.mapFeatures')).toBe('runs,peaks,places,glaciers');
+		expect(localStorage.getItem('sw.mapFeatures')).toBe('runs,peaks,places,glaciers,names');
 		expect(prefs.mapFeatures.has('contours')).toBe(false);
 	});
 
@@ -60,12 +60,19 @@ describe('prefs', () => {
 	it('switches features added later on once, then remembers the choice', async () => {
 		localStorage.setItem('sw.mapFeatures', 'runs,zones');
 		let { prefs } = await import('./prefs.svelte');
-		expect([...prefs.mapFeatures]).toEqual(['runs', 'zones', 'places', 'glaciers']);
+		expect([...prefs.mapFeatures]).toEqual(['runs', 'zones', 'places', 'glaciers', 'names']);
 		prefs.setMapFeature('glaciers', false);
 		vi.resetModules();
 		({ prefs } = await import('./prefs.svelte'));
 		expect(prefs.mapFeatures.has('glaciers')).toBe(false);
 		expect(prefs.mapFeatures.has('places')).toBe(true);
+	});
+
+	it('a browser on the last version gets only the newest feature, not ones it turned off', async () => {
+		localStorage.setItem('sw.mapFeatures', 'runs,peaks');
+		localStorage.setItem('sw.mapFeaturesV', '2');
+		const { prefs } = await import('./prefs.svelte');
+		expect([...prefs.mapFeatures]).toEqual(['runs', 'peaks', 'names']);
 	});
 
 	it('keeps working when storage is blocked', async () => {

@@ -80,7 +80,7 @@ describe('what the base draws', () => {
 		expect(spec.viirs?.tiles[0]).toBe(
 			'/api/tiles/gibs/VIIRS_NOAA20_CorrectedReflectance_TrueColor/2026-11-10/{z}/{x}/{y}'
 		);
-		expect(spec.view).toMatchObject({
+		expect(spec.views.at(-1)).toMatchObject({
 			id: 'view-fedcba9876543210-natural',
 			tiles: ['/api/sat/tiles/fedcba9876543210/natural/{z}/{x}/{y}.webp'],
 			tileSize: 512,
@@ -88,13 +88,15 @@ describe('what the base draws', () => {
 			maxzoom: 13,
 			bounds: snoq.box
 		});
-		expect(spec.view?.attribution).toContain('Copernicus Sentinel');
+		expect(spec.views.at(-1)?.attribution).toContain('Copernicus Sentinel');
 		expect(spec.dates).toEqual(datesGeojson(composite));
 	});
 
 	it('a whole scene has no outlines, and the snow bands swap both layers', () => {
 		const spec = recentSpec(data, snoq, { kind: 'scene', scene: snoq.scenes![0] }, 'snow');
-		expect(spec.view?.tiles[0]).toBe('/api/sat/tiles/cccccccccccccccc/snow/{z}/{x}/{y}.webp');
+		expect(spec.views.at(-1)?.tiles[0]).toBe(
+			'/api/sat/tiles/cccccccccccccccc/snow/{z}/{x}/{y}.webp'
+		);
 		expect(spec.viirs?.tiles[0]).toContain('BandsM11-I2-I1');
 		expect(spec.dates).toBeNull();
 	});
@@ -109,7 +111,7 @@ describe('what the base draws', () => {
 			{ kind: 'stitched', composite },
 			'snow'
 		);
-		expect(spec.wide).toMatchObject({
+		expect(spec.wides.at(-1)).toMatchObject({
 			id: 'wide-0123456789abcdef-snow',
 			tiles: ['/api/sat/tiles/0123456789abcdef/snow/{z}/{x}/{y}.webp'],
 			minzoom: 7,
@@ -122,21 +124,48 @@ describe('what the base draws', () => {
 		]);
 		// Stepping to a whole scene keeps the wide view and its dates.
 		const scene = recentSpec(data, spot, { kind: 'scene', scene: snoq.scenes![0] }, 'natural');
-		expect(scene.wide?.id).toBe('wide-0123456789abcdef-natural');
+		expect(scene.wides.at(-1)?.id).toBe('wide-0123456789abcdef-natural');
 		expect(scene.dates).toEqual(datesGeojson(wide, true));
 		expect(scene.dates?.features.every((f) => f.properties?.wide === true)).toBe(true);
 	});
 
-	it('only the daily mosaic with no view, and nothing without the index', () => {
-		expect(recentSpec(data, null, null, 'natural')).toMatchObject({
-			wide: null,
-			view: null,
-			dates: null
-		});
+	it('draws every location’s views, the nearest one’s on top', () => {
+		const wide = (v: string) => ({ ...composite, view: v });
+		const box: [number, number, number, number] = [-122, 47, -121, 48];
+		const locs = data.locations!.map((l) =>
+			l.id === 'snoqualmie' || l.id === 'revelstoke'
+				? { ...l, wide: wide(l.id === 'snoqualmie' ? 'w-snoq' : 'w-revel'), wide_box: box }
+				: l
+		);
+		const d = { ...data, locations: locs };
+		const snoq2 = locs.find((l) => l.id === 'snoqualmie')!;
+		const spec = recentSpec(d, snoq2, { kind: 'scene', scene: snoq2.scenes![0] }, 'natural');
+		// Whistler's and Revelstoke's first views (their newest scenes) under Snoqualmie's
+		// chosen one; Sunshine has none.
+		expect(spec.views.map((v) => v.id)).toEqual([
+			'view-0123456789abcdef-natural',
+			'view-aaaaaaaaaaaaaaaa-natural',
+			'view-cccccccccccccccc-natural'
+		]);
+		expect(spec.wides.map((v) => v.id)).toEqual(['wide-w-revel-natural', 'wide-w-snoq-natural']);
+		// Only the nearest location's parts are dated.
+		expect(spec.dates).toEqual(datesGeojson(wide('w-snoq'), true));
+		// Far from every location: their views all the same, first views, no dates.
+		const away = recentSpec(d, null, null, 'natural');
+		expect(away.views.map((v) => v.id)).toEqual([
+			'view-0123456789abcdef-natural',
+			'view-aaaaaaaaaaaaaaaa-natural',
+			'view-fedcba9876543210-natural'
+		]);
+		expect(away.wides).toHaveLength(2);
+		expect(away.dates).toBeNull();
+	});
+
+	it('nothing without the index', () => {
 		expect(recentSpec(null, null, null, 'natural')).toEqual({
 			viirs: null,
-			wide: null,
-			view: null,
+			wides: [],
+			views: [],
 			dates: null
 		});
 	});

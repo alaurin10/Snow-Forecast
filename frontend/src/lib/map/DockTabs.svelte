@@ -1,6 +1,6 @@
 <!--
   One row naming the controls at the foot of the map, each with what it shows now
-  ("Terrain · Slope", "Weather · Off"). A tap opens that control above the row (and folds
+  ("Terrain · Slope", "Weather · Off"; on phones just "Slope" once something is chosen). A tap opens that control above the row (and folds
   the one that was open); a tap on the open one folds it, leaving just this row.
 -->
 <script lang="ts">
@@ -11,6 +11,8 @@
 		value: string;
 		/** More of the same, for screen readers and on hover. */
 		status: string;
+		/** An icon (an SVG path on a 24 px grid) shown in place of the name on phones. */
+		icon?: string;
 	}
 
 	interface Props {
@@ -25,12 +27,16 @@
 <div class="docktabs glass" role="group" aria-label="Map controls">
 	{#each tabs as t (t.id)}
 		<button
+			class:chosen={!!t.value && t.value !== 'Off'}
+			class:iconic={!!t.icon}
 			aria-pressed={open === t.id}
 			aria-label="{t.title}: {t.status}"
 			title="{t.title}: {t.status}"
 			onclick={() => onpick(open === t.id ? null : t.id)}
 		>
-			<span>{t.title}</span>{#if t.value}<b class:off={t.value === 'Off'}>{t.value}</b>{/if}
+			{#if t.icon}<svg class="icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"
+					><path d={t.icon} /></svg
+				>{/if}<span>{t.title}</span>{#if t.value}<b class:off={t.value === 'Off'}>{t.value}</b>{/if}
 			<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
 				><path d={open === t.id ? 'M6 9l6 6 6-6' : 'M6 15l6-6 6 6'} /></svg
 			>
@@ -87,6 +93,26 @@
 	b.off {
 		font-weight: 500;
 		color: var(--text-3);
+	}
+	/* Phones: a tab with something chosen shows just that ("Satellite", "Snow total"),
+	   so Base, Terrain and Weather fit one row; an Off tab keeps its name. */
+	@media (max-width: 559px) {
+		button {
+			gap: 4px;
+			padding: 0 10px;
+		}
+		button.chosen span,
+		button.iconic span {
+			display: none;
+		}
+	}
+	.icon {
+		display: none;
+	}
+	@media (max-width: 559px) {
+		.icon {
+			display: block;
+		}
 	}
 	svg {
 		fill: none;

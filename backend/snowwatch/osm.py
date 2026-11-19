@@ -44,6 +44,8 @@ RUN_TYPES = {"downhill", "skitour", "backcountry", "nordic", "sled", "hike", "sn
 QUERY_VERSION = 2
 # Shelters worth showing in the mountains (not picnic or bus shelters), unless named.
 SHELTERS = {"basic_hut", "lean_to", "rock_shelter", "weather_shelter", "emergency"}
+# A peak's isolation (km to a higher peak) is at most this: the highest in the file.
+ISO_MAX = 100.0
 # Glaciers and cliffs are drawn as shapes; detail below ~8 m only adds bytes.
 SIMPLIFY_DEG = 0.00008
 
@@ -358,7 +360,37 @@ def to_geojson(elements: list[dict[str, Any]]) -> dict[str, Any]:
                 "properties": props,
             }
         )
-    return {"type": "FeatureCollection", "features": feats}
+    fc = {"type": "FeatureCollection", "features": feats}
+    add_isolation(fc)
+    return fc
+
+
+def add_isolation(fc: dict[str, Any]) -> bool:
+    """Give each peak its isolation, `iso`: km to the nearest higher peak in the file
+    (ISO_MAX for the highest, 0 without a height). The map shows the more isolated ones
+    first as it zooms in, so the big peaks stand out zoomed out. Returns whether any
+    peak's value changed."""
+    peaks = [f for f in fc.get("features", []) if f.get("properties", {}).get("kind") == "peak"]
+    pts = []
+    for f in peaks:
+        lon, lat = f["geometry"]["coordinates"][:2]
+        pts.append((math.radians(lat), math.radians(lon), f["properties"].get("ele")))
+    changed = False
+    for f, (lat, lon, ele) in zip(peaks, pts, strict=True):
+        if not isinstance(ele, int | float):
+            iso = 0.0
+        else:
+            best = ISO_MAX
+            for lat2, lon2, ele2 in pts:
+                if isinstance(ele2, int | float) and ele2 > ele:
+                    x = (lon2 - lon) * math.cos((lat + lat2) / 2)
+                    d = math.hypot(x, lat2 - lat) * 6371.0
+                    best = min(best, d)
+            iso = round(best, 1)
+        if f["properties"].get("iso") != iso:
+            f["properties"]["iso"] = iso
+            changed = True
+    return changed
 
 
 def fetch_box(client: httpx.Client, box: tuple[float, float, float, float]) -> list[Any] | None:
@@ -411,6 +443,14 @@ def refresh(
             m = json.loads(meta.read_text())
             max_age = MAX_AGE_S if int(m.get("features", 0)) > 0 else EMPTY_MAX_AGE_S
             if m.get("key") == key and now - float(m.get("at", 0)) < max_age:
+                # A file from before peaks had their isolation gets it, without asking
+                # Overpass again.
+                fc = json.loads(path.read_text())
+                if add_isolation(fc):
+                    tmp = path.with_suffix(".tmp")
+                    tmp.write_text(json.dumps(fc, separators=(",", ":")))
+                    tmp.replace(path)
+                    return True
                 return False
         except (ValueError, TypeError):
             pass

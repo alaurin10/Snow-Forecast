@@ -845,6 +845,37 @@ with a rule that nothing Esri named may be lost:
   tiles' water names only: Overpass failed for them that day.
 - The tiles' text is Open Sans and Noto Sans through `/api/glyphs/`; places tiles cost
   four label tiles each (through the server's cache).
+- Follow-up (19 Nov 2026), **every location's views at once**: `recentSpec` returns all
+  locations' wide and 10 m views (`wides`, `views`), bottom first: the wides, then the
+  10 m views, the nearest location's last in each, so 10 m covers 30 m wherever it
+  reaches and the nearest is on top. Others show their first view (stitched if they
+  have one); only the nearest is outlined and dated. `layers/sat.ts` keeps the replaced
+  views, just under their own kind's new ones, until the new tiles are in.
+- Follow-up (19 Nov 2026), **the Base pill**: the dock's tabs are Base, Terrain and
+  Weather (Measure while measuring); Base's panel has Topo / Satellite / Recent (the last
+  two need a connection) and, for Recent, `SatControls`. The Satellite tab is gone. On
+  phones a tab with something chosen shows just its value, Measure is a ruler, and the
+  map's button column stands above the row of tabs (it used to stand beside it, which
+  left the row ~240 px on a 375 px phone). Measured: 246-289 px for the three tabs at
+  320-390 px wide; with Measure, 302-345 px (only 320 px with the longest choices
+  scrolls).
+- Follow-up (19 Nov 2026), fewer names zoomed out: towns by size (cities of rank 10 and
+  under always, other cities from zoom 9, towns from 10, villages from 10.5, hamlets
+  from 11, more important first, 4 px apart). Rivers and creeks round the locations are
+  named once along each stretch (`line-center`: the middle of the line's piece in each
+  map tile) rather than every 150 px; the tiles' rivers and long lakes repeat every
+  350-900 px by zoom. A **Names** tile (`names` feature) hides the names over imagery;
+  borders stay. Feature defaults now remember which version added each feature, so a
+  browser on version 2 gets only Names switched on, not huts or glaciers it turned off.
+- **Peaks by isolation**: `osm.add_isolation` gives each peak `iso`, the distance in km
+  to the nearest higher peak in the file (100 for the highest, 0 without a height), when
+  the file is made, and once to a fresh file from before (no Overpass call). The map
+  shows peaks of 15 km and more at zoom 9, 6 at 10, 3 at 11, 1.2 at 12, 0.5 at 13, all
+  from 14 (`PEAK_FILTER`); a file without `iso` shows all, as before. Highest first where
+  names collide, with more room round names zoomed out. The dot is the label's icon (an
+  SDF image made in the browser, `peakDot`), so a peak whose name doesn't fit shows no
+  dot. Round Snoqualmie (214 peaks from the tiles) that is 1 peak at zoom 9, 7 at 10,
+  40 at 11 and ~110 at 12 over a 50 x 40 km area.
 
 ## Milestone 7 notes (done 12 Nov 2026)
 

@@ -126,7 +126,25 @@ export const SKI_LAYERS = [
 	'lift-labels',
 	'route-labels'
 ];
-export const PEAK_LAYERS = ['peaks', 'peak-labels'];
+export const PEAK_LAYERS = ['peak-labels'];
+/** The peaks' dot: an SDF image, coloured by the layer (see peakDot). */
+export const PEAK_DOT = 'peak-dot';
+
+/** A round dot as a signed distance field, for PEAK_DOT: drawn at half its pixels, 3 px
+ *  across the middle, with room for the halo round it. */
+export function peakDot(): { width: number; height: number; data: Uint8Array } {
+	const size = 24;
+	const r = 6;
+	const data = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y++) {
+		for (let x = 0; x < size; x++) {
+			const d = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
+			// MapLibre's SDF edge is at 192; outward it fades for the halo.
+			data[(y * size + x) * 4 + 3] = Math.max(0, Math.min(255, Math.round(192 + (r - d) * 24)));
+		}
+	}
+	return { width: size, height: size, data };
+}
 /** Huts and shelters, trailheads and passes. */
 export const PLACE_LAYERS = ['places', 'place-labels'];
 export const GLACIER_LAYERS = ['glaciers', 'glacier-lines', 'cliffs', 'glacier-labels'];
@@ -151,6 +169,10 @@ export const SAT_LABEL_LAYERS = [
 	'satlabels-states',
 	'satlabels-towns'
 ];
+/** State, province and country lines: shown over imagery whatever the Names switch. */
+export const SAT_BORDER_LAYERS = SAT_LABEL_LAYERS.slice(0, 3);
+/** The names over imagery, which the Names switch (`names` feature) shows or hides. */
+export const SAT_NAME_LAYERS = SAT_LABEL_LAYERS.slice(3);
 /** The precipitation overlay goes under this layer (over the base and terrain overlays). */
 export const PRECIP_BEFORE = SAT_LABEL_LAYERS[0];
 
@@ -181,6 +203,8 @@ export interface StyleOptions {
 	places: boolean;
 	/** Glaciers and cliffs. */
 	glaciers: boolean;
+	/** Place, water and park names over imagery (borders show whatever this is). */
+	names?: boolean;
 	contours: boolean;
 	shade: MapShade;
 	overlay: MapOverlay;
@@ -490,7 +514,7 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			});
 		}
 	}
-	layers.push(...satLabelLayers(imagery));
+	layers.push(...satLabelLayers(imagery, o.names ?? true));
 	if (full && o.contourTiles) {
 		sources.contours = { type: 'vector', tiles: [o.contourTiles], maxzoom: 15 };
 		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
@@ -749,35 +773,31 @@ export function skiLayers(
 			paint: { 'text-color': '#6a2f9e', ...LABEL_PAINT }
 		},
 		{
-			id: 'peaks',
-			type: 'circle',
-			source: 'ski',
-			minzoom: 10,
-			filter: ['==', ['get', 'kind'], 'peak'],
-			layout: { visibility: pv },
-			paint: {
-				'circle-radius': 3,
-				'circle-color': peakColor(dark),
-				'circle-stroke-width': 1.2,
-				'circle-stroke-color': halo(dark)
-			}
-		},
-		{
+			// The dot is the label's icon, so a peak whose name has no room shows nothing
+			// rather than a nameless dot.
 			id: 'peak-labels',
 			type: 'symbol',
 			source: 'ski',
-			minzoom: 10,
-			filter: ['==', ['get', 'kind'], 'peak'],
+			minzoom: 9,
+			filter: PEAK_FILTER,
 			layout: {
 				visibility: pv,
+				// The highest first where names would overlap.
+				'symbol-sort-key': ['-', 0, ['coalesce', ['get', 'ele'], 0]],
+				'icon-image': PEAK_DOT,
 				'text-field': peakLabel(units),
 				'text-font': FONT,
 				'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10.5, 15, 13],
 				'text-anchor': 'top',
 				'text-offset': [0, 0.5],
-				'text-max-width': 8
+				'text-max-width': 8,
+				// Room round each name, more zoomed out, so the peaks shown stand apart.
+				'text-padding': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 3]
 			},
 			paint: {
+				'icon-color': peakColor(dark),
+				'icon-halo-color': halo(dark),
+				'icon-halo-width': 1.2,
 				'text-color': peakText(dark),
 				'text-halo-color': halo(dark),
 				'text-halo-width': 1.6
@@ -785,6 +805,21 @@ export function skiLayers(
 		}
 	];
 }
+
+/**
+ * Peaks by isolation (`iso`, km to the nearest higher peak; snowwatch/osm.py): zoomed
+ * out only the big, standalone ones (15 km at zoom 9, 6 at 10, 3 at 11, 1.2 at 12, 0.5
+ * at 13), every named peak from zoom 14. A file from before isolation shows them all.
+ */
+export const PEAK_FILTER = [
+	'all',
+	['==', ['get', 'kind'], 'peak'],
+	[
+		'>=',
+		['coalesce', ['get', 'iso'], 1000],
+		['step', ['zoom'], 15, 10, 6, 11, 3, 12, 1.2, 13, 0.5, 14, 0]
+	]
+] as ExpressionSpecification;
 
 // ---- Glaciers and cliffs; huts, trailheads and passes --------------------------------
 
@@ -948,6 +983,20 @@ const BORDERS = [
 	['!=', ['get', 'maritime'], 1]
 ] as ExpressionSpecification;
 
+/** How far apart the tiles' river and long lake names repeat along them, in screen
+ *  pixels (wider zoomed in, where a river crosses the screen in long bends). */
+const LINE_LABEL_SPACING = [
+	'interpolate',
+	['linear'],
+	['zoom'],
+	10,
+	350,
+	13,
+	450,
+	16,
+	900
+] as ExpressionSpecification;
+
 /** Water names: light blue on a dark halo, as Esri drew them. */
 const WATER_TEXT = {
 	'text-color': '#a9dcff',
@@ -962,8 +1011,9 @@ const WATER_TEXT = {
  * from 11 and creeks from 13 along their lines; lakes; state names when zoomed out; and
  * towns, more of them as the map zooms in.
  */
-export function satLabelLayers(on: boolean): LayerSpecification[] {
-	const v = vis(on);
+export function satLabelLayers(on: boolean, names = true): LayerSpecification[] {
+	const bv = vis(on);
+	const v = vis(on && names);
 	const country = ['==', ['coalesce', ['get', 'admin_level'], 99], 2] as ExpressionSpecification;
 	return [
 		{
@@ -972,7 +1022,7 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			source: 'labels',
 			'source-layer': 'boundary',
 			filter: BORDERS,
-			layout: { visibility: v, 'line-join': 'round' },
+			layout: { visibility: bv, 'line-join': 'round' },
 			paint: {
 				'line-color': 'rgba(15, 20, 30, 0.55)',
 				'line-width': [
@@ -992,7 +1042,7 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			source: 'labels',
 			'source-layer': 'boundary',
 			filter: ['all', BORDERS, ['>', ['coalesce', ['get', 'admin_level'], 99], 2]],
-			layout: { visibility: v, 'line-join': 'round' },
+			layout: { visibility: bv, 'line-join': 'round' },
 			paint: {
 				'line-color': 'rgba(255, 255, 255, 0.85)',
 				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 12, 1.8],
@@ -1006,7 +1056,7 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			source: 'labels',
 			'source-layer': 'boundary',
 			filter: ['all', BORDERS, country],
-			layout: { visibility: v, 'line-join': 'round' },
+			layout: { visibility: bv, 'line-join': 'round' },
 			paint: {
 				'line-color': 'rgba(255, 255, 255, 0.9)',
 				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 12, 2.4]
@@ -1145,7 +1195,7 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 				'text-font': ['Noto Sans Regular'],
 				'text-size': ['match', ['get', 'class'], 'river', 12, 11],
 				'text-letter-spacing': 0.05,
-				'symbol-spacing': 400
+				'symbol-spacing': LINE_LABEL_SPACING
 			},
 			paint: { ...WATER_TEXT }
 		},
@@ -1167,8 +1217,8 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			paint: { ...WATER_TEXT }
 		},
 		{
-			// …big ones as a line along the lake, the name written along it, again every
-			// 250 px of a long lake as Esri's were.
+			// …big ones as a line along the lake, the name written along it (again along a
+			// long lake, as Esri's were).
 			id: 'satlabels-lake-lines',
 			type: 'symbol',
 			source: 'labels',
@@ -1178,7 +1228,7 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			layout: {
 				visibility: v,
 				'symbol-placement': 'line',
-				'symbol-spacing': 250,
+				'symbol-spacing': LINE_LABEL_SPACING,
 				'text-max-angle': 85,
 				'text-field': ['get', 'name'],
 				'text-font': ['Noto Sans Regular'],
@@ -1201,13 +1251,14 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			],
 			layout: {
 				visibility: v,
-				'symbol-placement': 'line',
+				// Once along each stretch on screen (the middle of its piece in each map
+				// tile), not repeated every few hundred pixels.
+				'symbol-placement': 'line-center',
 				'text-max-angle': 85,
 				'text-field': ['get', 'name'],
 				'text-font': ['Noto Sans Regular'],
 				'text-size': ['match', ['get', 'class'], 'river', 12, 11],
-				'text-letter-spacing': 0.05,
-				'symbol-spacing': 150
+				'text-letter-spacing': 0.05
 			},
 			paint: { ...WATER_TEXT }
 		},
@@ -1267,35 +1318,36 @@ export function satLabelLayers(on: boolean): LayerSpecification[] {
 			type: 'symbol',
 			source: 'labels-fine',
 			'source-layer': 'place',
-			// Esri's set and zooms: cities always, towns from 7, villages from 9, hamlets
-			// from 10.
+			// Only the major cities zoomed out (rank 10 and under: Seattle, Tacoma,
+			// Everett), then other cities from zoom 9, towns from 10, villages from 10.5
+			// and hamlets from 11.
 			filter: [
 				'any',
-				['==', ['get', 'class'], 'city'],
-				['all', ['==', ['get', 'class'], 'town'], ['>=', ['zoom'], 7]],
-				['all', ['==', ['get', 'class'], 'village'], ['>=', ['zoom'], 9]],
-				['all', ['==', ['get', 'class'], 'hamlet'], ['>=', ['zoom'], 10]]
+				['all', ['==', ['get', 'class'], 'city'], ['<=', ['coalesce', ['get', 'rank'], 99], 10]],
+				['all', ['==', ['get', 'class'], 'city'], ['>=', ['zoom'], 9]],
+				['all', ['==', ['get', 'class'], 'town'], ['>=', ['zoom'], 10]],
+				['all', ['==', ['get', 'class'], 'village'], ['>=', ['zoom'], 10.5]],
+				['all', ['==', ['get', 'class'], 'hamlet'], ['>=', ['zoom'], 11]]
 			],
 			layout: {
 				visibility: v,
 				'text-field': ['get', 'name'],
 				'text-font': FONT,
-				// Small when zoomed out, as Esri's were, so the towns it named all fit; a
-				// name moves beside its place if the middle is taken.
+				// A name moves beside its place if the middle is taken.
 				'text-size': [
 					'interpolate',
 					['linear'],
 					['zoom'],
 					8,
-					['match', ['get', 'class'], 'city', 11.5, 9.5],
+					['match', ['get', 'class'], 'city', 12.5, 10.5],
 					11,
-					['match', ['get', 'class'], 'city', 13, 'town', 12, 11]
+					['match', ['get', 'class'], 'city', 13.5, 'town', 12, 11]
 				],
 				'text-variable-anchor': ['center', 'left', 'right', 'top', 'bottom'],
 				'text-radial-offset': 0.4,
 				'text-justify': 'auto',
 				'text-max-width': 8,
-				'text-padding': 0,
+				'text-padding': 4,
 				'symbol-sort-key': ['coalesce', ['get', 'rank'], 20]
 			},
 			paint: {

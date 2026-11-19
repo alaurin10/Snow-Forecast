@@ -161,10 +161,10 @@ export interface RecentSource {
 /** What the Recent satellite base draws. */
 export interface RecentSpec {
 	viirs: RecentSource | null;
-	/** The 30 m stitched view of the wider area round the location, under `view`. */
-	wide: RecentSource | null;
-	/** The Sentinel-2 view over the location's area. */
-	view: RecentSource | null;
+	/** Every location's 30 m stitched view of the wider area round it, bottom first. */
+	wides: RecentSource[];
+	/** Every location's 10 m view over its own area, bottom first (over all the wides). */
+	views: RecentSource[];
 	/** The stitched views' parts, outlined and dated. */
 	dates: GeoJSON.FeatureCollection | null;
 }
@@ -183,6 +183,50 @@ function mergeDates(
 
 const gibs = (layer: string, day: string) => [`/api/tiles/gibs/${layer}/${day}/{z}/{x}/{y}`];
 
+function viewSource(
+	data: SatOut | null,
+	spot: SatLocation,
+	view: SatView | null,
+	bands: SatBands
+): RecentSource | null {
+	const name = view?.kind === 'stitched' ? view.composite.view : view?.scene.view;
+	const [minzoom, maxzoom] = data?.zooms ?? [S2_MIN_ZOOM, S2_MAX_ZOOM];
+	return name && spot.box
+		? {
+				id: `view-${name}-${bands}`,
+				tiles: [`/api/sat/tiles/${name}/${bands}/{z}/{x}/{y}.webp`],
+				tileSize: 512,
+				minzoom,
+				maxzoom,
+				bounds: spot.box,
+				attribution: SAT_ATTRIBUTION
+			}
+		: null;
+}
+
+function wideSource(data: SatOut | null, spot: SatLocation, bands: SatBands): RecentSource | null {
+	const [wmin, wmax] = data?.wide_zooms ?? [WIDE_MIN_ZOOM, WIDE_MAX_ZOOM];
+	return spot.wide && spot.wide_box
+		? {
+				id: `wide-${spot.wide.view}-${bands}`,
+				tiles: [`/api/sat/tiles/${spot.wide.view}/${bands}/{z}/{x}/{y}.webp`],
+				tileSize: 512,
+				minzoom: wmin,
+				maxzoom: wmax,
+				bounds: spot.wide_box,
+				attribution: SAT_ATTRIBUTION
+			}
+		: null;
+}
+
+/**
+ * What the Recent satellite base draws: every location's views, so areas that touch or
+ * overlap read as one. `spot` (the location nearest the map's middle) shows `view`, the
+ * one its controls step to, and the others their first (stitched, if they have one).
+ * Bottom first: the 30 m wide views, then the 10 m ones, so 10 m is on top wherever it
+ * reaches; within each, `spot`'s goes last, on top. Only `spot`'s parts are outlined
+ * and dated.
+ */
 export function recentSpec(
 	data: SatOut | null,
 	spot: SatLocation | null,
@@ -199,37 +243,18 @@ export function recentSpec(
 				attribution: GIBS_ATTRIBUTION
 			}
 		: null;
-	const name = view?.kind === 'stitched' ? view.composite.view : view?.scene.view;
-	const [minzoom, maxzoom] = data?.zooms ?? [S2_MIN_ZOOM, S2_MAX_ZOOM];
-	const s2: RecentSource | null =
-		name && spot?.box
-			? {
-					id: `view-${name}-${bands}`,
-					tiles: [`/api/sat/tiles/${name}/${bands}/{z}/{x}/{y}.webp`],
-					tileSize: 512,
-					minzoom,
-					maxzoom,
-					bounds: spot.box,
-					attribution: SAT_ATTRIBUTION
-				}
-			: null;
-	const [wmin, wmax] = data?.wide_zooms ?? [WIDE_MIN_ZOOM, WIDE_MAX_ZOOM];
-	const wide: RecentSource | null =
-		spot?.wide && spot.wide_box
-			? {
-					id: `wide-${spot.wide.view}-${bands}`,
-					tiles: [`/api/sat/tiles/${spot.wide.view}/${bands}/{z}/{x}/{y}.webp`],
-					tileSize: 512,
-					minzoom: wmin,
-					maxzoom: wmax,
-					bounds: spot.wide_box,
-					attribution: SAT_ATTRIBUTION
-				}
-			: null;
+	const others = (data?.locations ?? []).filter((l) => l.id !== spot?.id);
+	const wides = [...others, ...(spot ? [spot] : [])]
+		.map((l) => wideSource(data, l, bands))
+		.filter((x): x is RecentSource => !!x);
+	const views = [
+		...others.map((l) => viewSource(data, l, satViews(l)[0] ?? null, bands)),
+		spot ? viewSource(data, spot, view, bands) : null
+	].filter((x): x is RecentSource => !!x);
 	return {
 		viirs,
-		wide,
-		view: s2,
+		wides,
+		views,
 		dates: mergeDates(spot?.wide, view?.kind === 'stitched' ? view.composite : null)
 	};
 }
