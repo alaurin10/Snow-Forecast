@@ -4369,6 +4369,33 @@
             "$ref": "#/$defs/SatScene"
           },
           "type": "array"
+        },
+        "wide": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SatComposite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "wide_box": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -4435,6 +4462,27 @@
             }
           ],
           "default": null
+        },
+        "wide_km": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "wide_zooms": {
+          "default": [
+            7,
+            12
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
         },
         "zooms": {
           "default": [

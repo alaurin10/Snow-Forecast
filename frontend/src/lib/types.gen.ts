@@ -862,6 +862,8 @@ export interface SatOut {
 	min_clear_pct?: number;
 	scene_days?: number;
 	viirs_date?: string | null;
+	wide_km?: number | null;
+	wide_zooms?: number[];
 	zooms?: number[];
 }
 /**
@@ -878,6 +880,8 @@ export interface SatLocation {
 	lon: number;
 	name: string;
 	scenes?: SatScene[];
+	wide?: SatComposite | null;
+	wide_box?: [number, number, number, number] | null;
 }
 /**
  * The newest clear view of the area, stitched from passes (see `stitch`).

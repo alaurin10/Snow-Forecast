@@ -7,6 +7,14 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Recent satellite reaches past the 24 km square.** Round each location the map now
+  also shows the newest clear Sentinel-2 view of the 72 x 72 km area at 30 m, stitched
+  and dated like the 10 m view, which stays on top in the middle. Beyond it, and where
+  no pass in 60 days was clear, the daily 375 m mosaic still shows. The (i) says how far
+  the 30 m view reaches and the dates of its passes. Set `map.sat_wide_km` (36 by
+  default; 0 turns it off). On the server it about doubles the satellite job's first
+  run (4–5 minutes more per location) and adds ~40 MB per location on disk; memory use
+  doesn't change, and later refreshes only fetch new passes.
 - **The Observed tab, redesigned to read at a glance.** It now opens with the simple
   answers. A sentence sums up the snow station ("18 cm of new snow in the last 3 days"),
   with how its depth moved this week and how many days thawed. Below that: the depth on

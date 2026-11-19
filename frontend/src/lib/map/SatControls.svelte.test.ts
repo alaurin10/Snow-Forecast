@@ -29,6 +29,23 @@ describe('SatControls', () => {
 		expect((older as HTMLButtonElement).disabled).toBe(true);
 	});
 
+	it('tells of the wide view round the area, and shows it when the centre has none', async () => {
+		const snoq = data.locations!.find((l) => l.id === 'snoqualmie')!;
+		const wide = { ...snoq.composite!, view: '0123456789abcdef' };
+		render(SatControls, { ...props, data: { ...data, wide_km: 36 }, spot: { ...snoq, wide } });
+		await fireEvent.click(screen.getByRole('button', { name: 'About this view' }));
+		expect(
+			screen.getByText(/Round it, out to 36 km: the newest clear view at 30 m, 21 Oct–4 Nov/)
+		).toBeTruthy();
+		expect(screen.getByText(/VIIRS daily, 10 Nov beyond that/)).toBeTruthy();
+		cleanup();
+		const sunshine = data.locations![2];
+		render(SatControls, { ...props, spot: { ...sunshine, wide } });
+		const status = screen.getByRole('status').textContent ?? '';
+		expect(status.trim().startsWith('21 Oct–4 Nov')).toBe(true);
+		expect(status).toContain('30 m round Sunshine; no clear 10 m view in 60 days');
+	});
+
 	it('says when a location has no clear view, or none is near', () => {
 		render(SatControls, { ...props, spot: data.locations![2] });
 		expect(

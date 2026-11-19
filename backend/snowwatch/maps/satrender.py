@@ -1,9 +1,14 @@
 """Drawing the map's recent satellite views (docs/MAP-PLAN.md, B6).
 
-Every view is drawn once, by the worker, as a 24 x 24 km picture at Sentinel-2's own
-10 m (2,400 pixels a side, in Web Mercator), then cut into the map's 512 px tiles for
-zooms 9-13 under `data/sat/views/<view>/<natural|snow>/`. The browser then loads one
-layer of small finished tiles: nothing is fetched or drawn upstream while it pans.
+Every view is drawn once, by the worker, as one picture of its `Area` in Web Mercator,
+then cut into the map's 512 px tiles under `data/sat/views/<view>/<natural|snow>/`. The
+browser then loads one layer of small finished tiles: nothing is fetched or drawn
+upstream while it pans. Two areas round each location:
+
+- `CENTRE`: 24 x 24 km at Sentinel-2's own 10 m (2,400 pixels a side), zooms 9-13.
+- `WIDE`: the ring round it, 72 x 72 km at 30 m (also 2,400 pixels, so it costs about
+  as much to draw as the centre), zooms 7-12. Only a stitched view; the centre is drawn
+  over its middle.
 
 - A **scene** view is one pass as it is.
 - A **stitched** view takes each pixel from the pass `sat.stitch` chose for that part of
@@ -26,6 +31,7 @@ import math
 import shutil
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -42,10 +48,7 @@ log = logging.getLogger("snowwatch.sat")
 PC_BBOX = "https://planetarycomputer.microsoft.com/api/data/v1/item/bbox"
 # Bumped whenever the drawing changes, so every view is drawn afresh (new names).
 RENDER = 5
-PX = 2400  # pixels a side of a view's picture: 24 km at 10 m
-HALF = PX // 2
 TILE = 512
-ZOOMS = range(9, 14)  # zoom 13 is ~6.5 m a pixel here, finer than Sentinel-2's 10 m
 WORLD = 40075016.685578488  # Web Mercator metres round the equator
 MODES = {
     # Bright enough for dark forest and rock in low autumn sun; the S-curve keeps
@@ -71,11 +74,33 @@ CLEAR_MASK = (
     )
     + "&rescale=0,255"
 )
-CLOUD_MARGIN = 4  # mask pixels (20 m each) cut round cloud
-# Cloud specks up to this many mask pixels across (SCL calls some bright rock and snow
-# cloud) are ignored before the margin goes on: otherwise each leaves an 80 m hole.
-CLOUD_SPECK = 2
 QUALITY = 85
+
+
+@dataclass(frozen=True)
+class Area:
+    """The square drawn round a location, and how."""
+
+    name: str  # goes into its stitched views' names ("stitched" at the centre, as before)
+    km: float  # half its width on the ground
+    px: int  # pixels a side of its picture; the cloud mask is half that
+    zooms: range  # of its tiles
+    # Mask pixels cut round cloud, and cloud specks up to this many mask pixels across
+    # (SCL calls some bright rock and snow cloud) ignored before the margin goes on, so
+    # each doesn't leave a hole: 80 m and 40 m at the centre's 20 m mask.
+    cloud_margin: int
+    cloud_speck: int
+    max_layers: int  # passes in a stitched view at most
+
+    @property
+    def half(self) -> int:
+        return self.px // 2
+
+
+# Zoom 13 is ~6.5 m a pixel here, finer than Sentinel-2's 10 m; zoom 12 ~13 m, about
+# the wide picture's 30 m at its sharpest.
+CENTRE = Area("stitched", 12.0, 2400, range(9, 14), 4, 2, 6)
+WIDE = Area("wide", 36.0, 2400, range(7, 13), 2, 1, 8)
 
 Box = tuple[float, float, float, float]  # Web Mercator: x0, y0, x1, y1
 
@@ -133,15 +158,17 @@ class Renderer:
                 out.paste(Image.open(io.BytesIO(data)).convert(mode), (col * size, row * size))
         return np.asarray(out)
 
-    def picture(self, key: str, p: Pass, mode: str, box: Box) -> np.ndarray:
-        """A pass's picture of the area (PX x PX RGBA, transparent where it has no data),
+    def picture(self, key: str, p: Pass, mode: str, box: Box, area: Area) -> np.ndarray:
+        """A pass's picture of the area (px x px RGBA, transparent where it has no data),
         from the cache or fetched."""
         path = self.crops / key / p.id / f"{mode}.webp"
         if path.exists():
             return np.asarray(Image.open(path).convert("RGBA"))
-        out = np.zeros((PX, PX, 4), np.uint8)
+        out = np.zeros((area.px, area.px, 4), np.uint8)
         for it in p.items:
-            a = self._assemble(self._quarters(it.id, box, HALF, "webp", MODES[mode]), HALF, "RGBA")
+            a = self._assemble(
+                self._quarters(it.id, box, area.half, "webp", MODES[mode]), area.half, "RGBA"
+            )
             take = (out[..., 3] == 0) & (a[..., 3] > 0)
             out[take] = a[take]
             if (out[..., 3] > 0).all():
@@ -150,14 +177,15 @@ class Renderer:
         Image.fromarray(out, "RGBA").save(path, "WEBP", quality=95, method=4)
         return out
 
-    def clear(self, key: str, p: Pass, box: Box) -> np.ndarray:
-        """Where a pass saw the ground clearly, at 20 m (PX/2 square): no cloud, cloud
-        shadow or no data, less CLOUD_MARGIN pixels round cloud."""
-        path = self.crops / key / p.id / f"clear{CLOUD_MARGIN}s{CLOUD_SPECK}b.png"
+    def clear(self, key: str, p: Pass, box: Box, area: Area) -> np.ndarray:
+        """Where a pass saw the ground clearly, at half the picture's size (20 m at the
+        centre): no cloud, cloud shadow or no data, less the margin round cloud."""
+        margin, speck = area.cloud_margin, area.cloud_speck
+        path = self.crops / key / p.id / f"clear{margin}s{speck}b.png"
         if path.exists():
             m = np.asarray(Image.open(path).convert("L")) > 0
         else:
-            n = PX // 2
+            n = area.half
             clear = np.zeros((n, n), bool)
             cloud = np.zeros((n, n), bool)
             for it in p.items:
@@ -168,8 +196,8 @@ class Renderer:
                 clear |= seen & (a[..., 0] > 0)
                 cloud |= seen & (a[..., 0] == 0)
             seen = clear | cloud
-            cloud = grow(~grow(~cloud, CLOUD_SPECK), CLOUD_SPECK)  # opened: specks gone
-            m = seen & ~grow(cloud, CLOUD_MARGIN)
+            cloud = grow(~grow(~cloud, speck), speck)  # opened: specks gone
+            m = seen & ~grow(cloud, margin)
             path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray((m * 255).astype(np.uint8), "L").save(path, "PNG", optimize=True)
         return m
@@ -179,46 +207,50 @@ class Renderer:
     def _done(self, view: str) -> bool:
         return (self.views / view / "done").exists()
 
-    def scene(self, key: str, p: Pass, box: Box) -> str:
+    def scene(self, key: str, p: Pass, box: Box, area: Area) -> str:
         """Draw a whole pass as a view (if not drawn already); returns its name."""
         view = view_id("scene", box, [p.id])
         if not self._done(view):
             for mode in MODES:
-                self.cut(self.picture(key, p, mode, box), box, self.views / view / mode)
+                self.cut(
+                    self.picture(key, p, mode, box, area), box, self.views / view / mode, area.zooms
+                )
             (self.views / view / "done").touch()
         return view
 
-    def stitched(self, key: str, layers: Sequence[Pass], owner: np.ndarray, box: Box) -> str:
+    def stitched(
+        self, key: str, layers: Sequence[Pass], owner: np.ndarray, box: Box, area: Area
+    ) -> str:
         """Draw a stitched view (see the module's notes); returns its name."""
         view = view_id(
-            "stitched", box, [p.id for p in layers] + [hashlib.sha1(owner.tobytes()).hexdigest()]
+            area.name, box, [p.id for p in layers] + [hashlib.sha1(owner.tobytes()).hexdigest()]
         )
         if self._done(view):
             return view
         ok, seen = [], []
         for p in layers:
-            has = self.picture(key, p, "natural", box)[..., 3] > 0
+            has = self.picture(key, p, "natural", box, area)[..., 3] > 0
             seen.append(has)
-            ok.append(upsample2(self.clear(key, p, box)) & has)
-        choice = choose(owner, ok, seen)
+            ok.append(upsample2(self.clear(key, p, box, area)) & has)
+        choice = choose(owner, ok, seen, area.px)
         del ok, seen
         for mode in MODES:
-            out = np.zeros((PX, PX, 4), np.uint8)
+            out = np.zeros((area.px, area.px, 4), np.uint8)
             for i, p in enumerate(layers):
                 sel = choice == i
                 if sel.any():
-                    out[sel] = self.picture(key, p, mode, box)[sel]
-            self.cut(out, box, self.views / view / mode)
+                    out[sel] = self.picture(key, p, mode, box, area)[sel]
+            self.cut(out, box, self.views / view / mode, area.zooms)
         (self.views / view / "done").touch()
         return view
 
-    def cut(self, rgba: np.ndarray, box: Box, out_dir: Path) -> int:
-        """Cut a picture of `box` into the map's tiles for ZOOMS; returns how many."""
+    def cut(self, rgba: np.ndarray, box: Box, out_dir: Path, zooms: range) -> int:
+        """Cut a picture of `box` into the map's tiles for `zooms`; returns how many."""
         x0, y0, x1, y1 = box
         res = (x1 - x0) / rgba.shape[1]
         src = Image.fromarray(rgba, "RGBA").convert("RGBa")  # premultiplied: no dark fringes
         count = 0
-        for z in ZOOMS:
+        for z in zooms:
             span = WORLD / 2**z  # metres a tile
             tres = span / TILE
             img, r = src, res
@@ -280,7 +312,10 @@ def upsample2(m: np.ndarray) -> np.ndarray:
 
 
 def choose(
-    owner: np.ndarray, ok: Sequence[np.ndarray], seen: Sequence[np.ndarray] | None = None
+    owner: np.ndarray,
+    ok: Sequence[np.ndarray],
+    seen: Sequence[np.ndarray] | None = None,
+    px: int = CENTRE.px,
 ) -> np.ndarray:
     """Which layer each pixel comes from (-1: none).
 
@@ -290,7 +325,7 @@ def choose(
     surroundings. Given `seen` (where each layer has data at all), what's still left (cloud in
     every layer) comes from its part's layer, else the newest with data: a pass's own
     sharp picture of the cloud beats a hole showing the 375 m mosaic."""
-    size = ok[0].shape[0] if ok else PX
+    size = ok[0].shape[0] if ok else px
     choice = np.full((size, size), -1, np.int8)
     if not ok:
         return choice

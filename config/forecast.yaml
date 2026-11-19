@@ -118,13 +118,15 @@ map:
   # NOAA NBM runs (UTC) for the US beyond 48 h and US snow totals. Only 00/06/12/18
   # reach 10 days; each new run costs ~60-80 MB of downloads.
   nbm_cycles: [0, 12]
-  # Recent satellite: Sentinel-2 views of the 24 x 24 km round each location.
+  # Recent satellite: Sentinel-2 views of the 24 x 24 km round each location (10 m),
+  # and a stitched 30 m view of the wider area round it.
   sat_hours: 6           # look for new passes this often
   sat_days: 30           # the stitched newest-clear view uses passes this recent
   sat_scene_days: 60     # whole scenes are looked for this far back
   sat_min_clear: 0.85    # a whole scene sees at least this share of the area clearly
   sat_max_nodata: 0.03   # and misses at most this much of it (off its swath)
   sat_keep: 3            # whole scenes kept per location (the map steps through them)
+  sat_wide_km: 36        # a 30 m view this far round each location (72 km square); 0: off
   # Snow stations (SNOTEL and BC snow pillows) and Avalanche Canada field reports.
   stations_minutes: 60   # depth and 24-hour change at every station in the box
   obs_minutes: 60        # Mountain Information Network reports

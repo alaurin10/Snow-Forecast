@@ -1,9 +1,10 @@
 // Recent satellite base map (docs/MAP-PLAN.md, B6). NASA GIBS's daily VIIRS mosaic
-// (375 m, the newest day with imagery) everywhere, and over the 24 km round the location
-// nearest the middle of the map one Sentinel-2 view at 10 m, drawn and cut into tiles by
-// the server (backend/snowwatch/maps/satrender.py), so the map loads one layer of
-// finished tiles. The first view is stitched: each part from the newest pass that saw
-// the ground there, outlined and dated on the map. The others are whole clear scenes.
+// (375 m, the newest day with imagery) everywhere; round the location nearest the middle
+// of the map a stitched Sentinel-2 view of the 72 km round at 30 m (the wide view); and
+// over the 24 km in its middle one Sentinel-2 view at 10 m. All are drawn and cut into
+// tiles by the server (backend/snowwatch/maps/satrender.py), so the map loads finished
+// tiles. Stitched views take each part from the newest pass that saw the ground there,
+// outlined and dated on the map. The centre's other views are whole clear scenes.
 import type { SatComposite, SatLocation, SatOut, SatScene } from '../types.gen';
 import type { SatBands } from '../prefs.svelte';
 import { distanceKm } from './windsource';
@@ -14,6 +15,9 @@ export const SAT_RANGE_KM = 60;
 export const VIIRS_MAX_ZOOM = 9;
 export const S2_MIN_ZOOM = 9;
 export const S2_MAX_ZOOM = 13;
+/** The wide view's tiles are cut for zooms 7 to 12. */
+export const WIDE_MIN_ZOOM = 7;
+export const WIDE_MAX_ZOOM = 12;
 
 export const VIIRS_LAYERS: Record<SatBands, string> = {
 	natural: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
@@ -114,8 +118,9 @@ export function stitchedSpan(c: SatComposite): string {
 }
 
 /** A stitched view's dashed lines where two passes' parts meet, and each part as a
- * dated area (the map writes its date wherever the part is on screen). */
-export function datesGeojson(c: SatComposite): GeoJSON.FeatureCollection {
+ * dated area (the map writes its date wherever the part is on screen). The wide view's
+ * are marked `wide`, and drawn quieter. */
+export function datesGeojson(c: SatComposite, wide = false): GeoJSON.FeatureCollection {
 	const newest = c.layers[0]?.time;
 	return {
 		type: 'FeatureCollection',
@@ -124,14 +129,19 @@ export function datesGeojson(c: SatComposite): GeoJSON.FeatureCollection {
 				? [
 						{
 							type: 'Feature' as const,
-							properties: { kind: 'line' },
+							properties: { kind: 'line', ...(wide ? { wide } : {}) },
 							geometry: { type: 'MultiLineString' as const, coordinates: c.lines ?? [] }
 						}
 					]
 				: []),
 			...c.parts.map((p) => ({
 				type: 'Feature' as const,
-				properties: { kind: 'part', label: shortDate(p.time), newest: p.time === newest },
+				properties: {
+					kind: 'part',
+					label: shortDate(p.time),
+					newest: p.time === newest,
+					...(wide ? { wide } : {})
+				},
 				geometry: { type: 'MultiPolygon' as const, coordinates: p.polygons }
 			}))
 		]
@@ -151,10 +161,24 @@ export interface RecentSource {
 /** What the Recent satellite base draws. */
 export interface RecentSpec {
 	viirs: RecentSource | null;
+	/** The 30 m stitched view of the wider area round the location, under `view`. */
+	wide: RecentSource | null;
 	/** The Sentinel-2 view over the location's area. */
 	view: RecentSource | null;
-	/** The stitched view's parts, outlined and dated. */
+	/** The stitched views' parts, outlined and dated. */
 	dates: GeoJSON.FeatureCollection | null;
+}
+
+/** Both stitched views' outlines and dates in one collection (either may be missing). */
+function mergeDates(
+	wide: SatComposite | null | undefined,
+	centre: SatComposite | null
+): GeoJSON.FeatureCollection | null {
+	const features = [
+		...(wide?.layers.length ? datesGeojson(wide, true).features : []),
+		...(centre?.layers.length ? datesGeojson(centre).features : [])
+	];
+	return features.length ? { type: 'FeatureCollection', features } : null;
 }
 
 const gibs = (layer: string, day: string) => [`/api/tiles/gibs/${layer}/${day}/{z}/{x}/{y}`];
@@ -189,9 +213,23 @@ export function recentSpec(
 					attribution: SAT_ATTRIBUTION
 				}
 			: null;
+	const [wmin, wmax] = data?.wide_zooms ?? [WIDE_MIN_ZOOM, WIDE_MAX_ZOOM];
+	const wide: RecentSource | null =
+		spot?.wide && spot.wide_box
+			? {
+					id: `wide-${spot.wide.view}-${bands}`,
+					tiles: [`/api/sat/tiles/${spot.wide.view}/${bands}/{z}/{x}/{y}.webp`],
+					tileSize: 512,
+					minzoom: wmin,
+					maxzoom: wmax,
+					bounds: spot.wide_box,
+					attribution: SAT_ATTRIBUTION
+				}
+			: null;
 	return {
 		viirs,
+		wide,
 		view: s2,
-		dates: view?.kind === 'stitched' ? datesGeojson(view.composite) : null
+		dates: mergeDates(spot?.wide, view?.kind === 'stitched' ? view.composite : null)
 	};
 }

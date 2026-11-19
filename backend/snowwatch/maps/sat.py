@@ -12,6 +12,10 @@ and cut into map tiles by `satrender`:
 - **Scenes**: the newest whole passes of the last `scene_days` that cover the whole
   area (at most `max_nodata` without data) and see most of it (`min_clear` free of
   cloud). Coherent pictures, with no joins in the area.
+- **Wide** (`wide_km`, 36 by default): a stitched view of the 72 x 72 km round the
+  location at 30 m, drawn under the centre's views, so the map has recent imagery well
+  beyond the 24 km. The same steps on the same 96 x 96 grid (750 m cells), from passes
+  of the whole `scene_days` (a wider area is rarely all clear in `days`), at most eight.
 
 A scene's own cloud percentage covers a 110 km tile and says little about one valley,
 hence the grids. A pass is cut into 110 km MGRS tiles, each its own STAC item; a "pass"
@@ -32,7 +36,7 @@ import math
 import os
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -181,6 +185,10 @@ class SatLocation(BaseModel):
     box: Quad | None = None  # west, south, east, north of the drawn area
     scenes: list[SatScene] = []  # newest first
     composite: SatComposite | None = None
+    # The wider stitched view round it (see the module's notes), drawn under the others;
+    # its parts and lines leave out the centre square, which the centre's views cover.
+    wide_box: Quad | None = None
+    wide: SatComposite | None = None
     checked_at: datetime | None = None
     error: str | None = None
 
@@ -195,6 +203,8 @@ class SatOut(BaseModel):
     scene_days: int = 60  # how far back whole scenes are looked for
     min_clear_pct: int = 85  # a whole scene sees at least this much of the area
     zooms: list[int] = [9, 13]  # of the views' tiles
+    wide_km: float | None = None  # half the wide views' width on the ground (None: off)
+    wide_zooms: list[int] = [7, 12]  # of the wide views' tiles
     locations: list[SatLocation] = []
     attribution: list[str] = ATTRIBUTION
 
@@ -442,13 +452,14 @@ def stitch(
     grids: Sequence[tuple[Pass, np.ndarray]],
     fallback: Sequence[tuple[Pass, np.ndarray]] = (),
     latest: datetime | None = None,
+    max_layers: int = MAX_LAYERS,
 ) -> Plan:
     """The newest clear view of the area from passes' grids (given newest first).
 
     Newest first, each pass takes the cells it saw clearly (ground or snow) that no
     newer pass did, less those touching its cloud and without specks. A pass adding
     less than MIN_SHARE of the area (or MIN_INNER near the location) is left out; it
-    stops once FULL_SHARE is filled or at MAX_LAYERS. So a sliver of new clear ground
+    stops once FULL_SHARE is filled or at `max_layers`. So a sliver of new clear ground
     (a pass whose swath ends a few km away, or a gap in today's cloud) is shown, with
     older clear passes round it, rather than the whole view waiting for a pass that is
     clear everywhere. `fallback` (the newest whole scene, if it is older than `grids`
@@ -470,7 +481,7 @@ def stitch(
         owner[new] = len(layers)
         layers.append(p)
         oks.append(ok)
-        if (owner >= 0).mean() >= FULL_SHARE or len(layers) >= MAX_LAYERS:
+        if (owner >= 0).mean() >= FULL_SHARE or len(layers) >= max_layers:
             break
     owner = regionalize(owner, oks)
     # Passes left with nothing after that are dropped, the rest renumbered.
@@ -526,9 +537,10 @@ def regionalize(owner: np.ndarray, oks: Sequence[np.ndarray]) -> np.ndarray:
     return out
 
 
-def composite_out(plan: Plan, view: str, box: Box) -> SatComposite:
+def composite_out(plan: Plan, view: str, box: Box, hide: np.ndarray | None = None) -> SatComposite:
     """The index's description of a stitched view: its passes, and each part's outline
-    and date for the map."""
+    and date for the map. Cells in `hide` (the centre square, under a wide view) get no
+    outline, line or date: another view covers them."""
     x0, _, x1, y1 = box
     cell = (x1 - x0) / AREA_PX
 
@@ -536,7 +548,7 @@ def composite_out(plan: Plan, view: str, box: Box) -> SatComposite:
         lat, lon = unmerc(x0 + pt[0] * cell, y1 - pt[1] * cell)
         return [round(lon, 5), round(lat, 5)]  # ~1 m
 
-    shown = outlined(plan.owner)
+    shown = outlined(plan.owner if hide is None else np.where(hide, -1, plan.owner))
     parts = []
     layers = []
     for i, p in enumerate(plan.layers):
@@ -562,6 +574,15 @@ def composite_out(plan: Plan, view: str, box: Box) -> SatComposite:
         at_location=plan.layers[mid].time if mid >= 0 else None,
         latest_pass=plan.latest,
     )
+
+
+def centre_cells(wide_km: float) -> np.ndarray:
+    """The cells of a wide view's grid that the centre square covers."""
+    m = np.zeros((AREA_PX, AREA_PX), bool)
+    r = AREA_PX / 2 * AREA_KM / wide_km
+    a, b = round(AREA_PX / 2 - r), round(AREA_PX / 2 + r)
+    m[a:b, a:b] = True
+    return m
 
 
 def grow(m: np.ndarray) -> np.ndarray:
@@ -917,9 +938,11 @@ def _read_checked(path: Path) -> dict[str, dict[str, list[float]]]:
     return data if isinstance(data, dict) else {}
 
 
-def _spot_key(loc_id: str, lat: float, lon: float) -> str:
+def _spot_key(loc_id: str, lat: float, lon: float, km: float = AREA_KM) -> str:
     # A location that moves is judged afresh; so is every pass when the grid changes.
-    return f"{loc_id}@{lat:.3f},{lon:.3f}#{AREA_PX}mc"
+    # The wide area (any other `km`) is kept apart.
+    wide = "" if km == AREA_KM else f"+{km:g}km"
+    return f"{loc_id}@{lat:.3f},{lon:.3f}{wide}#{AREA_PX}mc"
 
 
 def _grid_path(sat_dir: Path, key: str, pid: str) -> Path:
@@ -934,6 +957,35 @@ def _load_grid(path: Path) -> np.ndarray | None:
     return g if g.shape == (4, AREA_PX, AREA_PX) else None
 
 
+def _judged(
+    client: httpx.Client,
+    sat_dir: Path,
+    key: str,
+    box: Box,
+    passes: Sequence[Pass],
+    seen: dict[str, list[float]],
+    out: SatResult,
+) -> list[tuple[Pass, np.ndarray]]:
+    """Each pass's grid of the area (saved, or read if new, up to MAX_CHECKS of them),
+    with haze marked, newest first."""
+    fresh = 0
+    grids: list[tuple[Pass, np.ndarray]] = []
+    for p in passes:
+        gpath = _grid_path(sat_dir, key, p.id)
+        grid = _load_grid(gpath) if p.id in seen else None
+        if grid is None:
+            if fresh >= MAX_CHECKS:
+                continue
+            fresh += 1
+            out.checked += 1
+            grid = read_pass(client, p, box)
+            gpath.parent.mkdir(parents=True, exist_ok=True)
+            np.save(gpath, grid)
+            seen[p.id] = [p.time.timestamp()]
+        grids.append((p, grid))
+    return list(zip([p for p, _ in grids], dehaze([g for _, g in grids]), strict=True))
+
+
 def refresh(
     sat_dir: Path,
     client: httpx.Client,
@@ -944,12 +996,16 @@ def refresh(
     min_clear: float = 0.85,
     max_nodata: float = 0.03,
     keep: int = 3,
+    wide_km: float = 36.0,
     now: datetime | None = None,
     renderer: satrender.Renderer | None = None,
 ) -> SatResult:
     """Judge new passes, choose and draw each location's views, and write the index. A
-    location that fails keeps the views it had."""
+    location that fails keeps the views it had. `wide_km` at or under the centre's
+    AREA_KM draws no wide views."""
     now = now or datetime.now(UTC)
+    centre = satrender.CENTRE
+    wide = replace(satrender.WIDE, km=wide_km) if wide_km > AREA_KM else None
     out = SatResult()
     index_path = sat_dir / "index.json"
     checked_path = sat_dir / "checked.json"
@@ -974,22 +1030,7 @@ def refresh(
         )
         try:
             passes = search(client, box, now - timedelta(days=scene_days), now)
-            fresh = 0
-            grids: list[tuple[Pass, np.ndarray]] = []
-            for p in passes:
-                gpath = _grid_path(sat_dir, key, p.id)
-                grid = _load_grid(gpath) if p.id in seen else None
-                if grid is None:
-                    if fresh >= MAX_CHECKS:
-                        continue
-                    fresh += 1
-                    out.checked += 1
-                    grid = read_pass(client, p, box)
-                    gpath.parent.mkdir(parents=True, exist_ok=True)
-                    np.save(gpath, grid)
-                    seen[p.id] = [p.time.timestamp()]
-                grids.append((p, grid))
-            grids = list(zip([p for p, _ in grids], dehaze([g for _, g in grids]), strict=True))
+            grids = _judged(client, sat_dir, key, box, passes, seen, out)
             # Whole scenes: cover the area, and see most of it.
             whole = []
             for p, g in grids:
@@ -1014,12 +1055,12 @@ def refresh(
                         clear_pct=round(look.clear * 100),
                         snow_pct=round(look.snow * 100),
                         nodata_pct=round(look.nodata * 100),
-                        view=draw.scene(key_dir(key), p, box),
+                        view=draw.scene(key_dir(key), p, box, centre),
                     )
                 )
                 crops.add(p.id)
             if plan.layers:
-                view = draw.stitched(key_dir(key), plan.layers, plan.owner, box)
+                view = draw.stitched(key_dir(key), plan.layers, plan.owner, box, centre)
                 spot.composite = composite_out(plan, view, box)
                 crops.update(p.id for p in plan.layers)
         except (httpx.HTTPError, ValueError, OSError) as e:
@@ -1036,6 +1077,25 @@ def refresh(
             crops.update(sc.id for sc in spot.scenes)
             if spot.composite:
                 crops.update(x.id for x in spot.composite.layers)
+        if wide is not None:
+            wkey = _spot_key(loc.id, lat, lon, wide.km)
+            keep_keys.add(wkey)
+            _wide(
+                client,
+                sat_dir,
+                draw,
+                spot,
+                wkey,
+                area_box(lat, lon, wide.km),
+                wide,
+                checked.setdefault(wkey, {}),
+                used_crops.setdefault(key_dir(wkey), set()),
+                old_by_id.get(loc.id),
+                out,
+                now - timedelta(days=days),
+                now - timedelta(days=scene_days),
+                now,
+            )
         spots.append(spot)
         out.scenes += len(spot.scenes)
 
@@ -1048,6 +1108,7 @@ def refresh(
     _prune_grids(sat_dir, checked)
     views = {sc.view for s in spots for sc in s.scenes}
     views |= {s.composite.view for s in spots if s.composite}
+    views |= {s.wide.view for s in spots if s.wide}
     draw.prune(views, used_crops)
     lat0 = sum(s.lat for s in spots) / len(spots) if spots else 45.0
     lon0 = sum(s.lon for s in spots) / len(spots) if spots else -118.0
@@ -1062,7 +1123,9 @@ def refresh(
         days=days,
         scene_days=scene_days,
         min_clear_pct=round(min_clear * 100),
-        zooms=[satrender.ZOOMS[0], satrender.ZOOMS[-1]],
+        zooms=[centre.zooms[0], centre.zooms[-1]],
+        wide_km=wide.km if wide else None,
+        wide_zooms=[satrender.WIDE.zooms[0], satrender.WIDE.zooms[-1]],
         locations=spots,
     )
     _write(index_path, index.model_dump_json())
@@ -1070,6 +1133,46 @@ def refresh(
     out.locations = len(spots)
     out.fetched = draw.fetched
     return out
+
+
+def _wide(
+    client: httpx.Client,
+    sat_dir: Path,
+    draw: satrender.Renderer,
+    spot: SatLocation,
+    key: str,
+    box: Box,
+    area: satrender.Area,
+    seen: dict[str, list[float]],
+    crops: set[str],
+    prev: SatLocation | None,
+    out: SatResult,
+    recent_from: datetime,
+    start: datetime,
+    now: datetime,
+) -> None:
+    """Choose and draw a location's wide view into `spot`; on failure keep the last."""
+    spot.wide_box = box_lonlat(box)
+    try:
+        passes = search(client, box, start, now)
+        grids = _judged(client, sat_dir, key, box, passes, seen, out)
+        plan = stitch(
+            [(p, g) for p, g in grids if p.time >= recent_from],
+            fallback=[(p, g) for p, g in grids if p.time < recent_from],
+            latest=passes[0].time if passes else None,
+            max_layers=area.max_layers,
+        )
+        if plan.layers:
+            view = draw.stitched(key_dir(key), plan.layers, plan.owner, box, area)
+            covered = spot.composite is not None or bool(spot.scenes)
+            spot.wide = composite_out(plan, view, box, centre_cells(area.km) if covered else None)
+            crops.update(p.id for p in plan.layers)
+    except (httpx.HTTPError, ValueError, OSError) as e:
+        out.errors.append(f"{spot.id} (wide): {type(e).__name__}: {e}")
+        log.warning("wide satellite view for %s failed: %s", spot.id, e)
+        if prev is not None and prev.wide is not None:
+            spot.wide, spot.wide_box = prev.wide, prev.wide_box
+            crops.update(x.id for x in prev.wide.layers)
 
 
 def key_dir(key: str) -> str:

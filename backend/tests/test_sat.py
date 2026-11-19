@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -58,9 +59,8 @@ def feature(fid: str, when: str, bbox: list[float] | None = None) -> dict[str, A
 @pytest.fixture
 def small(monkeypatch: pytest.MonkeyPatch) -> None:
     """Small pictures and two zooms, so drawing views in tests is quick."""
-    monkeypatch.setattr(satrender, "PX", 64)
-    monkeypatch.setattr(satrender, "HALF", 32)
-    monkeypatch.setattr(satrender, "ZOOMS", range(9, 11))
+    monkeypatch.setattr(satrender, "CENTRE", replace(satrender.CENTRE, px=64, zooms=range(9, 11)))
+    monkeypatch.setattr(satrender, "WIDE", replace(satrender.WIDE, px=64, zooms=range(8, 10)))
 
 
 # ---- judging a pass -------------------------------------------------------------
@@ -287,6 +287,22 @@ def test_composite_out_dates_parts_and_draws_lines(tmp_path: Path) -> None:
 # ---- drawing views -----------------------------------------------------------------
 
 
+def test_the_wide_view_leaves_the_centre_square_to_the_centre() -> None:
+    m = sat.centre_cells(36)
+    assert m[32:64, 32:64].all() and m.sum() == 32 * 32
+    # Two passes split east and west: under a wide view the line between them and the
+    # parts' outlines stop at the centre square, which the centre's views cover.
+    owner = np.zeros((N, N), np.int16)
+    owner[:, N // 2 :] = 1
+    t = datetime(2026, 11, 1, tzinfo=UTC)
+    plan = sat.Plan([sat.Pass("a", t, "Sentinel-2A"), sat.Pass("b", t, "Sentinel-2B")], owner)
+    box = sat.area_box(47.0, -121.0, 36)
+    whole = sat.composite_out(plan, "v", box)
+    cut = sat.composite_out(plan, "v", box, m)
+    assert len(whole.lines) == 1 and len(cut.lines) == 2
+    assert [p.share_pct for p in cut.parts] == [50, 50]  # shares are of the whole area
+
+
 def test_choose_prefers_the_part_then_fills_gaps_from_the_newest() -> None:
     owner = np.full((N, N), 1, np.int16)
     owner[:, : N // 2] = 0
@@ -331,7 +347,7 @@ def test_cut_puts_the_picture_in_the_right_tiles(tmp_path: Path) -> None:
     a[..., :3] = (200, 30, 30)
     a[..., 3] = 255
     a[px // 2 - 5 : px // 2 + 5, px // 2 - 5 : px // 2 + 5, :3] = (30, 30, 200)  # the middle
-    count = r.cut(a, box, tmp_path / "out")
+    count = r.cut(a, box, tmp_path / "out", satrender.CENTRE.zooms)
     assert count == len(list((tmp_path / "out").rglob("*.webp"))) > 0
     # The middle pixel is in the zoom-13 tile under the location, and blue.
     z = 13
@@ -347,7 +363,7 @@ def test_cut_puts_the_picture_in_the_right_tiles(tmp_path: Path) -> None:
     v = int((half - my - ty * span) / span * 512)
     assert tile[v, u, 2] > 150 and tile[v, u, 0] < 90
     # Tiles round the picture are partly transparent; none beyond it are written.
-    assert all((tmp_path / "out" / str(zz)).exists() for zz in satrender.ZOOMS)
+    assert all((tmp_path / "out" / str(zz)).exists() for zz in satrender.CENTRE.zooms)
 
 
 def test_view_names_change_with_what_they_show() -> None:
@@ -439,7 +455,8 @@ def test_refresh_chooses_and_draws_views(tmp_path: Path, small: None) -> None:
     up = Upstream()
     client = httpx.Client(transport=httpx.MockTransport(up))
     res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
-    assert res.errors == [] and res.locations == 1 and res.checked == 3 and res.fetched > 0
+    # Three passes judged for the centre and the same three for the wide area.
+    assert res.errors == [] and res.locations == 1 and res.checked == 6 and res.fetched > 0
     index = sat.read_index(tmp_path / "index.json")
     assert index is not None and index.viirs_date == "2026-11-10"  # today's is still black
     spot = index.locations[0]
@@ -458,7 +475,24 @@ def test_refresh_chooses_and_draws_views(tmp_path: Path, small: None) -> None:
     assert (views / co.view / "done").exists() and (views / spot.scenes[0].view / "done").exists()
     assert tile_colors(views / co.view / "natural") == {"red", "blue"}
     assert tile_colors(views / spot.scenes[0].view / "snow") == {"blue"}
-    assert {d.name for d in views.iterdir()} == {co.view, spot.scenes[0].view}
+    # The wide view: the same passes over the 72 km round, its own tiles and zooms, and
+    # no outline or date where the centre's views cover it, so the line between the
+    # halves is cut in two by the centre square.
+    wide = spot.wide
+    assert wide is not None and index.wide_km == 36 and index.wide_zooms == [8, 9]  # small
+    assert spot.wide_box == pytest.approx(sat.box_lonlat(sat.area_box(47.0, -121.0, 36)))
+    assert [x.id for x in wide.layers] == [NEWEST, FULL] and wide.filled_pct == 100
+    assert len(wide.parts) == 2 and len(wide.lines) == 2
+    inner = spot.box
+    assert inner is not None
+    for line in wide.lines:
+        assert not any(
+            inner[0] + 0.01 < lon < inner[2] - 0.01 and inner[1] + 0.01 < lat < inner[3] - 0.01
+            for lon, lat in line
+        )
+    assert tile_colors(views / wide.view / "natural") == {"red", "blue"}
+    assert {p.name for p in (views / wide.view / "natural").iterdir()} == {"8", "9"}
+    assert {d.name for d in views.iterdir()} == {co.view, spot.scenes[0].view, wide.view}
 
     # Next time nothing is fetched: passes, pictures and views are all kept.
     up.calls.clear()
@@ -470,11 +504,14 @@ def test_refresh_chooses_and_draws_views(tmp_path: Path, small: None) -> None:
     up.fail_search = True
     res = sat.refresh(tmp_path, client, [make_location()], now=NOW)
     again = sat.read_index(tmp_path / "index.json")
-    assert again is not None and len(res.errors) == 1 and again.locations[0].error
+    # One error for the centre, one for the wide view.
+    assert again is not None and len(res.errors) == 2 and again.locations[0].error
     assert again.locations[0].composite == co and [s.id for s in again.locations[0].scenes] == [
         FULL
     ]
+    assert again.locations[0].wide == wide and "(wide)" in res.errors[1]
     assert (views / co.view / "done").exists()  # its views are kept too
+    assert (views / wide.view / "done").exists()
 
 
 def test_refresh_forgets_moved_locations(tmp_path: Path, small: None) -> None:
@@ -491,8 +528,12 @@ def test_refresh_forgets_moved_locations(tmp_path: Path, small: None) -> None:
         tmp_path, httpx.Client(transport=httpx.MockTransport(Upstream(48.0))), [moved], now=NOW
     )
     checked = json.loads((tmp_path / "checked.json").read_text())
-    assert list(checked) == [sat._spot_key("testhill", 48.0, -121.0)]
-    assert len(list((tmp_path / "crops").iterdir())) == 1  # the old spot's pictures went
+    assert list(checked) == [
+        sat._spot_key("testhill", 48.0, -121.0),
+        sat._spot_key("testhill", 48.0, -121.0, 36),
+    ]
+    # The old spot's pictures went: what's left is the new spot's centre and wide area.
+    assert len(list((tmp_path / "crops").iterdir())) == 2
 
 
 def test_refresh_survives_gibs_being_down(tmp_path: Path, small: None) -> None:
@@ -594,7 +635,14 @@ def test_worker_looks_for_imagery_and_survives_failures(
     w = Worker(settings, config())
     w.satellite()
     assert calls == [
-        {"days": 30, "scene_days": 60, "min_clear": 0.85, "max_nodata": 0.03, "keep": 3}
+        {
+            "days": 30,
+            "scene_days": 60,
+            "min_clear": 0.85,
+            "max_nodata": 0.03,
+            "keep": 3,
+            "wide_km": 36.0,
+        }
     ]
     w.sat_lock.acquire()
     w.satellite()  # still running from last time: skip

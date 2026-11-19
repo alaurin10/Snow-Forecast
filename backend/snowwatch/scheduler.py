@@ -376,6 +376,7 @@ class Worker:
                     min_clear=mc.sat_min_clear,
                     max_nodata=mc.sat_max_nodata,
                     keep=mc.sat_keep,
+                    wide_km=mc.sat_wide_km,
                 )
             log.info(
                 "satellite: %d whole scenes for %d locations (%d passes judged, %d pictures "
