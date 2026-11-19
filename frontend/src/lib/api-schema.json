@@ -2396,6 +2396,13 @@
         "location_id": {
           "type": "string"
         },
+        "photo_reports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NearbyReport"
+          },
+          "type": "array"
+        },
         "radius_km": {
           "type": "number"
         },
@@ -2550,6 +2557,48 @@
       "title": "ObsOut",
       "type": "object"
     },
+    "ObsPhoto": {
+      "properties": {
+        "caption": {
+          "default": "",
+          "type": "string"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "thumb": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "url",
+        "thumb"
+      ],
+      "title": "ObsPhoto",
+      "type": "object"
+    },
     "ObsProps": {
       "properties": {
         "id": {
@@ -2561,6 +2610,12 @@
         "kinds": {
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "photos": {
+          "items": {
+            "$ref": "#/$defs/ObsPhoto"
           },
           "type": "array"
         },

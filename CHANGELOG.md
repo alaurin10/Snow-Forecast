@@ -7,6 +7,14 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Recent field photos on the Webcams tab.** Photos from Avalanche Canada's Mountain
+  Information Network reports within 60 km of the location, last 14 days, by day: each
+  report's title (linking to it), time, distance and region, then its photos with their
+  captions (each opens large). A location with no webcams gets the tab when there are
+  photos. The worker fetches a report's photos once, when it first appears. NWAC's
+  observations can't be shown (avalanche.org's observation API only answers the
+  centers' own sites), so locations with an NWAC forecast get a "Recent NWAC
+  observations" link there instead, and the Webcams tab even without webcams.
 - **Webcams are bigger, and can all play at once.** Cards are wider (two across on a
   desktop), a camera playing on its own spans the whole row (Crystal's 360° view is now
   usable), and a single camera always does. "Play all live" starts every camera's video

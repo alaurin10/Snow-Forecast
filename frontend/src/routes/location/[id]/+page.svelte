@@ -48,6 +48,7 @@
 	import ConfidenceTab from '../../../lib/confidence/ConfidenceTab.svelte';
 	import ObservedTab from '../../../lib/observed/ObservedTab.svelte';
 	import WebcamsTab from '../../../lib/webcams/WebcamsTab.svelte';
+	import { centerObservations } from '../../../lib/webcams';
 	import { flagText, flagTitle, isNew } from '../../../lib/flags';
 	import DangerPyramid from '../../../lib/backcountry/DangerPyramid.svelte';
 	import { compass, DANGER_WORDS } from '../../../lib/conditions';
@@ -167,8 +168,13 @@
 		...(snap?.location.kind === 'backcountry'
 			? (['forecast', 'backcountry', 'confidence', 'observed'] as const)
 			: (['forecast', 'confidence', 'backcountry', 'observed'] as const)),
-		// Webcams only where the owner added some (on the Manage page).
-		...(snap?.location.webcams?.length ? (['webcams'] as const) : [])
+		// Webcams where the owner added some (on the Manage page), where recent field
+		// reports nearby have photos, or where the avalanche center's observations are linked.
+		...(snap?.location.webcams?.length ||
+		nearby?.photo_reports?.length ||
+		centerObservations(avy?.doc)
+			? (['webcams'] as const)
+			: [])
 	]);
 	// Webcams open, then a location without any: back to its forecast.
 	$effect(() => {
@@ -758,7 +764,13 @@
 	{:else if tab === 'backcountry'}
 		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} />
 	{:else if tab === 'webcams'}
-		<WebcamsTab cams={snap.location.webcams ?? []} />
+		<WebcamsTab
+			cams={snap.location.webcams ?? []}
+			{nearby}
+			{units}
+			tz={snap.location.tz}
+			avy={avy?.doc ?? null}
+		/>
 	{:else}
 		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} />
 	{/if}

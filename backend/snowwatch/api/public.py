@@ -76,6 +76,7 @@ CONCERN_CAPTION = (
 NEARBY_KM = 60.0
 NEARBY_STATIONS = 8
 NEARBY_REPORTS = 8
+NEARBY_PHOTO_REPORTS = 24
 # The map's station and report files as last read: path → (file time, parsed).
 _stations_cache: dict[str, tuple[float, stations.StationsOut | None]] = {}
 _obs_cache: dict[str, tuple[float, observations.ObsOut | None]] = {}
@@ -489,6 +490,7 @@ def make_router() -> APIRouter:
             reports_at=obs.generated_at if obs else None,
             reports_days=obs.days if obs else None,
             reports=reports[:NEARBY_REPORTS],
+            photo_reports=[r for r in reports if r.report.photos][:NEARBY_PHOTO_REPORTS],
         )
 
     @router.get("/status", response_model=StatusOut)
