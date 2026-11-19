@@ -1,5 +1,5 @@
 # Webcams for the home installation's locations, gathered from each resort's webcam
-# page, the National Park Service and WSDOT (18 Nov 2026). Load them with
+# page, the National Park Service, WSDOT and ODOT (18–19 Nov 2026). Load them with
 #
 #   docker compose run --rm worker snowwatch locations webcams
 #
@@ -253,3 +253,46 @@ snowbird:
   - name: Tram Bullpen
     url: https://www.snowbird.com/the-mountain/webcams/view-all-webcams/tram-bullpen-webcam/
     image_url: https://manage.hdrelay.com/snapshot/61b2490be101c00b9c48374f
+
+hurricane-ridge:
+  # The National Park Service's cameras; the ski area's own page shows the same two.
+  - name: Hurricane Ridge – South
+    url: https://www.nps.gov/olym/learn/photosmultimedia/hurricane-ridge-webcam.htm
+    image_url: https://www.nps.gov/webcams-olym/southcam.jpg
+  - name: Hurricane Ridge – Parking Lot
+    url: https://www.nps.gov/olym/learn/photosmultimedia/hurricane-ridge-webcam.htm
+    image_url: https://www.nps.gov/webcams-olym/hrparkinglot.jpg
+
+timberline:
+  # The resort's cameras (Summit Pass is its small area in Government Camp, ~4,000 ft),
+  # then ODOT's on US 26 at Government Camp. The resort has no live video players.
+  - name: Timberline Lodge
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/lodge.jpg
+  - name: Pucci
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/pucci.jpg
+  - name: Magic Mile
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/FloodEast.jpg
+  - name: Jeff Flood
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/FloodSouth.jpg
+  - name: Palmer / Silcox
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/palmerbottom.jpg
+  - name: Bruno's
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/brunotop.jpg
+  - name: Snow Stake
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/snowstake.jpg
+  - name: Summit Pass
+    url: https://timberlinelodge.com/webcams/
+    image_url: https://timberlinelodge.com/snowcameras/summit.jpg
+  - name: US 26 at Timberline Hwy
+    url: https://www.tripcheck.com/DynamicReports/Report/RoadConditionDetail/?RW=200
+    image_url: https://tripcheck.com/RoadCams/cams/GovernmentCamp_pid624.jpg
+  - name: US 26 Government Camp Maint.
+    url: https://www.tripcheck.com/DynamicReports/Report/RoadConditionDetail/?RW=200
+    image_url: https://tripcheck.com/RoadCams/cams/US26%20at%20Govn%20Camp%20Maint_pid1899.JPG
