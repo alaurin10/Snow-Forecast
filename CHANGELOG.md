@@ -102,6 +102,10 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **The Recent satellite bar leads with the dates.** Folded, it now starts with the span of
+  the passes ("21 Oct–4 Nov", or "2–9 Nov" within a month) or a scene's day ("9 Nov · 9
+  days ago · 92% clear"), so the dates show even on a phone where the line is cut short.
+  "Newest clear view" and the satellite's name (Sentinel-2C) moved behind the (i).
 - **Radar scrubs as fast as you can drag, flat and in 3D** (docs/RADAR-PLAN.md, part 1):
   - The server sends each radar and forecast frame as numbers (the rate, and how much
     is snow, mix or rain), and the phone's graphics chip colours them at the screen's own
