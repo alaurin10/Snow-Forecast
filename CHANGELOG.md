@@ -66,8 +66,9 @@ Notable changes to Snow Watch. The format follows
   host's link: docs/DEPLOYMENT.md → Webcams.
 - **`snowwatch locations webcams`** sets many locations' webcams from a YAML file
   (`config/webcams.yaml` by default) without touching anything else about them, and
-  refreshes them. `config/webcams.yaml` holds 69 cameras for the home installation's
-  locations: resort cams, Mount Rainier's NPS cams and WSDOT pass cams.
+  refreshes them. `config/webcams.yaml` holds 81 cameras for the home installation's
+  locations: resort cams, the NPS cams at Mount Rainier and Hurricane Ridge, WSDOT pass
+  cams, and Timberline's cams with ODOT's on US 26 at Government Camp.
 - **Ozolio** players (Revelstoke, Palisades Tahoe) play in the app too.
 - **The snow total is picked on a slider**, like the radar, rather than a row of buttons,
   and it slides smoothly from 12 hours to 10 days ("Next 2½ days, to Fri 1 PM"): the
