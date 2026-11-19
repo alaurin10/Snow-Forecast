@@ -20,7 +20,7 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 | Piece | What it does |
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
-| `worker` | `snowwatch worker`. Four forecast runs a day, avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
+| `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
 | `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
@@ -189,9 +189,11 @@ older than `STALE_AFTER_H` (12 h).
   for each window from the ensembles' 10–90% range against the consensus (agreement
   within 5 cm is always high; small totals are judged against 10 cm), falling back to
   the models' lowest and highest when there is no ensemble; how the consensus moved
-  between the newest run and the oldest of the last five, over the days both cover.
+  between the newest run and the oldest of the last five (about a day, the trend
+  taking one run per 6 hours), over the days both cover.
 - **Trend and scorecard**: each run keeps per-day totals; the Confidence tab shows how
-  the forecast moved over the last runs and each source's track record, and the
+  the forecast moved over the last runs (one per 6 hours, so runs that repeat the same
+  model data don't flatten it) and each source's track record, and the
   Observed tab charts the forecast made before each day against what the snow station
   measured, by calendar day.
 - **Nearby** (`/api/locations/{id}/nearby`): the stations within 60 km and Avalanche

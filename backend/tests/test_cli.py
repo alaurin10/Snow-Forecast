@@ -90,9 +90,10 @@ def test_webcams_from_a_file_change_nothing_else(env: Settings, tmp_path: Path) 
 def test_scheduler_jobs(env: Settings) -> None:
     sched = build_scheduler(Worker(env, config()))
     ids = {j.id for j in sched.get_jobs()}
-    assert {"run-03:30", "run-09:30", "run-15:30", "run-21:30", "jobs", "nightly", "weekly"} <= ids
+    runs = [f"run-{h:02d}:30" for h in range(0, 24, 3)]
+    assert {*runs, "jobs", "nightly", "weekly"} <= ids
     ens = {j.id: j.kwargs.get("ensembles") for j in sched.get_jobs() if j.id.startswith("run-")}
-    assert ens == {"run-03:30": False, "run-09:30": True, "run-15:30": False, "run-21:30": True}
+    assert ens == {r: r in ("run-09:30", "run-21:30") for r in runs}
 
 
 def test_healthcheck_pings(env: Settings, monkeypatch: pytest.MonkeyPatch) -> None:

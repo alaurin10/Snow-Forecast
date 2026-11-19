@@ -124,7 +124,7 @@
 		<p>
 			Snow Watch puts several weather models side by side for ski resorts and backcountry zones: a
 			consensus of the models, the range the ensembles allow, how much the models disagree, and what
-			the snow stations measured. It updates four times a day.
+			the snow stations measured. It updates every 3 hours.
 		</p>
 		<h2>Please read</h2>
 		<p>
