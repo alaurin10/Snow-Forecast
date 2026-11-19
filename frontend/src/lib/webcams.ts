@@ -162,9 +162,19 @@ export function byDay<T>(
 }
 
 /** Avalanche centers whose observations (and their photos) can't be shown here, only
- *  linked: avalanche.org's observation API answers only the centers' own sites. */
+ *  linked. avalanche.org's observation API (NWAC, Sierra, Central Oregon) answers only
+ *  the centers' own sites; the Utah Avalanche Center's site turns automated visitors away. */
 const CENTER_OBSERVATIONS: Record<string, { name: string; url: string }> = {
-	NWAC: { name: 'NWAC', url: 'https://nwac.us/observations#/view/observations' }
+	NWAC: { name: 'NWAC', url: 'https://nwac.us/observations#/view/observations' },
+	SAC: {
+		name: 'Sierra Avalanche Center',
+		url: 'https://www.sierraavalanchecenter.org/observations#/view/observations'
+	},
+	COAA: {
+		name: 'Central Oregon Avalanche Center',
+		url: 'https://coavalanche.org/pages/observations#/view/observations'
+	},
+	UAC: { name: 'Utah Avalanche Center', url: 'https://utahavalanchecenter.org/observations' }
 };
 
 /** The observations page of the location's avalanche center, when it has one we link. */

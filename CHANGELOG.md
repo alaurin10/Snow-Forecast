@@ -7,6 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Links to the Sierra, Central Oregon and Utah avalanche centers' observations** on the
+  Webcams tab (Palisades Tahoe, Mt. Bachelor, Snowbird), like NWAC's. Their photos can't
+  be shown in the app: the first two use avalanche.org's observation API, which only
+  answers the centers' own sites, and the Utah Avalanche Center's site turns automated
+  visitors away.
 - **Recent field photos on the Webcams tab.** Photos from Avalanche Canada's Mountain
   Information Network reports within 60 km of the location, last 14 days, by day: each
   report's title (linking to it), time, distance and region, then its photos with their
