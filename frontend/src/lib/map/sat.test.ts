@@ -31,7 +31,7 @@ describe('picking and labelling scenes', () => {
 	it('reads like the plan’s chip', () => {
 		const now = new Date(2026, 10, 10, 12).getTime();
 		const s = scene({ time: new Date(2026, 10, 4, 12).toISOString() });
-		expect(sceneLabel(s, now)).toBe('Sentinel-2C · 4 Nov · 6 days ago · 92% clear');
+		expect(sceneLabel(s, now)).toBe('4 Nov · 6 days ago · 92% clear');
 		expect(dayLabel('2026-11-10')).toBe('10 Nov');
 	});
 });
@@ -42,7 +42,15 @@ describe('the stitched view', () => {
 		expect(satViews(spot).map((v) => v.kind)).toEqual(['stitched', 'scene']);
 		expect(satViews(data.locations![1]).map((v) => v.kind)).toEqual(['scene', 'scene']);
 		expect(satViews(null)).toEqual([]);
-		expect(stitchedSpan(composite)).toBe('21 Oct – 4 Nov');
+		expect(stitchedSpan(composite)).toBe('21 Oct–4 Nov');
+		const within = {
+			...composite,
+			layers: [
+				{ ...composite.layers[0], time: new Date(2026, 10, 9, 12).toISOString() },
+				{ ...composite.layers[0], time: new Date(2026, 10, 2, 12).toISOString() }
+			]
+		};
+		expect(stitchedSpan(within)).toBe('2–9 Nov');
 	});
 
 	it('draws a line where two passes meet, and dates each part, the newest marked', () => {

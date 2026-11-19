@@ -20,7 +20,7 @@ describe('SatControls', () => {
 	it('names the scene shown and steps between a location’s scenes', async () => {
 		const spot = data.locations![1];
 		render(SatControls, { ...props, spot });
-		expect(screen.getByRole('status').textContent).toContain('Sentinel-2C · 9 Nov · yesterday');
+		expect(screen.getByRole('status').textContent).toContain('9 Nov · yesterday');
 		expect(screen.getByText('1/2')).toBeTruthy();
 		const older = screen.getByRole('button', { name: 'Older view' });
 		await fireEvent.click(older);
@@ -51,14 +51,18 @@ describe('SatControls', () => {
 		const spot = data.locations!.find((l) => l.id === 'snoqualmie')!;
 		render(SatControls, { ...props, spot });
 		const status = screen.getByRole('status').textContent ?? '';
-		expect(status).toContain('Newest clear view · 2 passes, 21 Oct – 4 Nov');
-		expect(status).toContain('Snoqualmie Pass: seen 21 Oct');
+		// The dates come first, so they show even when the line is cut short.
+		expect(status.trim().startsWith('21 Oct–4 Nov')).toBe(true);
+		expect(status).toContain('Snoqualmie Pass seen');
+		expect(status).toContain('2 passes');
+		expect(status).not.toContain('Sentinel');
 		// The longer story is behind the (i).
 		expect(screen.queryByText(/The newest pass, 10 Nov, was cloudy there\./)).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'About this view' }));
 		expect(screen.getByText(/The newest pass, 10 Nov, was cloudy there\./)).toBeTruthy();
+		expect(screen.getByText(/last seen clearly 21 Oct/)).toBeTruthy();
 		expect(screen.getByText('1/2')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Older view' }));
-		expect(screen.getByRole('status').textContent).toContain('Sentinel-2C · 15 Oct');
+		expect(screen.getByRole('status').textContent).toContain('15 Oct');
 	});
 });

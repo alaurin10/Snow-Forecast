@@ -43,9 +43,13 @@
 		[
 			bands === 'snow' ? 'Snow shows cyan, cloud white.' : '',
 			stitched
-				? 'Each outlined part is the newest Sentinel-2 pass (10 m) that saw the ground there; small cloud gaps are filled from the next newest.'
+				? `Newest clear view: each outlined part is the newest Sentinel-2 pass (10 m) that saw the ground there; small cloud gaps are filled from the next newest.${
+						stitched.at_location
+							? ` ${spot?.name} itself was last seen clearly ${shortDate(stitched.at_location)}.`
+							: ''
+					}`
 				: scene
-					? `One Sentinel-2 pass (10 m) over the whole 24 km area, at least ${data?.min_clear_pct ?? 85}% of it clear.`
+					? `One ${scene.platform} pass (10 m) over the whole 24 km area, at least ${data?.min_clear_pct ?? 85}% of it clear.`
 					: '',
 			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${spot ? ' beyond the area and where no pass was clear' : ''}.`
 		]
@@ -72,15 +76,13 @@
 				<p class="note">Recent imagery isn't available right now.</p>
 			{:else if spot && stitched}
 				<p class="note" role="status">
-					<strong
-						>Newest clear view · {stitched.layers.length === 1
-							? '1 pass'
-							: `${stitched.layers.length} passes`}, {stitchedSpan(stitched)}</strong
-					>
+					<strong>{stitchedSpan(stitched)}</strong>
 					<span class="faint"
-						>· {spot.name}: {stitched.at_location
-							? `seen ${shortDate(stitched.at_location)}, ${ago(stitched.at_location, now)}`
-							: 'its own spot is in a gap, under cloud in every pass'}{zoomIn}</span
+						>· {stitched.at_location
+							? `${spot.name} seen ${ago(stitched.at_location, now)}`
+							: `${spot.name} under cloud in every pass`} · {stitched.layers.length === 1
+							? '1 pass'
+							: `${stitched.layers.length} passes`}{zoomIn}</span
 					>
 				</p>
 			{:else if spot && scene}
@@ -160,7 +162,7 @@
 	}
 	.seg button {
 		font-size: 0.78rem;
-		padding: 3px 10px;
+		padding: 3px 8px;
 		flex: 0 0 auto;
 	}
 	.step {
@@ -187,7 +189,7 @@
 		cursor: default;
 	}
 	.num {
-		padding: 0 4px;
+		padding: 0 2px;
 		color: var(--text-2);
 	}
 	/* One line: what's shown, cut short (the whole of it is in the (i)). */

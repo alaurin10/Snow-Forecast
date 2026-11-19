@@ -67,14 +67,10 @@ export function dayLabel(day: string): string {
 	});
 }
 
-/** The chip: "Sentinel-2C · 4 Nov · 6 days ago · 92% clear". */
+/** The chip, date first (the satellite's name is behind the (i)): "4 Nov · 6 days ago ·
+ *  92% clear". */
 export function sceneLabel(scene: SatScene, now: number): string {
-	return [
-		scene.platform,
-		shortDate(scene.time),
-		ago(scene.time, now),
-		`${scene.clear_pct}% clear`
-	].join(' · ');
+	return [shortDate(scene.time), ago(scene.time, now), `${scene.clear_pct}% clear`].join(' · ');
 }
 
 /** What the Sentinel-2 layer shows: the stitched newest-clear view, or one whole scene. */
@@ -90,7 +86,7 @@ export function satViews(spot: SatLocation | null): SatView[] {
 	return out;
 }
 
-/** What's on screen in a few words, for the folded controls: "Newest clear · 21 Oct – 4
+/** What's on screen in a few words, for the folded controls: "Newest clear · 21 Oct–4
  *  Nov", "4 Nov · 6 days ago", "Daily mosaic · 10 Nov". */
 export function satSummary(
 	viirsDate: string | null | undefined,
@@ -105,12 +101,16 @@ export function satSummary(
 	return viirsDate ? `Daily mosaic · ${dayLabel(viirsDate)}` : 'Daily mosaic';
 }
 
-/** "21 Oct – 10 Nov": the span of a stitched view's passes. */
+/** "21 Oct–10 Nov", or "2–9 Nov" within a month: the span of a stitched view's passes,
+ *  kept short so it fits the folded controls on a phone. */
 export function stitchedSpan(c: SatComposite): string {
 	const times = c.layers.map((l) => l.time).sort();
 	const a = shortDate(times[0]);
 	const b = shortDate(times[times.length - 1]);
-	return a === b ? a : `${a} – ${b}`;
+	if (a === b) return a;
+	const [da, ma] = a.split(' ');
+	const [db, mb] = b.split(' ');
+	return ma === mb ? `${da}–${db} ${mb}` : `${a}–${b}`;
 }
 
 /** A stitched view's dashed lines where two passes' parts meet, and each part as a
