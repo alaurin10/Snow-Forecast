@@ -641,7 +641,7 @@
 		const views = satViews(satSpot);
 		return views.length ? views[Math.min(sceneIndex, views.length - 1)] : null;
 	});
-	const NO_RECENT: RecentSpec = { viirs: null, view: null, dates: null };
+	const NO_RECENT: RecentSpec = { viirs: null, wide: null, view: null, dates: null };
 	$effect(() => {
 		const spec =
 			recent && !offline ? recentSpec(satData, satSpot, satView, prefs.satBands) : NO_RECENT;

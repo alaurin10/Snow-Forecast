@@ -31,6 +31,9 @@
 	const stitched = $derived(view?.kind === 'stitched' ? view.composite : null);
 	const viirs = $derived(data?.viirs_date ? dayLabel(data.viirs_date) : null);
 	const zoomIn = $derived(zoom < S2_MIN_ZOOM ? '. Zoom in for 10 m detail' : '');
+	/** The 30 m stitched view of the wider area round the location, if there is one. */
+	const wide = $derived(spot?.wide?.layers.length ? spot.wide : null);
+	const wideKm = $derived(Math.round(data?.wide_km ?? 36));
 	/** The newest pass was cloudy where the location is: say so, with its date. */
 	const cloudyNote = $derived(
 		stitched?.latest_pass &&
@@ -51,7 +54,10 @@
 				: scene
 					? `One ${scene.platform} pass (10 m) over the whole 24 km area, at least ${data?.min_clear_pct ?? 85}% of it clear.`
 					: '',
-			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${spot ? ' beyond the area and where no pass was clear' : ''}.`
+			wide
+				? `${views.length ? 'Round it' : `Round ${spot?.name}`}, out to ${wideKm} km: the newest clear view at 30 m, ${stitchedSpan(wide)}, its parts dated on the map.`
+				: '',
+			`NOAA-20 VIIRS daily${viirs ? `, ${viirs}` : ''}${spot ? `${wide ? ' beyond that' : ' beyond the area'} and where no pass was clear` : ''}.`
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -90,6 +96,13 @@
 					<strong>{sceneLabel(scene, now)}</strong>
 					<span class="faint"
 						>· {spot.name}{scene.snow_pct ? `, ${scene.snow_pct}% snow` : ''}{zoomIn}</span
+					>
+				</p>
+			{:else if spot && wide}
+				<p class="note" role="status">
+					<strong>{stitchedSpan(wide)}</strong>
+					<span class="faint"
+						>· 30 m round {spot.name}; no clear 10 m view in {data.scene_days ?? 60} days</span
 					>
 				</p>
 			{:else if spot}

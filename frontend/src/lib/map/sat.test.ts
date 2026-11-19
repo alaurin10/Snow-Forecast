@@ -98,10 +98,43 @@ describe('what the base draws', () => {
 		expect(spec.dates).toBeNull();
 	});
 
+	it('the wide view goes round the area, with its dates beside the centre’s', () => {
+		const wideBox: [number, number, number, number] = [-121.9, 47.1, -120.9, 47.75];
+		const wide = { ...composite, view: '0123456789abcdef' };
+		const spot = { ...snoq, wide, wide_box: wideBox };
+		const spec = recentSpec(
+			{ ...data, wide_zooms: [7, 12] },
+			spot,
+			{ kind: 'stitched', composite },
+			'snow'
+		);
+		expect(spec.wide).toMatchObject({
+			id: 'wide-0123456789abcdef-snow',
+			tiles: ['/api/sat/tiles/0123456789abcdef/snow/{z}/{x}/{y}.webp'],
+			minzoom: 7,
+			maxzoom: 12,
+			bounds: wideBox
+		});
+		expect(spec.dates?.features).toEqual([
+			...datesGeojson(wide, true).features,
+			...datesGeojson(composite).features
+		]);
+		// Stepping to a whole scene keeps the wide view and its dates.
+		const scene = recentSpec(data, spot, { kind: 'scene', scene: snoq.scenes![0] }, 'natural');
+		expect(scene.wide?.id).toBe('wide-0123456789abcdef-natural');
+		expect(scene.dates).toEqual(datesGeojson(wide, true));
+		expect(scene.dates?.features.every((f) => f.properties?.wide === true)).toBe(true);
+	});
+
 	it('only the daily mosaic with no view, and nothing without the index', () => {
-		expect(recentSpec(data, null, null, 'natural')).toMatchObject({ view: null, dates: null });
+		expect(recentSpec(data, null, null, 'natural')).toMatchObject({
+			wide: null,
+			view: null,
+			dates: null
+		});
 		expect(recentSpec(null, null, null, 'natural')).toEqual({
 			viirs: null,
+			wide: null,
 			view: null,
 			dates: null
 		});

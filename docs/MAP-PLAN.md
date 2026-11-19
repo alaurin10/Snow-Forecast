@@ -755,10 +755,30 @@ What shipped, and where it differs from the plan above:
   shading is off over it whatever the setting (Sun & shade still lights the hills, since
   that is the layer), the 3D haze stops at the horizon, and natural colour has a brighter
   stretch with an S-curve for snow.
+- Follow-up (18 Nov 2026): **a wide view round each location.** The 24 km square left
+  the rest of the screen on the 375 m mosaic. Each location now also gets a stitched view
+  of the 72 × 72 km round it at 30 m (`map.sat_wide_km`, 36; 0 turns it off), drawn under
+  the 10 m views:
+  - The same picture size as the centre (2,400 px), so the same memory and drawing time;
+    zooms 7–12 (`satrender.WIDE`). The same 96 × 96 grid, so 750 m cells; cloud margin
+    and specks scaled to its 60 m mask (2 and 1 pixels).
+  - Passes from the whole `sat_scene_days` (60), newest first, the last 30 days ahead of
+    older ones, at most eight (a wider area is rarely all clear within 30 days). No whole
+    scenes: a pass rarely covers all 72 km.
+  - Its parts and lines leave out the centre square (`sat.centre_cells`) when the centre
+    has a view, so the dates there are the centre's. On the map its lines are thinner
+    and fainter and its dates smaller than the centre's (`wide` on the features).
+  - Kept apart from the centre: its own key (`…+36km#96mc`), grids, pictures in
+    `crops/<loc>@…_36km/`, and failures (a failed wide search keeps the last wide view).
+  - Measured at Snoqualmie (one location, from nothing): the centre alone 148 s, 104
+    pictures, 313 MB at most; the wide view then added 275 s, 264 pictures and 38 MB on
+    disk (23 MB pictures, 12 MB tiles), at most 303 MB; a refresh with nothing new 2 s.
+    A 1,200 px quarter at 30 m took 3.0 s, like one at 10 m (3.6 s). The wide view had
+    eight passes (3 Oct to 17 Nov) and covered 92% of the area.
 - Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–4).
 - Known limits: Sentinel-2 is 10 m, so up close it is far softer than Esri's sub-metre
-  "Satellite"; 10 m imagery covers only the 24 km round each location (the 375 m mosaic
-  beyond); stitched parts are planned on a 250 m grid, so lines and dates follow the
+  "Satellite"; 10 m imagery covers only the 24 km round each location, 30 m the 72 km
+  round it (the 375 m mosaic beyond, and only the nearest location's views are drawn); stitched parts are planned on a 250 m grid, so lines and dates follow the
   10 m joins only roughly; thin cloud and haze can still slip through; a location with no clear pass in 30 days (Whistler and Snoqualmie on
   11 Nov 2026) shows only the 375 m mosaic; scenes are judged at the location, so cloud a
   few km away can still be in the picture; Sentinel-2 isn't fetched away from locations.
