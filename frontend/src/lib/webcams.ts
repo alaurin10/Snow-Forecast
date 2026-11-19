@@ -160,3 +160,17 @@ export function byDay<T>(
 			items: list
 		}));
 }
+
+/** Avalanche centers whose observations (and their photos) can't be shown here, only
+ *  linked: avalanche.org's observation API answers only the centers' own sites. */
+const CENTER_OBSERVATIONS: Record<string, { name: string; url: string }> = {
+	NWAC: { name: 'NWAC', url: 'https://nwac.us/observations#/view/observations' }
+};
+
+/** The observations page of the location's avalanche center, when it has one we link. */
+export function centerObservations(
+	avy: { provider: string; center_id?: string | null } | null | undefined
+): { name: string; url: string } | null {
+	if (avy?.provider !== 'nac' || !avy.center_id) return null;
+	return CENTER_OBSERVATIONS[avy.center_id.toUpperCase()] ?? null;
+}

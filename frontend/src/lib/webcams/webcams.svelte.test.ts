@@ -149,7 +149,21 @@ describe('webcams tab', () => {
 		expect(photos.container.querySelectorAll('.photos img')).toHaveLength(1);
 		cleanup();
 		const none = render(WebcamsTab, { cams: cams.slice(0, 1), nearby: nearby(0) });
-		expect(none.getByText(/No photos in reports within/)).toBeTruthy();
+		expect(none.getByText(/No photos in Avalanche Canada reports within/)).toBeTruthy();
+	});
+
+	it('links NWAC’s observations for its locations, even with no cameras or photos', () => {
+		const { getByRole, queryByText } = render(WebcamsTab, {
+			cams: [],
+			nearby: null,
+			avy: { provider: 'nac', center_id: 'NWAC' }
+		});
+		const link = getByRole('link', { name: 'Recent NWAC observations ↗' });
+		expect(link.getAttribute('href')).toBe('https://nwac.us/observations#/view/observations');
+		expect(queryByText(/No photos in Avalanche Canada reports/)).toBeNull(); // not loaded yet
+		cleanup();
+		const bc = render(WebcamsTab, { cams: [], nearby: nearby(1), avy: { provider: 'avcan' } });
+		expect(bc.queryByRole('link', { name: /NWAC observations/ })).toBeNull();
 	});
 
 	it('never frames a player from another host', () => {

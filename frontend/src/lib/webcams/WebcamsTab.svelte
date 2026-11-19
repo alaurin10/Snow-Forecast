@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
 	import { safeHref, safeImage } from '../links';
-	import { embedFor, freshImage, playSrc } from '../webcams';
+	import { centerObservations, embedFor, freshImage, playSrc } from '../webcams';
 	import type { NearbyOut, Webcam } from '../types.gen';
 	import type { UnitSystem } from '../units';
 	import FieldPhotos from './FieldPhotos.svelte';
@@ -21,9 +21,12 @@
 		nearby?: NearbyOut | null;
 		units?: UnitSystem;
 		tz?: string | null;
+		/** The location's avalanche forecast, for a link to its center's observations. */
+		avy?: { provider: string; center_id?: string | null } | null;
 	}
 
-	let { cams, nearby = null, units = 'imperial', tz = null }: Props = $props();
+	let { cams, nearby = null, units = 'imperial', tz = null, avy = null }: Props = $props();
+	const center = $derived(centerObservations(avy));
 
 	const REFRESH_MS = 5 * 60_000;
 	let broken = $state<Record<number, boolean>>({});
@@ -167,8 +170,8 @@
 		Brownrice, CamStreamer, Roundshot or Ozolio) only when you press Live or Play all.
 	</p>
 {/if}
-{#if nearby}
-	<FieldPhotos data={nearby} {units} {tz} />
+{#if nearby || center}
+	<FieldPhotos data={nearby} {units} {tz} {center} />
 {/if}
 
 <style>

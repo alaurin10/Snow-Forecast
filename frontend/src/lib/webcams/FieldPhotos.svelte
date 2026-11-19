@@ -11,14 +11,19 @@
 	import { byDay } from '../webcams';
 
 	interface Props {
-		data: NearbyOut;
+		/** Field reports around the location; null until they load (or if they fail). */
+		data: NearbyOut | null;
 		units: UnitSystem;
 		tz?: string | null;
+		/** The location's avalanche center's own observations page, linked (not shown). */
+		center?: { name: string; url: string } | null;
 	}
 
-	let { data, units, tz }: Props = $props();
+	let { data, units, tz, center = null }: Props = $props();
 
-	const days = $derived(byDay(data.photo_reports ?? [], (r) => r.report.time, tz));
+	const days = $derived(byDay(data?.photo_reports ?? [], (r) => r.report.time, tz));
+	const radius = $derived(data?.radius_km ?? 60);
+	const span = $derived(data?.reports_days ?? 14);
 	const away = (km: number) =>
 		units === 'imperial' ? `${(km * 0.621371).toFixed(0)} mi` : `${km.toFixed(0)} km`;
 	const clock = (iso: string) =>
@@ -34,9 +39,20 @@
 		<h2>Recent field photos</h2>
 		<p class="faint small">
 			From people's reports to Avalanche Canada's Mountain Information Network within {away(
-				data.radius_km
-			)}, last {data.reports_days ?? 14} days. What they saw; not checked by anyone.
+				radius
+			)}, last {span} days. What they saw; not checked by anyone.
 		</p>
+		{#if center && safeHref(center.url)}
+			<p class="center">
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+				<a class="btn small" href={safeHref(center.url)} target="_blank" rel="noopener noreferrer"
+					>Recent {center.name} observations ↗</a
+				>
+				<span class="faint small"
+					>{center.name}'s photos and reports open on its own site; they can't be shown here.</span
+				>
+			</p>
+		{/if}
 	</div>
 	{#if days.length}
 		{#each days as day (day.date)}
@@ -79,10 +95,9 @@
 				</div>
 			{/each}
 		{/each}
-	{:else}
+	{:else if data}
 		<p class="muted small">
-			No photos in reports within {away(data.radius_km)} in the last {data.reports_days ?? 14}
-			days.
+			No photos in Avalanche Canada reports within {away(radius)} in the last {span} days.
 		</p>
 	{/if}
 </section>
@@ -96,6 +111,16 @@
 	}
 	.head p {
 		margin: 0 0 4px;
+	}
+	.center {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 10px;
+		margin: 10px 0 4px;
+	}
+	.center .btn {
+		text-decoration: none;
 	}
 	h3 {
 		margin: 18px 0 8px;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byDay, embedFor, freshImage, playSrc } from './webcams';
+import { byDay, centerObservations, embedFor, freshImage, playSrc } from './webcams';
 
 const NOCOOKIE = 'https://www.youtube-nocookie.com/embed/vhO8nNqg9iw';
 
@@ -102,5 +102,16 @@ describe('byDay', () => {
 		]);
 		// In UTC the same instants fall on other days.
 		expect(byDay(items, (i) => i.time, 'UTC', now)[0].items.map((i) => i.id)).toEqual(['a', 'b']);
+	});
+});
+
+describe('centerObservations', () => {
+	it('links NWAC’s observations, and no other center', () => {
+		expect(centerObservations({ provider: 'nac', center_id: 'NWAC' })?.url).toBe(
+			'https://nwac.us/observations#/view/observations'
+		);
+		expect(centerObservations({ provider: 'nac', center_id: 'SAC' })).toBeNull();
+		expect(centerObservations({ provider: 'avcan', center_id: null })).toBeNull();
+		expect(centerObservations(null)).toBeNull();
 	});
 });
