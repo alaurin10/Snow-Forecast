@@ -112,6 +112,13 @@ Notable changes to Snow Watch. The format follows
   from the one source.
 
 ### Changed
+- **The forecast updates every 3 hours**, up from every 6 (`schedule.runs_utc`: 00:30,
+  03:30 … 21:30 UTC; the ensembles still come twice a day, at 09:30 and 21:30). The
+  runs in between catch the hourly HRRR and NBM in the US and keep "now" and the last
+  24 hours fresh. Open-Meteo use roughly doubles, to ~290 calls per location a day
+  (`snowwatch budget` shows the total). The Confidence tab's trend takes one run per
+  6 hours, so it still reaches back about as far and runs that repeat the same model
+  data don't flatten it.
 - **Calmer map labels.** Zoomed out, only the major cities are named (Seattle, Tacoma,
   Everett), then other cities from zoom 9, towns from 10, villages and hamlets from
   10.5-11. Peaks are shown by how far each is from a higher one, so zoomed out you see

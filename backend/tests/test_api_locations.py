@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
+from snowwatch.analysis.build import DailyRecord
 from snowwatch.api.app import create_app
 from snowwatch.http import Fetcher
 from snowwatch.inputs import load_responses
@@ -95,6 +96,23 @@ def test_trend(client: TestClient) -> None:
     assert first["next5_cm"] == pytest.approx(
         sum(v for d, v in sorted(first["daily"].items())[:5]), abs=0.2
     )
+
+
+def test_trend_takes_one_run_per_6_hours(client: TestClient, conn: sqlite3.Connection) -> None:
+    """Runs come every 3 hours; the trend skips those under 6 hours from the last one
+    taken, with slack for a run that started a few minutes late."""
+    day = captured_at().date().isoformat()
+    ids = {}
+    # The fixture's runs 1 and 2 are at +0 h and +6 h.
+    for hours in (9, 12.12, 15, 18):  # +12 h started 7 minutes late
+        run_id = repo.start_run(conn, "test")
+        issued = (captured_at() + timedelta(hours=hours)).isoformat()
+        repo.save_daily(conn, "rainy", run_id, issued, [DailyRecord(day, "cons_slr", 1.0, 1.0)])
+        ids[hours] = run_id
+    t = client.get("/api/locations/rainy/trend").json()
+    assert [r["run_id"] for r in t["runs"]] == [1, 2, ids[12.12], ids[18]]
+    t = client.get("/api/locations/rainy/trend?runs=2").json()
+    assert [r["run_id"] for r in t["runs"]] == [ids[12.12], ids[18]]
 
 
 def test_trend_follows_the_headline_depth(client: TestClient, conn: sqlite3.Connection) -> None:

@@ -61,5 +61,6 @@ def test_full_run_requests_and_daily_budget(cfg: ForecastConfig) -> None:
         "ens_gem_global",
     ]
     per_day = [om.daily_weight(loc, cfg) for loc in locs]
-    # 25 locations must fit comfortably inside the 10,000-call free tier.
-    assert max(per_day) * 25 < 6000
+    # 25 locations on 8 runs a day must still fit inside the 10,000-call free tier,
+    # with room for retries and manual runs.
+    assert max(per_day) * 25 < 8000

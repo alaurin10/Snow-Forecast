@@ -51,7 +51,10 @@ depth_method: slr
 verify_settled_ratio: 8
 
 schedule:
-  runs_utc: ["03:30", "09:30", "15:30", "21:30"]
+  # Every 3 hours. The global models update every 6–12 hours; the runs between catch
+  # the hourly HRRR and NBM (US) and keep "now" fresh. Each run costs ~33 Open-Meteo
+  # calls per location (`snowwatch budget` shows the daily total).
+  runs_utc: ["00:30", "03:30", "06:30", "09:30", "12:30", "15:30", "18:30", "21:30"]
   ensemble_runs_utc: ["09:30", "21:30"]
   backup_utc: "10:00"
   vacuum_weekday: sun
