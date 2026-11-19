@@ -72,66 +72,18 @@ def test_tile_cache_fetches_once_repairs_esri_and_prunes(tmp_path: Path) -> None
     assert not any(p.is_file() for p in tmp_path.rglob("*"))
 
 
-def test_label_tiles_follow_the_tilejson_and_are_vector(tmp_path: Path) -> None:
-    import httpx
-
-    from snowwatch import tiles
-    from snowwatch.tiles import VECTOR, TileCache
-
-    calls: list[str] = []
-    release = {"v": "20261201_000000_pt", "up": True}
-
-    def answer(req: httpx.Request) -> httpx.Response:
-        url = str(req.url)
-        calls.append(url)
-        if url == "https://tiles.openfreemap.org/planet":
-            if not release["up"]:
-                return httpx.Response(503)
-            tpl = f"https://tiles.openfreemap.org/planet/{release['v']}/{{z}}/{{x}}/{{y}}.pbf"
-            return httpx.Response(200, json={"tiles": [tpl]})
-        if url.endswith(".pbf"):
-            return httpx.Response(200, content=b"\x1a\x02pbf", headers={"content-type": VECTOR})
-        return httpx.Response(404)
-
-    cache = TileCache(tmp_path, "test", httpx.Client(transport=httpx.MockTransport(answer)))
-    got = cache.get("labels", 10, 166, 358)
-    assert got == (b"\x1a\x02pbf", VECTOR)
-    assert calls[-1] == "https://tiles.openfreemap.org/planet/20261201_000000_pt/10/166/358.pbf"
-    # The TileJSON is asked once a day, not for every tile.
-    cache.get("labels", 10, 166, 359)
-    assert sum(c.endswith("/planet") for c in calls) == 1
-    # A new release a day later; a TileJSON that doesn't answer keeps the last URL.
-    release["v"] = "20261208_000000_pt"
-    with cache._guard:
-        cache._templates["labels"] = (time.time() - 25 * 3600, cache._templates["labels"][1])
-    cache.get("labels", 10, 167, 358)
-    assert "/20261208_000000_pt/10/167/358.pbf" in calls[-1]
-    release["up"] = False
-    with cache._guard:
-        cache._templates["labels"] = (time.time() - 25 * 3600, cache._templates["labels"][1])
-    cache.get("labels", 10, 167, 359)
-    assert "/20261208_000000_pt/10/167/359.pbf" in calls[-1]
-    assert cache.get("labels", 15, 0, 0) is None  # beyond its zooms
-    assert "satlabels" not in tiles.UPSTREAMS  # Esri's labels, with county lines, are gone
-
-
 def test_api_serves_cached_tiles(settings: Settings, monkeypatch: Any) -> None:
     from snowwatch.tiles import TileCache
 
     monkeypatch.setattr(
         TileCache,
         "get",
-        lambda self, layer, z, x, y: {
-            "otm": (b"png", "image/png"),
-            "labels": (b"pbf", "application/x-protobuf"),
-        }.get(layer),
+        lambda self, layer, z, x, y: (b"png", "image/png") if layer == "otm" else None,
     )
     client = TestClient(create_app(settings))
     r = client.get("/api/tiles/otm/5/3/4.png")
     assert r.status_code == 200 and r.content == b"png"
     assert "max-age" in r.headers["cache-control"]
-    r = client.get("/api/tiles/labels/5/3/4.pbf")
-    assert r.status_code == 200 and r.headers["content-type"] == "application/x-protobuf"
     assert client.get("/api/tiles/nope/5/3/4.png").status_code == 404
 
 

@@ -116,11 +116,6 @@ Notable changes to Snow Watch. The format follows
   rather than a scatter of them, and the joins between passes fade instead of being cut
   sharp. The 10 m views stay first: the 30 m view round them never changes which passes
   they use.
-- **No county lines over satellite imagery.** Place names and borders over the
-  Satellite and Recent satellite bases now come from OpenStreetMap (OpenFreeMap's vector
-  tiles, through the server's cache) and are drawn by the app: state, province and
-  country lines, state names zoomed out, and towns, but not county lines, which Esri's
-  label pictures had baked in.
 - **The Recent satellite bar leads with the dates.** Folded, it now starts with the span of
   the passes ("21 Oct–4 Nov", or "2–9 Nov" within a month) or a scene's day ("9 Nov · 9
   days ago · 92% clear"), so the dates show even on a phone where the line is cut short.

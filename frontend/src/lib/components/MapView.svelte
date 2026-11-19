@@ -91,7 +91,6 @@
 		CONCERN_MIN_ZOOM,
 		OVERLAY_MIN_ZOOM,
 		PRECIP_BEFORE,
-		SAT_LABEL_LAYERS,
 		sky,
 		SKI_LAYERS,
 		SUN_MIN_ZOOM,
@@ -412,8 +411,7 @@
 		map.setLayerZoomRange('otm', off ? 0 : DETAIL_ZOOM - 0.5, 24);
 		map.setPaintProperty('otm', 'raster-opacity', off ? 1 : OTM_OPACITY);
 		map.setLayoutProperty('sat', 'visibility', sat ? 'visible' : 'none');
-		for (const id of SAT_LABEL_LAYERS)
-			map.setLayoutProperty(id, 'visibility', img ? 'visible' : 'none');
+		map.setLayoutProperty('satlabels', 'visibility', img ? 'visible' : 'none');
 	});
 
 	$effect(() => {

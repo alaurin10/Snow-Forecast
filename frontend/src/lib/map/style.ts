@@ -130,17 +130,8 @@ export const PEAK_LAYERS = ['peaks', 'peak-labels'];
 export const PLACE_LAYERS = ['places', 'place-labels'];
 export const GLACIER_LAYERS = ['glaciers', 'glacier-lines', 'cliffs', 'glacier-labels'];
 export const CONTOUR_LAYERS = ['contour-lines', 'contour-labels'];
-/** Names and borders over imagery (OpenStreetMap vector tiles): state, province and
- *  country lines, but not county lines, then state and town names. Bottom first. */
-export const SAT_LABEL_LAYERS = [
-	'satlabels',
-	'satlabels-borders',
-	'satlabels-countries',
-	'satlabels-states',
-	'satlabels-towns'
-];
 /** The precipitation overlay goes under this layer (over the base and terrain overlays). */
-export const PRECIP_BEFORE = SAT_LABEL_LAYERS[0];
+export const PRECIP_BEFORE = 'satlabels';
 
 export const ELEVATION_ATTRIBUTION =
 	'Elevation © <a href="https://mapterhorn.com/attribution/">Mapterhorn</a> (USGS 3DEP, NRCan HRDEM, Copernicus and others)';
@@ -372,12 +363,12 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			attribution:
 				'Imagery © <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics, USDA, USGS'
 		},
-		labels: {
-			type: 'vector',
-			tiles: ['/api/tiles/labels/{z}/{x}/{y}.pbf'],
-			maxzoom: 14,
-			attribution:
-				'Labels: <a href="https://openfreemap.org">OpenFreeMap</a>, <a href="https://www.openmaptiles.org/">© OpenMapTiles</a>, data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+		satlabels: {
+			type: 'raster',
+			tiles: tiles('satlabels'),
+			tileSize: 256,
+			maxzoom: 18,
+			attribution: 'Labels © <a href="https://www.esri.com">Esri</a>'
 		},
 		// Runs, lifts, peaks, huts, glaciers and more from OpenStreetMap, fetched weekly by
 		// the server.
@@ -462,7 +453,13 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 			});
 		}
 	}
-	layers.push(...satLabelLayers(imagery));
+	layers.push({
+		id: 'satlabels',
+		type: 'raster',
+		source: 'satlabels',
+		layout: { visibility: vis(imagery) },
+		paint: { 'raster-fade-duration': 150 }
+	});
 	if (full && o.contourTiles) {
 		sources.contours = { type: 'vector', tiles: [o.contourTiles], maxzoom: 15 };
 		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
@@ -900,120 +897,6 @@ export function placeLayers(dark: boolean, units: UnitSystem, on: boolean): Laye
 			paint: {
 				'text-color': peakText(dark),
 				'text-halo-color': halo(dark),
-				'text-halo-width': 1.5
-			}
-		}
-	];
-}
-
-/** Borders of states, provinces and countries: not counties (admin_level 6) or sea
- *  limits. */
-const BORDERS = [
-	'all',
-	['<=', ['coalesce', ['get', 'admin_level'], 99], 4],
-	['!=', ['get', 'maritime'], 1]
-] as ExpressionSpecification;
-
-/**
- * Names and borders over imagery, from OpenStreetMap: state and country lines (light,
- * on a dark casing, dashed for states), state names when zoomed out, and towns, more of
- * them as the map zooms in.
- */
-export function satLabelLayers(on: boolean): LayerSpecification[] {
-	const v = vis(on);
-	const country = ['==', ['coalesce', ['get', 'admin_level'], 99], 2] as ExpressionSpecification;
-	return [
-		{
-			id: 'satlabels',
-			type: 'line',
-			source: 'labels',
-			'source-layer': 'boundary',
-			filter: BORDERS,
-			layout: { visibility: v, 'line-join': 'round' },
-			paint: {
-				'line-color': 'rgba(15, 20, 30, 0.55)',
-				'line-width': [
-					'interpolate',
-					['linear'],
-					['zoom'],
-					4,
-					['case', country, 3, 2.2],
-					12,
-					['case', country, 5, 3.6]
-				]
-			}
-		},
-		{
-			id: 'satlabels-borders',
-			type: 'line',
-			source: 'labels',
-			'source-layer': 'boundary',
-			filter: ['all', BORDERS, ['>', ['coalesce', ['get', 'admin_level'], 99], 2]],
-			layout: { visibility: v, 'line-join': 'round' },
-			paint: {
-				'line-color': 'rgba(255, 255, 255, 0.85)',
-				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1, 12, 1.8],
-				'line-dasharray': [4, 2.5]
-			}
-		},
-		{
-			// Country lines solid, over the dashes, so a state line along one doesn't dash it.
-			id: 'satlabels-countries',
-			type: 'line',
-			source: 'labels',
-			'source-layer': 'boundary',
-			filter: ['all', BORDERS, country],
-			layout: { visibility: v, 'line-join': 'round' },
-			paint: {
-				'line-color': 'rgba(255, 255, 255, 0.9)',
-				'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 12, 2.4]
-			}
-		},
-		{
-			id: 'satlabels-states',
-			type: 'symbol',
-			source: 'labels',
-			'source-layer': 'place',
-			maxzoom: 8,
-			filter: ['in', ['get', 'class'], ['literal', ['state', 'province']]],
-			layout: {
-				visibility: v,
-				'text-field': ['get', 'name'],
-				'text-font': FONT,
-				'text-size': 12,
-				'text-letter-spacing': 0.12,
-				'text-transform': 'uppercase',
-				'text-max-width': 8
-			},
-			paint: {
-				'text-color': 'rgba(255, 255, 255, 0.85)',
-				'text-halo-color': 'rgba(15, 20, 30, 0.8)',
-				'text-halo-width': 1.4
-			}
-		},
-		{
-			id: 'satlabels-towns',
-			type: 'symbol',
-			source: 'labels',
-			'source-layer': 'place',
-			filter: [
-				'any',
-				['==', ['get', 'class'], 'city'],
-				['all', ['==', ['get', 'class'], 'town'], ['>=', ['zoom'], 7]],
-				['all', ['==', ['get', 'class'], 'village'], ['>=', ['zoom'], 10]],
-				['all', ['==', ['get', 'class'], 'hamlet'], ['>=', ['zoom'], 12]]
-			],
-			layout: {
-				visibility: v,
-				'text-field': ['get', 'name'],
-				'text-font': FONT,
-				'text-size': ['match', ['get', 'class'], 'city', 14, 'town', 12.5, 11.5],
-				'text-max-width': 8,
-				'text-padding': 4
-			},
-			paint: {
-				'text-color': '#fff6e0',
-				'text-halo-color': 'rgba(15, 20, 30, 0.85)',
 				'text-halo-width': 1.5
 			}
 		}

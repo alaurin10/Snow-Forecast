@@ -30,8 +30,6 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-VECTOR = "application/x-protobuf"
-
 
 @dataclass(frozen=True)
 class Upstream:
@@ -39,9 +37,6 @@ class Upstream:
     max_zoom: int
     media_type: str
     fix_edges: bool = False
-    # Where the tile URL comes from when it changes (OpenFreeMap names each data
-    # release): a TileJSON whose first `tiles` URL is used, `urls[0]` until it answers.
-    tilejson: str | None = None
 
 
 UPSTREAMS: dict[str, Upstream] = {
@@ -51,8 +46,7 @@ UPSTREAMS: dict[str, Upstream] = {
         "image/png",
     ),
     "pistes": Upstream(("https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png",), 18, "image/png"),
-    # Satellite imagery for the Satellite style; `labels` draws place names and borders
-    # over it.
+    # Satellite imagery for the Satellite style, with place names and borders on top.
     "sat": Upstream(
         (
             "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/"
@@ -61,14 +55,13 @@ UPSTREAMS: dict[str, Upstream] = {
         18,
         "image/jpeg",
     ),
-    # Vector tiles of OpenStreetMap (OpenMapTiles' layers) for the names and borders over
-    # imagery, drawn in the browser, so county lines can be left out (Esri's label
-    # pictures had them baked in).
-    "labels": Upstream(
-        ("https://tiles.openfreemap.org/planet/20261115_080022_pt/{z}/{x}/{y}.pbf",),
-        14,
-        VECTOR,
-        tilejson="https://tiles.openfreemap.org/planet",
+    "satlabels": Upstream(
+        (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/"
+            "World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        ),
+        18,
+        "image/png",
     ),
     "esri": Upstream(
         (
@@ -82,7 +75,6 @@ UPSTREAMS: dict[str, Upstream] = {
 }
 
 KEEP_DAYS = 45
-TILEJSON_HOURS = 24  # how long a TileJSON's tile URL is used before asking again
 MAX_TILE_BYTES = 2_000_000  # a real 256 px tile is well under this
 UPSTREAM_AT_ONCE = 6
 
@@ -127,7 +119,6 @@ class TileCache:
         self._guard = threading.Lock()
         self._upstream = threading.BoundedSemaphore(UPSTREAM_AT_ONCE)
         self._size: int | None = None  # bytes on disk, counted on the first miss
-        self._templates: dict[str, tuple[float, str]] = {}  # layer: (when asked, URL)
 
     def _path(self, layer: str, z: int, x: int, y: int) -> Path | None:
         up = UPSTREAMS.get(layer)
@@ -170,50 +161,20 @@ class TileCache:
         if path is None:
             return None
         up = UPSTREAMS[layer]
-        template = self._template(layer, up) if up.tilejson else up.urls[(x + y) % len(up.urls)]
-        url = template.format(z=z, x=x, y=y)
-        data = self.through_status(path, url, up.fix_edges, up.media_type)[0]
+        url = up.urls[(x + y) % len(up.urls)].format(z=z, x=x, y=y)
+        data = self.through(path, url, up.fix_edges)
         return None if data is None else (data, up.media_type)
-
-    def _template(self, layer: str, up: Upstream) -> str:
-        """The tile URL a TileJSON names now, asked for once a day (and not again for an
-        hour after a failure); the last one known, or `urls[0]`, meanwhile."""
-        now = time.time()
-        with self._guard:
-            asked, url = self._templates.get(layer, (0.0, up.urls[0]))
-        if now - asked < TILEJSON_HOURS * 3600 or up.tilejson is None:
-            return url
-        with self._lock(f"tilejson:{layer}"):
-            with self._guard:
-                asked, url = self._templates.get(layer, (0.0, up.urls[0]))
-            if now - asked < TILEJSON_HOURS * 3600:
-                return url
-            fresh = url
-            try:
-                r = self.client.get(up.tilejson)
-                got = r.json().get("tiles") if r.status_code == 200 else None
-                if isinstance(got, list) and got and isinstance(got[0], str) and "{z}" in got[0]:
-                    fresh = got[0]
-                    asked = now
-                else:
-                    asked = now - (TILEJSON_HOURS - 1) * 3600
-            except (httpx.HTTPError, ValueError):
-                asked = now - (TILEJSON_HOURS - 1) * 3600
-            with self._guard:
-                self._templates[layer] = (asked, fresh)
-            return fresh
 
     def through(self, path: Path, url: str, fix_edges: bool = False) -> bytes | None:
         """A file from the cache at `path`, else fetched from `url` (an image) and kept."""
         return self.through_status(path, url, fix_edges)[0]
 
     def through_status(
-        self, path: Path, url: str, fix_edges: bool = False, media_type: str = "image/"
+        self, path: Path, url: str, fix_edges: bool = False
     ) -> tuple[bytes | None, int]:
         """As `through`, with the upstream's HTTP status (200 for a cached file, 0 when
         the upstream couldn't be reached), so "it has no such tile" (404) can be told
-        apart from "it didn't answer". Images are checked to be images; vector tiles
-        (`media_type` VECTOR) only to have come with a 200."""
+        apart from "it didn't answer"."""
         key = str(path.relative_to(self.root))
         # One upstream fetch per tile even when several requests arrive together.
         with self._lock(key):
@@ -225,8 +186,11 @@ class TileCache:
                     r = self.client.get(url)
                 except httpx.HTTPError:
                     return None, 0
-            kind_ok = media_type == VECTOR or r.headers.get("content-type", "").startswith("image/")
-            if r.status_code != 200 or not kind_ok or len(r.content) > MAX_TILE_BYTES:
+            if (
+                r.status_code != 200
+                or not r.headers.get("content-type", "").startswith("image/")
+                or len(r.content) > MAX_TILE_BYTES
+            ):
                 return None, r.status_code if r.status_code != 200 else 0
             data = r.content
             if fix_edges:

@@ -337,9 +337,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return tile_cache
 
     @app.get("/api/tiles/{layer}/{z}/{x}/{y}.png")
-    @app.get("/api/tiles/{layer}/{z}/{x}/{y}.pbf")
     def tile(layer: str, z: int, x: int, y: int, request: Request) -> Response:
-        """Base map, label and ski-run tiles, cached here (see snowwatch/tiles.py)."""
+        """Base map and ski-run tiles, cached here (see snowwatch/tiles.py)."""
         cache = tiles()
         if not cache.cached(layer, z, x, y):
             tile_misses.check(request)

@@ -20,7 +20,6 @@ running a public or commercial installation.
 | [OpenSkiMap](https://openskimap.org/) | The ski-area list for Manage | © OpenStreetMap contributors, ODbL |
 | [OpenTopoMap](https://opentopomap.org/) | Topographic base map (cached by the server) | CC-BY-SA; tile use policy applies |
 | [Esri](https://www.esri.com/) | Topographic and satellite base maps (cached by the server) | Esri terms of use |
-| [OpenFreeMap](https://openfreemap.org/) ([OpenMapTiles](https://www.openmaptiles.org/) schema) | Place names and state and country lines over satellite imagery | © OpenMapTiles, © OpenStreetMap contributors, ODbL |
 | [Copernicus Sentinel-2](https://dataspace.copernicus.eu/), via [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/) | Recent satellite imagery near each location (cached by the server) | Free and open (Copernicus data policy): "Contains modified Copernicus Sentinel data" |
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) | Daily VIIRS and 30 m HLS satellite imagery (cached by the server); GOES-West GeoColor cloud imagery (NOAA, CIRA) for the map | NASA open data, no restrictions; credit NASA (and NOAA/CIRA for GeoColor) |
 | [Mapterhorn](https://mapterhorn.com/attribution/) | Elevation: 3D terrain, hill shading, slope, aspect, contours (from USGS 3DEP, NRCan HRDEM, Copernicus GLO-30 and others) | Open data; each source under its own licence, listed by Mapterhorn |
