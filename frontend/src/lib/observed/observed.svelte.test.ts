@@ -1,12 +1,16 @@
-// The Observed tab: the station's charts and the measured-vs-forecast bars stay inside
-// their plots; nearby stations and field reports list what the server found.
+// The Observed tab: the hero's sentence and numbers, the station's charts and the
+// measured-vs-forecast bars stay inside their plots; snow by elevation and field reports
+// show what the server found.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/svelte';
+import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import crystal from '../fixtures/crystal.json';
 import whistler from '../fixtures/whistler.json';
-import type { NearbyOut, Snapshot, VerificationOut } from '../types.gen';
+import type { NearbyOut, Snapshot, Snotel, VerificationOut } from '../types.gen';
 import { expectMarksInside } from '../charts/__tests__/marks';
-import StationPanel from './StationPanel.svelte';
+import { stationRead } from './read';
+import StationHero from './StationHero.svelte';
+import SnowpackDetail from './SnowpackDetail.svelte';
+import ForecastVerdict from './ForecastVerdict.svelte';
 import MeasuredVsForecast from './MeasuredVsForecast.svelte';
 import NearbyStations from './NearbyStations.svelte';
 import FieldReports from './FieldReports.svelte';
@@ -17,20 +21,74 @@ afterEach(cleanup);
 const us = crystal as unknown as Snapshot;
 const bc = whistler as unknown as Snapshot;
 
-describe('station panel', () => {
-	it('charts SNOTEL depth and water', () => {
-		const { container, getByText } = render(StationPanel, {
-			station: us.snotel ?? null,
-			bandLabel: 'Mid',
-			bandElev: us.bands[1].elev_m,
+const hero = (station: Snotel, units: 'metric' | 'imperial' = 'metric') =>
+	render(StationHero, {
+		station,
+		read: stationRead(station, units),
+		bandLabel: 'Mid-mountain',
+		bandElev: 1800,
+		today: station.daily.at(-1)?.date,
+		units
+	});
+
+describe('station hero', () => {
+	it('sums the station up in a sentence, three numbers and seven days', () => {
+		const { container, getByRole } = hero(us.snotel!, 'imperial');
+		expect(getByRole('heading', { level: 2 }).textContent).toMatch(/\.$/);
+		expect(container.textContent).toMatch(/NRCS SNOTEL/);
+		expect(container.textContent).toMatch(/Morse Lake/);
+		expect(container.textContent).toMatch(/below Mid-mountain/);
+		expect(container.querySelectorAll('.week li').length).toBe(7);
+		expect(container.querySelector('.week li:last-child .wd')?.textContent).toBe('Today');
+		expect(container.querySelector('svg.spark')).toBeTruthy();
+	});
+
+	it('tints a snowy day like the calendar and shows each day’s high and low', () => {
+		const station = structuredClone(us.snotel!);
+		station.daily = [10, 10, 10, 10, 10, 10, 30, 30].map((d, i) => ({
+			date: `2026-11-0${i + 1}`,
+			depth_cm: d,
+			swe_mm: d * 3,
+			temp_c: -2,
+			precip_mm: 0,
+			tmin_c: -9,
+			tmax_c: i === 7 ? 3 : -1
+		}));
+		station.depth_cm = 30;
+		const { container } = hero(station);
+		const cells = [...container.querySelectorAll('.week li')];
+		expect(cells[4].className).toMatch(/c4/); // 20 cm on Nov 6: the 6–12 in step
+		expect(cells[4].querySelector('.amt')?.textContent).toBe('20');
+		expect(cells[6].querySelector('.temps')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+			'3° -9°'
+		);
+		expect(container.textContent).toMatch(/Above freezing on 1 of the last 7 days/);
+	});
+
+	it('shows a BC snow pillow', () => {
+		const { container } = hero(bc.snotel!);
+		expect(container.textContent).toMatch(/BC River Forecast Centre/);
+		expect(container.textContent).toMatch(/Callaghan Creek/);
+	});
+});
+
+describe('the last 30 days', () => {
+	it('charts depth, new snow and temperature on one time axis, and switches to snow water', async () => {
+		const station = structuredClone(us.snotel!);
+		station.daily = station.daily.map((d) => ({ ...d, tmin_c: -6, tmax_c: 1 }));
+		const { container, getByText, getByRole } = render(SnowpackDetail, {
+			read: stationRead(station, 'imperial'),
 			units: 'imperial',
 			width: 380
 		});
-		expect(getByText('Snow depth, 30 days')).toBeTruthy();
+		expect(getByText('Snow depth')).toBeTruthy();
 		expect(getByText('New snow each day')).toBeTruthy();
-		expect(getByText('Last 7 days')).toBeTruthy();
-		expect(container.textContent).toMatch(/NRCS SNOTEL/);
+		expect(getByText('Low and high temperature')).toBeTruthy();
+		expect(container.querySelectorAll('rect.day').length).toBe(30);
 		expectMarksInside(container);
+		await fireEvent.click(getByRole('button', { name: 'Snow water' }));
+		expect(getByText('Snow water', { selector: '.title' })).toBeTruthy();
+		expect(container.textContent).not.toMatch(/Snow depth/);
 	});
 
 	it('counts new snow as each day’s depth gain, never a loss', () => {
@@ -43,38 +101,18 @@ describe('station panel', () => {
 			temp_c: -2,
 			precip_mm: 0
 		}));
-		const { container } = render(StationPanel, {
-			station,
-			bandLabel: 'Mid',
-			bandElev: 1800,
+		station.depth_cm = 30; // settled a little since this morning
+		const { container } = render(SnowpackDetail, {
+			read: stationRead(station, 'metric'),
 			units: 'metric',
 			width: 380
 		});
 		// 15 cm, then two days of settling, then 12 cm: two bars, 27 cm in all.
 		expect(container.querySelectorAll('path.bar').length).toBe(2);
 		expect(container.textContent).toMatch(/27 cm in all/);
+		// No temperatures reported: no temperature chart.
+		expect(container.textContent).not.toMatch(/Low and high temperature/);
 		expectMarksInside(container);
-	});
-
-	it('shows a BC snow pillow', () => {
-		const { container } = render(StationPanel, {
-			station: bc.snotel ?? null,
-			bandLabel: 'Mid',
-			bandElev: bc.bands[1].elev_m,
-			units: 'metric'
-		});
-		expect(container.textContent).toMatch(/BC River Forecast Centre/);
-		expect(container.textContent).toMatch(/Callaghan Creek/);
-	});
-
-	it('says when there is no station', () => {
-		const { getByText } = render(StationPanel, {
-			station: null,
-			bandLabel: 'Mid',
-			bandElev: 1500,
-			units: 'imperial'
-		});
-		expect(getByText(/No snow station is set/)).toBeTruthy();
 	});
 });
 
@@ -103,13 +141,47 @@ const scores = (ready: boolean): VerificationOut => ({
 	}))
 });
 
-describe('measured against the forecast', () => {
+describe('did the forecast get it right?', () => {
+	it('puts the two totals side by side and says which way it leans', () => {
+		const { container, getByText } = render(ForecastVerdict, {
+			data: scores(true),
+			units: 'metric'
+		});
+		const vals = [...container.querySelectorAll('.val')].map((v) => v.textContent);
+		// 8 days: forecast 8 cm (temperature-based) each, measured 12, 4, 4, 12, 4, 4, 12, 4.
+		expect(vals).toEqual(['64 cm', '56 cm']);
+		expect(getByText('Ran high')).toBeTruthy();
+		expect(container.textContent).toMatch(/by about 2 cm a day; a typical day was off by 2 cm/);
+	});
+
+	it('waits for a week, and says so while loading, after an error and without a station', () => {
+		const a = render(ForecastVerdict, { data: scores(false), units: 'metric' });
+		expect(a.container.textContent).toMatch(/fills in after about a week/);
+		cleanup();
+		const b = render(ForecastVerdict, { data: null, units: 'metric', load: 'loading' });
+		expect(b.container.textContent).toMatch(/Loading/);
+		cleanup();
+		const c = render(ForecastVerdict, { data: null, units: 'metric', load: 'error' });
+		expect(c.getByRole('alert')).toBeTruthy();
+		cleanup();
+		const d = render(ForecastVerdict, { data: null, units: 'metric' });
+		expect(d.container.textContent).toMatch(/needs a snow station/);
+	});
+});
+
+const stat = (container: HTMLElement, label: string) =>
+	[...container.querySelectorAll('.stats > div')]
+		.find((d) => d.querySelector('.eyebrow')?.textContent === label)
+		?.querySelector('.stat')
+		?.textContent?.replace(/\s+/g, ' ');
+
+describe('forecast check, day by day', () => {
 	it('waits for a week of forecasts', () => {
 		const { getByText } = render(MeasuredVsForecast, { data: scores(false), units: 'imperial' });
 		expect(getByText(/fills in after about a week/)).toBeTruthy();
 	});
 
-	it('draws each day’s pair and says how the forecast leans', () => {
+	it('draws each day’s pair and sums it up in three numbers', () => {
 		const { container } = render(MeasuredVsForecast, {
 			data: scores(true),
 			units: 'metric',
@@ -117,13 +189,13 @@ describe('measured against the forecast', () => {
 		});
 		expect(container.querySelectorAll('path.obs').length).toBe(8);
 		expect(container.querySelectorAll('path.fc').length).toBe(8);
-		expect(container.textContent).toMatch(
-			/missed by 2\s+cm a day on average, with 2 cm a day too much/
-		);
+		expect(stat(container, 'Typical miss')).toBe('2cm/day');
+		expect(stat(container, 'Lean')).toBe('+2cm/day');
+		expect(stat(container, 'Days scored')).toBe('8');
 		expectMarksInside(container);
 	});
 
-	it('shades the days the depth can’t measure and checks the gauge too', () => {
+	it('shades the days the depth can’t measure and checks the gauge on the other view', async () => {
 		const data = scores(true);
 		data.rows.push({
 			source: 'cons_settled',
@@ -147,18 +219,27 @@ describe('measured against the forecast', () => {
 			observed_water_mm: 10,
 			cons_water_mm: 12
 		}));
-		const { container } = render(MeasuredVsForecast, { data, units: 'metric', width: 380 });
+		const { container, getByRole } = render(MeasuredVsForecast, {
+			data,
+			units: 'metric',
+			width: 380
+		});
 		expect(container.querySelectorAll('rect.skip').length).toBe(2);
-		// New snow: 6 measured days drawn, 8 forecast; precipitation: 8 and 8.
-		expect(container.querySelectorAll('path.obs').length).toBe(6 + 8);
-		expect(container.querySelectorAll('path.fc').length).toBe(8 + 8);
-		const text = container.textContent?.replace(/\s+/g, ' ');
-		expect(text).toMatch(/as settled snow \(8:1\)\. Over 6 days it has missed by 2 cm a day/);
-		expect(text).toMatch(
-			/Over 8 days it has missed by 4\.0 mm a day on average, with 3\.0 mm a day too much/
-		);
+		// New snow: 6 measured days drawn, 8 forecast.
+		expect(container.querySelectorAll('path.obs').length).toBe(6);
+		expect(container.querySelectorAll('path.fc').length).toBe(8);
+		let text = container.textContent?.replace(/\s+/g, ' ');
+		expect(text).toMatch(/as settled snow \(8:1\)/);
+		expect(stat(container, 'Lean')).toBe('−1cm/day');
+		expect(stat(container, 'Days scored')).toBe('6');
 		expect(text).toMatch(/2 days \(2 with no snowpack on the ground\) can't be measured/);
 		expectMarksInside(container);
+		await fireEvent.click(getByRole('button', { name: 'Precipitation' }));
+		expect(container.querySelectorAll('path.obs').length).toBe(8);
+		expect(stat(container, 'Typical miss')).toBe('4.0mm/day');
+		expect(stat(container, 'Lean')).toBe('+3.0mm/day');
+		text = container.textContent?.replace(/\s+/g, ' ');
+		expect(text).toMatch(/Rain and melted snow in the station’s gauge/);
 	});
 
 	it('checks the gauge alone while there is no snowpack', () => {
@@ -173,10 +254,14 @@ describe('measured against the forecast', () => {
 			]
 		};
 		data.pairs = data.pairs.map((p) => ({ ...p, skip: 'bare' as const, observed_water_mm: 5 }));
-		const { container } = render(MeasuredVsForecast, { data, units: 'imperial', width: 380 });
-		const text = container.textContent?.replace(/\s+/g, ' ');
-		expect(text).toMatch(/can’t check the forecast yet/);
-		expect(text).toMatch(/0\.83 in a day on average, with 0\.79 in a day too much/);
+		const { container, queryByRole } = render(MeasuredVsForecast, {
+			data,
+			units: 'imperial',
+			width: 380
+		});
+		expect(queryByRole('button', { name: 'New snow' })).toBeNull();
+		expect(stat(container, 'Typical miss')).toBe('0.83in/day');
+		expect(stat(container, 'Lean')).toBe('+0.79in/day');
 		expect(container.querySelectorAll('rect.skip').length).toBe(0); // no depth chart
 	});
 
@@ -214,21 +299,18 @@ describe('measured against the forecast', () => {
 		// Six days at the station: not yet; the mid band's 20 cm sets the scale.
 		const a = render(MeasuredVsForecast, { data: withStation(6), units: 'metric', width: 380 });
 		let text = a.container.textContent?.replace(/\s+/g, ' ');
-		expect(text).toMatch(
-			/evening before, as settled snow \(8:1\)\. Over 8 days it has missed by 6 cm/
-		);
-		expect(text).not.toMatch(/station’s own elevation/);
+		expect(text).toMatch(/forecast for mid-mountain, as settled snow \(8:1\)/);
+		expect(stat(a.container, 'Typical miss')).toBe('6cm/day');
 		expect(tallest(a.container)).toBeGreaterThanOrEqual(20);
 		cleanup();
-		// A week: the forecast for the station's own elevation, in both charts.
+		// A week: the forecast for the station's own elevation.
 		const b = render(MeasuredVsForecast, { data: withStation(7), units: 'metric', width: 380 });
 		text = b.container.textContent?.replace(/\s+/g, ' ');
 		expect(text).toMatch(
-			/evening before for the station’s own elevation \(1,650 m\), as settled snow \(8:1\)\. Over 7 days it has missed by 1 cm a day on average, with no lean/
+			/forecast for the station’s own elevation \(1,650 m\), as settled snow \(8:1\)/
 		);
-		expect(text).toMatch(
-			/forecast’s for the station’s own elevation \(1,650 m\)\. Over 7 days it has missed by 2\.0 mm/
-		);
+		expect(stat(b.container, 'Typical miss')).toBe('1cm/day');
+		expect(stat(b.container, 'Lean')).toBe('None');
 		expect(tallest(b.container)).toBeLessThan(20);
 		expectMarksInside(b.container);
 	});
@@ -278,31 +360,31 @@ const nearby = (over: Partial<NearbyOut> = {}): NearbyOut => ({
 	...over
 });
 
-describe('stations nearby', () => {
-	it('lists stations highest first with the location’s elevations between them', () => {
-		const { container, getByText, getAllByText } = render(NearbyStations, {
+describe('snow by elevation', () => {
+	it('plots each station by its height and depth, with the location’s elevations across', () => {
+		const { container, getByText } = render(NearbyStations, {
 			data: nearby(),
 			bands: us.bands,
 			own: '642:WA:SNTL',
-			units: 'metric'
+			units: 'metric',
+			width: 380
 		});
+		// Three stations with a height; the unsurveyed one is only in the table.
+		expect(container.querySelectorAll('circle.dot').length).toBe(3);
+		expect(container.querySelectorAll('circle.dot.own').length).toBe(1);
+		expect(container.querySelectorAll('line.band').length).toBe(3);
+		expect(container.textContent).toMatch(/Morse Lake: 80 cm at 1,650 m/);
+		expectMarksInside(container);
+		// Every station in the table, highest first.
 		const names = [...container.querySelectorAll('tbody th')].map((th) =>
 			th.textContent?.replace(/\s+/g, ' ').trim()
 		);
-		// Crystal: summit 2,095 m, mid 1,800 m, base 1,341 m.
-		expect(names).toEqual([
-			'Summit',
-			'High Camp',
-			'Mid-mountain',
-			'Morse Lake this location’s',
-			'Base',
-			'Low Flat',
-			'Unsurveyed'
-		]);
-		expect(getByText('120 cm')).toBeTruthy();
-		expect(getAllByText('+8 cm').length).toBe(2); // the two deep stations
-		expect(getAllByText('-2 cm').length).toBe(2);
-		expect(getByText('Morse Lake').getAttribute('href')).toBe('https://example.org/642:WA:SNTL');
+		expect(names).toEqual(['High Camp', 'Morse Lake this location’s', 'Low Flat', 'Unsurveyed']);
+		expect(getByText('All 4 stations')).toBeTruthy();
+		expect(container.querySelector('details.list')?.hasAttribute('open')).toBe(false);
+		expect(getByText('Morse Lake', { selector: 'a' }).getAttribute('href')).toBe(
+			'https://example.org/642:WA:SNTL'
+		);
 	});
 
 	it('says when none is near, and when the list has not arrived', () => {
@@ -366,6 +448,38 @@ describe('field reports', () => {
 });
 
 describe('observed tab', () => {
+	it('leads with the simple answers, then the detail', () => {
+		const { container, getByRole } = render(ObservedTab, {
+			snap: us,
+			scores: scores(true),
+			nearby: nearby(),
+			units: 'metric',
+			width: 380
+		});
+		const headings = [...container.querySelectorAll('h2')].map((h) => h.textContent?.trim());
+		expect(headings.slice(1)).toEqual([
+			'Did the forecast get it right?',
+			'In detail',
+			'The last 30 days',
+			'Forecast check, day by day',
+			'Snow by elevation'
+		]);
+		expect(getByRole('heading', { name: /^.+\.$/ })).toBeTruthy(); // the hero's sentence
+	});
+
+	it('opens on the stations nearby when the location has no station', () => {
+		const { container, getByRole, queryByRole } = render(ObservedTab, {
+			snap: { ...us, snotel: null },
+			scores: null,
+			nearby: nearby(),
+			units: 'metric',
+			width: 380
+		});
+		expect(container.textContent).toMatch(/No snow station is set/);
+		expect(getByRole('heading', { name: 'Snow by elevation' })).toBeTruthy();
+		expect(queryByRole('heading', { name: 'Did the forecast get it right?' })).toBeNull();
+	});
+
 	it('shows field reports in Canada even when there are none, elsewhere only when one is near', () => {
 		const canada = render(ObservedTab, {
 			snap: bc,
@@ -385,8 +499,6 @@ describe('observed tab', () => {
 			width: 380
 		});
 		expect(states.queryByRole('heading', { name: 'Field reports nearby' })).toBeNull();
-		for (const title of ['Snow station', 'Measured against the forecast', 'Snow stations nearby'])
-			expect(states.getByRole('heading', { name: title })).toBeTruthy();
 		cleanup();
 		const near = render(ObservedTab, {
 			snap: us,

@@ -44,10 +44,10 @@ for (const path of PAGES) {
 const SECTIONS: [string, string, string][] = [
 	['whistler', 'Confidence', 'How sure is this forecast?'],
 	['whistler', 'Backcountry', 'Avalanche weather, day by day'],
-	['whistler', 'Observed', 'Snow stations nearby'],
+	['whistler', 'Observed', 'Snow by elevation'],
 	['rainy', 'Backcountry', 'Touring weather'],
 	['rainy', 'Confidence', 'The models, day by day'],
-	['crystal', 'Observed', 'Measured against the forecast']
+	['crystal', 'Observed', 'Forecast check, day by day']
 ];
 for (const [loc, tab, heading] of SECTIONS) {
 	test(`${loc} → ${tab} draws without errors or sideways scrolling`, async ({ page }) => {

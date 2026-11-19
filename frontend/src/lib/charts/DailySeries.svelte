@@ -1,8 +1,10 @@
-<!-- One observed daily series (snow depth or snow water) as an area over the last 30 days. -->
+<!-- One observed daily series (snow depth or snow water) as an area over the last 30 days.
+     Days sit on the same bands as DailyBars and DailyRange, so stacked charts line up and
+     can share one crosshair (`index`). -->
 <script lang="ts">
-	import { scaleLinear } from 'd3-scale';
+	import { scaleBand, scaleLinear } from 'd3-scale';
 	import Frame from './Frame.svelte';
-	import { bandPath, linePath, maxOf } from './geom';
+	import { bandIndex, bandPath, linePath, maxOf } from './geom';
 	import { monthDay } from '../time';
 
 	interface Props {
@@ -14,6 +16,11 @@
 		digits?: number;
 		color?: string;
 		width?: number;
+		height?: number;
+		/** The day under the shared crosshair, or null. */
+		index?: number | null;
+		onindex?: (i: number) => void;
+		onleave?: () => void;
 	}
 
 	let {
@@ -23,41 +30,51 @@
 		unit,
 		digits = 0,
 		color = 'var(--snow)',
-		width: fixedWidth
+		width: fixedWidth,
+		height = 140,
+		index = null,
+		onindex,
+		onleave
 	}: Props = $props();
 	let measured = $state(0);
 
 	const W = $derived(fixedWidth ?? measured);
 	const M = { top: 8, right: 12, bottom: 22, left: 36 };
-	const H = 140;
-	const ih = H - M.top - M.bottom;
+	const ih = $derived(height - M.top - M.bottom);
 	const iw = $derived(Math.max(0, W - M.left - M.right));
-	const x = $derived(
-		scaleLinear()
-			.domain([0, Math.max(1, dates.length - 1)])
-			.range([0, iw])
-	);
+	const x = $derived(scaleBand<string>().domain(dates).range([0, iw]).paddingInner(0.25));
 	const y = $derived(
 		scaleLinear()
 			.domain([0, maxOf(values, 1)])
 			.range([ih, 0])
 			.nice(3)
 	);
-	const xs = $derived(dates.map((_, i) => x(i)));
+	const xs = $derived(dates.map((d) => (x(d) ?? 0) + x.bandwidth() / 2));
 	const ys = $derived(values.map((v) => (v === null ? null : y(v))));
 	const last = $derived([...values].reverse().find((v) => v !== null) ?? null);
+	const fmt = (v: number | null) => (v === null ? '–' : `${v.toFixed(digits)} ${unit}`);
+	const readout = $derived(
+		index !== null && dates[index]
+			? `${monthDay(dates[index])}: ${fmt(values[index])}`
+			: last === null
+				? 'no data'
+				: `latest ${fmt(last)}`
+	);
 </script>
 
 <div bind:clientWidth={measured}>
 	<Frame
 		{title}
-		readout={last === null ? 'no data' : `latest ${last.toFixed(digits)} ${unit}`}
+		{readout}
 		width={W}
-		height={H}
+		{height}
 		margin={M}
 		{y}
 		yTicks={y.ticks(3)}
 		label={`${title}, daily, ${unit}`}
+		crossX={index === null ? null : xs[index]}
+		onpointer={onindex ? (px) => onindex(bandIndex(x, dates.length, px)) : undefined}
+		{onleave}
 	>
 		{#snippet children({ ih: plotH })}
 			{#if values.some((v) => v !== null)}

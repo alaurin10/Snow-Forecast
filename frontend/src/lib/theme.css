@@ -396,6 +396,44 @@ button {
 	background: var(--glass);
 }
 
+/* A card's fine print, folded away: "How this is measured", "All 9 stations". */
+details.how {
+	margin-top: 12px;
+}
+details.how > summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	list-style: none;
+	cursor: pointer;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--text-2);
+}
+details.how > summary::-webkit-details-marker {
+	display: none;
+}
+details.how > summary::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform var(--ease);
+}
+details.how[open] > summary::before {
+	transform: rotate(45deg);
+}
+details.how > summary:hover {
+	color: var(--text);
+}
+details.how > p {
+	margin: 8px 0 0;
+	font-size: 0.8rem;
+	color: var(--text-3);
+}
+
 .table-wrap {
 	overflow-x: auto;
 	-webkit-overflow-scrolling: touch;
