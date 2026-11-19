@@ -11,7 +11,8 @@ import {
 	sceneLabel,
 	stitchedSpan
 } from './sat';
-import { mapStyle } from './style';
+import { featureFilter } from '@maplibre/maplibre-gl-style-spec';
+import { mapStyle, SAT_LABEL_LAYERS } from './style';
 
 describe('picking and labelling scenes', () => {
 	it('takes the nearest location within range', () => {
@@ -159,7 +160,22 @@ describe('what the base draws', () => {
 		const vis = (id: string) =>
 			(style.layers.find((l) => l.id === id)?.layout as { visibility?: string } | undefined)
 				?.visibility;
-		expect(vis('satlabels')).toBe('visible');
+		for (const id of SAT_LABEL_LAYERS) expect(vis(id)).toBe('visible');
+		// Names and borders come from vector tiles, so county lines can be left out.
+		expect(style.sources.labels).toMatchObject({ type: 'vector', maxzoom: 14 });
+		expect(style.sources.satlabels).toBeUndefined();
+		const border = (props: Record<string, unknown>) =>
+			['satlabels', 'satlabels-borders', 'satlabels-countries'].filter((id) => {
+				const layer = style.layers.find((l) => l.id === id) as { filter: unknown };
+				return featureFilter(layer.filter as never, `layers.${id}.filter`).filter({ zoom: 10 }, {
+					type: 2,
+					properties: props
+				} as never);
+			});
+		expect(border({ admin_level: 6, maritime: 0 })).toEqual([]); // county
+		expect(border({ admin_level: 4, maritime: 1 })).toEqual([]); // at sea
+		expect(border({ admin_level: 4, maritime: 0 })).toEqual(['satlabels', 'satlabels-borders']);
+		expect(border({ admin_level: 2, maritime: 0 })).toEqual(['satlabels', 'satlabels-countries']);
 		expect(vis('contour-lines')).toBe('visible');
 		expect(vis('sat')).toBe('none');
 		expect(vis('esri')).toBe('none');

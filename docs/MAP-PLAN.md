@@ -775,6 +775,29 @@ What shipped, and where it differs from the plan above:
     disk (23 MB pictures, 12 MB tiles), at most 303 MB; a refresh with nothing new 2 s.
     A 1,200 px quarter at 30 m took 3.0 s, like one at 10 m (3.6 s). The wide view had
     eight passes (3 Oct to 17 Nov) and covered 92% of the area.
+- Follow-up (18 Nov 2026): **a tidier stitched view.** On the phone the stitched view
+  looked like a patchwork: boxes of other passes, hard-edged, often November snow
+  beside October ground. At Snoqualmie 19% of the pixels were gap fills (cloud holes in
+  a part filled from another pass), and the boxes were the 80 m cloud margin grown with
+  a square window plus the parts following the 250 m grid's straight edges. Now
+  (`satrender`, RENDER 6):
+  - The margin and the speck filter grow roughly round (octagons), so holes are blobs.
+  - Parts' borders are blurred over ~120 m before being drawn (`PART_SOFTEN_M`), so
+    they curve rather than step.
+  - Each part's gaps are filled from as few passes as can be: the pass nearest in time
+    that saw at least half of what the best one did fills all of the part's gaps, then
+    the next for what's left (before, each pixel took the nearest pass that saw it, a
+    scatter of passes).
+  - Joins fade over ~50 m (`FEATHER_M`, inside the cloud margin), and a pass reaches
+    past its own pixels only where it saw the ground clearly, so a fade never brings in
+    cloud.
+  - The cloud masks are kept as fetched (`mask.png`: no data, cloud, clear) and cleaned
+    up on use, so changing the cleanup fetches nothing; the old `clear*.png` go when a
+    mask is fetched. Redrawing every view the first time costs ~1 min a location and
+    fetches the masks again (~100 pictures a location).
+  - At most ~420 MB while drawing (the blend's sums), against ~310 MB before.
+  - The 10 m views don't depend on the wide view: a test checks that a refresh with and
+    without it gives the same 10 m views.
 - Not done: the ≤ 300 MB phone memory measurement (as in milestones 3–4).
 - Known limits: Sentinel-2 is 10 m, so up close it is far softer than Esri's sub-metre
   "Satellite"; 10 m imagery covers only the 24 km round each location, 30 m the 72 km
