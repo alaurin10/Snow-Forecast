@@ -1,11 +1,12 @@
 # Webcams for the home installation's locations, gathered from each resort's webcam
-# page, the National Park Service, WSDOT and ODOT (18–19 Nov 2026). Load them with
+# page, the National Park Service, WSDOT and ODOT (18–19 Nov 2026).
 #
-#   docker compose run --rm worker snowwatch locations webcams
-#
-# which replaces the webcams of each location listed here (and nothing else about it)
-# and refreshes those locations so the cameras show within a few minutes. A location
-# that isn't listed keeps its webcams. After that, edit them on the Manage page as usual.
+# The worker applies this file by itself: merge a change and, once the server has
+# updated, each location whose entry changed gets these webcams (replacing its own) and
+# shows them a few minutes later. Entries that didn't change leave the location alone,
+# so webcams edited on the Manage page stay until that location's entry here changes.
+# A location listed before it exists gets its webcams once it is added. To force the
+# whole file now: docker compose run --rm worker snowwatch locations webcams
 #
 # Each webcam: name, url (the page "Open site" opens), and optionally image_url (a
 # picture the camera updates) and video_url (a live player: YouTube, CamStreamer,
