@@ -1,15 +1,17 @@
 <!--
-  The snow stations around the location, highest first, with the location's own
-  elevations slotted in between: a rough profile of how deep the snow is at each height.
-  Read from the same hourly file as the map's stations layer.
+  Snow by elevation: the snow stations around the location drawn as a profile (how deep
+  the snow is at each height, with this location's elevations across it), and every
+  station in a table underneath, highest first. Read from the same hourly file as the
+  map's stations layer.
 -->
 <script lang="ts">
 	import { hscroll } from '../hscroll';
 	import { safeHref } from '../links';
 	import type { LoadState } from '../load';
-	import type { BandOut, NearbyOut, NearbyStation } from '../types.gen';
+	import type { BandOut, NearbyOut } from '../types.gen';
 	import { ago } from '../time';
 	import { elevation, snow, type UnitSystem } from '../units';
+	import ElevationProfile from './ElevationProfile.svelte';
 
 	interface Props {
 		data: NearbyOut | null;
@@ -18,28 +20,20 @@
 		/** The location's own station (its id), marked in the list. */
 		own?: string | null;
 		units: UnitSystem;
+		/** Fixed chart width (tests); otherwise the chart measures its container. */
+		width?: number;
 	}
 
-	let { data, load = 'ready', bands, own = null, units }: Props = $props();
+	let { data, load = 'ready', bands, own = null, units, width }: Props = $props();
 
-	type Row =
-		| { kind: 'station'; elev: number; s: NearbyStation }
-		| { kind: 'band'; elev: number; label: string };
 	const stations = $derived(data?.stations ?? []);
-	// Stations with a known height and the location's bands, highest first; a station
-	// with no elevation on record goes last.
-	const rows = $derived.by<Row[]>(() => {
-		const out: Row[] = [
-			...stations
-				.filter((s) => s.station.elev_m !== null)
-				.map((s) => ({ kind: 'station' as const, elev: s.station.elev_m as number, s })),
-			...bands.map((b) => ({ kind: 'band' as const, elev: b.elev_m, label: b.label }))
-		];
-		out.sort((a, b) => b.elev - a.elev);
-		for (const s of stations.filter((x) => x.station.elev_m === null))
-			out.push({ kind: 'station', elev: NaN, s });
-		return out;
-	});
+	// Highest first; a station with no elevation on record goes last.
+	const rows = $derived(
+		[...stations].sort((a, b) => (b.station.elev_m ?? -Infinity) - (a.station.elev_m ?? -Infinity))
+	);
+	const charted = $derived(
+		stations.filter((s) => s.station.elev_m !== null && s.station.depth_cm !== null).length
+	);
 	const deepest = $derived(Math.max(1, ...stations.map((s) => s.station.depth_cm ?? 0)));
 	const away = (km: number) =>
 		units === 'imperial' ? `${(km * 0.621371).toFixed(0)} mi` : `${km.toFixed(0)} km`;
@@ -48,8 +42,8 @@
 		cm === null || cm === undefined ? '–' : `${cm > 0 ? '+' : ''}${snow(cm, units)}`;
 </script>
 
-<section class="card">
-	<h2>Snow stations nearby</h2>
+<section class="card" aria-labelledby="near-h">
+	<h2 id="near-h">Snow by elevation</h2>
 	{#if load === 'loading'}
 		<p class="muted small" aria-live="polite">Loading nearby stations…</p>
 	{:else if load === 'error'}
@@ -59,33 +53,28 @@
 	{:else if !stations.length}
 		<p class="muted small">No snow station is reporting within {radius}.</p>
 	{:else}
-		<p class="muted small">
-			Within {radius}, highest first, with this location’s elevations between them. Checked {ago(
-				data.stations_at
-			)}.
+		<p class="muted small sub">
+			Snow stations within {radius}, checked {ago(data.stations_at)}.
 		</p>
-		<div class="table-wrap" use:hscroll>
-			<table class="data near">
-				<thead>
-					<tr>
-						<th>Station</th>
-						<th>Elevation</th>
-						<th class="away">Away</th>
-						<th class="depth">Snow depth</th>
-						<th>24 h</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each rows as r, i (i)}
-						{#if r.kind === 'band'}
-							<tr class="band">
-								<th scope="row">{r.label}</th>
-								<td class="num">{elevation(r.elev, units)}</td>
-								<td class="away"></td>
-								<td colspan="2"></td>
-							</tr>
-						{:else}
-							{@const st = r.s.station}
+		{#if charted}
+			<ElevationProfile {stations} {bands} {own} {units} {width} />
+		{/if}
+		<details class="how list" open={!charted}>
+			<summary>All {stations.length} station{stations.length === 1 ? '' : 's'}</summary>
+			<div class="table-wrap" use:hscroll>
+				<table class="data near">
+					<thead>
+						<tr>
+							<th>Station</th>
+							<th>Elevation</th>
+							<th class="away">Away</th>
+							<th class="depth">Snow depth</th>
+							<th>24 h</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each rows as r (r.station.id)}
+							{@const st = r.station}
 							<tr>
 								<th scope="row">
 									{#if safeHref(st.url)}
@@ -97,7 +86,7 @@
 									{#if st.id === own}<span class="own">this location’s</span>{/if}
 								</th>
 								<td class="num">{elevation(st.elev_m, units)}</td>
-								<td class="num away">{away(r.s.distance_km)}</td>
+								<td class="num away">{away(r.distance_km)}</td>
 								<td class="depth">
 									<span class="bar" aria-hidden="true"
 										><i style:width="{(100 * (st.depth_cm ?? 0)) / deepest}%"></i></span
@@ -106,11 +95,11 @@
 								</td>
 								<td class="num">{signed(st.change24_cm)}</td>
 							</tr>
-						{/if}
-					{/each}
-				</tbody>
-			</table>
-		</div>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</details>
 		<p class="faint small">
 			SNOTEL and BC snow pillows, as they report. A 24-hour change includes settling, so it can be
 			negative.
@@ -141,18 +130,11 @@
 		font-weight: 600;
 		white-space: nowrap;
 	}
-	/* The location's own elevations, as quiet markers between the stations. */
-	.band th,
-	.band td {
-		padding-top: 3px;
-		padding-bottom: 3px;
-		font-size: 0.76rem;
-		color: var(--text-3);
+	.sub {
+		margin: 0 0 10px;
 	}
-	.near .band th {
-		font-weight: 600;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
+	.list {
+		margin-top: 10px;
 	}
 	.depth {
 		min-width: 150px;

@@ -7,6 +7,19 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The Observed tab, redesigned to read at a glance.** It now opens with the simple
+  answers. A sentence sums up the snow station ("18 cm of new snow in the last 3 days"),
+  with how its depth moved this week and how many days thawed. Below that: the depth on
+  the ground with a 30-day sparkline, new snow over 24 h, 72 h and 7 days, and the last
+  seven days as cells tinted like the calendar, each with its high and low. Beside it,
+  "Did the forecast get it right?" puts the forecast's total next to the measured one,
+  with one sentence on how it leans. Under "In detail": the last 30 days as depth (or snow
+  water), new snow and a new low/high temperature chart, on one time axis with a shared
+  crosshair; the day-by-day forecast check, with a New snow / Precipitation toggle and
+  three numbers (typical miss, lean, days scored) in place of long sentences; and snow by
+  elevation, a chart of the nearby stations' depth against their height with this
+  location's elevations drawn across it, plus the full table folded underneath. The
+  explanations fold away into "How this is measured".
 - **Links to the Sierra, Central Oregon and Utah avalanche centers' observations** on the
   Webcams tab (Palisades Tahoe, Mt. Bachelor, Snowbird), like NWAC's. Their photos can't
   be shown in the app: the first two use avalanche.org's observation API, which only

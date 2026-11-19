@@ -68,3 +68,11 @@ export const maxOf = (vals: (number | null | undefined)[], floor = 0): number =>
 	Math.max(floor, ...finite(vals));
 
 export const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+/** The band under a pointer `px` inside the plot (nearest band, gaps included). */
+export function bandIndex(x: { step(): number; bandwidth(): number }, n: number, px: number) {
+	const step = x.step();
+	if (!n || !step) return 0;
+	const i = Math.floor((px + (step - x.bandwidth()) / 2) / step);
+	return clamp(i, 0, n - 1);
+}
