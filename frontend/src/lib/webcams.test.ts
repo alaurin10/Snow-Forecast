@@ -106,11 +106,17 @@ describe('byDay', () => {
 });
 
 describe('centerObservations', () => {
-	it('links NWAC’s observations, and no other center', () => {
+	it('links the observations of the centers it knows, and no others', () => {
 		expect(centerObservations({ provider: 'nac', center_id: 'NWAC' })?.url).toBe(
 			'https://nwac.us/observations#/view/observations'
 		);
-		expect(centerObservations({ provider: 'nac', center_id: 'SAC' })).toBeNull();
+		expect(centerObservations({ provider: 'nac', center_id: 'SAC' })?.name).toBe(
+			'Sierra Avalanche Center'
+		);
+		expect(centerObservations({ provider: 'nac', center_id: 'uac' })?.url).toBe(
+			'https://utahavalanchecenter.org/observations'
+		);
+		expect(centerObservations({ provider: 'nac', center_id: 'XYZ' })).toBeNull();
 		expect(centerObservations({ provider: 'avcan', center_id: null })).toBeNull();
 		expect(centerObservations(null)).toBeNull();
 	});
