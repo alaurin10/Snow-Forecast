@@ -50,6 +50,31 @@ from snowwatch.verify import VerificationOut, headline_source, verification
 
 CACHE = "public, max-age=300, stale-while-revalidate=3600"
 
+# The trend shows one run per this much time, so runs that mostly repeat the same
+# model data (the forecast runs every 3 hours) don't flatten the chart. The slack
+# lets a run that started a few minutes late still count as 6 hours on.
+TREND_SPACING = timedelta(hours=6)
+TREND_SLACK = timedelta(hours=1)
+
+
+def _spaced_runs(conn: sqlite3.Connection, location_id: str, count: int) -> list[int]:
+    """Up to `count` run ids for one location, newest first: the latest run, then each
+    earlier run at least TREND_SPACING (less the slack) before the last one taken."""
+    picked: list[int] = []
+    last: datetime | None = None
+    for r in conn.execute(
+        "SELECT run_id, MIN(issued_at) AS issued_at FROM forecast_daily "
+        "WHERE location_id = ? GROUP BY run_id ORDER BY run_id DESC",
+        (location_id,),
+    ):
+        at = datetime.fromisoformat(r["issued_at"])
+        if last is None or last - at >= TREND_SPACING - TREND_SLACK:
+            picked.append(r["run_id"])
+            last = at
+            if len(picked) >= count:
+                break
+    return picked
+
 
 def db(request: Request) -> Iterator[sqlite3.Connection]:
     settings: Settings = request.app.state.settings
@@ -412,13 +437,13 @@ def make_router() -> APIRouter:
         # Every run stores the consensus both ways, so the trend follows the headline
         # depth method with no step on the day it changes.
         source = headline_source(request.app.state.forecast_config)
+        picked = _spaced_runs(conn, location_id, runs)
+        marks = ",".join("?" * len(picked))
         rows = conn.execute(
             "SELECT run_id, issued_at, target_date, snow_cm FROM forecast_daily "
-            "WHERE location_id = ? AND source = ? AND run_id IN ("
-            "  SELECT DISTINCT run_id FROM forecast_daily WHERE location_id = ? "
-            "  ORDER BY run_id DESC LIMIT ?"
-            ") ORDER BY run_id, target_date",
-            (location_id, source, location_id, runs),
+            f"WHERE location_id = ? AND source = ? AND run_id IN ({marks}) "
+            "ORDER BY run_id, target_date",
+            (location_id, source, *picked),
         ).fetchall()
         by_run: dict[int, TrendRun] = {}
         for r in rows:
