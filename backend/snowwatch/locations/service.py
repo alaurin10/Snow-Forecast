@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from snowwatch.models import AvyRef, Band, Location, Webcam
 from snowwatch.store.db import utcnow_iso
 from snowwatch.urls import clean_links
 
 log = logging.getLogger("snowwatch.locations")
+
+_WEBCAM_LIST = TypeAdapter(list[Webcam])
 
 
 class LocationLimitError(ValueError):
@@ -182,33 +186,113 @@ def import_yaml(conn: sqlite3.Connection, path: Path, *, max_locations: int) -> 
     return len(locs)
 
 
+def _webcams_json(cams: list[Webcam]) -> str:
+    return json.dumps([w.model_dump(exclude_none=True) for w in cams])
+
+
+def _webcams_digest(cams: list[Webcam]) -> str:
+    """Stands for a list of webcams, so a file entry can be compared with what was applied."""
+    canon = json.dumps([w.model_dump(exclude_none=True) for w in cams], sort_keys=True)
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+
+def read_webcams_yaml(path: Path) -> tuple[dict[str, list[Webcam]], dict[str, str]]:
+    """The webcams a file lists per location id, and the entries that fail the checks
+    ({id: why}). Raises ValueError if the file isn't a mapping of ids to lists."""
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"{path}: not valid YAML ({e})") from e
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected location ids, each with a list of webcams")
+    good: dict[str, list[Webcam]] = {}
+    bad: dict[str, str] = {}
+    for loc_id, cams in raw.items():
+        try:
+            if not isinstance(cams, list | None):
+                raise ValueError("expected a list of webcams")
+            checked = _WEBCAM_LIST.validate_python(cams or [])
+            if len(checked) > 12:  # as Location checks its own
+                raise ValueError("at most 12 webcams")
+            good[str(loc_id)] = checked
+        except (ValidationError, ValueError) as e:
+            bad[str(loc_id)] = str(e).splitlines()[0] if str(e) else type(e).__name__
+    return good, bad
+
+
+def _record_applied(conn: sqlite3.Connection, loc_id: str, cams: list[Webcam]) -> None:
+    conn.execute(
+        "INSERT INTO webcams_applied (location_id, digest, applied_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (location_id) DO UPDATE SET digest = excluded.digest, "
+        "applied_at = excluded.applied_at",
+        (loc_id, _webcams_digest(cams), utcnow_iso()),
+    )
+
+
+def _save_webcams(conn: sqlite3.Connection, loc_id: str, cams: list[Webcam], by: str) -> None:
+    conn.execute(
+        "UPDATE locations SET webcams_json = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+        (_webcams_json(cams), utcnow_iso(), by, loc_id),
+    )
+
+
 def set_webcams_yaml(conn: sqlite3.Connection, path: Path) -> dict[str, int]:
     """Replace the webcams of each location the file lists, leaving everything else as it
     is. The file maps a location id to its webcams (a list, as on the Manage page). Every
-    entry is checked before anything is saved; an unknown id is an error."""
-    raw = yaml.safe_load(path.read_text()) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path}: expected location ids, each with a list of webcams")
-    plan: list[Location] = []
-    for loc_id, cams in raw.items():
-        loc = get_location(conn, str(loc_id))
-        if loc is None:
+    entry is checked before anything is saved; an unknown id or a bad entry is an error."""
+    good, bad = read_webcams_yaml(path)
+    if bad:
+        loc_id, why = next(iter(bad.items()))
+        raise ValueError(f"{path}: {loc_id}: {why}")
+    for loc_id in good:
+        if get_location(conn, loc_id) is None:
             raise ValueError(f"{path}: unknown location {loc_id!r}")
-        data = loc.model_dump()
-        data["webcams"] = cams or []
-        plan.append(Location.model_validate(data))
-    for loc in plan:
-        conn.execute(
-            "UPDATE locations SET webcams_json = ?, updated_at = ?, updated_by = ? WHERE id = ?",
-            (
-                json.dumps([w.model_dump(exclude_none=True) for w in loc.webcams]),
-                utcnow_iso(),
-                "webcams",
-                loc.id,
-            ),
-        )
+    for loc_id, cams in good.items():
+        _save_webcams(conn, loc_id, cams, "webcams")
+        _record_applied(conn, loc_id, cams)
     conn.commit()
-    return {loc.id: len(loc.webcams) for loc in plan}
+    return {loc_id: len(cams) for loc_id, cams in good.items()}
+
+
+@dataclass
+class WebcamSync:
+    applied: dict[str, int] = field(default_factory=dict)  # id → webcams now set
+    kept: list[str] = field(default_factory=list)  # had other webcams; left as they were
+    waiting: list[str] = field(default_factory=list)  # no such location (yet)
+    invalid: dict[str, str] = field(default_factory=dict)  # id → why the entry was refused
+
+
+def sync_webcams_yaml(conn: sqlite3.Connection, path: Path) -> WebcamSync:
+    """Apply the entries of the webcams file that changed since they were last applied.
+
+    An entry applies when the file's webcams for a location differ from what was last
+    applied there, replacing that location's webcams (edits on the Manage page included).
+    The first time an entry is seen for a location that already has other webcams, those
+    are kept: nothing is lost when this starts on an existing installation. A location
+    that doesn't exist yet waits, and gets its webcams once it is added. A missing file
+    is nothing to do; a bad entry is skipped and the others still apply."""
+    out = WebcamSync()
+    if not path.exists():
+        return out
+    good, out.invalid = read_webcams_yaml(path)
+    seen = dict(conn.execute("SELECT location_id, digest FROM webcams_applied").fetchall())
+    for loc_id, cams in good.items():
+        digest = _webcams_digest(cams)
+        if seen.get(loc_id) == digest:
+            continue
+        loc = get_location(conn, loc_id)
+        if loc is None:
+            out.waiting.append(loc_id)
+            continue
+        current = _webcams_digest(loc.webcams)
+        if current != digest and (loc_id in seen or not loc.webcams):
+            _save_webcams(conn, loc_id, cams, "webcams-file")
+            out.applied[loc_id] = len(cams)
+        elif current != digest:
+            out.kept.append(loc_id)
+        _record_applied(conn, loc_id, cams)
+    conn.commit()
+    return out
 
 
 def export_yaml(conn: sqlite3.Connection) -> str:

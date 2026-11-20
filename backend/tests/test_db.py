@@ -24,6 +24,7 @@ EXPECTED = {
     "snotel_stations",
     "avy_zones",
     "push_log",
+    "webcams_applied",
     "schema_migrations",
 }
 
@@ -38,6 +39,7 @@ def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
         "005_cleanup",
         "006_push_log",
         "007_snotel_start_of_day",
+        "008_webcams_applied",
     ]
     assert table_names(conn) >= EXPECTED
     assert not table_names(conn) & {"alerts", "obs_hourly"}

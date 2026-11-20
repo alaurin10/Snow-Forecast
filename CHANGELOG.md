@@ -7,6 +7,14 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **`config/webcams.yaml` applies itself.** The worker reads it at start (so after every
+  update) and every 5 minutes, and gives each location whose entry is new or changed the
+  file's webcams, then refreshes it. Merging a webcam change is all it takes; no command
+  to run. Entries that didn't change leave their location alone, so webcams edited on
+  the Manage page stay until that location's entry changes; the first time an entry is
+  seen for a location that already has other webcams, those are kept. A listed location
+  that doesn't exist yet gets its webcams once it is added. `snowwatch locations webcams`
+  still applies the whole file at once.
 - **A Base pill at the foot of the map**, beside Terrain and Weather: Topo, Satellite or
   Recent, with Recent's controls (colours, the view stepper) in its panel, as Radar has
   its timeline. On phones a tab with something chosen shows just that ("Satellite",

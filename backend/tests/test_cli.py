@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from snowwatch import cli
 from snowwatch.scheduler import Worker, build_scheduler
@@ -81,7 +80,7 @@ def test_webcams_from_a_file_change_nothing_else(env: Settings, tmp_path: Path) 
     with pytest.raises(ValueError, match="nowhere"):
         cli.main(["locations", "webcams", str(f)])
     f.write_text("crystal: []\nwhistler:\n  - {name: X, url: 'javascript:alert(1)'}\n")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match="whistler"):
         cli.main(["locations", "webcams", str(f)])
     after = service.get_location(conn, "crystal")
     assert after is not None and len(after.webcams) == 2

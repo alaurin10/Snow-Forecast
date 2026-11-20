@@ -162,16 +162,28 @@ location with webcams gets a Webcams tab. Each webcam has:
 Changes to webcams (or links) start a forecast refresh for that location, so they show a
 minute or two after saving.
 
-Many at once: list them by location id in a YAML file (see
-[`config/webcams.yaml`](../config/webcams.yaml), the home installation's cameras) and run
+Many at once: list them by location id in
+[`config/webcams.yaml`](../config/webcams.yaml) (the home installation's cameras). The
+worker applies the file itself, at start (so after every update) and every 5 minutes:
+
+- A location whose entry is new or changed gets the file's webcams, replacing its own,
+  and is refreshed so they show a few minutes later. Nothing else about it changes.
+- An entry that hasn't changed since it was applied leaves the location alone, so edits
+  on the Manage page stay until that location's entry in the file changes.
+- The first time the worker sees an entry for a location that already has other webcams
+  (an installation that set them before this existed), it keeps them and says so in the
+  log; the entry applies once it changes.
+- An id that isn't a location yet waits: add the location on the Manage page and its
+  webcams follow within 5 minutes. A bad entry is skipped (logged); the rest still apply.
+
+With automatic updates on, merging a change to the file is all it takes. To apply the
+whole file now, own webcams or not (or another file):
 
 ```bash
-docker compose run --rm worker snowwatch locations webcams
+docker compose run --rm worker snowwatch locations webcams [path]
 ```
 
-It reads `config/webcams.yaml` (or a path you give), replaces the webcams of each location
-listed (nothing else about them, and no other location), and refreshes those locations.
-Every entry is checked first; one bad link or unknown id and nothing is saved.
+That one checks every entry first; one bad link or unknown id and nothing is saved.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1

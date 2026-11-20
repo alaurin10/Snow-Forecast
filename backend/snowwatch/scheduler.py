@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from snowwatch import avalanche, avalanche_zones, jobs, push
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, prune_raw
-from snowwatch.locations.service import list_locations
+from snowwatch.locations.service import list_locations, sync_webcams_yaml
 from snowwatch.models import Location
 from snowwatch.pipeline import run_all
 from snowwatch.settings import Settings
@@ -31,6 +31,10 @@ RUN_TIME_BUDGET_S = 45 * 60
 
 def http_ping(url: str) -> None:
     httpx.get(url, timeout=10)
+
+
+# How often the worker looks at config/webcams.yaml (it also does at start).
+WEBCAMS_SYNC_MINUTES = 5
 
 
 class Worker:
@@ -49,6 +53,7 @@ class Worker:
         }
         self.sat_lock = threading.Lock()
         self._ping = ping
+        self._webcams_notes: tuple[tuple[str, ...], tuple[tuple[str, str], ...]] = ((), ())
         conn = connect(settings.database)
         applied = migrate(conn)
         if applied:
@@ -174,6 +179,39 @@ class Worker:
                     push.notify(conn, self.settings, found)
                 except Exception:
                     log.exception("push alerts failed")
+
+    def sync_webcams(self) -> None:
+        """Apply config/webcams.yaml where it changed (see sync_webcams_yaml) and refresh
+        those locations so their webcams show. Runs at start (after every deploy) and
+        every few minutes, which also catches a listed location once it is added."""
+        path = self.settings.config_dir / "webcams.yaml"
+        conn = connect(self.settings.database)
+        try:
+            res = sync_webcams_yaml(conn, path)
+        except (OSError, ValueError) as e:
+            log.error("webcams file not applied: %s", e)
+            return
+        active = {loc.id for loc in list_locations(conn)}
+        for loc_id, n in res.applied.items():
+            log.info("webcams for %s set from %s (%d)", loc_id, path.name, n)
+            if loc_id in active:
+                jobs.enqueue(conn, "pull", loc_id, "webcams")
+        for loc_id in res.kept:
+            log.info(
+                "%s already has its own webcams; kept them (the file's entry applies "
+                "once it changes, or now with `snowwatch locations webcams`)",
+                loc_id,
+            )
+        # Waiting and refused entries are said once, not every few minutes.
+        notes = (tuple(sorted(res.waiting)), tuple(sorted(res.invalid.items())))
+        if notes != self._webcams_notes:
+            self._webcams_notes = notes
+            if res.waiting:
+                log.info(
+                    "webcams wait for locations not added yet: %s", ", ".join(sorted(res.waiting))
+                )
+            for loc_id, why in sorted(res.invalid.items()):
+                log.warning("webcams for %s not applied: %s", loc_id, why)
 
     def process_jobs(self) -> None:
         if not self.lock.acquire(blocking=False):
@@ -448,6 +486,13 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         worker.heartbeat,
         IntervalTrigger(seconds=30),
         id="heartbeat",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
+    sched.add_job(
+        worker.sync_webcams,
+        IntervalTrigger(minutes=WEBCAMS_SYNC_MINUTES),
+        id="webcams",
         next_run_time=datetime.now(UTC),
         **opts,
     )
