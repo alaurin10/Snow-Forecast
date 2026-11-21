@@ -350,6 +350,17 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     assert probe_at(out, tt[20]["file"], top, 5)[0] == pytest.approx(-8.2, abs=0.05)
     assert tt[-1]["src"]["north"] == "gdps"
     assert probe_at(out, tt[-1]["file"], top, 5)[0] == pytest.approx(-5.5, abs=0.05)
+    # Each frame also as numbers for the map: the temperature at the ground (half the
+    # grid's size), and at sea level and 4,500 m (a quarter of it).
+    from snowwatch.maps import totaldata
+
+    step = totaldata.decode((out / tt[0]["data"]).read_bytes())
+    assert step is not None and step.band_m == 4500 and step.bands.shape[0] == 2
+    assert step.area.shape == ((REGION.height + 1) // 2, (REGION.width + 1) // 2)
+    assert totaldata.code_temp(step.area[0, 2]) == pytest.approx(-8.25, abs=0.25)
+    assert totaldata.code_temp(step.area[-1, 2]) == pytest.approx(2, abs=0.25)
+    sea, top_m = totaldata.code_temp(step.bands[:, 0, 1])
+    assert (sea, top_m) == (pytest.approx(-1.75, abs=0.25), pytest.approx(-31, abs=0.25))
     assert any("SNODAS" in a for a in ix["attribution"])
     assert any("GOES-West" in a for a in ix["attribution"])
 
@@ -584,3 +595,13 @@ def test_snow_reaching_the_ground_takes_the_level_around_it() -> None:
     assert (out[:, 20:26] == 1800).all()  # the cold area's edge, within reach
     assert (out[:, 27:] == 0).all()  # beyond reach: snow to the valleys
     assert (layers.fill_codes(np.full((3, 3), -2.0), 6, 0.0) == 0).all()
+
+
+def test_temperature_codes_round_trip() -> None:
+    from snowwatch.maps import totaldata
+
+    c = np.array([-80.0, -70.0, -8.25, 0.0, 12.3, 57.0, 70.0, np.nan], np.float32)
+    codes = totaldata.temp_codes(c)
+    assert codes[-1] == 0 and codes[0] == 1 and codes[-2] == 255  # none; clamped
+    back = totaldata.code_temp(codes)
+    assert np.allclose(back[1:6], c[1:6], atol=0.25) and np.isnan(back[-1])

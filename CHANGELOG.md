@@ -6,6 +6,18 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Temperature moves smoothly, and its slider is finer up close.** The map now draws the
+  Temperature layer itself from numbers, as it does the snow total: colours run smoothly
+  (with a crisp break at 0 °C), the slider glides between forecast frames rather than
+  jumping, and zoomed in each spot gets the temperature at its own height, pixel by pixel
+  (this replaces the drape coloured from the map's centre). The slider is continuous
+  with marks at now, 12 h, 1, 2, 3, 5, 7 and 10 days, evenly spaced, so the first days
+  take most of it; Play moves along it at an even pace, so the near days pass slowly and
+  the far ones quickly. The key is a smooth gradient to match. On the server each
+  temperature frame is also written as numbers (~230 KB, ~12 MB for the 10 days, fetched
+  nearest the slider first); browsers without WebGL 2 keep the pictures.
+
 ### Added
 - **Temperature on the map**, in the Weather choices beside Snow level: the forecast 2 m
   temperature every 3 hours to 3½ days, then every 6 hours to 10 days, drawn over the whole

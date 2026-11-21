@@ -204,7 +204,8 @@ export function asFrame(f: LayerFrame): Frame {
 		kind: past ? 'radar' : 'forecast',
 		span_h: 0,
 		src: f.src,
-		valid: f.t
+		valid: f.t,
+		...(f.data ? { data: f.data } : {})
 	};
 }
 
@@ -364,7 +365,7 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 		return `Snow level: the height above sea level where falling snow turns to rain, from ${models}. The darkest band also means snow reaching the ground everywhere.`;
 	}
 	if (weather === 'temp') {
-		return `Temperature 2 m above the ground, from ${models}, moved from each model's smoothed ground to the real terrain at 6.5 °C a kilometre: colder on the ridges, warmer in the valleys. An estimate: cold air pooled in valleys (an inversion) isn't in it. Zoomed in, the terrain is coloured by height from the temperature at the map's centre.`;
+		return `Temperature 2 m above the ground, from ${models}, moved from each model's smoothed ground to the real terrain at 6.5 °C a kilometre: colder on the ridges, warmer in the valleys. Zoomed in, each spot gets the temperature at its own height. An estimate: cold air pooled in valleys (an inversion) isn't in it.`;
 	}
 	return '';
 }
@@ -436,6 +437,46 @@ export function totalWords(hours: number): string {
 
 /** A mark's tick: "12h", "3d". */
 export const markTick = (h: number) => (h < 48 ? `${h}h` : `${Math.round(h / 24)}d`);
+
+// ---- The temperature's continuous slider ----------------------------------------------
+
+/** Hours ahead the temperature slider marks, evenly spaced along it (between them it is
+ *  continuous): fine in the first days, coarse beyond, as the snow total's. */
+export const TEMP_MARKS = [12, 24, 48, 72, 120, 168];
+
+/** The temperature slider: its frames' hours from the first, and its marks (hours from the
+ *  first frame) with their ticks, from "now" (the first frame) to the last frame. */
+export function tempSlider(
+	frames: { t: number }[],
+	nowS = Date.now() / 1000
+): { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null {
+	if (frames.length < 2) return null;
+	const t0 = frames[0].t;
+	const hours = frames.map((f) => (f.t - t0) / HOUR);
+	const last = hours[hours.length - 1];
+	const ahead = (t0 - nowS) / HOUR; // the first frame is up to a few hours ahead
+	const marks = [0];
+	const ticks = ['Now'];
+	for (const h of TEMP_MARKS) {
+		const at = h - ahead;
+		if (at > marks[marks.length - 1] + 1 && at < last - 6) {
+			marks.push(at);
+			ticks.push(aheadTick(h));
+		}
+	}
+	marks.push(last);
+	ticks.push(aheadTick(Math.round(last + ahead)));
+	return { t0, hours, marks, ticks };
+}
+
+/** A temperature mark's tick: "12h", then whole days ("1d", "10d"). */
+const aheadTick = (h: number) => (h < 24 ? `${h}h` : `${Math.round(h / 24)}d`);
+
+/** "Sun 4 PM" and "forecast · in 26 h" for a time on the temperature slider (to the
+ *  nearest hour: between frames the slider slides freely). */
+export function tempLabel(t: number, now = Date.now()): { when: string; rel: string } {
+	return layerLabel({ t: Math.round(t / HOUR) * HOUR, past: false } as Frame, now);
+}
 
 /** "to Fri 4 PM": when a total of so many hours from `start` ends. */
 export function totalUntil(start: number, hours: number): string {

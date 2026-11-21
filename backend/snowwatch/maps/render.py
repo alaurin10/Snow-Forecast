@@ -231,6 +231,8 @@ class LayerFrame:
     src: dict[str, str] = field(default_factory=dict)
     # Each source used → its run start or analysis time (Unix seconds).
     runs: dict[str, int] = field(default_factory=dict)
+    # The same frame as numbers, for the map to colour itself (temperature: totaldata.py).
+    data: str = ""
 
     @classmethod
     def load(cls, d: dict[str, Any]) -> LayerFrame:
@@ -1464,6 +1466,7 @@ def _files(index: dict[str, Any]) -> set[str]:
     for layer in (index.get("layers") or {}).values():
         if isinstance(layer, dict):
             out |= {f.get("file") for f in layer.get("frames", [])}
+            out |= {f.get("data") for f in layer.get("frames", [])}
     steps = index.get("steps")
     if isinstance(steps, dict):
         out |= {s.get("data") for s in steps.get("steps", []) if isinstance(s, dict)}

@@ -16,7 +16,7 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from 'maplibre-gl';
 import { FrameLoader, frameWorker, type Want, type WorkerLike } from './loader';
 import type { StepPlanes } from './steps';
-import { TotalGl, type Draw, type StepTex } from './totalgl';
+import { CM_SCALE, TotalGl, type Draw, type StepScale, type StepTex } from './totalgl';
 
 /** One step of the slider, as the layer needs it. */
 export interface TotalStepRef {
@@ -48,6 +48,13 @@ export interface TotalOptions {
 	elevation?: ElevationSource;
 	onChange?: () => void;
 	worker?: WorkerLike;
+	/** The map layer's id (the snow total's by default). */
+	id?: string;
+	/** How the steps' codes read and are coloured (the snow total's by default). */
+	scale?: StepScale;
+	/** Before the first step, fade in from nothing (a total) rather than show the first
+	 *  step (a value at an instant, such as the temperature). */
+	fromNothing?: boolean;
 }
 
 /** From this zoom in, the snow at each pixel's elevation (faded in over a zoom level). */
@@ -81,9 +88,14 @@ export function adjustAt(zoom: number): number {
  * The steps either side of `hours` and how far between (0: all `a`). `a` is -1 before the
  * first step: from nothing at the start to the first step.
  */
-export function bracketHours(hours: number, steps: number[]): { a: number; b: number; f: number } {
+export function bracketHours(
+	hours: number,
+	steps: number[],
+	fromNothing = true
+): { a: number; b: number; f: number } {
 	const n = steps.length;
 	if (!n) return { a: -1, b: -1, f: 0 };
+	if (hours <= steps[0] && !fromNothing) return { a: 0, b: 0, f: 0 };
 	if (hours <= steps[0])
 		return { a: -1, b: 0, f: steps[0] > 0 ? Math.max(0, hours) / steps[0] : 1 };
 	for (let i = 0; i < n - 1; i++) {
@@ -109,7 +121,7 @@ export function elevationFor(
 
 export class TotalLayer {
 	static readonly ID = 'snowtotal';
-	readonly id = TotalLayer.ID;
+	readonly id: string;
 	private steps: TotalStepRef[] = [];
 	private hours = 24;
 	private gfx: TotalGl | null = null;
@@ -140,6 +152,7 @@ export class TotalLayer {
 		opts: TotalOptions
 	) {
 		this.opts = opts;
+		this.id = opts.id ?? TotalLayer.ID;
 		const [[south, west], [north, east]] = opts.bounds;
 		this.box = {
 			x0: mercX(west),
@@ -202,7 +215,8 @@ export class TotalLayer {
 		this.hours = hours;
 		const { a, b, f } = bracketHours(
 			hours,
-			this.steps.map((s) => s.hours)
+			this.steps.map((s) => s.hours),
+			this.opts.fromNothing ?? true
 		);
 		this.loader.seek(a < 0 ? b * f : a + f);
 		this.changed();
@@ -259,7 +273,7 @@ export class TotalLayer {
 		if (this.gfx && !this.gfx.alive()) this.forget();
 		if (!this.gfx) {
 			try {
-				this.gfx = new TotalGl(gl, this.opts.width, this.opts.height);
+				this.gfx = new TotalGl(gl, this.opts.width, this.opts.height, this.opts.scale ?? CM_SCALE);
 			} catch (e) {
 				console.error(e);
 				return;
@@ -291,7 +305,7 @@ export class TotalLayer {
 	/** The pair to draw: exact when both are on hand, else the nearest step there is. */
 	private bracket(): { a: StepTex | null; b: StepTex; f: number; exact: boolean } | null {
 		const hours = this.steps.map((s) => s.hours);
-		const { a, b, f } = bracketHours(this.hours, hours);
+		const { a, b, f } = bracketHours(this.hours, hours, this.opts.fromNothing ?? true);
 		if (b < 0) return null;
 		const ta = a < 0 ? null : this.tex.get(this.steps[a].file);
 		const tb = this.tex.get(this.steps[b].file);
