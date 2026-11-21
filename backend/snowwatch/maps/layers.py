@@ -10,6 +10,8 @@
   snowfall   snow that fell in the last 24, 48 and 72 h: NOHRSC (US only)
   clouds     GOES-West GeoColor, every half hour over the last 3 h; then the forecast
              cloud cover to 10 days (HRDPS, RDPS, GDPS in Canada, NBM in the US)
+  temp       the 2 m temperature to 10 days, every 3 h then every 6 h (the same models as
+             the forecast cloud cover), moved from each model's ground to the real one
 
 Each picture is redrawn only when its inputs change (its key), like the frames. A layer
 whose sources don't answer keeps the pictures it has.
@@ -17,6 +19,7 @@ whose sources don't answer keeps the pictures it has.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -25,8 +28,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from snowwatch.maps import cloudheights
+from snowwatch.maps import cloudheights, totaldata
+from snowwatch.maps.bins import LAPSE_C_PER_M
 from snowwatch.maps.blend import Layer, feather, feather_px, mosaic, north_weight
+from snowwatch.maps.elevation import region_elevation
+from snowwatch.maps.files import save_npy
 from snowwatch.maps.geomet import (
     Grid,
     capabilities_dims,
@@ -36,7 +42,7 @@ from snowwatch.maps.geomet import (
     ts_iso,
     wcs_grid,
 )
-from snowwatch.maps.palette import DEPTH, SNOWLEVEL, TOTAL, WIND
+from snowwatch.maps.palette import DEPTH, SNOWLEVEL, TEMP, TOTAL, WIND
 from snowwatch.maps.region import Region, spread, stitch
 from snowwatch.maps.sources import gibs, nohrsc, snodas
 from snowwatch.maps.sources.nbm import Nbm
@@ -103,6 +109,20 @@ CLOUD_GDPS = "GDPS_15km_TotalCloudCover"  # hourly to 84 h, 3-hourly to 240 h
 CLOUD_STEP_H = 3  # forecast cloud frames every 3 h…
 CLOUD_LONG_STEP_H = 6  # …and every 6 h beyond RDPS's run
 CLOUD_DRAWING = 3  # in each forecast cloud frame's key: change it to draw them again
+# 2 m temperature (°C), Canada's models from finest to coarsest, and each one's ground
+# (model orography, m: GeoMet has it with each model's WEonG layers; it never changes).
+TEMP_HRDPS = "HRDPS.CONTINENTAL_TT"  # hourly to 48 h; 0 outside HRDPS's domain
+TEMP_RDPS = "RDPS_10km_AirTemp_2m"  # hourly to 84 h
+TEMP_GDPS = "GDPS_15km_AirTemp_2m"  # hourly to 84 h, 3-hourly to 240 h
+GROUND = {
+    "hrdps": "HRDPS-WEonG_2.5km_Orography",
+    "rdps": "RDPS-WEonG_10km_Orography",
+    "gdps": "GDPS-WEonG_15km_Orography",
+}
+GROUND_RANGE = (-500.0, 9000.0)
+TEMP_RANGE_C = (-80.0, 60.0)
+KELVIN = 273.15
+TEMP_DRAWING = 2  # in each temperature frame's key: change it to draw them again
 RIDGE_SPEED = "RDPS_10km_WindSpeed_700mb"  # m/s
 RIDGE_DIR = "RDPS_10km_WindDir_700mb"  # degrees, where the wind blows from
 CALDAS = "CaLDAS-NSRPS_2.5km_SnowDepth"  # metres
@@ -172,6 +192,7 @@ def draw(r: Renderer, region: Region) -> dict[str, list[LayerFrame]]:
         ("depth", lambda: depth(r, region, old.get("depth", []))),
         ("snowfall", lambda: snowfall(r, region, old.get("snowfall", []))),
         ("clouds", lambda: clouds(r, region, old.get("clouds", []))),
+        ("temp", lambda: temperature(r, region, old.get("temp", []))),
     ]
     for name, job in parts:
         try:
@@ -484,7 +505,7 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
     w_hrdps = r._hrdps_weight(region) if hr is not None else None
     # NBM's cloud heights reach to 84 h: the ground under them is needed only then.
     heights_due = us is not None and any(1 <= us.lead(t) <= CLOUD_HEIGHTS_TO_H for t in times)
-    grounded = heights_due and r._ground(region) is not None
+    grounded = heights_due and r._ground(region, region_elevation) is not None
 
     def job(t: int) -> Callable[[], LayerFrame | None]:
         def go() -> LayerFrame | None:
@@ -542,7 +563,7 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
             name = r._save_cloud(cover, f"k{t}")
             heights = None
             if use_z and us is not None:
-                g = r._ground(region)
+                g = r._ground(region, region_elevation)
                 heights = cloud_heights(us, lead, cover, g) if g is not None else None
             data = r._save_numbers(cloudheights.encode(cover, heights), f"kh{t}")
             return LayerFrame(t, name, key, "forecast", 0, 0, src, runs, data)
@@ -550,3 +571,149 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
         return go
 
     return _parallel([job(t) for t in times])
+
+
+# ---- Temperature ------------------------------------------------------------------------
+#
+# A model's 2 m temperature is for its own ground: a smooth surface at its grid's spacing
+# (2.5 km for HRDPS and NBM, 10 km for RDPS, 15 km for GDPS), well below the peaks and above
+# the valleys. Each model's temperature is first taken to sea level along a typical cooling
+# with height (6.5 °C a km, as bins.py uses), from its own ground (GeoMet's model orography
+# for Canada's models; for NBM, whose 2.5 km grid is already fitted to the terrain, the
+# real ground's mean under each pixel). Those are blended across the border like the other
+# layers, then brought back up to the real ground (elevation.py) along the same line. The
+# probe keeps both the temperature at the ground and at sea level, so tap-for-numbers can
+# give it at any height; and each frame is also written as numbers (totaldata.py), which
+# the map colours itself, blending between frames and, zoomed in, giving each pixel the
+# temperature at its own elevation. A typical cooling is an estimate: a valley
+# inversion (cold air pooled under warm) isn't in it.
+
+
+def temperature(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFrame] | None:
+    """The 2 m temperature every 3 h to the end of RDPS's run, then every 6 h to GDPS's
+    (10 days): HRDPS where its domain reaches and RDPS beneath it, then GDPS, in Canada;
+    NBM in the US; on the real ground."""
+    from snowwatch.maps.render import LayerFrame
+
+    now = int(r.now())
+    hr = run_of(r, TEMP_HRDPS)
+    rd = run_of(r, TEMP_RDPS)
+    gd = run_of(r, TEMP_GDPS)
+    if rd is None and gd is None:
+        return None
+    ground = region_elevation(r.net, region, r.grids_dir)
+    if ground is None:
+        return None
+    rd_end = max(rd.times) if rd else now
+    times: list[int] = []
+    for run, step in ((rd, CLOUD_STEP_H), (gd, CLOUD_LONG_STEP_H)):
+        if run is None:
+            continue
+        start = times[-1] if times else now
+        times += [t for t in run.times if t > start and t % (step * HOUR) == 0]
+    us: Nbm | None = r._nbm(region)
+    prev = _reuse(r, old)
+    w_hrdps = r._hrdps_weight(region) if hr is not None else None
+    lift = ground * LAPSE_C_PER_M  # °C between sea level and the real ground
+
+    def job(t: int) -> Callable[[], LayerFrame | None]:
+        def go() -> LayerFrame | None:
+            use_h = hr is not None and w_hrdps is not None and t in hr.times
+            base = rd if rd is not None and t in rd.times and t <= rd_end else None
+            if base is None and gd is not None and t in gd.times:
+                base = gd
+            lead = us.lead(t) if us is not None else 0
+            use_n = us is not None and 1 <= lead <= 264
+            key = "|".join(
+                [
+                    f"temp@{TEMP_DRAWING}",
+                    str(t),
+                    f"h:{hr.ref}" if use_h and hr else "-",
+                    f"b:{base.ref}" if base else "-",
+                    f"n:{us.run}:{lead}" if use_n and us else "-",
+                    region.key,
+                ]
+            )
+            had = prev.get(key)
+            if had is not None:
+                return had
+            layers: list[Layer] = []
+            src: dict[str, str] = {}
+            runs: dict[str, int] = {}
+            if use_n and us is not None:
+                v = us.field(lead, "TMP", "2 m above ground")
+                if v is not None:
+                    c = v - KELVIN
+                    c = np.where((c >= TEMP_RANGE_C[0]) & (c <= TEMP_RANGE_C[1]), c, np.nan)
+                    layers.append(Layer("nbm", c + lift, r._us_weight(region, c)))
+                    src["south"] = "nbm"
+                    runs["nbm"] = us.run
+            north = ""
+            if use_h and hr is not None and w_hrdps is not None:
+                v = at_sea_level(r, region, "hrdps", TEMP_HRDPS, hr, t)
+                if v is not None:
+                    layers.append(Layer("hrdps", v, w_hrdps))
+                    north = "hrdps"
+                    runs["hrdps"] = _ts(hr.ref)
+            if base is not None:
+                model = "rdps" if base is rd else "gdps"
+                v = at_sea_level(r, region, model, TEMP_RDPS if base is rd else TEMP_GDPS, base, t)
+                if v is not None:
+                    layers.append(Layer(model, v, 1.0))
+                    north = north or model
+                    runs[model] = _ts(base.ref)
+            if not north:
+                return None  # try again next time rather than draw only the US
+            src["north"] = north
+            src.setdefault("south", north)
+            sea = mosaic(layers).amount
+            here = sea - lift
+            # The first band holds anything colder (below a ramp's first step is clear).
+            shown = np.where(np.isfinite(here), np.maximum(here, TEMP[0][0]), np.nan)
+            name = r._save_ramp(shown, TEMP, f"tt{t}", np.stack([here, sea]))
+            # The same as numbers, for the map to colour smoothly and adjust to the terrain.
+            data = totaldata.encode_temp(here, sea, LAPSE_C_PER_M)
+            numbers = f"td{t}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+            r._store(numbers, data)
+            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs, numbers)
+
+        return go
+
+    return _parallel([job(t) for t in times])
+
+
+def at_sea_level(
+    r: Renderer, region: Region, model: str, layer: str, run: Run, t: int
+) -> np.ndarray | None:
+    """A Canadian model's 2 m temperature (°C) at time t, taken from its ground to sea
+    level; None without the temperature or the model's ground."""
+    below = model_ground(r, region, model)
+    if below is None:
+        return None
+    c = grid(r, layer, run, t, region, TEMP_RANGE_C)
+    if c is None:
+        return None
+    out: np.ndarray = c + below * LAPSE_C_PER_M
+    return out
+
+
+def model_ground(r: Renderer, region: Region, model: str) -> np.ndarray | None:
+    """A model's ground (m) on the region, as it interpolates its temperature: from GeoMet
+    once per job, and kept on disk for when GeoMet doesn't answer."""
+    layer = GROUND[model]
+    path = r.grids_dir / f"ground-{model}-{hashlib.sha1(region.key.encode()).hexdigest()[:16]}.npy"
+
+    def fetch() -> np.ndarray:
+        run = run_of(r, layer)
+        got = grid(r, layer, run, run.times[0], region, GROUND_RANGE) if run else None
+        if got is not None and np.isfinite(got).any():
+            save_npy(path, got.astype(np.float32))
+            return got
+        try:
+            kept = np.load(path)
+        except (OSError, ValueError):
+            return np.empty((0, 0), np.float32)
+        return kept if kept.shape == (region.height, region.width) else np.empty((0, 0))
+
+    got = r._once(f"ground-{model}", region, fetch)
+    return got if got.size else None

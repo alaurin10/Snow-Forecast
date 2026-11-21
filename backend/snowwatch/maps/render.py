@@ -45,8 +45,8 @@ from snowwatch.maps import (
     bins,
     coverage,
     dataframe,
+    elevation,
     grib,
-    ground,
     terrain_totals,
     totaldata,
     totals,
@@ -232,8 +232,8 @@ class LayerFrame:
     src: dict[str, str] = field(default_factory=dict)
     # Each source used → its run start or analysis time (Unix seconds).
     runs: dict[str, int] = field(default_factory=dict)
-    # The frame as numbers, when the map can draw it from them (forecast clouds with their
-    # heights: cloudheights.py).
+    # The same frame as numbers, for the map to draw itself (temperature: totaldata.py;
+    # forecast clouds with their heights: cloudheights.py).
     data: str = ""
 
     @classmethod
@@ -299,7 +299,7 @@ class Renderer:
         self.totals: list[TotalOut] = []
         self._prev_totals: dict[str, TotalOut] = {}
         self._nbm_run: int | None = None
-        # The ground under the box (ground.py), once per job: None not yet asked, False
+        # The ground under the box (elevation.py), once per job: None not yet asked, False
         # couldn't be had.
         self._ground_grid: np.ndarray | bool | None = None
         self._ground_lock = threading.Lock()
@@ -879,11 +879,16 @@ class Renderer:
             self._nbm_obj = Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
         return self._nbm_obj
 
-    def _ground(self, region: Region) -> np.ndarray | None:
-        """The ground's height under the box (ground.py), asked for once per job."""
+    def _ground(
+        self,
+        region: Region,
+        fetch: Callable[[Net, Region, Path], np.ndarray | None] | None = None,
+    ) -> np.ndarray | None:
+        """The ground's height under the box (elevation.py), asked for once per job."""
         with self._ground_lock:
             if self._ground_grid is None:
-                got = ground.ground(self.net, region, self.grids_dir)
+                get = fetch or elevation.region_elevation
+                got = get(self.net, region, self.grids_dir)
                 self._ground_grid = got if got is not None else False
             have = self._ground_grid
             if isinstance(have, np.ndarray) and have.shape == (region.height, region.width):

@@ -91,6 +91,12 @@
 			about: 'Forecast snow, with the ratio from the forecast temperature.'
 		},
 		{ id: 'snowlevel', label: 'Snow level', about: 'Forecast snow level, to about 3½ days.' },
+		{
+			id: 'temp',
+			label: 'Temp',
+			name: 'Temperature',
+			about: 'Forecast temperature to 10 days, adjusted to the height of the terrain.'
+		},
 		{ id: 'wind', label: 'Wind', about: 'Forecast wind, to about 3½ days.' },
 		{
 			id: 'depth',
@@ -341,7 +347,8 @@
 					</div>
 				{/if}
 			</div>
-			<div class="mp-tiles" role="group" aria-label="Weather">
+			<!-- Five across: the nine choices fit in two rows, as eight did four across. -->
+			<div class="mp-tiles" style:--cols="5" role="group" aria-label="Weather">
 				{#each WEATHER as w (w.id)}
 					{@render tileButton(
 						w.label,

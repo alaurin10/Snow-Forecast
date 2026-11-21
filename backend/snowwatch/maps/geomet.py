@@ -56,6 +56,25 @@ class Net:
                 return None
         return None
 
+    def found(self, url: str, tries: int = 3) -> tuple[bytes | None, bool]:
+        """A file's bytes, or None and whether the server said there is no such file (a
+        404, as tile servers answer where they have nothing) rather than failing."""
+        for attempt in range(tries):
+            if attempt:
+                self.sleep(2 + 3 * attempt)
+            try:
+                r = self.client.get(url, timeout=20)
+            except httpx.HTTPError as e:
+                log.debug("GET %s failed: %s", url, e)
+                continue
+            if r.status_code == 200:
+                return r.content, False
+            if r.status_code == 404:
+                return None, True
+            if r.status_code != 429 and r.status_code < 500:
+                return None, False
+        return None, False
+
     def range(self, url: str, start: int, end: int | None, tries: int = 3) -> bytes | None:
         """Bytes `start`..`end` (inclusive; None for the rest) of a file, or None.
 

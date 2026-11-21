@@ -200,6 +200,7 @@ Each is a named entry under `layers` in the index, drawn by the same `PrecipLaye
 | Layer | Data | Form |
 |---|---|---|
 | Snow level | HRDPS-WEonG / RDPS-WEonG `SnowLevelHeight` north, NBM `SNOWLVL` south | timeline, 3-hourly to 84 h, bands every 250 m |
+| Temperature (added later) | HRDPS / RDPS / GDPS 2 m temperature north, NBM `TMP` south, each moved from its model's ground (`…-WEonG_…_Orography`; NBM's own terrain) to the real ground at 6.5 °C/km | timeline, 3-hourly to 84 h then 6-hourly to 240 h, drawn by the map from numbers (smooth colours, blended between frames, each pixel at its own elevation from zoom 8), continuous slider marked now, 12 h, 1–3, 5, 7, 10 days |
 | Wind and gusts | HRDPS `WSPD`, `WGE` north; HRRR `GUST`, 10 m wind south; "ridge level" from `RDPS_10km_WindSpeed_700mb` | timeline, 3-hourly to 48 h; speed colours first, particles as a stretch |
 | Snow on the ground | SNODAS (US) + CaLDAS (Canada) | one picture, daily |
 | Snowfall observed | NOHRSC 24/48/72 h (US only) | pictures, refreshed every 6 h |

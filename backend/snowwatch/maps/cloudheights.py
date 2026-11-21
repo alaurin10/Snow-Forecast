@@ -14,7 +14,7 @@ Where the heights come from (NBM, the US and Canada to about 55°N; sources/nbm.
   the frame's total cover, its top unknown.
 - elsewhere and beyond: no heights, and the map draws the total cover as it always has.
 
-NBM's heights are above its own ground; adding the ground (ground.py) gives heights above
+NBM's heights are above its own ground; adding the ground (elevation.py) gives heights above
 sea level.
 
 The file is one gzip stream (like dataframe.py's) of a 16-byte header and byte planes at

@@ -21,12 +21,16 @@
 		totalUntil,
 		totalWords,
 		SNOWLEVEL,
+		TEMP,
+		tempLabel,
+		tempTick,
 		WIND,
 		windTick,
 		type Pick,
 		type WeatherView
 	} from './weather';
 	import { TERRAIN_NOTE } from './layers/snowtiles';
+	import { tempColor } from './precip/totalgl';
 
 	interface Props {
 		view: WeatherView;
@@ -59,6 +63,11 @@
 		continuous?: boolean;
 		/** Where that slider is: hours from the totals' start. */
 		totalHours?: number;
+		/** The temperature's continuous slider (its frames are drawn as numbers): the first
+		 *  frame's time, the frames' and the marks' hours from it, and the marks' ticks. */
+		temp?: { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null;
+		/** Where that slider is: hours from the first frame. */
+		tempHours?: number;
 	}
 
 	let {
@@ -79,8 +88,12 @@
 		snowLine = null,
 		adjusted = false,
 		continuous = false,
-		totalHours = $bindable(24)
+		totalHours = $bindable(24),
+		temp = null,
+		tempHours = $bindable(0)
 	}: Props = $props();
+	/** The time on the temperature slider, in words. */
+	const tempWhen = $derived(temp ? tempLabel(temp.t0 + tempHours * 3600) : null);
 	/** The continuous snow total slider's marks (hours), evenly spaced along it. */
 	const marks = $derived(view.steps ? totalMarks(view.steps.hours) : []);
 
@@ -156,8 +169,14 @@
 			return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
 		if (weather === 'wind')
 			return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
+		if (weather === 'temp')
+			return { steps: TEMP, tick: (v) => tempTick(v, units), unit: imp ? '°F' : '°C' };
 		return null;
 	});
+	/** A temperature cell runs smoothly across its 2 °C, as the map does. */
+	const rgb = (c: number[]) => `rgb(${c.join(', ')})`;
+	const tempCell = (from: number) =>
+		`linear-gradient(90deg, ${rgb(tempColor(from + 0.01))}, ${rgb(tempColor(from + 1.99))})`;
 	/** A cell dark enough to need light text (relative luminance under ~0.3). */
 	function darkCell(hex: string): boolean {
 		const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
@@ -286,6 +305,66 @@
 			{:else}
 				<p class="note">{empty}</p>
 			{/if}
+		{:else if temp && weather === 'temp' && tempWhen}
+			{@const last = temp.marks.length - 1}
+			{@const at = posAt(tempHours, temp.marks)}
+			<div class="player">
+				<button
+					class="play"
+					onclick={() => (playing = !playing)}
+					aria-label={playing ? 'Pause' : 'Play'}
+				>
+					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+						{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
+					</svg>
+				</button>
+				<div class="track">
+					<input
+						type="range"
+						min="0"
+						max={last}
+						step="0.01"
+						value={at}
+						oninput={(e) => {
+							playing = false;
+							tempHours = hoursAt(Number(e.currentTarget.value), temp.marks);
+						}}
+						onkeydown={(e) => {
+							// The keys move from frame to frame, however finely the slider slides.
+							const d = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+							if (!d) return;
+							e.preventDefault();
+							playing = false;
+							const hs = temp.hours;
+							const next =
+								d > 0
+									? (hs.find((h) => h > tempHours + 1e-6) ?? hs[hs.length - 1])
+									: (hs.findLast((h) => h < tempHours - 1e-6) ?? hs[0]);
+							tempHours = next;
+						}}
+						aria-label="Time"
+						aria-valuetext={`${tempWhen.when}, ${tempWhen.rel}`}
+					/>
+					<div class="ticks" aria-hidden="true">
+						{#each temp.marks as h, i (h)}
+							<span class:now={Math.abs(at - i) < 0.05} style:left="{(i / last) * 100}%"
+								>{temp.ticks[i]}</span
+							>
+						{/each}
+					</div>
+				</div>
+				<div
+					class="time"
+					aria-live="off"
+					title={adjusted ? 'Adjusted to the terrain: each spot at its own height' : undefined}
+				>
+					<strong class="num">{tempWhen.when}</strong>
+					<span class="fc"
+						>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{tempWhen.rel}</span
+					>
+					{#if adjusted}<span class="adj">adjusted to terrain</span>{/if}
+				</div>
+			</div>
 		{:else if count && label && current}
 			<div class="player">
 				<button
@@ -391,7 +470,10 @@
 				<span class="name">{cells.unit}</span>
 				<span class="ticks-ramp">
 					{#each cells.steps as s (s.from)}
-						<span class="cell" class:dark={darkCell(s.color)} style:background={s.color}
+						<span
+							class="cell"
+							class:dark={darkCell(s.color)}
+							style:background={weather === 'temp' && temp ? tempCell(s.from) : s.color}
 							>{cells.tick(s.from)}</span
 						>
 					{/each}

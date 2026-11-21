@@ -6,7 +6,34 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Temperature moves smoothly, and its slider is finer up close.** The map now draws the
+  Temperature layer itself from numbers, as it does the snow total: colours run smoothly
+  (with a crisp break at 0 °C), the slider glides between forecast frames rather than
+  jumping, and zoomed in each spot gets the temperature at its own height, pixel by pixel
+  (this replaces the drape coloured from the map's centre). The slider is continuous
+  with marks at now, 12 h, 1, 2, 3, 5, 7 and 10 days, evenly spaced, so the first days
+  take most of it; Play moves along it at an even pace, so the near days pass slowly and
+  the far ones quickly. The key is a smooth gradient to match. On the server each
+  temperature frame is also written as numbers (~230 KB, ~12 MB for the 10 days, fetched
+  nearest the slider first); browsers without WebGL 2 keep the pictures.
+
 ### Added
+- **Temperature on the map**, in the Weather choices beside Snow level: the forecast 2 m
+  temperature every 3 hours to 3½ days, then every 6 hours to 10 days, drawn over the whole
+  box so it shows zoomed out like the snow level. It is adjusted to the terrain: each
+  model's temperature is for its own smoothed ground (HRDPS and NBM 2.5 km, RDPS 10 km,
+  GDPS 15 km), so the worker takes it to sea level from that ground at 6.5 °C a km and
+  back up to the real ground's height under each pixel (Mapterhorn's elevation), giving
+  cold ridges and warm valleys and a freezing line that follows the mountains. Zoomed in
+  past 10, the terrain itself is coloured by height from the temperature at the map's
+  centre, ridge by ridge, as the rain/snow line is. The key runs from −30 to 30 °C in
+  2 °C bands, turning from ice blue to green at 0 °C. Tapping a spot gives its
+  temperature at that spot's own height now and its range over the next three days. An
+  estimate: cold air pooled in valleys (an inversion) isn't in it. On the server: about
+  50 more frames per layers run (~2 MB of NBM temperature each, cached), and the model
+  ground heights and a grid of elevation, fetched once and kept. The Layers sheet's
+  weather tiles now sit five across, so the nine choices still take two rows.
 - **Forecast clouds at their heights.** Zoomed in (from zoom 8), the Clouds layer's
   forecast now sits on the terrain at the height NOAA's National Blend of Models gives
   its base and top: ground inside the cloud is fogged, summits above a sea of cloud stay
@@ -15,7 +42,7 @@ Notable changes to Snow Watch. The format follows
   55°N; elsewhere and beyond, the cover alone as before. Zoomed out it looks as it did.
   It stays on further in than before, lighter, so the ground under the fog still reads.
   On the server: ~180 MB more NOAA downloads and under a minute of work per NBM run
-  (twice a day), and a one-off ~4 MB of elevation tiles.
+  (twice a day); the ground under the clouds is the Temperature layer's elevation grid.
 - **3D clouds** (Layers → Show, off until chosen): puffs of cloud floating at their
   forecast heights around each location, for the time on the weather slider (or now):
   none when it's clear, clumps when partly cloudy, a deck when overcast. Ridges hide the

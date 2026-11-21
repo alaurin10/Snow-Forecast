@@ -159,8 +159,8 @@ export interface LayerFrame {
 	src: { north?: string; south?: string };
 	/** Each source → its run start or analysis time (Unix seconds). */
 	runs: Record<string, number>;
-	/** The frame as numbers (forecast clouds with their heights: ../map/precip/clouds.ts),
-	 *  the file under /api/precip/; absent when there are none. */
+	/** The frame as numbers, for the map to draw itself (temperature; forecast clouds with
+	 *  their heights: ../map/precip/clouds.ts), the file under /api/precip/. */
 	data?: string;
 }
 

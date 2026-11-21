@@ -1,18 +1,15 @@
-"""Forecast clouds with their heights (maps/cloudheights.py), NBM's cloud layers
-(sources/nbm.py) and the ground under the box (maps/ground.py)."""
+"""Forecast clouds with their heights (maps/cloudheights.py) and NBM's cloud layers
+(sources/nbm.py)."""
 
 from __future__ import annotations
 
-import io
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
-from PIL import Image
 
 from snowwatch.maps import cloudheights as ch
-from snowwatch.maps import grib, ground
+from snowwatch.maps import grib
 from snowwatch.maps.geomet import Net
 from snowwatch.maps.region import box_region
 from snowwatch.maps.sources import nbm
@@ -202,61 +199,3 @@ def test_nbm_cloud_layers_lowest_first_and_whole(monkeypatch: pytest.MonkeyPatch
     assert patterns[-1] == r":TCDC:high cloud layer:12 hour fcst:"
     # Past 36 h there are no layers, and nothing is asked for.
     assert fake.cloud_layers(nbm.CLOUD_LAYERS_TO_H + 3) is None and len(asked) == 1
-
-
-# ---- The ground ---------------------------------------------------------------------------
-
-
-def terrarium_png(metres: float) -> bytes:
-    v = metres + 32768
-    r, gb = divmod(v, 256)
-    g, b = int(gb), round((gb - int(gb)) * 256)
-    img = np.zeros((ground.TILE, ground.TILE, 3), np.uint8)
-    img[...] = (int(r), g, b)
-    buf = io.BytesIO()
-    Image.fromarray(img).save(buf, "PNG")
-    return buf.getvalue()
-
-
-class TileClient:
-    """Mapterhorn: 1,500 m tiles, except the sea (404) west of 125°W."""
-
-    def __init__(self, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls = 0
-
-    def get(self, url: str, timeout: float = 0) -> Any:
-        self.calls += 1
-        z, x, _ = (int(p) for p in [*url.rsplit("/", 3)[1:3], url.rsplit("/", 1)[1][:-5]])
-        if self.fail and x == 5:
-            return type("R", (), {"status_code": 503, "content": b""})()
-        lon_west = x / 2**z * 360 - 180
-        if lon_west < -125:
-            return type("R", (), {"status_code": 404, "content": b""})()
-        return type("R", (), {"status_code": 200, "content": terrarium_png(1500)})()
-
-
-def test_ground_from_elevation_tiles_kept_on_disk(tmp_path: Path) -> None:
-    region = box_region(44, -130, 50, -114, 40)
-    client = TileClient()
-    net = Net(client)  # type: ignore[arg-type]
-    g = ground.ground(net, region, tmp_path)
-    assert g is not None and g.shape == (region.height, region.width)
-    assert g[:, -1].min() == pytest.approx(1500, abs=1)  # the east: land
-    assert g[:, 0].max() == 0  # the far west: sea
-    calls = client.calls
-    assert ground.ground(net, region, tmp_path) is not None and client.calls == calls
-
-
-def test_ground_with_a_tile_missing_is_tried_again(tmp_path: Path) -> None:
-    region = box_region(44, -130, 50, -114, 40)
-    net = Net(TileClient(fail=True))  # type: ignore[arg-type]
-    assert ground.ground(net, region, tmp_path) is None
-    assert not list(tmp_path.glob("ground-*.npy"))
-
-
-def test_box_mean() -> None:
-    a = np.zeros((5, 5), np.float32)
-    a[2, 2] = 9
-    m = ground._box_mean(a, 3)
-    assert m[2, 2] == pytest.approx(1) and m[1, 1] == pytest.approx(1) and m[0, 0] == 0

@@ -8,15 +8,18 @@ import { expect, test } from '@playwright/test';
 test('zoomed in, forecast clouds are drawn at their height', async ({ page }) => {
 	const errors: string[] = [];
 	page.on('pageerror', (e) => errors.push(String(e)));
+	// Less motion: the loop doesn't play by itself, so the slider stays where it's put.
+	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await page.addInitScript(() => localStorage.setItem('sw.mapWeather', 'clouds'));
 	await page.goto('/map?loc=crystal', { waitUntil: 'networkidle' });
 	const slider = page.getByRole('slider', { name: 'Time' });
 	await expect(slider).toBeVisible({ timeout: 30_000 });
-	const pause = page.getByRole('button', { name: 'Pause' });
-	if (await pause.count()) await pause.click();
-	// "Now" is the satellite picture; the next frame is the forecast with heights.
-	await slider.focus();
-	await page.keyboard.press('ArrowRight');
+	// Frame 0 is the satellite picture; frame 1 the first forecast, which has heights.
+	await slider.evaluate((el: HTMLInputElement) => {
+		el.value = '1';
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	await expect(page.getByText('forecast · in')).toBeVisible();
 	await expect(page.getByText('at cloud height')).toBeVisible({ timeout: 15_000 });
 	// Zoomed out (the map's own "-" key: phones have no zoom buttons), the cover alone.
 	await page.locator('canvas.maplibregl-canvas').focus();
