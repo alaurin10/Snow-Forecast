@@ -19,7 +19,8 @@ test('zoomed in, forecast clouds are drawn at their height', async ({ page }) =>
 		el.value = '1';
 		el.dispatchEvent(new Event('input', { bubbles: true }));
 	});
-	await expect(page.getByText('forecast · in')).toBeVisible();
+	// The first forecast frame may be "now" or "in 2 h", depending on the clock.
+	await expect(page.getByText(/^forecast · /)).toBeVisible();
 	await expect(page.getByText('at cloud height')).toBeVisible({ timeout: 15_000 });
 	// Zoomed out (the map's own "-" key: phones have no zoom buttons), the cover alone.
 	await page.locator('canvas.maplibregl-canvas').focus();
