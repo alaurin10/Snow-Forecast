@@ -21,6 +21,8 @@
 		totalUntil,
 		totalWords,
 		SNOWLEVEL,
+		TEMP,
+		tempTick,
 		WIND,
 		windTick,
 		type Pick,
@@ -156,6 +158,8 @@
 			return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
 		if (weather === 'wind')
 			return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
+		if (weather === 'temp')
+			return { steps: TEMP, tick: (v) => tempTick(v, units), unit: imp ? '°F' : '°C' };
 		return null;
 	});
 	/** A cell dark enough to need light text (relative luminance under ~0.3). */

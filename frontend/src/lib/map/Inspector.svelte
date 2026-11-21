@@ -26,7 +26,8 @@
 	import type { PointOut } from '../types.gen';
 	import { RAMPS, type PrecipKind } from '../radar';
 	import { radarNow, type RadarNow } from './radarnow';
-	import { snow as fmtSnow, speed as fmtSpeed } from '../units';
+	import { snow as fmtSnow, speed as fmtSpeed, temperature as fmtTemp } from '../units';
+	import { tempAt } from './weather';
 	import { elevationLadder, snowAtElevation, TERRAIN_NOTE } from './layers/snowtiles';
 	import { areaText } from './here';
 
@@ -152,6 +153,18 @@
 			.map((x) => x.value!);
 		const ridge = soon(point.ridge);
 		const gust = soon(point.gust);
+		// Temperature at the spot's own height (the layer's sea-level value brought up the
+		// same way), now and its range over the next three days.
+		const lapse = point.temp_lapse_c_per_km ?? 6.5;
+		const spotTempM = facts ? (facts.sea ? 0 : facts.elevation) : null;
+		const tempHere = (x: { c: number | null; sea_c: number | null }) =>
+			spotTempM != null && x.sea_c != null ? tempAt(x.sea_c, spotTempM, lapse) : x.c;
+		const temps = point.temp ?? [];
+		const tempNow = soon(temps);
+		const tempNext = temps
+			.filter((x) => x.t >= nowS - 1800 && x.t <= nowS + 72 * 3600)
+			.map(tempHere)
+			.filter((v): v is number => v != null);
 		// The next 48 hourly forecast frames, each a cell in its colour.
 		const hours = point.rates.filter((r) => r.kind === 'forecast' && r.span_h <= 1).slice(0, 48);
 		const strip = hours.map((r) => ({
@@ -188,6 +201,10 @@
 			lowest: levels.length ? Math.min(...levels) : null,
 			ridge,
 			gust: gust?.value ?? null,
+			temp: tempNow ? tempHere(tempNow) : null,
+			tempLow: tempNext.length ? Math.min(...tempNext) : null,
+			tempHigh: tempNext.length ? Math.max(...tempNext) : null,
+			tempAtSpot: spotTempM != null,
 			depth: point.depth?.cm ?? null,
 			fell: point.observed.filter((o) => o.cm != null),
 			strip,
@@ -381,6 +398,19 @@
 							{fmtElevation(wx.level, units)}
 							{#if wx.lowest != null && wx.lowest < wx.level - 100}
 								<span class="faint">· lowest {fmtElevation(wx.lowest, units)}</span>
+							{/if}
+						</dd>
+					</div>
+				{/if}
+				{#if wx.temp != null}
+					<div>
+						<dt title={wx.tempAtSpot ? "At this spot's height" : undefined}>Temperature</dt>
+						<dd>
+							{fmtTemp(wx.temp, units)}
+							{#if wx.tempLow != null && wx.tempHigh != null}
+								<span class="faint"
+									>· {fmtTemp(wx.tempLow, units)} to {fmtTemp(wx.tempHigh, units)} in 3 days</span
+								>
 							{/if}
 						</dd>
 					</div>

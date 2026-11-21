@@ -23,6 +23,7 @@ from snowwatch.maps.palette import (
     DEPTH,
     PALETTE,
     SNOWLEVEL,
+    TEMP,
     TOTAL,
     WIND,
     index_ramp,
@@ -46,7 +47,7 @@ REGION = box_region(44, -125, 54, -110, 30)
 # ---- Painting -------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ramp", [SNOWLEVEL, WIND, DEPTH, TOTAL])
+@pytest.mark.parametrize("ramp", [SNOWLEVEL, WIND, DEPTH, TOTAL, TEMP])
 def test_index_ramp_matches_painting_then_snapping(ramp: list[tuple[float, str]]) -> None:
     lows = [low for low, _ in ramp]
     values = np.array([[lows[0] - 1, np.nan, *lows, lows[-1] * 3]], np.float32)
@@ -186,7 +187,14 @@ VALUES = {
     "HRDPS.CONTINENTAL_NT": 90.0,  # % cloud
     "RDPS_10km_TotalCloudCover": 60.0,
     "GDPS_15km_TotalCloudCover": 30.0,
+    "HRDPS.CONTINENTAL_TT": -5.0,  # °C, on each model's own ground
+    "RDPS_10km_AirTemp_2m": -3.0,
+    "GDPS_15km_AirTemp_2m": 1.0,
+    "HRDPS-WEonG_2.5km_Orography": 500.0,  # m
+    "RDPS-WEonG_10km_Orography": 200.0,
+    "GDPS-WEonG_15km_Orography": 0.0,
 }
+GROUND_M = 1000.0  # the real ground everywhere, in these tests
 
 
 class LayersNet(Net):
@@ -233,7 +241,7 @@ class LayersNet(Net):
 
 class FieldNbm(FakeNbm):
     def field(self, fhour: int, var: str, level: str) -> np.ndarray | None:
-        value = {"SNOWLVL": 800.0, "GUST": 8.0, "TCDC": 10.0}[var]
+        value = {"SNOWLVL": 800.0, "GUST": 8.0, "TCDC": 10.0, "TMP": 275.15}[var]
         return np.full((self.region.height, self.region.width), value, np.float32)
 
 
@@ -264,6 +272,11 @@ def sources(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         return np.full((region.height, region.width, 4), 200, np.uint8)
 
     monkeypatch.setattr(layers, "stitch", stitch)
+    monkeypatch.setattr(
+        layers,
+        "region_elevation",
+        lambda net, region, d: np.full((region.height, region.width), GROUND_M, np.float32),
+    )
     return calls
 
 
@@ -279,7 +292,7 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     out = tmp_path / "precip"
     ix = Renderer(out, net, now=lambda: NOW).layers(REGION)
     lay = ix["layers"]
-    assert set(lay) == {"snowlevel", "gust", "ridge", "depth", "snowfall", "clouds"}
+    assert set(lay) == {"snowlevel", "gust", "ridge", "depth", "snowfall", "clouds", "temp"}
     sl = lay["snowlevel"]["frames"]
     # Every 3 hours from the next one to the end of RDPS's run.
     assert [f["t"] - T0 for f in sl] == [h * H for h in range(6, 85, 3)]
@@ -324,6 +337,19 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
 
     with Image.open(out / ahead[0]["file"]) as im:
         assert im.size == (REGION.width // 2, REGION.height // 2) and im.mode == "P"
+    # Temperature: the clouds' timeline, each model taken from its own ground to the real
+    # one (1,000 m here) at 6.5 °C a km. Probes hold it there and at sea level.
+    tt = lay["temp"]["frames"]
+    assert [f["t"] for f in tt] == [f["t"] for f in ahead]
+    assert tt[0]["src"] == {"south": "nbm", "north": "hrdps"}
+    # North, HRDPS: -5 °C at its 500 m is -1.75 °C at sea level, -8.25 °C at 1,000 m.
+    assert probe_at(out, tt[0]["file"], top, 5).tolist() == pytest.approx([-8.25, -1.75], abs=0.05)
+    # South, NBM (2 °C, already on the terrain): 2 °C at the ground, 8.5 °C at sea level.
+    assert probe_at(out, tt[0]["file"], bottom, 5).tolist() == pytest.approx([2, 8.5], abs=0.05)
+    # Beyond 48 h RDPS (-3 °C at 200 m), beyond 84 h GDPS (1 °C at sea level).
+    assert probe_at(out, tt[20]["file"], top, 5)[0] == pytest.approx(-8.2, abs=0.05)
+    assert tt[-1]["src"]["north"] == "gdps"
+    assert probe_at(out, tt[-1]["file"], top, 5)[0] == pytest.approx(-5.5, abs=0.05)
     assert any("SNODAS" in a for a in ix["attribution"])
     assert any("GOES-West" in a for a in ix["attribution"])
 
@@ -383,6 +409,9 @@ def point_index(tmp_path: Path) -> tuple[dict[str, Any], Path, Path]:
         np.full(shape, 50.0), WIND, "w1", np.stack([np.full(shape, 50.0), np.full(shape, 260.0)])
     )
     level = r._save_ramp(np.full(shape, 1234.0), SNOWLEVEL, "sl1")
+    temp = r._save_ramp(
+        np.full(shape, -4.0), TEMP, "tt1", np.stack([np.full(shape, -4.0), np.full(shape, 3.5)])
+    )
     totals_dir.mkdir(parents=True)
     np.save(totals_dir / "24h.npy", np.full(shape, 12.0, np.float16))
     top = NOW - NOW % H
@@ -404,6 +433,7 @@ def point_index(tmp_path: Path) -> tuple[dict[str, Any], Path, Path]:
         "layers": {
             "ridge": {"frames": [{"t": top + 3 * H, "file": ridge}]},
             "snowlevel": {"frames": [{"t": top + 3 * H, "file": level}]},
+            "temp": {"frames": [{"t": top + 3 * H, "file": temp}]},
         },
     }
     return index, out, totals_dir
@@ -421,6 +451,7 @@ def test_point_reads_every_layer_at_a_spot(tmp_path: Path) -> None:
     assert [(x.window, x.cm) for x in p.totals] == [(24, 12.0)]
     assert [(x.value) for x in p.snow_level] == [1230.0]
     assert [(x.kmh, x.dir) for x in p.ridge] == [(50.0, 260.0)]
+    assert [(x.c, x.sea_c) for x in p.temp] == [(-4.0, 3.5)] and p.temp_lapse_c_per_km == 6.5
     rose = {x.window: x for x in p.roses}
     # The 24 h total is 12 cm, from the west (260°): it loads east-facing slopes.
     assert rose["next24"].snow_cm == 12.0 and rose["next24"].wind_from == "W"

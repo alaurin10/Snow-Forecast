@@ -1,6 +1,7 @@
 // The map's one weather layer: what it shows, and how its controls work.
 //
-// Radar & forecast, snow level, wind and clouds are loops (a slider through frames);
+// Radar & forecast, snow level, temperature, wind and clouds are loops (a slider through
+// frames);
 // snow totals, snow on the ground and observed snowfall are pictures picked by window.
 // The server draws every picture (backend/snowwatch/maps/layers.py) and lists them in the
 // same index as the precipitation frames (../radar.ts).
@@ -15,7 +16,7 @@ import {
 	type RampStep,
 	type Timeline
 } from '../radar';
-import { kmhToMph, mToFt, type UnitSystem } from '../units';
+import { cToF, kmhToMph, mToFt, type UnitSystem } from '../units';
 
 const HOUR = 3600;
 
@@ -41,6 +42,47 @@ export const SNOWLEVEL: RampStep[] = [
 	{ from: 3750, color: '#cf4339' },
 	{ from: 4000, color: '#a82f3a' }
 ];
+
+/**
+ * Temperature, lower bound in °C, a band every 2 °C (the first also holds anything colder,
+ * the last anything warmer). The colours turn from ice blue to green at 0 °C.
+ */
+export const TEMP: RampStep[] = [
+	{ from: -30, color: '#3b0f70' },
+	{ from: -28, color: '#4a1486' },
+	{ from: -26, color: '#5a1f9c' },
+	{ from: -24, color: '#6a2fb0' },
+	{ from: -22, color: '#6a44c0' },
+	{ from: -20, color: '#5c58cc' },
+	{ from: -18, color: '#4d6bd6' },
+	{ from: -16, color: '#3f7fdd' },
+	{ from: -14, color: '#3592e0' },
+	{ from: -12, color: '#33a4e0' },
+	{ from: -10, color: '#3fb4dd' },
+	{ from: -8, color: '#58c3dd' },
+	{ from: -6, color: '#77d0e0' },
+	{ from: -4, color: '#98dce6' },
+	{ from: -2, color: '#c4ecf4' },
+	{ from: 0, color: '#a6d96a' },
+	{ from: 2, color: '#c4e35f' },
+	{ from: 4, color: '#e2ea5a' },
+	{ from: 6, color: '#f6e05a' },
+	{ from: 8, color: '#f9cd4f' },
+	{ from: 10, color: '#f8b545' },
+	{ from: 12, color: '#f59c3d' },
+	{ from: 14, color: '#f08336' },
+	{ from: 16, color: '#e96b32' },
+	{ from: 18, color: '#dd5530' },
+	{ from: 20, color: '#cc3f2f' },
+	{ from: 22, color: '#b52d30' },
+	{ from: 24, color: '#9c1f33' },
+	{ from: 26, color: '#821637' },
+	{ from: 28, color: '#6a1037' },
+	{ from: 30, color: '#520b33' }
+];
+
+/** The cooling with height the temperature layer assumes, °C a metre (the server's too). */
+export const LAPSE_C_PER_M = 0.0065;
 
 /** Wind (gusts, or the ridge-level wind), lower bound in km/h; clear below 20. */
 export const WIND: RampStep[] = [
@@ -74,6 +116,20 @@ export function levelTick(m: number, units: UnitSystem): string {
 	if (m % 1000) return '';
 	if (units === 'metric') return `${m / 1000}k`;
 	return `${(mToFt(m) / 1000).toFixed(1).replace('.0', '')}k`;
+}
+
+/** Temperature key: a tick every 10 °C ("-10", "0", "10"; "14", "32", "50" in °F). */
+export function tempTick(c: number, units: UnitSystem): string {
+	if (c % 10) return '';
+	return String(Math.round(units === 'imperial' ? cToF(c) : c));
+}
+
+/**
+ * The temperature (°C) at a height, from the temperature taken to sea level (a point's
+ * `sea_c`) along the layer's cooling with height.
+ */
+export function tempAt(seaC: number, m: number, lapsePerKm = LAPSE_C_PER_M * 1000): number {
+	return seaC - (lapsePerKm * Math.max(0, m)) / 1000;
 }
 
 /** Wind key: "20" (km/h) or "12" (mph). */
@@ -132,7 +188,7 @@ const NONE: WeatherView = {
 /** Which layer of the index a weather choice shows. */
 export function layerName(weather: MapWeather, wind: MapWind): string | null {
 	if (weather === 'wind') return wind === 'ridge' ? 'ridge' : 'gust';
-	if (weather === 'snowlevel' || weather === 'clouds') return weather;
+	if (weather === 'snowlevel' || weather === 'clouds' || weather === 'temp') return weather;
 	if (weather === 'depth' || weather === 'snowfall') return weather;
 	return null;
 }
@@ -307,6 +363,9 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 	if (weather === 'snowlevel') {
 		return `Snow level: the height above sea level where falling snow turns to rain, from ${models}. The darkest band also means snow reaching the ground everywhere.`;
 	}
+	if (weather === 'temp') {
+		return `Temperature 2 m above the ground, from ${models}, moved from each model's smoothed ground to the real terrain at 6.5 °C a kilometre: colder on the ridges, warmer in the valleys. An estimate: cold air pooled in valleys (an inversion) isn't in it. Zoomed in, the terrain is coloured by height from the temperature at the map's centre.`;
+	}
 	return '';
 }
 
@@ -315,6 +374,7 @@ export const WEATHER_WORDS: Record<MapWeather, string> = {
 	radar: 'precipitation',
 	totals: 'snow totals',
 	snowlevel: 'the snow level',
+	temp: 'the temperature',
 	wind: 'the wind',
 	depth: 'snow on the ground',
 	snowfall: 'observed snowfall',
@@ -327,6 +387,7 @@ export const WEATHER_CHOICES: { id: MapWeather; label: string }[] = [
 	{ id: 'radar', label: 'Radar & forecast' },
 	{ id: 'totals', label: 'Snow total' },
 	{ id: 'snowlevel', label: 'Snow level' },
+	{ id: 'temp', label: 'Temperature' },
 	{ id: 'wind', label: 'Wind' },
 	{ id: 'depth', label: 'Snow depth' },
 	{ id: 'snowfall', label: 'Observed snow' },

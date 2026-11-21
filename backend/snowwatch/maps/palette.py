@@ -84,6 +84,43 @@ DEPTH: list[tuple[float, str]] = [
     (304.8, "#4b0f55"),
 ]
 
+# Temperature: lower bound in °C, a band every 2 °C; the first band also holds anything
+# colder, the last anything warmer. Cold runs violet to blue to ice, 0 °C turns to green,
+# warm runs yellow to red, so the freezing line stands out.
+TEMP: list[tuple[float, str]] = [
+    (-30, "#3b0f70"),
+    (-28, "#4a1486"),
+    (-26, "#5a1f9c"),
+    (-24, "#6a2fb0"),
+    (-22, "#6a44c0"),
+    (-20, "#5c58cc"),
+    (-18, "#4d6bd6"),
+    (-16, "#3f7fdd"),
+    (-14, "#3592e0"),
+    (-12, "#33a4e0"),
+    (-10, "#3fb4dd"),
+    (-8, "#58c3dd"),
+    (-6, "#77d0e0"),
+    (-4, "#98dce6"),
+    (-2, "#c4ecf4"),
+    (0, "#a6d96a"),
+    (2, "#c4e35f"),
+    (4, "#e2ea5a"),
+    (6, "#f6e05a"),
+    (8, "#f9cd4f"),
+    (10, "#f8b545"),
+    (12, "#f59c3d"),
+    (14, "#f08336"),
+    (16, "#e96b32"),
+    (18, "#dd5530"),
+    (20, "#cc3f2f"),
+    (22, "#b52d30"),
+    (24, "#9c1f33"),
+    (26, "#821637"),
+    (28, "#6a1037"),
+    (30, "#520b33"),
+]
+
 
 def hex_rgb(h: str) -> RGB:
     return int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
@@ -99,7 +136,7 @@ def ramp_color(ramp: list[tuple[float, str]], value: float) -> RGB | None:
 
 # Every colour a frame can hold: index 0 is transparent.
 PALETTE: list[RGB] = [(0, 0, 0)] + [
-    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH) for _, c in ramp
+    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP) for _, c in ramp
 ]
 
 # Precipitation type codes, as the compositing uses them.
@@ -189,7 +226,7 @@ def paint_ramp(values: np.ndarray, ramp: list[tuple[float, str]]) -> np.ndarray:
 def _ramp_offset(ramp: list[tuple[float, str]]) -> int:
     """Where a ramp's first colour sits in PALETTE (0 is transparent)."""
     at = 1
-    for r in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH):
+    for r in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP):
         if r is ramp:
             return at
         at += len(r)
