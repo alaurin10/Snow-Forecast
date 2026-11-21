@@ -7,6 +7,21 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Temperature on the map**, in the Weather choices beside Snow level: the forecast 2 m
+  temperature every 3 hours to 3½ days, then every 6 hours to 10 days, drawn over the whole
+  box so it shows zoomed out like the snow level. It is adjusted to the terrain: each
+  model's temperature is for its own smoothed ground (HRDPS and NBM 2.5 km, RDPS 10 km,
+  GDPS 15 km), so the worker takes it to sea level from that ground at 6.5 °C a km and
+  back up to the real ground's height under each pixel (Mapterhorn's elevation), giving
+  cold ridges and warm valleys and a freezing line that follows the mountains. Zoomed in
+  past 10, the terrain itself is coloured by height from the temperature at the map's
+  centre, ridge by ridge, as the rain/snow line is. The key runs from −30 to 30 °C in
+  2 °C bands, turning from ice blue to green at 0 °C. Tapping a spot gives its
+  temperature at that spot's own height now and its range over the next three days. An
+  estimate: cold air pooled in valleys (an inversion) isn't in it. On the server: about
+  50 more frames per layers run (~2 MB of NBM temperature each, cached), and the model
+  ground heights and a grid of elevation, fetched once and kept. The Layers sheet's
+  weather tiles now sit five across, so the nine choices still take two rows.
 - **`config/webcams.yaml` applies itself.** The worker reads it at start (so after every
   update) and every 5 minutes, and gives each location whose entry is new or changed the
   file's webcams, then refreshes it. Merging a webcam change is all it takes; no command

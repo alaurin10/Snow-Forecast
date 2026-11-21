@@ -18,7 +18,8 @@ snow stations measured, and the official avalanche rating.
 - **Uncertainty you can see**: ensemble ranges, chance-of-snow curves, model
   agreement, outliers flagged, and how the forecast changed over the last runs.
 - **Overview, calendar and map**: where and when the snow is, storm cycles, a
-  radar and forecast precipitation map with ski runs and 3D terrain.
+  radar and forecast precipitation map with ski runs and 3D terrain, and forecast
+  snow level, wind and temperature (adjusted to the height of the terrain) layers.
 - **Backcountry**: avalanche danger exactly as published (hidden once expired), with
   each problem's aspects and elevations drawn; a week of "avalanche weather" day by day
   (new snow, drifting, rain, warming, and how hard the weather pushes on the snowpack,

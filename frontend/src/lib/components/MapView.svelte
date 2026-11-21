@@ -168,6 +168,7 @@
 	import { useOwnLabels } from '../map/layers/labels';
 	import { placesProtocol } from '../map/placeTiles';
 	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
+	import { setTempDrape, TEMPDRAPE_ZOOM } from '../map/layers/tempdrape';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
@@ -1484,6 +1485,7 @@
 		{ id: 'radar', label: 'Radar', name: 'Radar & forecast' },
 		{ id: 'totals', label: 'Snow total', name: 'Snow total' },
 		{ id: 'snowlevel', label: 'Snow level', name: 'Snow level' },
+		{ id: 'temp', label: 'Temp', name: 'Temperature' },
 		{ id: 'wind', label: 'Wind', name: 'Wind' },
 		{ id: 'depth', label: 'Depth', name: 'Snow depth' },
 		{ id: 'snowfall', label: 'Observed', name: 'Observed snow' },
@@ -1625,9 +1627,11 @@
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
 	/** Where the picture stops being drawn: where it has faded out, or where the snow
-	 *  total's terrain-adjusted tiles take over. */
+	 *  total's terrain-adjusted tiles or the temperature's drape take over. */
 	function pictureMaxZoom(): number {
-		return snowTiles ? SNOWTILES_ZOOM : goneAt(weatherOpacity(weather));
+		if (snowTiles) return SNOWTILES_ZOOM;
+		if (centreSeaTemp != null) return TEMPDRAPE_ZOOM;
+		return goneAt(weatherOpacity(weather));
 	}
 	$effect(() => {
 		const o = weatherOpacity(weather);
@@ -2081,13 +2085,14 @@
 		});
 	});
 
-	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
-	/** The map's forecast at the centre, for the snow level the drape uses. */
+	// ---- The rain/snow line and the temperature draped on the terrain (zoomed in) ------
+	/** The map's forecast at the centre, for the snow level or temperature a drape uses. */
 	let levelPoint = $state.raw<PointOut | null>(null);
 	const lineOn = $derived(weather === 'snowlevel' && zoom >= SNOWLINE_ZOOM - 0.5 && !offline);
+	const tempOn = $derived(weather === 'temp' && zoom >= TEMPDRAPE_ZOOM - 0.5 && !offline);
 	$effect(() => {
 		const c = centre;
-		if (!lineOn) return;
+		if (!lineOn && !tempOn) return;
 		const have = untrack(() => levelPoint);
 		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < 3) return;
 		let gone = false;
@@ -2105,6 +2110,18 @@
 	$effect(() => {
 		const level = centreLevel;
 		if (ready && map && radar) setSnowLine(map, level, PrecipLayer.ID);
+	});
+	/** The temperature at sea level at the map's centre for the frame on the slider, and
+	 *  the cooling with height to bring it to each spot's height. */
+	const centreSeaTemp = $derived.by(() => {
+		if (!tempOn || !levelPoint || !current) return null;
+		const t = current.t;
+		return levelPoint.temp?.find((x) => x.t === t)?.sea_c ?? null;
+	});
+	$effect(() => {
+		const seaC = centreSeaTemp;
+		const lapse = (levelPoint?.temp_lapse_c_per_km ?? 6.5) / 1000;
+		if (ready && map && radar) setTempDrape(map, seaC, PrecipLayer.ID, lapse);
 	});
 
 	// Stop playing when the app goes to the background. Back in front, draw the frame on

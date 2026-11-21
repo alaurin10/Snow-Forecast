@@ -43,7 +43,7 @@ backend/snowwatch/
               render.py (frames, index, pruning) totals.py (snow totals to 10 days)
               bins.py terrain_totals.py (snow totals every 250 m of elevation)
               tiles_render.py (those painted on the terrain as tiles, by the api)
-              layers.py (snow level, wind, snow on the ground, observed snowfall,
+              layers.py (snow level, temperature, wind, snow on the ground, observed snowfall,
               clouds) point.py (tap-for-numbers from the pictures' probes)
               sat.py (choosing recent Sentinel-2 views per location, daily VIIRS)
               satrender.py (drawing those views and cutting them into tiles)

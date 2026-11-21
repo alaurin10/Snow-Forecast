@@ -9,7 +9,9 @@ render.py) and the snow totals as numbers (`data/maps/totals/<window>h.npy`, eve
   radar and the nowcast from the wide loop (`data/precip/wide/`, docs/RADAR-PLAN.md M6);
 - snow totals per window, and per elevation from the terrain-adjusted grids
   (`data/maps/totals/bins-<id>.npy`, see bins.py), snow level, gusts and the ridge-level
-  wind with its direction through the forecast, snow on the ground, and observed snowfall;
+  wind with its direction through the forecast, the temperature (at the ground the
+  picture is drawn for, and at sea level, to take to any height), snow on the ground, and
+  observed snowfall;
 - loading roses for the next 24 and 72 hours, as a location's snapshot has them: the
   ridge wind's direction weighted by the snow falling at the time and that wind's speed,
   for the map's wind-effect layer where no saved location is near.
@@ -66,6 +68,14 @@ class PointWind(BaseModel):
     dir: float | None  # where the wind blows from, degrees
 
 
+class PointTemp(BaseModel):
+    t: int
+    # °C at the mean ground under the picture's pixel, and taken to sea level along
+    # PointOut.temp_lapse_c_per_km (so at a height z m: sea_c - lapse * z / 1000).
+    c: float | None
+    sea_c: float | None
+
+
 class PointTotal(BaseModel):
     window: int
     hours: int
@@ -105,6 +115,10 @@ class PointOut(BaseModel):
     gust: list[PointValue]  # km/h
     ridge: list[PointWind]
     depth: PointDepth | None
+    # The temperature through the forecast (empty before the layer is drawn).
+    temp: list[PointTemp] = []
+    # The cooling with height the temperature layer assumes (°C a km).
+    temp_lapse_c_per_km: float = round(bins.LAPSE_C_PER_M * 1000, 2)
     observed: list[PointObserved]
     roses: list[RoseOut]
     min_snow_cm: float
@@ -283,6 +297,15 @@ def probe(
         kmh = _num(cell[0], 0) if cell is not None else None
         d = _num(cell[1], 0) if cell is not None and cell.size > 1 else None
         out.ridge.append(PointWind(t=f["t"], kmh=kmh, dir=d))
+    for f in frames("temp"):
+        cell = probes.cell(f["file"])
+        out.temp.append(
+            PointTemp(
+                t=f["t"],
+                c=_num(cell[0]) if cell is not None else None,
+                sea_c=_num(cell[1]) if cell is not None and cell.size > 1 else None,
+            )
+        )
     for f in frames("depth")[-1:]:
         cell = probes.cell(f["file"])
         out.depth = PointDepth(

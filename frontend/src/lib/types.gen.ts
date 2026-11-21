@@ -385,6 +385,8 @@ export interface PointOut {
 	ridge: PointWind[];
 	roses: RoseOut[];
 	snow_level: PointValue[];
+	temp?: PointTemp[];
+	temp_lapse_c_per_km?: number;
 	totals: PointTotal[];
 	wide?: boolean;
 }
@@ -454,6 +456,15 @@ export interface RoseOut {
 	snow_cm: number;
 	wind_from: string | null;
 	window: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "PointTemp".
+ */
+export interface PointTemp {
+	c: number | null;
+	sea_c: number | null;
+	t: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

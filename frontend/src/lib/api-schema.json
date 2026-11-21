@@ -3625,6 +3625,17 @@
           },
           "type": "array"
         },
+        "temp": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PointTemp"
+          },
+          "type": "array"
+        },
+        "temp_lapse_c_per_km": {
+          "default": 6.5,
+          "type": "number"
+        },
         "totals": {
           "items": {
             "$ref": "#/$defs/PointTotal"
@@ -3716,6 +3727,40 @@
         "high"
       ],
       "title": "PointRate",
+      "type": "object"
+    },
+    "PointTemp": {
+      "properties": {
+        "c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sea_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t",
+        "c",
+        "sea_c"
+      ],
+      "title": "PointTemp",
       "type": "object"
     },
     "PointTotal": {
