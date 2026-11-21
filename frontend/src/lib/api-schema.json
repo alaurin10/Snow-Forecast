@@ -739,19 +739,11 @@
         "layers": {
           "items": {
             "items": {
+              "items": {
+                "type": "integer"
+              },
               "maxItems": 3,
               "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "integer"
-                }
-              ],
               "type": "array"
             },
             "type": "array"
@@ -2225,6 +2217,63 @@
         "avy_zones"
       ],
       "title": "LookupStatus",
+      "type": "object"
+    },
+    "MapCloudsLocation": {
+      "description": "A location's cloud layers hour by hour, placed at its middle, with the heights its\nbands span (so the map can say whether the summit is above the cloud).",
+      "properties": {
+        "base_m": {
+          "type": "number"
+        },
+        "clouds": {
+          "$ref": "#/$defs/CloudsOut"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summit_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "lat",
+        "lon",
+        "base_m",
+        "summit_m",
+        "generated_at",
+        "clouds"
+      ],
+      "title": "MapCloudsLocation",
+      "type": "object"
+    },
+    "MapCloudsOut": {
+      "description": "Each location's cloud layers for the map's 3D clouds: an approximation.",
+      "properties": {
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/MapCloudsLocation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "locations"
+      ],
+      "title": "MapCloudsOut",
       "type": "object"
     },
     "MapStation": {
@@ -6137,6 +6186,9 @@
     "lookups": {
       "$ref": "#/$defs/LookupStatus"
     },
+    "map_clouds": {
+      "$ref": "#/$defs/MapCloudsOut"
+    },
     "map_concern": {
       "$ref": "#/$defs/ConcernOut"
     },
@@ -6212,6 +6264,7 @@
     "locations",
     "overview",
     "map_wind",
+    "map_clouds",
     "map_concern",
     "avalanche_zones",
     "sat",

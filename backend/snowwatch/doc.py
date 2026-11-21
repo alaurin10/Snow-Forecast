@@ -10,6 +10,8 @@ field) to keep the gzipped document small.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field, field_validator
 
 from snowwatch.models import Webcam
@@ -347,7 +349,7 @@ class CloudsOut(BaseModel):
     start: int  # the first hour's start (Unix seconds)
     step_h: int = 1
     # Each hour's layers, lowest first: [base m, top m, cover %], heights above sea level.
-    layers: list[list[tuple[int, int, int]]]
+    layers: list[list[Annotated[list[int], Field(min_length=3, max_length=3)]]]
     cover: list[int | None]  # each hour's layers together as one cover (%)
 
 

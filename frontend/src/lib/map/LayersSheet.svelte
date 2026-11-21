@@ -31,10 +31,20 @@
 		concern?: boolean;
 		/** The owner has supplied ATES ratings. */
 		ates?: boolean;
+		/** The browser can draw the 3D clouds (WebGL 2). */
+		clouds3d?: boolean;
 		onclose: () => void;
 	}
 
-	let { analysis, contours, offline, concern = false, ates = false, onclose }: Props = $props();
+	let {
+		analysis,
+		contours,
+		offline,
+		concern = false,
+		ates = false,
+		clouds3d = true,
+		onclose
+	}: Props = $props();
 
 	interface Choice<T> {
 		id: T;
@@ -208,6 +218,15 @@
 			about: 'Contours over imagery; the topo map draws its own.',
 			disabled: !contours,
 			why: 'Contours couldn’t load'
+		},
+		{
+			id: 'clouds3d',
+			label: '3D clouds',
+			name: 'Clouds at their heights (3D)',
+			about:
+				'Clouds floating at their forecast heights around your locations, for the time on the weather slider (or now): clear, broken or a full deck. Best in 3D; a rough picture, not a measurement.',
+			disabled: !clouds3d,
+			why: 'Needs a newer browser'
 		}
 	]);
 	const SHADES = ['off', 'light', 'strong'] as const;

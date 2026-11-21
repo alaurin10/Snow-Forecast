@@ -274,6 +274,7 @@ class ApiTypes(BaseModel):
     locations: list[LocationSummary]
     overview: list[OverviewRow]
     map_wind: MapWindOut
+    map_clouds: MapCloudsOut
     map_concern: ConcernOut
     avalanche_zones: ZonesOut
     sat: SatOut

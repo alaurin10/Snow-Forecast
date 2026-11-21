@@ -8,6 +8,7 @@ import type {
 	Location,
 	LocationSummary,
 	LookupStatus,
+	MapCloudsOut,
 	MapWindOut,
 	Me,
 	MetaOut,
@@ -75,6 +76,8 @@ export function getOverview(): Promise<OverviewRow[]> {
 }
 /** Every location's loading roses, for the map's wind-effect layer. */
 export const getMapWind = () => get<MapWindOut>('/api/map/wind');
+/** Every location's cloud layers, for the map's 3D clouds. */
+export const getMapClouds = () => get<MapCloudsOut>('/api/map/clouds');
 export const getRuns = (limit = 20) => get<RunOut[]>(`/api/runs?limit=${limit}`);
 
 export interface Health {

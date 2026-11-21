@@ -15,6 +15,7 @@ export interface ApiTypes {
 	job: JobOut;
 	locations: LocationSummary[];
 	lookups: LookupStatus;
+	map_clouds: MapCloudsOut;
 	map_concern: ConcernOut;
 	map_point: PointOut;
 	map_stations: StationsOut;
@@ -338,6 +339,46 @@ export interface LookupStatus {
 	avy_zones: number;
 	ski_areas: number;
 	snotel_stations: number;
+}
+/**
+ * Each location's cloud layers for the map's 3D clouds: an approximation.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MapCloudsOut".
+ */
+export interface MapCloudsOut {
+	locations: MapCloudsLocation[];
+}
+/**
+ * A location's cloud layers hour by hour, placed at its middle, with the heights its
+ * bands span (so the map can say whether the summit is above the cloud).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "MapCloudsLocation".
+ */
+export interface MapCloudsLocation {
+	base_m: number;
+	clouds: CloudsOut;
+	generated_at: string;
+	id: string;
+	lat: number;
+	lon: number;
+	name: string;
+	summit_m: number;
+}
+/**
+ * The cloud layers above a location hour by hour, from one model's cloud cover at each
+ * pressure level (analysis/clouds.py): an approximation, for the map's 3D clouds.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CloudsOut".
+ */
+export interface CloudsOut {
+	cover: (number | null)[];
+	layers: [number, number, number][][];
+	model: string;
+	start: number;
+	step_h?: number;
 }
 /**
  * The experimental terrain concern index's settings (config `terrain:`), for every
@@ -1202,20 +1243,6 @@ export interface WindowOut {
 	snow_cm: number | null;
 	snow_cm_raw: number | null;
 	snow_cm_slr: number | null;
-}
-/**
- * The cloud layers above a location hour by hour, from one model's cloud cover at each
- * pressure level (analysis/clouds.py): an approximation, for the map's 3D clouds.
- *
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "CloudsOut".
- */
-export interface CloudsOut {
-	cover: (number | null)[];
-	layers: [unknown, unknown, unknown][][];
-	model: string;
-	start: number;
-	step_h?: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

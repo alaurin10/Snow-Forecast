@@ -31,6 +31,7 @@
 		getAvalancheZones,
 		getConcern,
 		getMapPoint,
+		getMapClouds,
 		getMapWind,
 		getReports,
 		getSat,
@@ -133,6 +134,8 @@
 	} from '../map/layers/terrain';
 	import { TotalLayer } from '../map/precip/totallayer';
 	import { CloudLayer } from '../map/precip/cloudlayer';
+	import { Clouds3dLayer } from '../map/clouds3d/layer';
+	import type { CloudSite } from '../map/clouds3d/puffs';
 	import {
 		elevationTile,
 		jobsClient,
@@ -1759,6 +1762,42 @@
 		const f = glCloud ? current!.data! : null;
 		if (glClouds) cloudLayer?.setFrame(f);
 	});
+	// ---- 3D clouds (Show → 3D clouds): puffs at their heights around each location -------
+	const clouds3dOn = $derived(radar && glOk && prefs.mapFeatures.has('clouds3d'));
+	let cloudSites = $state.raw<CloudSite[]>([]);
+	let clouds3d: Clouds3dLayer | null = null;
+	// The locations' cloud layers: when switched on, and again with each new timeline (the
+	// forecast runs every 3 hours).
+	$effect(() => {
+		void timeline;
+		if (!clouds3dOn) return;
+		let gone = false;
+		getMapClouds()
+			.then((r) => {
+				if (!gone) cloudSites = r.locations.map((l) => ({ ...l, clouds: l.clouds }));
+			})
+			.catch((e) => console.error('3D clouds', e));
+		return () => (gone = true);
+	});
+	/** The time they show: the weather slider's when it plays through time, else now. */
+	const cloudTime = $derived(looping && current ? current.valid : now / 1000);
+	$effect(() => {
+		const on = clouds3dOn;
+		if (!ready || !map) return;
+		if (!on) {
+			clouds3d?.remove();
+			clouds3d = null;
+			return;
+		}
+		clouds3d ??= new Clouds3dLayer(map);
+		clouds3d.setSites(cloudSites);
+		clouds3d.setTime(untrack(() => cloudTime));
+	});
+	$effect(() => {
+		const t = cloudTime;
+		if (clouds3dOn) clouds3d?.setTime(t);
+	});
+
 	/** Zoomed in past where the layer has faded out. Smooth fields (totals, snow level, wind,
 	 *  snow on the ground) and the clouds drawn from numbers stay on further in. */
 	const tooClose = $derived(
@@ -2764,6 +2803,7 @@
 				{offline}
 				concern={!!concernCfg}
 				ates={!!atesData}
+				clouds3d={glOk}
 				onclose={() => (panel = 'none')}
 			/>
 		{/if}
