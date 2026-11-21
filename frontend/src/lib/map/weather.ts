@@ -148,7 +148,8 @@ export function asFrame(f: LayerFrame): Frame {
 		kind: past ? 'radar' : 'forecast',
 		span_h: 0,
 		src: f.src,
-		valid: f.t
+		valid: f.t,
+		...(f.data ? { data: f.data } : {})
 	};
 }
 
@@ -290,7 +291,10 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 				north && south && north !== south
 					? `${north} in Canada, ${south} in the US`
 					: north || south;
-			return `Forecast cloud cover from ${from}: the thicker the cloud, the greyer.`;
+			const heights = f.data
+				? " Zoomed in, the cloud is drawn at its height where NOAA's National Blend of Models gives one (the US and southern Canada, about 3½ days ahead): ground inside the cloud is fogged, summits above it are clear. An estimate."
+				: '';
+			return `Forecast cloud cover from ${from}: the thicker the cloud, the greyer.${heights}`;
 		}
 		return 'GOES-West satellite, GeoColor: true colour by day, infrared with city lights by night (NOAA, CIRA; via NASA GIBS). After it, the forecast cloud cover.';
 	}

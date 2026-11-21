@@ -159,6 +159,9 @@ export interface LayerFrame {
 	src: { north?: string; south?: string };
 	/** Each source → its run start or analysis time (Unix seconds). */
 	runs: Record<string, number>;
+	/** The frame as numbers (forecast clouds with their heights: ../map/precip/clouds.ts),
+	 *  the file under /api/precip/; absent when there are none. */
+	data?: string;
 }
 
 /** The index as the server writes it. Version 1 frames lack `kind`, `span_h` and `src`;
@@ -257,7 +260,8 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 				kind: f.kind === 'observed' ? ('observed' as const) : ('forecast' as const),
 				hours: typeof f.hours === 'number' ? f.hours : 0,
 				src: f.src ?? {},
-				runs: f.runs ?? {}
+				runs: f.runs ?? {},
+				...(typeof f.data === 'string' && f.data ? { data: f.data } : {})
 			}))
 			.sort((a, b) => a.hours - b.hours || a.t - b.t);
 	}
