@@ -63,6 +63,9 @@ describe('the snow total layer', () => {
 		expect(bracketHours(12, hours)).toEqual({ a: 1, b: 2, f: 0 });
 		expect(bracketHours(100, hours)).toEqual({ a: 3, b: 3, f: 0 });
 		expect(bracketHours(5, [])).toEqual({ a: -1, b: -1, f: 0 });
+		// A value at an instant (the temperature) shows the first step before it, not nothing.
+		expect(bracketHours(3, hours, false)).toEqual({ a: 0, b: 0, f: 0 });
+		expect(bracketHours(18, hours, false)).toEqual({ a: 1, b: 2, f: 0.5 });
 	});
 
 	it('adjusts to terrain from zoom 8, faded in over a zoom level', () => {

@@ -11,6 +11,9 @@
 // difference from the row above.
 
 export const CM_MIN = 0.2;
+/** Temperature frames (the same container): codes 1..255 for −70 °C every 0.5 °C. */
+export const TEMP_MIN = -70;
+export const TEMP_STEP = 0.5;
 export const CM_MAX = 1000;
 export const CM_CODES = 254;
 const SPAN = Math.log(CM_MAX / CM_MIN);

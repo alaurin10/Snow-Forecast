@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from snowwatch.maps import totaldata
 from snowwatch.maps.bins import LAPSE_C_PER_M
 from snowwatch.maps.blend import Layer, feather, feather_px, mosaic, north_weight
 from snowwatch.maps.elevation import region_elevation
@@ -121,7 +122,7 @@ GROUND = {
 GROUND_RANGE = (-500.0, 9000.0)
 TEMP_RANGE_C = (-80.0, 60.0)
 KELVIN = 273.15
-TEMP_DRAWING = 1  # in each temperature frame's key: change it to draw them again
+TEMP_DRAWING = 2  # in each temperature frame's key: change it to draw them again
 RIDGE_SPEED = "RDPS_10km_WindSpeed_700mb"  # m/s
 RIDGE_DIR = "RDPS_10km_WindDir_700mb"  # degrees, where the wind blows from
 CALDAS = "CaLDAS-NSRPS_2.5km_SnowDepth"  # metres
@@ -549,8 +550,10 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
 # for Canada's models; for NBM, whose 2.5 km grid is already fitted to the terrain, the
 # real ground's mean under each pixel). Those are blended across the border like the other
 # layers, then brought back up to the real ground (elevation.py) along the same line. The
-# probe keeps both the temperature at the ground and at sea level, so the map's drape and
-# tap-for-numbers can give it at any height. A typical cooling is an estimate: a valley
+# probe keeps both the temperature at the ground and at sea level, so tap-for-numbers can
+# give it at any height; and each frame is also written as numbers (totaldata.py), which
+# the map colours itself, blending between frames and, zoomed in, giving each pixel the
+# temperature at its own elevation. A typical cooling is an estimate: a valley
 # inversion (cold air pooled under warm) isn't in it.
 
 
@@ -636,7 +639,11 @@ def temperature(r: Renderer, region: Region, old: list[LayerFrame]) -> list[Laye
             # The first band holds anything colder (below a ramp's first step is clear).
             shown = np.where(np.isfinite(here), np.maximum(here, TEMP[0][0]), np.nan)
             name = r._save_ramp(shown, TEMP, f"tt{t}", np.stack([here, sea]))
-            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs)
+            # The same as numbers, for the map to colour smoothly and adjust to the terrain.
+            data = totaldata.encode_temp(here, sea, LAPSE_C_PER_M)
+            numbers = f"td{t}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+            r._store(numbers, data)
+            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs, numbers)
 
         return go
 

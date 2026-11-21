@@ -1,9 +1,13 @@
-// The Temperature layer: its key, bringing a sea-level temperature to a height, and the
-// drape that colours the terrain by height zoomed in.
+// The Temperature layer: its key, bringing a sea-level temperature to a height, its
+// continuous slider, and its smooth colours.
 import { describe, expect, it } from 'vitest';
-import { tempDrapeColors } from './layers/tempdrape';
+import { tempColor, tempLut } from './precip/totalgl';
 import {
+	hoursAt,
 	layerName,
+	posAt,
+	tempLabel,
+	tempSlider,
 	layerSource,
 	TEMP,
 	tempAt,
@@ -56,26 +60,61 @@ describe('temperature layer', () => {
 	});
 });
 
-describe('temperature drape', () => {
-	it("colours each height on the layer's bands", () => {
-		const e = tempDrapeColors(3) as unknown as (string | number)[];
-		expect(e.slice(0, 3)).toEqual(['interpolate', ['linear'], ['elevation']]);
-		const stops = e.slice(3);
-		// Sea level: 3 °C is in the 2 °C band.
-		expect(stops.slice(0, 2)).toEqual([0, TEMP.find((s) => s.from === 2)!.color]);
-		// 0 °C is reached at 3 / 0.0065 ≈ 461.5 m: green below, ice blue above.
-		const ice = stops.indexOf(TEMP.find((s) => s.from === -2)!.color);
-		expect(stops[ice - 1]).toBeCloseTo(3 / 0.0065, 1);
-		expect(stops[ice - 2]).toBe(TEMP.find((s) => s.from === 0)!.color);
-		expect(stops[ice - 3]).toBeCloseTo(3 / 0.0065 - 0.5, 1);
-		// Heights only rise, and the top holds the coldest band reached.
-		const heights = stops.filter((_, i) => i % 2 === 0) as number[];
-		expect(heights).toEqual([...heights].sort((a, b) => a - b));
-		expect(stops[stops.length - 1]).toBe(TEMP[0].color);
+describe('temperature slider', () => {
+	const H = 3600;
+	const now = 1_800_000_000;
+	// Every 3 h for 84 h, then every 6 h to 240 h, the first an hour ahead.
+	const hours = [
+		...Array.from({ length: 28 }, (_, i) => 1 + 3 * i),
+		...Array.from({ length: 26 }, (_, i) => 88 + 6 * i)
+	];
+	const frames = hours.map((h) => ({ t: now + h * H }));
+
+	it('marks the first days finely and the far ones coarsely', () => {
+		const s = tempSlider(frames, now)!;
+		expect(s.t0).toBe(now + H);
+		expect(s.ticks).toEqual(['Now', '12h', '1d', '2d', '3d', '5d', '7d', '10d']);
+		// Hours from the first frame (an hour ahead of now).
+		expect(s.marks).toEqual([0, 11, 23, 47, 71, 119, 167, 237]);
+		expect(s.hours[0]).toBe(0);
+		// Evenly spaced marks: the first day takes two of seven stretches of the slider.
+		expect(posAt(23, s.marks)).toBe(2);
+		expect(hoursAt(6.5, s.marks)).toBeCloseTo(202);
+		expect(tempSlider(frames.slice(0, 1), now)).toBeNull();
 	});
 
-	it('is one colour where no band edge is within reach', () => {
-		const e = tempDrapeColors(-40) as unknown as (string | number)[];
-		expect(e.slice(3)).toEqual([0, TEMP[0].color, 9000, TEMP[0].color]);
+	it('says when a time on the slider is', () => {
+		const l = tempLabel(now + 26 * H + 1300, now * 1000);
+		expect(l.rel).toBe('forecast · in 26 h');
+		expect(l.when).not.toMatch(/:/); // to the hour
+	});
+});
+
+describe('temperature colours', () => {
+	const color = (c: number) => tempColor(c);
+	const hex = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+
+	it("run smoothly between the key's colours", () => {
+		// Each band's colour sits at its middle; between two middles, part way.
+		expect(color(5)).toEqual(hex(TEMP.find((s) => s.from === 4)!.color));
+		const mid = color(6);
+		const a = hex(TEMP.find((s) => s.from === 4)!.color);
+		const b = hex(TEMP.find((s) => s.from === 6)!.color);
+		mid.forEach((v, k) => expect(v).toBe(Math.round((a[k] + b[k]) / 2)));
+	});
+
+	it('break sharply at 0 °C, and hold at the ends', () => {
+		expect(color(-0.01)).toEqual(hex(TEMP.find((s) => s.from === -2)!.color));
+		expect(color(0)).toEqual(hex(TEMP.find((s) => s.from === 0)!.color));
+		expect(color(-60)).toEqual(hex(TEMP[0].color));
+		expect(color(45)).toEqual(hex(TEMP[TEMP.length - 1].color));
+	});
+
+	it('fill the codes the numbers use', () => {
+		const lut = tempLut();
+		expect(Array.from(lut.slice(0, 4))).toEqual([0, 0, 0, 0]); // no data: clear
+		// Code 141 is 0 °C (−70 + 140 × 0.5).
+		expect(Array.from(lut.slice(141 * 4, 141 * 4 + 3))).toEqual(color(0));
+		expect(lut[255 * 4 + 3]).toBe(255);
 	});
 });

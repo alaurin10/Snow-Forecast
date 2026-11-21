@@ -49,7 +49,15 @@
 	} from '../types.gen';
 	import { prefs, type MapBase, type MapOverlay, type MapWeather } from '../prefs.svelte';
 	import { tick, untrack } from 'svelte';
-	import { layerLabel, layerSource, WEATHER_WORDS, weatherView } from '../map/weather';
+	import {
+		hoursAt,
+		layerLabel,
+		posAt as markPosAt,
+		layerSource,
+		tempSlider,
+		WEATHER_WORDS,
+		weatherView
+	} from '../map/weather';
 	import { viewport } from '../viewport.svelte';
 	import { RAIL_FOLDED_DROP, RAIL_FOLDED_INSET, RAIL_OPEN_INSET, railUi } from '../railui.svelte';
 	import {
@@ -131,6 +139,7 @@
 		setupTerrain
 	} from '../map/layers/terrain';
 	import { TotalLayer } from '../map/precip/totallayer';
+	import { TEMP_SCALE } from '../map/precip/totalgl';
 	import {
 		elevationTile,
 		jobsClient,
@@ -168,7 +177,6 @@
 	import { useOwnLabels } from '../map/layers/labels';
 	import { placesProtocol } from '../map/placeTiles';
 	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
-	import { setTempDrape, TEMPDRAPE_ZOOM } from '../map/layers/tempdrape';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
@@ -1614,6 +1622,26 @@
 			totalTick++;
 		});
 	}
+	// ---- The temperature, drawn from numbers the same way (TotalLayer, TEMP_SCALE) ---------
+	/** The temperature is drawn that way: the server lists each frame's numbers. */
+	const glTemp = $derived(
+		glOk && weather === 'temp' && on && count > 1 && frames.every((f) => !!f.data)
+	);
+	/** Its continuous slider: the frames' hours and the marks (fine near, coarse far). */
+	const tempScale = $derived(glTemp ? tempSlider(frames, now / 1000) : null);
+	/** Where that slider is: hours from the first frame. */
+	let tempHours = $state(0);
+	let tempLayer: TotalLayer | null = null;
+	let tempTick = $state(0);
+	let tempNoted = false;
+	function tempChanged() {
+		if (tempNoted) return;
+		tempNoted = true;
+		queueMicrotask(() => {
+			tempNoted = false;
+			tempTick++;
+		});
+	}
 	const waiting = $derived.by(() => {
 		if (glRadar) return radarWaiting;
 		if (glTotals) {
@@ -1621,17 +1649,20 @@
 			void totalHours;
 			return !!totalLayer?.waiting;
 		}
+		if (glTemp) {
+			void tempTick;
+			void tempHours;
+			return !!tempLayer?.waiting;
+		}
 		return (!!current && shown !== current.file) || (!!pick && shown !== pick.file);
 	});
 
 	const store = new FrameStore();
 	let overlay: PrecipLayer | null = null;
 	/** Where the picture stops being drawn: where it has faded out, or where the snow
-	 *  total's terrain-adjusted tiles or the temperature's drape take over. */
+	 *  total's terrain-adjusted tiles take over. */
 	function pictureMaxZoom(): number {
-		if (snowTiles) return SNOWTILES_ZOOM;
-		if (centreSeaTemp != null) return TEMPDRAPE_ZOOM;
-		return goneAt(weatherOpacity(weather));
+		return snowTiles ? SNOWTILES_ZOOM : goneAt(weatherOpacity(weather));
 	}
 	$effect(() => {
 		const o = weatherOpacity(weather);
@@ -1696,6 +1727,91 @@
 			tl.steps.steps.map((x) => ({ file: x.data, url: dataUrl(x), hours: x.hours }))
 		);
 		totalLayer.setPosition(untrack(() => totalHours));
+	});
+	$effect(() => {
+		const use = glTemp;
+		const tl = timeline;
+		const sc = tempScale;
+		const list = frames;
+		if (!ready || !map || !tl) return;
+		if (!use || !sc) {
+			tempLayer?.remove();
+			tempLayer = null;
+			return;
+		}
+		const o = weatherOpacity('temp');
+		tempLayer ??= new TotalLayer(map, {
+			id: 'temperature',
+			scale: TEMP_SCALE,
+			fromNothing: false,
+			bounds: tl.bounds,
+			width: tl.width,
+			height: tl.height,
+			beforeId: PRECIP_BEFORE,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			// Zoomed in, the temperature at each pixel's elevation, from the terrain worker's tiles.
+			elevation: analysis ? elevationTile : undefined,
+			onChange: tempChanged
+		});
+		tempLayer.setSteps(
+			list.map((f, i) => ({ file: f.data!, url: dataUrl(f), hours: sc.hours[i] }))
+		);
+		tempLayer.setPosition(untrack(() => tempHours));
+	});
+	$effect(() => {
+		const h = tempHours;
+		const sc = tempScale;
+		if (!glTemp || !sc) return;
+		tempLayer?.setPosition(h);
+		// The nearest frame stands for the slider elsewhere (its sources, tap-for-numbers).
+		let near = 0;
+		sc.hours.forEach((x, i) => {
+			if (Math.abs(x - h) < Math.abs(sc.hours[near] - h)) near = i;
+		});
+		if (untrack(() => frame) !== near) frame = near;
+	});
+	/** Playing, each stretch of the temperature slider between two marks takes this long. */
+	const TEMP_MARK_MS = 1800;
+	// Play the temperature as one movement along its slider: as long for each stretch
+	// between marks, so the first days pass slowly and the far days quickly.
+	$effect(() => {
+		const sc = tempScale;
+		if (!ready || !playing || !glTemp || !sc) return;
+		const last = sc.marks.length - 1;
+		let p = markPosAt(
+			untrack(() => tempHours),
+			sc.marks
+		);
+		if (p >= last - 1e-3) p = 0;
+		let before = performance.now();
+		let hold = 300;
+		let loops = 0;
+		let stalled = 0;
+		let raf = requestAnimationFrame(function tick(t: number) {
+			raf = requestAnimationFrame(tick);
+			const dt = Math.min(100, t - before);
+			before = t;
+			if (hold > 0) return void (hold -= dt);
+			if (p >= last) {
+				// A few loops, then rest at the start.
+				if (++loops >= 3) {
+					playing = false;
+					tempHours = 0;
+					return;
+				}
+				p = 0;
+				tempHours = 0;
+				hold = 500;
+				return;
+			}
+			if (tempLayer?.waiting && stalled < 3000) return void (stalled += dt);
+			stalled = 0;
+			p = Math.min(last, p + dt / TEMP_MARK_MS);
+			tempHours = hoursAt(p, sc.marks);
+			if (p >= last) hold = 1200;
+		});
+		return () => cancelAnimationFrame(raf);
 	});
 	$effect(() => {
 		const h = totalHours;
@@ -1827,8 +1943,8 @@
 			shown = null;
 			return;
 		}
-		if (glRadar || glTotals) {
-			// The radar or snow total layer draws it; the picture layers stand empty.
+		if (glRadar || glTotals || glTemp) {
+			// The radar, snow total or temperature layer draws it; the pictures stand empty.
 			++showToken;
 			if (overlay?.showing) overlay.draw(null, null, 0);
 			shown = want.file;
@@ -1976,7 +2092,7 @@
 	// Play: step when the next frame is on hand (or after a short wait), quicker through
 	// observations, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || !looping || count < 2 || glRadar) return;
+		if (!ready || !playing || !looping || count < 2 || glRadar || glTemp) return;
 		let hold = 0;
 		let waits = 0;
 		let loops = 0;
@@ -2072,6 +2188,10 @@
 			void totalHours;
 			return !!totalLayer?.adjusted(zoom);
 		}
+		if (glTemp) {
+			void tempTick;
+			return !!tempLayer?.adjusted(zoom);
+		}
 		return !!snowTilesUrl(snowTiles ? pick : undefined, zoom);
 	});
 	$effect(() => {
@@ -2085,14 +2205,13 @@
 		});
 	});
 
-	// ---- The rain/snow line and the temperature draped on the terrain (zoomed in) ------
-	/** The map's forecast at the centre, for the snow level or temperature a drape uses. */
+	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
+	/** The map's forecast at the centre, for the snow level the drape uses. */
 	let levelPoint = $state.raw<PointOut | null>(null);
 	const lineOn = $derived(weather === 'snowlevel' && zoom >= SNOWLINE_ZOOM - 0.5 && !offline);
-	const tempOn = $derived(weather === 'temp' && zoom >= TEMPDRAPE_ZOOM - 0.5 && !offline);
 	$effect(() => {
 		const c = centre;
-		if (!lineOn && !tempOn) return;
+		if (!lineOn) return;
 		const have = untrack(() => levelPoint);
 		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < 3) return;
 		let gone = false;
@@ -2110,18 +2229,6 @@
 	$effect(() => {
 		const level = centreLevel;
 		if (ready && map && radar) setSnowLine(map, level, PrecipLayer.ID);
-	});
-	/** The temperature at sea level at the map's centre for the frame on the slider, and
-	 *  the cooling with height to bring it to each spot's height. */
-	const centreSeaTemp = $derived.by(() => {
-		if (!tempOn || !levelPoint || !current) return null;
-		const t = current.t;
-		return levelPoint.temp?.find((x) => x.t === t)?.sea_c ?? null;
-	});
-	$effect(() => {
-		const seaC = centreSeaTemp;
-		const lapse = (levelPoint?.temp_lapse_c_per_km ?? 6.5) / 1000;
-		if (ready && map && radar) setTempDrape(map, seaC, PrecipLayer.ID, lapse);
 	});
 
 	// Stop playing when the app goes to the background. Back in front, draw the frame on
@@ -3034,6 +3141,8 @@
 						{adjusted}
 						continuous={glTotals}
 						bind:totalHours
+						temp={tempScale}
+						bind:tempHours
 						ready={ready_}
 						{loadError}
 					/>

@@ -27,6 +27,12 @@ row above (as dataframe.py):
          where the snow by elevation couldn't be worked out.
 
 Each byte is a code: 0 none, 1..255 log-spaced from CM_MIN to CM_MAX cm (3.4% a step).
+
+The Temperature layer's frames use the same container (layers.py, `encode_temp`), with
+codes linear in °C (TEMP_MIN, every TEMP_STEP) and two bands: the temperature at sea level
+and at TEMP_TOP_M, so the map gets it at any elevation by the same reading of the bands
+(the layer assumes a straight line with height). Its area plane is the temperature at the
+mean ground under each area pixel.
 """
 
 from __future__ import annotations
@@ -60,6 +66,43 @@ STEP_WINDOWS = (
     *range(60, 121, 12),
     *range(144, 241, 24),
 )
+
+
+# Temperature codes: 1..255 for TEMP_MIN, TEMP_MIN + TEMP_STEP … (−70 to 57 °C), 0 none.
+TEMP_MIN = -70.0
+TEMP_STEP = 0.5
+TEMP_TOP_M = 4500  # the upper band (the box's highest ground is 4,421 m)
+
+
+def temp_codes(c: np.ndarray) -> np.ndarray:
+    """°C to codes (0 for no data), clamped to the codes' range."""
+    a = np.asarray(c, np.float32)
+    out = np.zeros(a.shape, np.uint8)
+    have = np.isfinite(a)
+    code = 1 + np.rint((a[have] - TEMP_MIN) / TEMP_STEP)
+    out[have] = np.clip(code, 1, 1 + CODES).astype(np.uint8)
+    return out
+
+
+def code_temp(codes: np.ndarray) -> np.ndarray:
+    """Codes back to °C (NaN for none); takes fractional codes too."""
+    c = np.asarray(codes, np.float32)
+    out: np.ndarray = np.where(c >= 1, TEMP_MIN + (c - 1) * TEMP_STEP, np.nan)
+    return out.astype(np.float32)
+
+
+def encode_temp(here: np.ndarray, sea: np.ndarray, lapse_c_per_m: float) -> bytes:
+    """A temperature frame's file: the temperature at the ground (°C on the region's grid)
+    as the area plane, and the temperature at sea level and at TEMP_TOP_M (along the
+    layer's cooling with height) as two bands on the band grid."""
+    area = temp_codes(_halve(here))
+    sea4 = _halve(_halve(sea))
+    planes = [area, temp_codes(sea4), temp_codes(sea4 - lapse_c_per_m * TEMP_TOP_M)]
+    ah, aw = area.shape
+    bh, bw = sea4.shape
+    head = HEADER.pack(MAGIC, aw, ah, bw, bh, 2, TEMP_TOP_M // 50, 0)
+    body = head + b"".join(_filter(p) for p in planes)
+    return gzip.compress(body, 9, mtime=0)
 
 
 def cm_codes(cm: np.ndarray) -> np.ndarray:

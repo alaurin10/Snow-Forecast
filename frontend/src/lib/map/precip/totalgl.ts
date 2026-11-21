@@ -9,13 +9,32 @@
 //
 // One program draws everything, flat and draped on 3D terrain: a quad (the whole box, or
 // one map tile) with a matrix to clip space and its place in the box.
-import { TOTAL } from '../../radar';
-import { CM_CODES, CM_MAX, CM_MIN, cmCode, codeCm } from './steps';
+//
+// The Temperature layer is drawn by the same program with its own scale (StepScale): its
+// codes are linear in °C, its two bands the temperature at sea level and high up (so the
+// bands give a straight line with height), and its colours run smoothly between the key's.
+import { TOTAL, type RampStep } from '../../radar';
+import { TEMP } from '../weather';
+import { CM_CODES, CM_MAX, CM_MIN, cmCode, codeCm, TEMP_MIN, TEMP_STEP } from './steps';
 import type { StepPlanes } from './steps';
 
-// The codes' scale as GLSL float literals.
+// The codes' scales as GLSL float literals.
 const CM_MIN_GLSL = CM_MIN.toFixed(6);
 const SPAN_GLSL = Math.log(CM_MAX / CM_MIN).toFixed(6);
+const T_MIN_GLSL = TEMP_MIN.toFixed(6);
+const T_STEP_GLSL = TEMP_STEP.toFixed(6);
+
+/** How a layer's codes read as amounts, and how amounts are coloured. */
+export interface StepScale {
+	/** GLSL body of `float amount(float code)`. */
+	amount: string;
+	/** GLSL body of `float code(float a)`, its inverse (clamped to the codes). */
+	code: string;
+	/** Each code's colour, 256 RGBA. */
+	lut: () => Uint8Array;
+	/** The code from which colours show. */
+	first: number;
+}
 
 const VERT = `#version 300 es
 in vec2 a_pos;          // 0..1 across the quad: x east, y south
@@ -30,7 +49,7 @@ void main() {
 	gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
 }`;
 
-const FRAG = `#version 300 es
+const frag = (scale: StepScale) => `#version 300 es
 precision highp float;
 precision highp sampler3D;
 in vec2 v_box;
@@ -55,12 +74,10 @@ uniform float u_first;    // the code where the colours start
 out vec4 o_color;
 
 float cm(float code) {
-	return code >= 1.0 ? ${CM_MIN_GLSL} * exp((code - 1.0) / ${CM_CODES}.0 * ${SPAN_GLSL}) : 0.0;
+	${scale.amount}
 }
-float code(float c) {
-	return c >= ${CM_MIN_GLSL}
-		? min(${CM_CODES + 1}.0, 1.0 + ${CM_CODES}.0 * log(c / ${CM_MIN_GLSL}) / ${SPAN_GLSL})
-		: 0.0;
+float code(float a) {
+	${scale.code}
 }
 // Elevation (m) at uv, bilinear between the tile's pixels: each pixel's channels carry one
 // Terrarium number, so they are read one by one and the numbers blended.
@@ -118,6 +135,57 @@ export function totalLut(): Uint8Array {
 
 /** The code at which the first colour starts (1 inch). */
 export const FIRST_CODE = cmCode(TOTAL[0].from);
+
+/** The snow total: log-spaced cm, coloured in its key's steps. */
+export const CM_SCALE: StepScale = {
+	amount: `return code >= 1.0 ? ${CM_MIN_GLSL} * exp((code - 1.0) / ${CM_CODES}.0 * ${SPAN_GLSL}) : 0.0;`,
+	code: `return a >= ${CM_MIN_GLSL}
+		? min(${CM_CODES + 1}.0, 1.0 + ${CM_CODES}.0 * log(a / ${CM_MIN_GLSL}) / ${SPAN_GLSL})
+		: 0.0;`,
+	lut: totalLut,
+	first: FIRST_CODE
+};
+
+const hexRgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+
+/**
+ * A temperature's colour (°C), running smoothly between the key's colours (each at its
+ * band's middle) but breaking sharply at 0 °C, so the freezing line stays crisp.
+ */
+export function tempColor(c: number, steps: RampStep[] = TEMP): [number, number, number] {
+	const side = steps.filter((s) => (c < 0 ? s.from < 0 : s.from >= 0));
+	const mids = side.map((s, i) => {
+		const next = side[i + 1]?.from ?? steps[steps.indexOf(s) + 1]?.from ?? s.from + 2;
+		return { at: (s.from + next) / 2, rgb: hexRgb(s.color) };
+	});
+	if (c <= mids[0].at) return mids[0].rgb as [number, number, number];
+	for (let i = 1; i < mids.length; i++) {
+		if (c <= mids[i].at) {
+			const f = (c - mids[i - 1].at) / (mids[i].at - mids[i - 1].at);
+			return mids[i - 1].rgb.map((v, k) => Math.round(v + (mids[i].rgb[k] - v) * f)) as [
+				number,
+				number,
+				number
+			];
+		}
+	}
+	return mids[mids.length - 1].rgb as [number, number, number];
+}
+
+/** Each temperature code's colour (code 0: no data, clear). */
+export function tempLut(): Uint8Array {
+	const out = new Uint8Array(256 * 4);
+	for (let c = 1; c < 256; c++) out.set([...tempColor(TEMP_MIN + (c - 1) * TEMP_STEP), 255], c * 4);
+	return out;
+}
+
+/** The temperature: codes linear in °C, coloured smoothly. */
+export const TEMP_SCALE: StepScale = {
+	amount: `return ${T_MIN_GLSL} + (code - 1.0) * ${T_STEP_GLSL};`,
+	code: `return clamp(1.0 + (a - ${T_MIN_GLSL}) / ${T_STEP_GLSL}, 1.0, 255.0);`,
+	lut: tempLut,
+	first: 0.5
+};
 
 /** A step's textures. */
 export interface StepTex {
@@ -197,10 +265,11 @@ export class TotalGl {
 		readonly gl: WebGL2RenderingContext,
 		/** The steps' box in the region's own pixels. */
 		private boxWidth: number,
-		private boxHeight: number
+		private boxHeight: number,
+		private scale: StepScale = CM_SCALE
 	) {
 		const vs = compile(gl, gl.VERTEX_SHADER, VERT);
-		const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+		const fs = compile(gl, gl.FRAGMENT_SHADER, frag(scale));
 		const program = gl.createProgram()!;
 		gl.attachShader(program, vs);
 		gl.attachShader(program, fs);
@@ -224,7 +293,7 @@ export class TotalGl {
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
 		this.store();
-		this.lut = this.tex2d(gl.RGBA8, 256, 1, gl.RGBA, totalLut(), gl.NEAREST);
+		this.lut = this.tex2d(gl.RGBA8, 256, 1, gl.RGBA, scale.lut(), gl.NEAREST);
 		this.none2d = this.tex2d(gl.RGBA8, 1, 1, gl.RGBA, new Uint8Array([128, 0, 0, 255]), gl.NEAREST);
 		this.none3d = gl.createTexture()!;
 		gl.bindTexture(gl.TEXTURE_3D, this.none3d);
@@ -369,7 +438,7 @@ export class TotalGl {
 		gl.uniform1f(u.u_scale_a, a ? 1 : 0);
 		gl.uniform1f(u.u_adjust, d.elev ? d.adjust : 0);
 		gl.uniform1f(u.u_opacity, d.opacity);
-		gl.uniform1f(u.u_first, FIRST_CODE);
+		gl.uniform1f(u.u_first, this.scale.first);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		gl.bindVertexArray(null);
 		gl.activeTexture(gl.TEXTURE0);

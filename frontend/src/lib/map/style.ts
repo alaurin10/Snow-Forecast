@@ -59,6 +59,17 @@ export const FIELD_OPACITY: ExpressionSpecification = [
 	15,
 	0
 ];
+/** Temperature: a field like the snow level, but adjusted to the terrain zoomed in, so it
+ *  stays (lighter) however far in. */
+export const TEMP_OPACITY: ExpressionSpecification = [
+	'interpolate',
+	['linear'],
+	['zoom'],
+	10,
+	0.62,
+	14,
+	0.45
+];
 /** Satellite imagery of clouds: nearly opaque, gone by the time terrain detail matters. */
 export const CLOUD_OPACITY: ExpressionSpecification = [
 	'interpolate',
@@ -77,6 +88,7 @@ export function weatherOpacity(w: string): ExpressionSpecification {
 	if (w === 'radar') return PRECIP_OPACITY;
 	if (w === 'clouds') return CLOUD_OPACITY;
 	if (w === 'totals' || w === 'snowfall') return TOTAL_OPACITY;
+	if (w === 'temp') return TEMP_OPACITY;
 	return FIELD_OPACITY;
 }
 
