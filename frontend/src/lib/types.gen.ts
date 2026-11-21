@@ -953,6 +953,7 @@ export interface Snapshot {
 	backcountry?: BackcountryOut | null;
 	bands: BandOut[];
 	basis_switch: string | null;
+	clouds?: CloudsOut | null;
 	daily: DailyRow[];
 	days?: DayOut[];
 	depth_method: string;
@@ -1201,6 +1202,20 @@ export interface WindowOut {
 	snow_cm: number | null;
 	snow_cm_raw: number | null;
 	snow_cm_slr: number | null;
+}
+/**
+ * The cloud layers above a location hour by hour, from one model's cloud cover at each
+ * pressure level (analysis/clouds.py): an approximation, for the map's 3D clouds.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CloudsOut".
+ */
+export interface CloudsOut {
+	cover: (number | null)[];
+	layers: [unknown, unknown, unknown][][];
+	model: string;
+	start: number;
+	step_h?: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

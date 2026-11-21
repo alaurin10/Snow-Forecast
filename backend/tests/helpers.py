@@ -70,6 +70,28 @@ def fixture_snapshot(loc_id: str) -> Snapshot:
 BC_DATA = "https://www.env.gov.bc.ca/wsd/data_searches/snow/asws/data/"
 
 
+def synthetic_clouds(params: dict[str, str]) -> dict[str, Any]:
+    """A made-up answer to a location's clouds request (the captured fixtures predate it):
+    hourly from the capture's day for `forecast_days`, a deck from about 1,500 m to
+    2,500 m, thickest in the afternoon, and each level at a standard height."""
+    from snowwatch.sources.openmeteo import CLOUD_LEVELS
+
+    start = int(captured_at().timestamp()) // 86400 * 86400
+    hours = int(params.get("forecast_days", "10")) * 24
+    times = [start + h * 3600 for h in range(hours)]
+    # Heights of the standard atmosphere's pressure levels (m).
+    std = {1000: 110, 950: 540, 900: 990, 850: 1460, 800: 1950, 750: 2470, 700: 3010}
+    std |= {650: 3590, 600: 4210, 500: 5570, 400: 7190, 300: 9160}
+    hourly: dict[str, list[float | int]] = {"time": times}
+    for p in CLOUD_LEVELS:
+        deck = 800 >= p >= 750
+        hourly[f"geopotential_height_{p}hPa"] = [std[p]] * hours
+        hourly[f"cloud_cover_{p}hPa"] = [
+            (40 + 50 * ((t // 3600) % 24 >= 12)) if deck else 0 for t in times
+        ]
+    return {"timezone": "UTC", "utc_offset_seconds": 0, "hourly": hourly}
+
+
 def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = None) -> Any:
     """An httpx transport that answers with the captured responses.
 
@@ -95,7 +117,14 @@ def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = Non
             if any(f in "bc_asws" for f in fail):
                 return httpx.Response(500)
             return httpx.Response(200, text=(FIXTURES.parent / "bc" / name).read_text())
-        key = index.get((url, frozenset(dict(req.url.params).items())))
+        params = dict(req.url.params)
+        if "cloud_cover_850hPa" in params.get("hourly", "").split(","):
+            if log is not None:
+                log.append("synthetic clouds")
+            if any(f in "clouds" for f in fail):
+                return httpx.Response(500)
+            return httpx.Response(200, json=synthetic_clouds(params))
+        key = index.get((url, frozenset(params.items())))
         if log is not None:
             log.append(key or f"unmatched {url}")
         if key is None:

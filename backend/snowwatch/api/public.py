@@ -22,6 +22,8 @@ from snowwatch.api.models import (
     DangerChip,
     LocationAge,
     LocationSummary,
+    MapCloudsLocation,
+    MapCloudsOut,
     MapWindLocation,
     MapWindOut,
     NearbyOut,
@@ -306,6 +308,31 @@ def make_router() -> APIRouter:
         return MapWindOut(
             min_snow_cm=cfg.rose_min_snow_cm, min_wind_kmh=cfg.rose_min_wind_kmh, locations=out
         )
+
+    @router.get("/map/clouds", response_model=MapCloudsOut)
+    def map_clouds(conn: Conn, response: Response) -> MapCloudsOut:
+        """Every location's cloud layers: the map's 3D clouds."""
+        snaps = latest_snapshots(conn)
+        out = []
+        for loc in service.list_locations(conn):
+            snap = snaps.get(loc.id)
+            if snap is None or snap.clouds is None:
+                continue
+            mid = loc.band("mid")
+            out.append(
+                MapCloudsLocation(
+                    id=loc.id,
+                    name=loc.name,
+                    lat=mid.lat,
+                    lon=mid.lon,
+                    base_m=loc.band("base").elev_m,
+                    summit_m=loc.band("summit").elev_m,
+                    generated_at=snap.generated_at,
+                    clouds=snap.clouds,
+                )
+            )
+        response.headers["Cache-Control"] = CACHE
+        return MapCloudsOut(locations=out)
 
     @router.get("/map/concern", response_model=ConcernOut)
     def map_concern(request: Request, response: Response) -> ConcernOut:

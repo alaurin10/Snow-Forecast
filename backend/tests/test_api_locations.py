@@ -17,7 +17,7 @@ from snowwatch.locations import service
 from snowwatch.pipeline import run_location
 from snowwatch.settings import Settings
 from snowwatch.store import repo
-from tests.helpers import FIXTURES, SEED, captured_at, config
+from tests.helpers import FIXTURES, SEED, captured_at, config, synthetic_clouds
 
 
 @pytest.fixture
@@ -327,3 +327,35 @@ def test_verification_endpoint(client: TestClient) -> None:
     assert body["station"] == "642:WA:SNTL" and body["needs_days"] >= 1
     assert body["headline"] == "cons_slr"
     assert client.get("/api/locations/nope/verification").status_code == 404
+
+
+def test_map_clouds_lists_locations_with_layers(
+    client: TestClient, conn: sqlite3.Connection
+) -> None:
+    assert client.get("/api/map/clouds").json() == {"locations": []}  # the fixtures predate it
+    run_id = repo.start_run(conn, "test")
+    loc = service.get_location(conn, "crystal")
+    assert loc is not None
+    responses = {**load_responses(FIXTURES / "crystal"), "clouds": synthetic_clouds({})}
+    res = run_location(
+        conn,
+        loc,
+        Fetcher(user_agent="t"),
+        config(),
+        run_id=run_id,
+        now=captured_at() + timedelta(hours=1),
+        ensembles=False,
+        responses=responses,
+    )
+    assert res.ok
+    repo.finish_run(conn, run_id, "ok", [], 0)
+    r = client.get("/api/map/clouds")
+    assert r.status_code == 200 and "max-age=300" in r.headers["cache-control"]
+    (got,) = r.json()["locations"]
+    assert got["id"] == "crystal" and got["summit_m"] > got["base_m"]
+    clouds = got["clouds"]
+    assert clouds["model"] == "gfs_seamless" and clouds["step_h"] == 1
+    # From 3 h ago to 10 days ahead.
+    now_h = int(captured_at().timestamp()) // 3600 * 3600 + 3600
+    assert clouds["start"] == now_h - 3 * 3600 and len(clouds["layers"]) == 3 + 240
+    assert any(clouds["layers"])

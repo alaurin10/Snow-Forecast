@@ -720,6 +720,64 @@
       "title": "CatalogItem",
       "type": "object"
     },
+    "CloudsOut": {
+      "description": "The cloud layers above a location hour by hour, from one model's cloud cover at each\npressure level (analysis/clouds.py): an approximation, for the map's 3D clouds.",
+      "properties": {
+        "cover": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "layers": {
+          "items": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "start": {
+          "type": "integer"
+        },
+        "step_h": {
+          "default": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "start",
+        "layers",
+        "cover"
+      ],
+      "title": "CloudsOut",
+      "type": "object"
+    },
     "ConcernOut": {
       "description": "The experimental terrain concern index's settings (config `terrain:`), for every\nvisitor unless HAZARD_INDEX is off. The browser works the index out from these.",
       "properties": {
@@ -4687,6 +4745,17 @@
               "type": "null"
             }
           ]
+        },
+        "clouds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CloudsOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "daily": {
           "items": {

@@ -63,6 +63,16 @@ UPPER_HOURLY = [
     *[f"geopotential_height_{p}hPa" for p in PRESSURE_LEVELS],
 ]
 
+# One model's cloud cover through the air above a location, for its cloud layers (the
+# map's 3D clouds): every ~50 hPa (~500 m) through the heights mountains reach, coarser
+# above. The pressure levels' heights come with them.
+CLOUD_LEVELS = (1000, 950, 900, 850, 800, 750, 700, 650, 600, 500, 400, 300)
+CLOUD_HOURLY = [
+    *[f"cloud_cover_{p}hPa" for p in CLOUD_LEVELS],
+    *[f"geopotential_height_{p}hPa" for p in CLOUD_LEVELS],
+]
+CLOUD_DAYS = 10  # the map's timeline
+
 # Per model at the snow station's own spot and elevation, for the scorecard only: the
 # bands stay where the location puts them.
 STATION_HOURLY = ["snowfall", "precipitation"]
@@ -142,6 +152,21 @@ def upper_air_request(
     return Request("upper", SOURCE, FORECAST_URL, params, w)
 
 
+def clouds_request(loc: Location, model: str, *, forecast_days: int = CLOUD_DAYS) -> Request:
+    """One model's cloud cover at every pressure level over the location's middle."""
+    mid = loc.band("mid")
+    params = {
+        "latitude": f"{mid.lat:g}",
+        "longitude": f"{mid.lon:g}",
+        **_common(),
+        "hourly": ",".join(CLOUD_HOURLY),
+        "models": model,
+        "forecast_days": str(forecast_days),
+    }
+    w = estimate_weight(points=1, days=forecast_days, variables=len(CLOUD_HOURLY))
+    return Request("clouds", SOURCE, FORECAST_URL, params, w)
+
+
 def station_request(
     lat: float, lon: float, elev_m: float, models: list[str], *, forecast_days: int = 3
 ) -> Request:
@@ -194,6 +219,9 @@ def location_requests(
         multimodel_request(loc, cfg.models_for(loc.country)),
         upper_air_request(loc, cfg.upper_air_models(loc.country)),
     ]
+    cloud_model = cfg.cloud_model(loc.country)
+    if cloud_model:
+        reqs.append(clouds_request(loc, cloud_model))
     if ensembles:
         reqs += [ensemble_request(loc, s) for s in cfg.ensembles]
     return reqs

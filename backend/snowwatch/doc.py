@@ -339,6 +339,18 @@ class LocationMeta(BaseModel):
         return clean_links(v)
 
 
+class CloudsOut(BaseModel):
+    """The cloud layers above a location hour by hour, from one model's cloud cover at each
+    pressure level (analysis/clouds.py): an approximation, for the map's 3D clouds."""
+
+    model: str
+    start: int  # the first hour's start (Unix seconds)
+    step_h: int = 1
+    # Each hour's layers, lowest first: [base m, top m, cover %], heights above sea level.
+    layers: list[list[tuple[int, int, int]]]
+    cover: list[int | None]  # each hour's layers together as one cover (%)
+
+
 class Snapshot(BaseModel):
     version: int = DOC_VERSION
     location: LocationMeta
@@ -359,3 +371,4 @@ class Snapshot(BaseModel):
     days: list[DayOut] = []
     flags: list[Flag] = Field(default_factory=list)
     warnings: list[str] = []
+    clouds: CloudsOut | None = None
