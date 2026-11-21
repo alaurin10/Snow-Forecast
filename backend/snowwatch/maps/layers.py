@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from snowwatch.maps import cloudheights
 from snowwatch.maps.blend import Layer, feather, feather_px, mosaic, north_weight
 from snowwatch.maps.geomet import (
     Grid,
@@ -101,7 +102,7 @@ CLOUD_RDPS = "RDPS_10km_TotalCloudCover"  # hourly to 84 h
 CLOUD_GDPS = "GDPS_15km_TotalCloudCover"  # hourly to 84 h, 3-hourly to 240 h
 CLOUD_STEP_H = 3  # forecast cloud frames every 3 h…
 CLOUD_LONG_STEP_H = 6  # …and every 6 h beyond RDPS's run
-CLOUD_DRAWING = 2  # in each forecast cloud frame's key: change it to draw them again
+CLOUD_DRAWING = 3  # in each forecast cloud frame's key: change it to draw them again
 RIDGE_SPEED = "RDPS_10km_WindSpeed_700mb"  # m/s
 RIDGE_DIR = "RDPS_10km_WindDir_700mb"  # degrees, where the wind blows from
 CALDAS = "CaLDAS-NSRPS_2.5km_SnowDepth"  # metres
@@ -186,7 +187,11 @@ def draw(r: Renderer, region: Region) -> dict[str, list[LayerFrame]]:
 
 
 def _reuse(r: Renderer, old: list[LayerFrame]) -> dict[str, LayerFrame]:
-    return {f.key: f for f in old if (r.dir / f.file).exists()}
+    return {
+        f.key: f
+        for f in old
+        if (r.dir / f.file).exists() and (not f.data or (r.dir / f.data).exists())
+    }
 
 
 def _parallel(jobs: list[Callable[[], LayerFrame | None]], workers: int = 2) -> list[LayerFrame]:
@@ -392,6 +397,23 @@ def snowfall(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFr
 
 # ---- Clouds -----------------------------------------------------------------------------
 
+CLOUD_HEIGHTS_TO_H = 84  # NBM's lowest cloud base reaches about this far
+
+
+def cloud_heights(
+    us: Nbm, lead: int, cover: np.ndarray, ground: np.ndarray
+) -> cloudheights.Heights | None:
+    """The clouds' heights at one forecast hour: NBM's layers to 36 h, then its lowest
+    cloud's base with the frame's cover; None if it has neither."""
+    got = us.cloud_layers(lead)
+    if got is not None:
+        lays, high = got
+        return cloudheights.from_layers(lays, high, ground)
+    base = us.cloud_base(lead)
+    if base is None:
+        return None
+    return cloudheights.from_base(base, cover, ground)
+
 
 def clouds(r: Renderer, region: Region, old: list[LayerFrame]) -> list[LayerFrame] | None:
     """The satellite's last 3 hours, then the forecast's cloud cover to 10 days, on one
@@ -440,7 +462,8 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
     """Total cloud cover every 3 h to the end of RDPS's run, then every 6 h to GDPS's
     (10 days): HRDPS where its domain reaches and RDPS beneath it, then GDPS, in Canada;
     NBM in the US; blended across the border like the other layers. Drawn as cloud (see
-    Renderer._save_cloud)."""
+    Renderer._save_cloud), and kept as numbers with NBM's cloud heights where it has them
+    (cloudheights.py)."""
     from snowwatch.maps.render import LayerFrame
 
     now = int(r.now())
@@ -459,6 +482,9 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
     us: Nbm | None = r._nbm(region)
     prev = _reuse(r, old)
     w_hrdps = r._hrdps_weight(region) if hr is not None else None
+    # NBM's cloud heights reach to 84 h: the ground under them is needed only then.
+    heights_due = us is not None and any(1 <= us.lead(t) <= CLOUD_HEIGHTS_TO_H for t in times)
+    grounded = heights_due and r._ground(region) is not None
 
     def job(t: int) -> Callable[[], LayerFrame | None]:
         def go() -> LayerFrame | None:
@@ -468,6 +494,7 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
                 base = gd
             lead = us.lead(t) if us is not None else 0
             use_n = us is not None and 1 <= lead <= 264
+            use_z = use_n and grounded and lead <= CLOUD_HEIGHTS_TO_H
             key = "|".join(
                 [
                     f"cloudf@{CLOUD_DRAWING}",
@@ -475,6 +502,7 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
                     f"h:{hr.ref}" if use_h and hr else "-",
                     f"b:{base.ref}" if base else "-",
                     f"n:{us.run}:{lead}" if use_n and us else "-",
+                    "z" if use_z else "-",
                     region.key,
                 ]
             )
@@ -512,7 +540,12 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
             src.setdefault("south", north)
             cover = mosaic(layers).amount
             name = r._save_cloud(cover, f"k{t}")
-            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs)
+            heights = None
+            if use_z and us is not None:
+                g = r._ground(region)
+                heights = cloud_heights(us, lead, cover, g) if g is not None else None
+            data = r._save_numbers(cloudheights.encode(cover, heights), f"kh{t}")
+            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs, data)
 
         return go
 

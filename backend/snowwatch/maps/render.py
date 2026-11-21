@@ -46,6 +46,7 @@ from snowwatch.maps import (
     coverage,
     dataframe,
     grib,
+    ground,
     terrain_totals,
     totaldata,
     totals,
@@ -231,6 +232,9 @@ class LayerFrame:
     src: dict[str, str] = field(default_factory=dict)
     # Each source used → its run start or analysis time (Unix seconds).
     runs: dict[str, int] = field(default_factory=dict)
+    # The frame as numbers, when the map can draw it from them (forecast clouds with their
+    # heights: cloudheights.py).
+    data: str = ""
 
     @classmethod
     def load(cls, d: dict[str, Any]) -> LayerFrame:
@@ -295,6 +299,10 @@ class Renderer:
         self.totals: list[TotalOut] = []
         self._prev_totals: dict[str, TotalOut] = {}
         self._nbm_run: int | None = None
+        # The ground under the box (ground.py), once per job: None not yet asked, False
+        # couldn't be had.
+        self._ground_grid: np.ndarray | bool | None = None
+        self._ground_lock = threading.Lock()
         self.dir.mkdir(parents=True, exist_ok=True)
 
     # ---- The index ---------------------------------------------------------------
@@ -533,6 +541,12 @@ class Renderer:
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
         self._store(name, data)
         self._write_probe(name, probe_sample(c, self.probe_step).astype(np.float16))
+        return name
+
+    def _save_numbers(self, data: bytes, prefix: str) -> str:
+        """A frame's numbers file (a gzip stream, served as it is), named by its bytes."""
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.{dataframe.EXT}"
+        self._store(name, data)
         return name
 
     def _save_webp(self, img: np.ndarray, prefix: str, quality: int = 72) -> str:
@@ -864,6 +878,17 @@ class Renderer:
         if self._nbm_obj is None or self._nbm_obj.region != region:
             self._nbm_obj = Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
         return self._nbm_obj
+
+    def _ground(self, region: Region) -> np.ndarray | None:
+        """The ground's height under the box (ground.py), asked for once per job."""
+        with self._ground_lock:
+            if self._ground_grid is None:
+                got = ground.ground(self.net, region, self.grids_dir)
+                self._ground_grid = got if got is not None else False
+            have = self._ground_grid
+            if isinstance(have, np.ndarray) and have.shape == (region.height, region.width):
+                return have
+            return None
 
     def forecast(self, region: Region) -> dict[str, Any]:
         """The forecast timeline to 10 days, every source blended as numbers (blend.py).
@@ -1464,6 +1489,7 @@ def _files(index: dict[str, Any]) -> set[str]:
     for layer in (index.get("layers") or {}).values():
         if isinstance(layer, dict):
             out |= {f.get("file") for f in layer.get("frames", [])}
+            out |= {f.get("data") for f in layer.get("frames", [])}
     steps = index.get("steps")
     if isinstance(steps, dict):
         out |= {s.get("data") for s in steps.get("steps", []) if isinstance(s, dict)}

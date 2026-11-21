@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from snowwatch.analysis.backcountry import BackcountryConfig
 from snowwatch.api.app import create_app
-from snowwatch.maps import layers, point
+from snowwatch.maps import cloudheights, ground, layers, point
 from snowwatch.maps.geomet import Grid, Net, iso_ts, ts_iso
 from snowwatch.maps.palette import (
     DEPTH,
@@ -34,6 +34,8 @@ from snowwatch.maps.palette import SNOW_T as PSNOW
 from snowwatch.maps.region import box_region
 from snowwatch.maps.render import Renderer
 from snowwatch.maps.sources import gibs, nohrsc, snodas
+from snowwatch.maps.sources import nbm as nbm_source
+from snowwatch.maps.sources.nbm import CloudLayer
 from snowwatch.settings import Settings
 from tests.test_forecast_maps import FakeNbm, float_tiff, resp
 
@@ -236,6 +238,18 @@ class FieldNbm(FakeNbm):
         value = {"SNOWLVL": 800.0, "GUST": 8.0, "TCDC": 10.0}[var]
         return np.full((self.region.height, self.region.width), value, np.float32)
 
+    def _full(self, v: float) -> np.ndarray:
+        return np.full((self.region.height, self.region.width), v, np.float32)
+
+    def cloud_layers(self, fhour: int) -> tuple[list[CloudLayer], np.ndarray | None] | None:
+        """One layer 500–1,500 m above the ground, 80%, to 36 h."""
+        if fhour > nbm_source.CLOUD_LAYERS_TO_H:
+            return None
+        return [CloudLayer(self._full(500), self._full(1500), self._full(80))], self._full(10)
+
+    def cloud_base(self, fhour: int) -> np.ndarray | None:
+        return self._full(300) if fhour <= 84 else None
+
 
 @pytest.fixture
 def sources(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
@@ -332,6 +346,55 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     again = Renderer(out, net, now=lambda: NOW).layers(REGION)
     assert (len(net.coverages), sources) == before
     assert again["layers"] == ix["layers"]
+
+
+def test_forecast_clouds_are_kept_as_numbers_with_their_heights(
+    tmp_path: Path, sources: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = []
+
+    def flat(net: Any, region: Any, cache_dir: Any = None) -> np.ndarray:
+        asked.append(region.key)
+        return np.full((region.height, region.width), 1000, np.float32)
+
+    monkeypatch.setattr(ground, "ground", flat)
+    out = tmp_path / "precip"
+    ix = Renderer(out, LayersNet(), now=lambda: NOW).layers(REGION)
+    ahead = [f for f in ix["layers"]["clouds"]["frames"] if f["kind"] == "forecast"]
+    assert all(f["data"].endswith(".bin") and (out / f["data"]).exists() for f in ahead)
+    assert len(asked) == 1  # the ground once per job
+    by_lead = {
+        (f["t"] - T0) // H: cloudheights.decode((out / f["data"]).read_bytes()) for f in ahead
+    }
+    # To 36 h NBM's layers: 1,500–2,500 m above sea level over the 1,000 m ground.
+    first = by_lead[6]
+    assert first["flags"] == cloudheights.HAS_HEIGHTS | cloudheights.HAS_TOPS
+    bottom = REGION.height // 4 - 1  # the US, in the planes' quarter size
+    assert first["base"][bottom, 2] == 1500 and first["top"][bottom, 2] == 2490
+    assert first["low"][bottom, 2] == 80 and first["above"][bottom, 2] == 10
+    # Then only the lowest cloud's base, with the frame's own cover.
+    later = by_lead[60]
+    assert later["flags"] == cloudheights.HAS_HEIGHTS and later["base"][bottom, 2] == 1290
+    # Beyond 84 h no heights: the cover alone.
+    assert by_lead[90]["flags"] == 0
+    # Satellite pictures have no numbers.
+    assert not next(f for f in ix["layers"]["clouds"]["frames"] if f["kind"] == "observed")["data"]
+
+
+def test_without_the_ground_clouds_have_no_heights_until_it_comes(
+    tmp_path: Path, sources: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    have: list[np.ndarray | None] = [None]
+    monkeypatch.setattr(ground, "ground", lambda net, region, cache_dir=None: have[0])
+    out = tmp_path / "precip"
+    ix = Renderer(out, LayersNet(), now=lambda: NOW).layers(REGION)
+    first = next(f for f in ix["layers"]["clouds"]["frames"] if f["kind"] == "forecast")
+    assert cloudheights.decode((out / first["data"]).read_bytes())["flags"] == 0
+    # The ground arrives: the frames are drawn again, with heights.
+    have[0] = np.zeros((REGION.height, REGION.width), np.float32)
+    again = Renderer(out, LayersNet(), now=lambda: NOW).layers(REGION)
+    first = next(f for f in again["layers"]["clouds"]["frames"] if f["kind"] == "forecast")
+    assert cloudheights.decode((out / first["data"]).read_bytes())["flags"] != 0
 
 
 def test_a_layer_whose_source_fails_keeps_its_pictures(
