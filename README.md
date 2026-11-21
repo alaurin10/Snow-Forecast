@@ -73,7 +73,7 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `NWS_CONTACT` | | Email or URL the US National Weather Service asks for |
 | `PUBLIC_URL` | | The site's HTTPS address |
 | `TRUSTED_PROXY` | `0` | `1` behind a reverse proxy or Cloudflare |
-| `MAX_LOCATIONS` | `25` | Cap on active locations (each uses ~290 Open-Meteo calls a day) |
+| `MAX_LOCATIONS` | `25` | Cap on active locations (each uses ~310 Open-Meteo calls a day) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | empty (alerts off) | Push alerts: `snowwatch push keys` |
 | `CONTACT_EMAIL` | `NWS_CONTACT` | Email for push services |
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
