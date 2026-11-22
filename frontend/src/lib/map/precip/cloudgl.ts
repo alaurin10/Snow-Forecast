@@ -1,13 +1,12 @@
 // The forecast clouds' shader: a frame's numbers (./clouds.ts) kept on the graphics chip
 // and drawn at the screen's own resolution.
 //
-// Zoomed out it draws the total cover as the server's pictures do (from a light veil to
-// thick grey cloud). Zoomed in, where the frame has heights, it holds each pixel's own
-// elevation (from the elevation tiles 3D and the hill shading use) against the cloud:
-// ground inside the low cloud is fog, ground above its top is clear (a summit above a sea
-// of cloud), ground beneath its base is shaded a little by the cloud overhead, and ground
-// above it a little by any cloud higher up. Between the two zooms it fades from one to the
-// other; where the frame has no heights it keeps the cover.
+// It draws the total cover as the server's pictures do (from a light veil to thick grey
+// cloud), a full deck as a full layer. Zoomed in, where the frame knows the cloud's top
+// (NBM's layers, to 36 h), it holds each pixel's own elevation (from the elevation tiles 3D
+// and the hill shading use) against that top: ground standing above it shows through, under
+// only the cloud higher up, so summits poke out of a sea of cloud. Between the two zooms it
+// fades from one to the other; without tops it keeps the cover.
 //
 // One program draws everything, flat and draped on 3D terrain: a quad (the whole box, or
 // one map tile) with a matrix to clip space and its place in the box.
@@ -72,28 +71,16 @@ void main() {
 	vec4 color = vec4(plain.rgb * plain.a, plain.a);
 	float k = u_adjust * s.g;
 	if (k > 0.0) {
-		vec2 h = texture(u_heights, uv).rg * 255.0 * u_step;
-		float base = h.x;
-		float top = u_tops > 0.5 ? h.y : 1.0e6;
+		// Seen from above, cloud hides everything beneath its top: the frame's cover holds
+		// over all ground below the low cloud's top. Ground standing above it (a summit over
+		// a sea of cloud) shows through, under only the cloud higher up.
+		float top = texture(u_heights, uv).g * 255.0 * u_step;
 		float z = elevation(v_elev);
-		float low = s.b / FULL;
-		float above = s.a / FULL;
-		float inside = smoothstep(base - FEATHER, base + FEATHER, z)
-			* (1.0 - smoothstep(top - FEATHER, top + FEATHER, z));
-		float below = 1.0 - smoothstep(base - FEATHER, base + FEATHER, z);
-		float overhead = below * (1.0 - (1.0 - low) * (1.0 - above)) + (1.0 - below) * above;
-		// In the cloud: fog, as thick as the cloud is solid. Ground with cloud overhead:
-		// a light grey-blue shade.
-		float fog = clamp(low * inside, 0.0, 1.0);
-		// A grey-blue a little translucent, so it doesn't read as snow on imagery.
-		float fogA = fog > 0.0 ? 0.2 + 0.55 * fog : 0.0;
-		float shadeA = 0.3 * overhead * (1.0 - fog);
-		vec3 fogRgb = vec3(0.84, 0.87, 0.91);
-		vec3 shadeRgb = vec3(0.36, 0.40, 0.47);
-		// "Over" in premultiplied terms: the shade beneath, the fog on top.
-		float a = fogA + shadeA * (1.0 - fogA);
-		vec3 rgb = fogRgb * fogA + shadeRgb * shadeA * (1.0 - fogA);
-		color = mix(color, vec4(rgb, a), k);
+		float total = s.r / FULL;
+		float above = min(s.a / FULL, total);
+		float out_ = smoothstep(top - FEATHER, top + FEATHER, z);
+		vec4 c = coverColor(mix(total, above, out_));
+		color = mix(color, vec4(c.rgb * c.a, c.a), k);
 	}
 	color *= u_opacity;
 	if (color.a <= 0.002) discard;
@@ -287,7 +274,7 @@ export class CloudGl {
 		gl.uniform2f(u.u_span, this.boxWidth / (t.width * t.ds), this.boxHeight / (t.height * t.ds));
 		gl.uniform1f(u.u_step, t.stepM);
 		gl.uniform1f(u.u_tops, t.tops ? 1 : 0);
-		gl.uniform1f(u.u_adjust, d.elev && t.hasHeights ? d.adjust : 0);
+		gl.uniform1f(u.u_adjust, d.elev && t.hasHeights && t.tops ? d.adjust : 0);
 		gl.uniform1f(u.u_opacity, d.opacity);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		gl.bindVertexArray(null);

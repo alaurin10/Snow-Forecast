@@ -35,14 +35,14 @@ Notable changes to Snow Watch. The format follows
   ground heights and a grid of elevation, fetched once and kept. The Layers sheet's
   weather tiles now sit five across, so the nine choices still take two rows.
 - **Forecast clouds at their heights.** Zoomed in (from zoom 8), the Clouds layer's
-  forecast now sits on the terrain at the height NOAA's National Blend of Models gives
-  its base and top: ground inside the cloud is fogged, summits above a sea of cloud stay
-  clear, and valleys beneath it are lightly shaded ("at cloud height" beside the time).
-  Cloud tops are known to 36 h and bases to 3½ days, across the US and Canada to about
-  55°N; elsewhere and beyond, the cover alone as before. Zoomed out it looks as it did.
-  It stays on further in than before, lighter, so the ground under the fog still reads.
-  On the server: ~180 MB more NOAA downloads and under a minute of work per NBM run
-  (twice a day); the ground under the clouds is the Temperature layer's elevation grid.
+  forecast knows where the cloud's top is (NOAA's National Blend of Models, to 36 h,
+  across the US and Canada to about 55°N): the cloud covers everything beneath its top as
+  one layer, a full deck as a full deck, and summits standing above it show through, under
+  only any cloud higher up ("at cloud height" beside the time). Elsewhere and beyond, the
+  cover alone as before; zoomed out it looks as it did. It stays on further in than
+  before, lighter, so the ground under it still reads. On the server: ~180 MB more NOAA
+  downloads and under a minute of work per NBM run (twice a day); the ground under the
+  clouds is the Temperature layer's elevation grid.
 - **3D clouds** (Layers → Show, off until chosen): puffs of cloud floating at their
   forecast heights around each location, for the time on the weather slider (or now):
   none when it's clear, clumps when partly cloudy, a deck when overcast. Ridges hide the

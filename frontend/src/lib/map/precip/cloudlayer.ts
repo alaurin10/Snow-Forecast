@@ -184,10 +184,11 @@ export class CloudLayer {
 		return !!this.current && !this.tex.has(this.current);
 	}
 
-	/** What's on screen is the cloud against the terrain (zoomed in, with heights). */
+	/** What's on screen is the cloud against the terrain (zoomed in, with cloud tops). */
 	adjusted(zoom = this.map.getZoom()): boolean {
 		if (!this.opts.elevation || cloudAdjustAt(zoom) < 0.5 || !this.current) return false;
-		return !!this.tex.get(this.current)?.hasHeights;
+		const t = this.tex.get(this.current);
+		return !!t?.hasHeights && t.tops;
 	}
 
 	/** The frames to keep on hand: those around the slider. */
