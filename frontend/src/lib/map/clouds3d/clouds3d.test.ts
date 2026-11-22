@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daylight, instances } from './layer';
+import { instances } from './layer';
 import { layersAt, puffsAt, RADIUS_M, SLOTS, skyAt, slots, type CloudSite } from './puffs';
 
 const T0 = 1_800_000_000;
@@ -116,11 +116,5 @@ describe('drawing them', () => {
 		const puffs = [{ x: 0, y: 0, z: 100, r: 1, squash: 1, dark: 0, alpha: 1, seed: 0, per: 1 }];
 		const view = { cx: 0, cy: 0, worldSize: 1, exaggeration: 1.5, fade: 1 };
 		expect(instances(puffs, m, view).data[2]).toBe(150);
-	});
-
-	it('is dim at night and warm at sunset', () => {
-		expect(daylight(30)).toEqual({ light: 1, warm: 0 });
-		expect(daylight(-20).light).toBeLessThan(0.5);
-		expect(daylight(1).warm).toBeGreaterThan(0.5);
 	});
 });

@@ -46,8 +46,9 @@ Notable changes to Snow Watch. The format follows
 - **3D clouds** (Layers → Show, off until chosen): puffs of cloud floating at their
   forecast heights around each location, for the time on the weather slider (or now):
   none when it's clear, clumps when partly cloudy, a deck when overcast. Ridges hide the
-  clouds behind them and summits poke through a deck; they dim at night and warm at
-  sunrise and sunset. Best in 3D, and a rough picture rather than a measurement. Each
+  clouds behind them and summits poke through a deck. They keep one look at every hour
+  (white tops, grey undersides, darker for a thick deck), so scrubbing doesn't flicker.
+  Best in 3D, and a rough picture rather than a measurement. Each
   location's cloud layers come from one light Open-Meteo request a run (~2.4 calls; a
   location now uses ~310 calls a day, so 25 still fit the free tier).
 - **`config/webcams.yaml` applies itself.** The worker reads it at start (so after every
