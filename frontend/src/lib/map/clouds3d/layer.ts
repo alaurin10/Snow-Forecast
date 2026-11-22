@@ -9,7 +9,6 @@
 // are scaled with the terrain's exaggeration, so a cloud based at 1,500 m meets the
 // ground at 1,500 m. It is independent of the weather layers.
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from 'maplibre-gl';
-import { sunPosition } from '../terrain/sun';
 import { puffsAt, type CloudSite, type Puff } from './puffs';
 
 /** Hidden zoomed out further than this (a location's clouds would be a few pixels). */
@@ -50,8 +49,6 @@ in vec2 v_uv;
 in float v_dark;
 in float v_alpha;
 in float v_seed;
-uniform float u_light;   // 1 by day, dimmer at night
-uniform float u_warm;    // 0..1: the low sun's warm light
 uniform float u_opacity;
 out vec4 o_color;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -72,8 +69,8 @@ void main() {
 	// Lit from above: white tops, grey undersides, darker for a thick deck.
 	float lit = clamp(0.5 + 0.5 * p.y + (n - 0.5) * 0.3, 0.0, 1.0);
 	vec3 under = mix(vec3(0.80, 0.82, 0.86), vec3(0.48, 0.51, 0.57), v_dark);
-	vec3 rgb = mix(under, vec3(1.0), lit) * u_light;
-	rgb = mix(rgb, rgb * vec3(1.1, 0.9, 0.76), u_warm * lit);
+	// One look at every hour: lighting by the time of day flickered as the slider stepped.
+	vec3 rgb = mix(under, vec3(1.0), lit);
 	o_color = vec4(rgb * a, a);  // premultiplied, as the map blends
 }`;
 
@@ -93,13 +90,6 @@ const smoothstep = (a: number, b: number, x: number) => {
 	const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
 	return u * u * (3 - 2 * u);
 };
-
-/** Day and dusk light for a sun altitude (degrees): brightness and warmth. */
-export function daylight(altitude: number): { light: number; warm: number } {
-	const light = 0.38 + 0.62 * smoothstep(-8, 4, altitude);
-	const warm = smoothstep(-6, 1, altitude) * (1 - smoothstep(4, 14, altitude));
-	return { light, warm };
-}
 
 /** The puffs to draw, far to near, as instance data for a view: positions from the
  *  centre (world px, metres × exaggeration), each one's size in world px. Behind the
@@ -234,7 +224,7 @@ export class Clouds3dLayer {
 			if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost())
 				throw new Error(`3D clouds program: ${gl.getProgramInfoLog(program)}`);
 			const loc: Record<string, WebGLUniformLocation | null> = {};
-			for (const n of ['u_matrix', 'u_proj', 'u_pitch', 'u_light', 'u_warm', 'u_opacity'])
+			for (const n of ['u_matrix', 'u_proj', 'u_pitch', 'u_opacity'])
 				loc[n] = gl.getUniformLocation(program, n);
 			const vao = gl.createVertexArray()!;
 			const corners = gl.createBuffer()!;
@@ -299,8 +289,6 @@ export class Clouds3dLayer {
 		});
 		if (!count) return;
 		const p = args.projectionMatrix as ArrayLike<number>;
-		const sun = sunPosition(this.t * 1000, centre.lat, centre.lng);
-		const { light, warm } = daylight(sun.altitude);
 
 		gl.useProgram(g.program);
 		gl.bindVertexArray(g.vao);
@@ -309,8 +297,6 @@ export class Clouds3dLayer {
 		gl.uniformMatrix4fv(g.loc.u_matrix, false, new Float32Array(m));
 		gl.uniform2f(g.loc.u_proj, Math.abs(p[0]), Math.abs(p[5]));
 		gl.uniform1f(g.loc.u_pitch, Math.sin((map.getPitch() * Math.PI) / 180));
-		gl.uniform1f(g.loc.u_light, light);
-		gl.uniform1f(g.loc.u_warm, warm);
 		gl.uniform1f(g.loc.u_opacity, 1);
 		// Hidden by terrain in front, blended over one another far to near.
 		gl.enable(gl.DEPTH_TEST);
