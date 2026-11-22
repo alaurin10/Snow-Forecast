@@ -29,6 +29,7 @@ from snowwatch.sources import bc_asws, nws, snotel
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import (
     blend_request,
+    clouds_request,
     ensemble_request,
     multimodel_request,
     station_request,
@@ -88,6 +89,11 @@ def fetch_responses(
     )
     if upper is not None:
         out["upper"] = upper
+    cloud_model = cfg.cloud_model(loc.country)
+    if cloud_model:
+        clouds = _try(fetcher, clouds_request(loc, cloud_model), key("clouds"), errors)
+        if clouds is not None:
+            out["clouds"] = clouds
 
     cached = repo.cached_ensembles(conn, loc.id, now=now, max_age_h=cfg.ensemble_max_age_h)
     for system in cfg.ensembles:

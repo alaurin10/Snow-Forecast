@@ -11,6 +11,10 @@ models:
     CA: [gem_hrdps_continental]
   # NBM has no pressure-level data.
   upper_air_exclude: [ncep_nbm_conus]
+  # Each location's cloud layers for the map's 3D clouds: the cloud cover at every
+  # pressure level from one model (GFS with HRRR in the US; HRDPS, RDPS and GDPS in
+  # Canada). ~2.4 Open-Meteo calls a run per location.
+  clouds: {US: gfs_seamless, CA: gem_seamless}
 
 # Ensemble systems (member counts: GEFS 31, ECMWF ENS 51, GEPS 21).
 ensembles: [gfs_seamless, ecmwf_ifs025, gem_global]

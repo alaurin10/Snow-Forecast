@@ -34,6 +34,20 @@ def test_upper_air_is_one_point_at_the_summit(cfg: ForecastConfig) -> None:
     assert req.params["past_days"] == "3"  # the loading rose looks back 72 h
 
 
+def test_clouds_are_one_model_at_every_level_over_the_middle(cfg: ForecastConfig) -> None:
+    loc = make_location()
+    assert cfg.cloud_model("US") == "gfs_seamless" and cfg.cloud_model("CA") == "gem_seamless"
+    req = om.clouds_request(loc, cfg.cloud_model("US") or "")
+    assert req.name == "clouds" and req.params["models"] == "gfs_seamless"
+    assert req.params["latitude"] == "47" and "elevation" not in req.params
+    hourly = req.params["hourly"].split(",")
+    assert "cloud_cover_850hPa" in hourly and "geopotential_height_650hPa" in hourly
+    assert len(hourly) == 2 * len(om.CLOUD_LEVELS)
+    assert req.params["forecast_days"] == "10"
+    # One model, 24 variables, 10 days: a little over two calls.
+    assert req.weight == 2.4
+
+
 def test_ensemble_at_mid(cfg: ForecastConfig) -> None:
     req = om.ensemble_request(make_location(), "ecmwf_ifs025")
     assert req.url == om.ENSEMBLE_URL
@@ -56,6 +70,7 @@ def test_full_run_requests_and_daily_budget(cfg: ForecastConfig) -> None:
         "blend",
         "multi",
         "upper",
+        "clouds",
         "ens_gfs_seamless",
         "ens_ecmwf_ifs025",
         "ens_gem_global",

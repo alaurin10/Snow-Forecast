@@ -433,6 +433,11 @@
 					<span class:fc={current.kind === 'forecast'} class:nc={current.kind === 'nowcast'}
 						>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{label.rel}</span
 					>
+					{#if adjusted && weather === 'clouds'}<span
+							class="adj"
+							title="Ground inside the cloud is fogged; ground above its top is clear. Cloud heights from NOAA's National Blend of Models: an estimate."
+							>at cloud height</span
+						>{/if}
 				</div>
 			</div>
 		{:else if loadError}

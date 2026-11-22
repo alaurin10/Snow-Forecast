@@ -41,6 +41,7 @@ def inputs_from_responses(
         blend=blend,
         multi=multi,
         upper=parse_point(responses["upper"]) if "upper" in responses else None,
+        clouds=parse_point(responses["clouds"]) if "clouds" in responses else None,
         ensembles={
             s: parse_point(responses[f"ens_{s}"]) for s in cfg.ensembles if f"ens_{s}" in responses
         },

@@ -34,6 +34,22 @@ Notable changes to Snow Watch. The format follows
   50 more frames per layers run (~2 MB of NBM temperature each, cached), and the model
   ground heights and a grid of elevation, fetched once and kept. The Layers sheet's
   weather tiles now sit five across, so the nine choices still take two rows.
+- **Forecast clouds at their heights.** Zoomed in (from zoom 8), the Clouds layer's
+  forecast now sits on the terrain at the height NOAA's National Blend of Models gives
+  its base and top: ground inside the cloud is fogged, summits above a sea of cloud stay
+  clear, and valleys beneath it are lightly shaded ("at cloud height" beside the time).
+  Cloud tops are known to 36 h and bases to 3½ days, across the US and Canada to about
+  55°N; elsewhere and beyond, the cover alone as before. Zoomed out it looks as it did.
+  It stays on further in than before, lighter, so the ground under the fog still reads.
+  On the server: ~180 MB more NOAA downloads and under a minute of work per NBM run
+  (twice a day); the ground under the clouds is the Temperature layer's elevation grid.
+- **3D clouds** (Layers → Show, off until chosen): puffs of cloud floating at their
+  forecast heights around each location, for the time on the weather slider (or now):
+  none when it's clear, clumps when partly cloudy, a deck when overcast. Ridges hide the
+  clouds behind them and summits poke through a deck; they dim at night and warm at
+  sunrise and sunset. Best in 3D, and a rough picture rather than a measurement. Each
+  location's cloud layers come from one light Open-Meteo request a run (~2.4 calls; a
+  location now uses ~310 calls a day, so 25 still fit the free tier).
 - **`config/webcams.yaml` applies itself.** The worker reads it at start (so after every
   update) and every 5 minutes, and gives each location whose entry is new or changed the
   file's webcams, then refreshes it. Merging a webcam change is all it takes; no command

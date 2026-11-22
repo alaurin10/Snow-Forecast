@@ -20,6 +20,9 @@ class ModelSets(BaseModel):
     global_: list[str] = Field(alias="global")
     short_range: dict[str, list[str]] = {}
     upper_air_exclude: list[str] = []
+    # One model per country for each location's cloud layers (the map's 3D clouds): the
+    # cloud cover at every pressure level from it. A country not listed takes the first.
+    clouds: dict[str, str] = {"US": "gfs_seamless", "CA": "gem_seamless"}
 
 
 class SlrBand(BaseModel):
@@ -175,6 +178,11 @@ class ForecastConfig(BaseModel):
 
     def upper_air_models(self, country: str) -> list[str]:
         return [m for m in self.models_for(country) if m not in self.models.upper_air_exclude]
+
+    def cloud_model(self, country: str) -> str | None:
+        """The model for a location's cloud layers, or None if none is set."""
+        clouds = self.models.clouds
+        return clouds.get(country) or next(iter(clouds.values()), None)
 
 
 def load_forecast_config(path: Path | None = None) -> ForecastConfig:

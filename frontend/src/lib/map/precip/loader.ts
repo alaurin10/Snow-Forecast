@@ -5,8 +5,7 @@
 // So dragging the slider somewhere new is served at once, with nothing to re-queue, and
 // frames no longer wanted are cancelled.
 import type { Planes } from './codec';
-import type { LoadRequest, LoadResponse } from './frames.worker';
-import type { StepPlanes } from './steps';
+import type { AnyPlanes, LoadRequest, LoadResponse } from './frames.worker';
 
 /** A frame to have ready: `key` names it (file and size), `at` is its place on the slider. */
 export interface Want {
@@ -31,7 +30,7 @@ const TRIES = 3;
 /** A frame that failed every try is left alone this long, then tried again if still wanted. */
 const REST_MS = 20_000;
 
-export class FrameLoader<P extends Planes | StepPlanes = Planes> {
+export class FrameLoader<P extends AnyPlanes = Planes> {
 	private wants = new Map<string, Want>();
 	private flying = new Map<number, string>();
 	private failed = new Map<string, { tries: number; until: number }>();

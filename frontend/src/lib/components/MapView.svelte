@@ -31,6 +31,7 @@
 		getAvalancheZones,
 		getConcern,
 		getMapPoint,
+		getMapClouds,
 		getMapWind,
 		getReports,
 		getSat,
@@ -109,6 +110,7 @@
 		weatherOpacity,
 		opacityAt,
 		goneAt,
+		CLOUD_NUMBERS_OPACITY,
 		WIND_MIN_ZOOM
 	} from '../map/style';
 	import { AnalysisLayer, AreaRunner, viewBounds, type AreaState } from '../map/layers/analysis';
@@ -140,6 +142,9 @@
 	} from '../map/layers/terrain';
 	import { TotalLayer } from '../map/precip/totallayer';
 	import { TEMP_SCALE } from '../map/precip/totalgl';
+	import { CloudLayer } from '../map/precip/cloudlayer';
+	import { Clouds3dLayer } from '../map/clouds3d/layer';
+	import type { CloudSite } from '../map/clouds3d/puffs';
 	import {
 		elevationTile,
 		jobsClient,
@@ -278,8 +283,6 @@
 	// The precipitation pictures are ~1.4 km a pixel: they fade as the map zooms past
 	// that and are gone up close, where one pixel would fill the screen.
 	const weather = $derived<MapWeather>(radar ? prefs.mapWeather : 'off');
-	/** Smooth fields (totals, snow level, wind, snow on the ground) stay on further in. */
-	const tooClose = $derived(zoom >= goneAt(weatherOpacity(weather)));
 
 	const layersOpen = $derived(panel === 'layers');
 	/** Phones and tablets: the More menu (measure, offline maps, about) is open. */
@@ -1644,6 +1647,10 @@
 	}
 	const waiting = $derived.by(() => {
 		if (glRadar) return radarWaiting;
+		if (glCloud) {
+			void cloudTick;
+			return !!cloudLayer?.waiting;
+		}
 		if (glTotals) {
 			void totalTick;
 			void totalHours;
@@ -1825,6 +1832,98 @@
 		if (near != null && untrack(() => picked.totals) !== near)
 			picked = { ...untrack(() => picked), totals: near };
 	});
+	// ---- Forecast clouds, drawn from numbers on the graphics chip (../map/precip/cloudlayer.ts)
+	/** The clouds' forecast frames are drawn that way: the server lists them as numbers. */
+	const glClouds = $derived(
+		glOk && weather === 'clouds' && looping && frames.some((f) => !f.past && !!f.data)
+	);
+	/** The frame on the slider is one of them (a satellite picture is drawn as a picture). */
+	const glCloud = $derived(glClouds && !!current && !current.past && !!current.data);
+	let cloudLayer: CloudLayer | null = null;
+	let cloudTick = $state(0);
+	let cloudNoted = false;
+	function cloudChanged() {
+		if (cloudNoted) return;
+		cloudNoted = true;
+		queueMicrotask(() => {
+			cloudNoted = false;
+			cloudTick++;
+			if (glClouds) ready_ = untrack(framesReady);
+		});
+	}
+	$effect(() => {
+		const use = glClouds;
+		const tl = timeline;
+		const list = frames;
+		if (!ready || !map || !tl) return;
+		if (!use) {
+			cloudLayer?.remove();
+			cloudLayer = null;
+			return;
+		}
+		const o = CLOUD_NUMBERS_OPACITY;
+		cloudLayer ??= new CloudLayer(map, {
+			bounds: tl.bounds,
+			width: tl.width,
+			height: tl.height,
+			beforeId: PRECIP_BEFORE,
+			opacity: (z) => opacityAt(o, z),
+			maxzoom: goneAt(o),
+			// Zoomed in, the cloud against each pixel's elevation, from the terrain worker's tiles.
+			elevation: analysis ? elevationTile : undefined,
+			onChange: cloudChanged
+		});
+		cloudLayer.setFrames(
+			list.filter((f) => !f.past && f.data).map((f) => ({ file: f.data!, url: dataUrl(f) }))
+		);
+		cloudLayer.setFrame(untrack(() => (glCloud ? current!.data! : null)));
+	});
+	$effect(() => {
+		const f = glCloud ? current!.data! : null;
+		if (glClouds) cloudLayer?.setFrame(f);
+	});
+	// ---- 3D clouds (Show → 3D clouds): puffs at their heights around each location -------
+	const clouds3dOn = $derived(radar && glOk && prefs.mapFeatures.has('clouds3d'));
+	let cloudSites = $state.raw<CloudSite[]>([]);
+	let clouds3d: Clouds3dLayer | null = null;
+	// The locations' cloud layers: when switched on, and again with each new timeline (the
+	// forecast runs every 3 hours).
+	$effect(() => {
+		void timeline;
+		if (!clouds3dOn) return;
+		let gone = false;
+		getMapClouds()
+			.then((r) => {
+				if (!gone) cloudSites = r.locations.map((l) => ({ ...l, clouds: l.clouds }));
+			})
+			.catch((e) => console.error('3D clouds', e));
+		return () => (gone = true);
+	});
+	/** The time they show: the weather slider's when it plays through time, else now. */
+	const cloudTime = $derived(looping && current ? current.valid : now / 1000);
+	$effect(() => {
+		const on = clouds3dOn;
+		if (!ready || !map) return;
+		if (!on) {
+			clouds3d?.remove();
+			clouds3d = null;
+			return;
+		}
+		clouds3d ??= new Clouds3dLayer(map);
+		clouds3d.setSites(cloudSites);
+		clouds3d.setTime(untrack(() => cloudTime));
+	});
+	$effect(() => {
+		const t = cloudTime;
+		if (clouds3dOn) clouds3d?.setTime(t);
+	});
+
+	/** Zoomed in past where the layer has faded out. Smooth fields (totals, snow level, wind,
+	 *  snow on the ground) and the clouds drawn from numbers stay on further in. */
+	const tooClose = $derived(
+		zoom >= goneAt(glCloud ? CLOUD_NUMBERS_OPACITY : weatherOpacity(weather))
+	);
+
 	// The frame index follows the slider, and the slider follows a jump to a frame (a new
 	// timeline, another layer, "now").
 	$effect(() => {
@@ -1920,6 +2019,16 @@
 		const have = radarLayer?.ready() ?? new Set<string>();
 		return new Set(frames.filter((f) => f.data && have.has(f.data)).map((f) => f.file));
 	}
+	/** A frame is on hand: its numbers in the cloud layer, or its picture downloaded. */
+	function hasFrame(f: Frame | undefined): boolean {
+		if (!f) return false;
+		if (glClouds && !f.past && f.data) return !!cloudLayer?.has(f.data);
+		return store.has(f);
+	}
+	/** The clouds' frames on hand: pictures for the satellite, numbers for the forecast. */
+	function framesReady(): Set<string> {
+		return new Set(frames.filter(hasFrame).map((f) => f.file));
+	}
 	const stillMotion =
 		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 	/** How long the picture on screen fades into the next: within a playing frame's time;
@@ -1943,8 +2052,9 @@
 			shown = null;
 			return;
 		}
-		if (glRadar || glTotals || glTemp) {
-			// The radar, snow total or temperature layer draws it; the pictures stand empty.
+		if (glRadar || glTotals || glTemp || glCloud) {
+			// The radar, snow total, temperature or cloud layer draws it; the pictures stand
+			// empty.
 			++showToken;
 			if (overlay?.showing) overlay.draw(null, null, 0);
 			shown = want.file;
@@ -1989,6 +2099,8 @@
 		const order = list
 			.map((f, i) => ({ f, i, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
 			.filter((x) => extendedWanted || from < 0 || x.i < from)
+			// The cloud layer fetches its own (as numbers).
+			.filter((x) => !(glClouds && !x.f.past && x.f.data))
 			.sort((a, b) => a.d - b.d)
 			.map((x) => x.f);
 		await Promise.all(
@@ -2021,7 +2133,9 @@
 			ready_ = untrack(dataReady);
 			return;
 		}
-		ready_ = new Set(list.filter((f) => store.has(f)).map((f) => f.file));
+		ready_ = untrack(() =>
+			glClouds ? framesReady() : new Set(list.filter((f) => store.has(f)).map((f) => f.file))
+		);
 		void untrack(fetchAll);
 	});
 	// Another layer: start it at "now" (or its first frame).
@@ -2103,7 +2217,7 @@
 			id = setTimeout(tick, frameMs(a && b && b.t > a.t ? b.t - a.t : 3600));
 			if (hold > 0) return void hold--;
 			const next = (frame + 1) % count;
-			if ((waiting || !store.has(frames[next])) && waits++ < 10) return;
+			if ((waiting || !hasFrame(frames[next])) && waits++ < 10) return;
 			waits = 0;
 			// A few loops, then rest on "now": endless playback keeps the phone busy.
 			if (next === 0 && ++loops >= 3) {
@@ -2183,6 +2297,10 @@
 	/** They're what's on screen (zoomed in far enough), or the snow total layer's own
 	 *  terrain adjustment is. */
 	const adjusted = $derived.by(() => {
+		if (glCloud) {
+			void cloudTick;
+			return !!cloudLayer?.adjusted(zoom);
+		}
 		if (glTotals) {
 			void totalTick;
 			void totalHours;
@@ -2810,6 +2928,7 @@
 				{offline}
 				concern={!!concernCfg}
 				ates={!!atesData}
+				clouds3d={glOk}
 				onclose={() => (panel = 'none')}
 			/>
 		{/if}

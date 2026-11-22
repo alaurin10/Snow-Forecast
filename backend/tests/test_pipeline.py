@@ -54,6 +54,19 @@ def test_full_run_stores_every_location(seeded: sqlite3.Connection) -> None:
     assert [r["location_id"] for r in stn] == ["crystal", "rainy", "snoqualmie"]
     assert all(r["n"] >= 1 for r in stn)
     assert "crystal/station" in calls
+    # Each location's cloud layers, for the map's 3D clouds.
+    assert calls.count("synthetic clouds") == 6
+    assert snap.clouds is not None and snap.clouds.model == "gfs_seamless"
+    ca = repo.latest_snapshot(seeded, "whistler")
+    assert ca is not None and ca.clouds is not None and ca.clouds.model == "gem_seamless"
+
+
+def test_clouds_failing_is_only_a_warning(seeded: sqlite3.Connection) -> None:
+    _, results = run(seeded, fetcher(fail=("clouds",)), ensembles=True)
+    assert all(r.ok for r in results)
+    assert any("clouds" in e for r in results for e in r.errors)
+    snap = repo.latest_snapshot(seeded, "crystal")
+    assert snap is not None and snap.clouds is None
 
 
 def test_ensembles_are_reused_between_ensemble_runs(seeded: sqlite3.Connection) -> None:

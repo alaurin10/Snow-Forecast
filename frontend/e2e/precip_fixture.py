@@ -1,8 +1,10 @@
 """Precipitation frames for the e2e server (e2e/serve.sh), so the map's timeline has
 something to play: radar for the past two hours, a short nowcast and a day of hourly
 forecast, at the real picture size over the real box, with bands of rain and snow that
-drift east; and snow totals for a few windows, more snow over a wider area the longer
-the window. Written fresh each run (no binaries in git).
+drift east; snow totals for a few windows, more snow over a wider area the longer
+the window; and clouds: a satellite picture, then forecast cloud cover with its heights
+(a deck over the Cascades, based at 1,500 m with its top at 2,500 m). Written fresh each
+run (no binaries in git).
 
     uv run --frozen python ../frontend/e2e/precip_fixture.py <data>/precip
 """
@@ -19,9 +21,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from snowwatch.maps import bins, dataframe, totaldata
+from snowwatch.maps import bins, cloudheights, dataframe, totaldata
 from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index, paint_total
-from snowwatch.maps.region import WEST, box_region
+from snowwatch.maps.region import WEST, box_region, merc_x, merc_y
+from snowwatch.maps.render import Renderer
 
 WIDTH = 1700  # config/forecast.yaml map.width
 RADAR = 10  # every 12 minutes
@@ -48,6 +51,75 @@ def picture(region, step: int, ds: int, blind: bool = False) -> tuple[bytes, byt
         filled = np.zeros((h, w), np.float32)
         filled[300:700, 1000:1450] = 1.0
     return encode_fine(fine_index(rate, kind)), dataframe.encode(rate, kind, ds, filled)
+
+
+def clouds(out: Path, region, now: int) -> list[dict]:
+    """A satellite picture half an hour ago, then forecast clouds every 3 hours: a deck
+    over the Cascades (1,500–2,500 m above sea level) drifting east and thinning; heights
+    to 9 h with tops, to 15 h bases only, then the cover alone."""
+    h, w = region.height, region.width
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    # Rainier and Crystal Mountain, in the box's pixels.
+    cx = (merc_x(-121.6) - region.x0) / (region.x1 - region.x0) * w
+    cy = (region.y1 - merc_y(46.9)) / (region.y1 - region.y0) * h
+    r = Renderer(out, None)  # type: ignore[arg-type]
+    frames: list[dict] = []
+    sat = np.full((h, w, 3), 90, np.uint8)
+    sat[ys.astype(int) % 200 < 100] = 200
+    buf = io.BytesIO()
+    Image.fromarray(sat, "RGB").save(buf, "WEBP", quality=40)
+    name = f"c{now - 1800}-{hashlib.sha1(buf.getvalue()).hexdigest()[:12]}.webp"
+    (out / name).write_bytes(buf.getvalue())
+    frames.append(
+        {
+            "t": now - 1800,
+            "file": name,
+            "key": name,
+            "kind": "observed",
+            "span_h": 0,
+            "hours": 0,
+            "src": {"north": "goes"},
+            "runs": {},
+            "data": "",
+        }
+    )
+    start = now // (3 * 3600) * (3 * 3600)
+    ground = np.zeros((h, w), np.float32)
+    for i in range(6):
+        t = start + (i + 1) * 3 * 3600
+        deck = np.exp(-((xs - cx - i * 25) ** 2 + (ys - cy) ** 2) / (2 * (160.0 - i * 10) ** 2))
+        cover = np.clip(100 * deck * 1.4, 0, 100).astype(np.float32)
+        heights = None
+        if i < 3:
+            lay = cloudheights.CloudLayer(
+                np.full((h, w), 1500, np.float32),
+                np.full((h, w), 2500, np.float32),
+                cover,
+            )
+            none = cloudheights.CloudLayer(
+                np.full((h, w), 7620, np.float32),
+                np.full((h, w), 13716, np.float32),
+                np.zeros((h, w), np.float32),
+            )
+            heights = cloudheights.from_layers([lay, none, none], cover * 0.3, ground)
+        elif i < 5:
+            heights = cloudheights.from_base(np.full((h, w), 1500, np.float32), cover, ground)
+        picture = r._save_cloud(cover, f"k{t}")
+        data = r._save_numbers(cloudheights.encode(cover, heights), f"kh{t}")
+        frames.append(
+            {
+                "t": t,
+                "file": picture,
+                "key": picture,
+                "kind": "forecast",
+                "span_h": 0,
+                "hours": 0,
+                "src": {"north": "hrdps", "south": "nbm"},
+                "runs": {"nbm": start},
+                "data": data,
+            }
+        )
+    return frames
 
 
 def main(out: Path) -> None:
@@ -134,7 +206,7 @@ def main(out: Path) -> None:
         "frames": frames,
         "totals": totals,
         "steps": {"start": start, "key": "e2e", "steps": steps},
-        "layers": {},
+        "layers": {"clouds": {"frames": clouds(out, region, now)}},
         "attribution": [],
     }
     (out / "index.json").write_text(json.dumps(index))

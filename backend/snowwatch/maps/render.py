@@ -45,6 +45,7 @@ from snowwatch.maps import (
     bins,
     coverage,
     dataframe,
+    elevation,
     grib,
     terrain_totals,
     totaldata,
@@ -231,7 +232,8 @@ class LayerFrame:
     src: dict[str, str] = field(default_factory=dict)
     # Each source used → its run start or analysis time (Unix seconds).
     runs: dict[str, int] = field(default_factory=dict)
-    # The same frame as numbers, for the map to colour itself (temperature: totaldata.py).
+    # The same frame as numbers, for the map to draw itself (temperature: totaldata.py;
+    # forecast clouds with their heights: cloudheights.py).
     data: str = ""
 
     @classmethod
@@ -297,6 +299,10 @@ class Renderer:
         self.totals: list[TotalOut] = []
         self._prev_totals: dict[str, TotalOut] = {}
         self._nbm_run: int | None = None
+        # The ground under the box (elevation.py), once per job: None not yet asked, False
+        # couldn't be had.
+        self._ground_grid: np.ndarray | bool | None = None
+        self._ground_lock = threading.Lock()
         self.dir.mkdir(parents=True, exist_ok=True)
 
     # ---- The index ---------------------------------------------------------------
@@ -535,6 +541,12 @@ class Renderer:
         name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.png"
         self._store(name, data)
         self._write_probe(name, probe_sample(c, self.probe_step).astype(np.float16))
+        return name
+
+    def _save_numbers(self, data: bytes, prefix: str) -> str:
+        """A frame's numbers file (a gzip stream, served as it is), named by its bytes."""
+        name = f"{prefix}-{hashlib.sha1(data).hexdigest()[:12]}.{dataframe.EXT}"
+        self._store(name, data)
         return name
 
     def _save_webp(self, img: np.ndarray, prefix: str, quality: int = 72) -> str:
@@ -866,6 +878,22 @@ class Renderer:
         if self._nbm_obj is None or self._nbm_obj.region != region:
             self._nbm_obj = Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
         return self._nbm_obj
+
+    def _ground(
+        self,
+        region: Region,
+        fetch: Callable[[Net, Region, Path], np.ndarray | None] | None = None,
+    ) -> np.ndarray | None:
+        """The ground's height under the box (elevation.py), asked for once per job."""
+        with self._ground_lock:
+            if self._ground_grid is None:
+                get = fetch or elevation.region_elevation
+                got = get(self.net, region, self.grids_dir)
+                self._ground_grid = got if got is not None else False
+            have = self._ground_grid
+            if isinstance(have, np.ndarray) and have.shape == (region.height, region.width):
+                return have
+            return None
 
     def forecast(self, region: Region) -> dict[str, Any]:
         """The forecast timeline to 10 days, every source blended as numbers (blend.py).

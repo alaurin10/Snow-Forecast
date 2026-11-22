@@ -56,7 +56,8 @@ export type MapFeature =
 	| 'stations'
 	| 'obs'
 	| 'ates'
-	| 'names';
+	| 'names'
+	| 'clouds3d';
 export const MAP_FEATURES: readonly MapFeature[] = [
 	'runs',
 	'peaks',
@@ -67,7 +68,9 @@ export const MAP_FEATURES: readonly MapFeature[] = [
 	'stations',
 	'obs',
 	'ates',
-	'names'
+	'names',
+	// Off until chosen (not one of NEW_FEATURES): more fun than useful.
+	'clouds3d'
 ] as const;
 /** Features added later that are on for everyone once, like the ones before them. */
 const NEW_FEATURES: readonly MapFeature[] = ['places', 'glaciers', 'names'];

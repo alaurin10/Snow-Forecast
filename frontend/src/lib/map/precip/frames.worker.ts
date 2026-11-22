@@ -1,20 +1,23 @@
 // Downloads and unpacks precipitation frames off the main thread (./codec.ts): fetch,
 // inflate, undo the row filter, and for a phone halve the radar's rate plane. The planes
 // go back as transferred buffers, ready to upload as textures. The snow total's steps
-// (./steps.ts) come the same way.
+// (./steps.ts) and the forecast clouds (./clouds.ts) come the same way.
+import { parseClouds, type CloudPlanes } from './clouds';
 import { halve, parse, type Planes } from './codec';
 import { parseStep, type StepPlanes } from './steps';
+
+export type AnyPlanes = Planes | StepPlanes | CloudPlanes;
 
 export type LoadRequest =
 	{ type: 'load'; id: number; url: string; half: boolean } | { type: 'cancel'; id: number };
 
 export type LoadResponse =
-	| { id: number; ok: true; planes: Planes | StepPlanes }
+	| { id: number; ok: true; planes: AnyPlanes }
 	| { id: number; ok: false; error: string; aborted: boolean };
 
 const aborts = new Map<number, AbortController>();
 
-async function load(url: string, half: boolean, signal: AbortSignal): Promise<Planes | StepPlanes> {
+async function load(url: string, half: boolean, signal: AbortSignal): Promise<AnyPlanes> {
 	const res = await fetch(url, { signal });
 	if (!res.ok || !res.body) throw new Error(`frame ${res.status}`);
 	const raw = await new Response(
@@ -23,6 +26,8 @@ async function load(url: string, half: boolean, signal: AbortSignal): Promise<Pl
 	const bytes = new Uint8Array(raw);
 	const step = parseStep(bytes);
 	if (step) return step;
+	const clouds = parseClouds(bytes);
+	if (clouds) return clouds;
 	const planes = parse(bytes);
 	if (!planes) throw new Error('not a frame');
 	return half ? halve(planes) : planes;
@@ -45,7 +50,9 @@ self.onmessage = (ev: MessageEvent<LoadRequest>) => {
 					{ id: msg.id, ok: true, planes },
 					'step' in planes
 						? [planes.area.buffer, planes.bands.buffer]
-						: [planes.rate.buffer, planes.type.buffer]
+						: 'cloud' in planes
+							? [planes.shares.buffer, planes.heights.buffer]
+							: [planes.rate.buffer, planes.type.buffer]
 				),
 			(e: unknown) =>
 				post({

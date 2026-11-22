@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from snowwatch.analysis import backcountry as bc
 from snowwatch.analysis import ensemble as ens
+from snowwatch.analysis.clouds import cloud_layers
 from snowwatch.analysis.consensus import PeriodConsensus, period_consensus
 from snowwatch.analysis.flags import compute_flags
 from snowwatch.analysis.freezing import LEVELS, freezing_level_m
@@ -39,6 +40,7 @@ from snowwatch.doc import (
     Alert,
     BackcountryOut,
     BandOut,
+    CloudsOut,
     DailyEns,
     DailyRow,
     DayOut,
@@ -62,6 +64,7 @@ from snowwatch.doc import (
     WindowOut,
 )
 from snowwatch.models import Location
+from snowwatch.sources.openmeteo import CLOUD_DAYS, CLOUD_LEVELS
 
 WINDOWS = {"next5": (0, 10), "d6_10": (10, 20)}
 
@@ -71,6 +74,7 @@ class ForecastInputs:
     blend: list[PointData]  # base, mid, summit
     multi: list[PointData]  # base, mid, summit
     upper: PointData | None = None
+    clouds: PointData | None = None  # one model's cloud cover at each pressure level
     ensembles: dict[str, PointData] = field(default_factory=dict)
     alerts: list[Alert] = field(default_factory=list)
     snotel: Snotel | None = None
@@ -215,6 +219,25 @@ class _BandWork:
     wdir: dict[int, float | None]
     ratios: list[tuple[float | None, str | None]]
     model_sums: list[dict[str, float | None]]
+
+
+CLOUD_PAST_H = 3  # the map's satellite pictures reach this far back
+
+
+def _clouds(
+    loc: Location, inputs: ForecastInputs, cfg: ForecastConfig, now_h: int
+) -> CloudsOut | None:
+    """The cloud layers above the location from 3 h ago to 10 days ahead, for the map."""
+    model = cfg.cloud_model(loc.country)
+    if inputs.clouds is None or not model:
+        return None
+    return cloud_layers(
+        inputs.clouds,
+        model,
+        CLOUD_LEVELS,
+        start=now_h - CLOUD_PAST_H * 3600,
+        hours=CLOUD_PAST_H + CLOUD_DAYS * 24,
+    )
 
 
 def build_snapshot(
@@ -439,6 +462,7 @@ def build_snapshot(
         backcountry=backcountry,
         days=days,
         warnings=warnings,
+        clouds=_clouds(loc, inputs, cfg, now_h),
     )
     # Chance that 48 h (4 periods) bring a storm's worth of snow, from the members,
     # each period's snow water at its headline ratio.

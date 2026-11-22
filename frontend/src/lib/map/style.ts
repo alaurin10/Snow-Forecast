@@ -83,6 +83,23 @@ export const CLOUD_OPACITY: ExpressionSpecification = [
 	0
 ];
 
+/** Forecast clouds drawn from numbers: as the pictures zoomed out; zoomed in, the cloud
+ *  against the terrain (fog on the ground inside it), which stays on further in but
+ *  lighter, so the ground under the fog still reads. */
+export const CLOUD_NUMBERS_OPACITY: ExpressionSpecification = [
+	'interpolate',
+	['linear'],
+	['zoom'],
+	9,
+	0.85,
+	12,
+	0.75,
+	15,
+	0.5,
+	16.5,
+	0
+];
+
 /** How strongly each weather layer covers the map, by zoom. */
 export function weatherOpacity(w: string): ExpressionSpecification {
 	if (w === 'radar') return PRECIP_OPACITY;

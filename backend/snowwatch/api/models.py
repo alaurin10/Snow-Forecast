@@ -10,7 +10,7 @@ from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, Sa
 from snowwatch.api.auth import Me
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
-from snowwatch.doc import DayOut, Flag, RoseOut, Snapshot
+from snowwatch.doc import CloudsOut, DayOut, Flag, RoseOut, Snapshot
 from snowwatch.locations.resolve import ResolveIn, ResolveOut
 from snowwatch.maps.point import PointOut
 from snowwatch.maps.sat import SatOut
@@ -115,6 +115,26 @@ class MapWindOut(BaseModel):
     min_snow_cm: float  # less new snow than this: nothing to move
     min_wind_kmh: float  # lighter than this: little drifting
     locations: list[MapWindLocation]
+
+
+class MapCloudsLocation(BaseModel):
+    """A location's cloud layers hour by hour, placed at its middle, with the heights its
+    bands span (so the map can say whether the summit is above the cloud)."""
+
+    id: str
+    name: str
+    lat: float
+    lon: float
+    base_m: float
+    summit_m: float
+    generated_at: str
+    clouds: CloudsOut
+
+
+class MapCloudsOut(BaseModel):
+    """Each location's cloud layers for the map's 3D clouds: an approximation."""
+
+    locations: list[MapCloudsLocation]
 
 
 class ConcernOut(BaseModel):
@@ -254,6 +274,7 @@ class ApiTypes(BaseModel):
     locations: list[LocationSummary]
     overview: list[OverviewRow]
     map_wind: MapWindOut
+    map_clouds: MapCloudsOut
     map_concern: ConcernOut
     avalanche_zones: ZonesOut
     sat: SatOut

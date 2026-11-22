@@ -15,6 +15,13 @@ So beyond 48 h we work in 6-hour blocks (a 3-hour frame takes its share of its b
 how RDPS splits the same six hours; see render.py). Each run is fetched once: messages are
 cached on disk (grib.fetch_messages).
 
+Clouds (probed 21 Nov 2026): to 36 h each file has up to three cloud layers from the
+ground up, as NBM's own level types 195, 196 and 197 (which wgrib2's index calls
+"reserved"), each a base (`CDCB`) and top (`CDCTOP`) in metres above the ground and a cover
+(`TCDC`, %), and the high cloud layer's cover. A layer that isn't there has its base at
+7,620 m (25,000 ft) and its top at 13,716 m (45,000 ft). To 84 h only the lowest cloud's
+base (`CEIL` at "cloud base", metres above the ground; 88,888 m where there is none).
+
 Bucket: noaa-nbm-grib2-pds (NOAA Open Data Dissemination), free, no key.
 """
 
@@ -23,6 +30,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +48,19 @@ HOUR = 3600
 LAST_H = 264
 HOURLY_TO_H = 48  # 1-hour APCP and ASNOW exist to here
 BLOCK_H = 6
+CLOUD_LAYERS_TO_H = 36  # the layers' last forecast hour
+LAYER_SURFACES = (195, 196, 197)  # NBM's first, second and third cloud layer
+NO_BASE_M = 7600.0  # a layer's base at or above this: no such layer
+NO_TOP_M = 13700.0  # likewise its top
+
+
+@dataclass
+class CloudLayer:
+    """One of NBM's cloud layers on the region: metres above the ground, cover in %."""
+
+    base: np.ndarray
+    top: np.ndarray
+    cover: np.ndarray
 
 
 def file_url(run: int, fhour: int) -> str:
@@ -108,6 +129,42 @@ class Nbm:
             self.cache_dir,
         )
         return grib.on_region(raw[0], self.region, self.grids_dir)
+
+    def cloud_layers(self, fhour: int) -> tuple[list[CloudLayer], np.ndarray | None] | None:
+        """The cloud layers at one forecast hour, lowest first, and the high cloud layer's
+        cover (%); None where the file has none (past 36 h)."""
+        if fhour > CLOUD_LAYERS_TO_H:
+            return None
+        names = ("CDCB", "CDCTOP", "TCDC")
+        patterns = [rf":{v}:reserved:{fhour} hour fcst:" for _ in LAYER_SURFACES for v in names]
+        nth = [k for k in range(len(LAYER_SURFACES)) for _ in names]
+        patterns.append(rf":TCDC:high cloud layer:{fhour} hour fcst:")
+        nth.append(0)
+        raw = grib.fetch_messages(
+            self.net, file_url(self.run, fhour), patterns, self.cache_dir, nth
+        )
+        found: dict[int, CloudLayer] = {}
+        for k in range(len(LAYER_SURFACES)):
+            trio = raw[3 * k : 3 * k + 3]
+            surfaces = {grib.first_surface(m) for m in trio if m is not None}
+            # Only a whole layer, its three fields agreeing which layer it is.
+            if None in trio or len(surfaces) != 1:
+                continue
+            surface = surfaces.pop()
+            if surface not in LAYER_SURFACES or surface is None:
+                continue
+            base, top, cover = (grib.on_region(m, self.region, self.grids_dir) for m in trio)
+            if base is None or top is None or cover is None:
+                continue
+            found[surface] = CloudLayer(base, top, cover)
+        if not found:
+            return None
+        high = grib.on_region(raw[-1], self.region, self.grids_dir)
+        return [found[s] for s in sorted(found)], high
+
+    def cloud_base(self, fhour: int) -> np.ndarray | None:
+        """The lowest cloud's base (metres above the ground; NaN or 88,888 where none)."""
+        return self.field(fhour, "CEIL", "cloud base")
 
     def precip(self, end: int, hours: int) -> tuple[np.ndarray, np.ndarray] | None:
         """Water (mm) over the period and its type codes, or None if NBM hasn't it.

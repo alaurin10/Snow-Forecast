@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import itertools
 import logging
 import math
 import os
@@ -74,11 +75,13 @@ def parse_idx(text: str) -> list[IdxEntry]:
     return out
 
 
-def find(entries: list[IdxEntry], pattern: str) -> IdxEntry | None:
+def find(entries: list[IdxEntry], pattern: str, nth: int = 0) -> IdxEntry | None:
     """The first plain (not probability or percentile) message whose description matches
-    a regex, such as r":APCP:surface:0-1 hour acc fcst:" (matched against `IdxEntry.line`)."""
+    a regex, such as r":APCP:surface:0-1 hour acc fcst:" (matched against `IdxEntry.line`),
+    or the `nth` after it: NBM's cloud layers share one description ("reserved" level)."""
     rx = re.compile(pattern)
-    return next((e for e in entries if not e.extra and rx.search(e.line)), None)
+    hits = (e for e in entries if not e.extra and rx.search(e.line))
+    return next(itertools.islice(hits, nth, None), None)
 
 
 def fetch_message(net: Net, url: str, pattern: str) -> bytes | None:
@@ -91,17 +94,24 @@ def _cache_path(cache_dir: Path, url: str, pattern: str) -> Path:
 
 
 def fetch_messages(
-    net: Net, url: str, patterns: list[str], cache_dir: Path | None = None
+    net: Net,
+    url: str,
+    patterns: list[str],
+    cache_dir: Path | None = None,
+    nth: list[int] | None = None,
 ) -> list[bytes | None]:
     """Several messages of one GRIB2 file: one `.idx` request, then a range request each.
+    `nth` (one per pattern) takes a later match than the first (see `find`).
 
     With `cache_dir`, messages are kept on disk by URL and pattern (model files never
     change once published), so the same field isn't downloaded twice."""
     out: list[bytes | None] = [None] * len(patterns)
+    which = nth or [0] * len(patterns)
+    keys = [p if n == 0 else f"{p}#{n}" for p, n in zip(patterns, which, strict=True)]
     todo = list(range(len(patterns)))
     if cache_dir is not None:
         for i in list(todo):
-            path = _cache_path(cache_dir, url, patterns[i])
+            path = _cache_path(cache_dir, url, keys[i])
             if path.exists():
                 with contextlib.suppress(OSError):
                     out[i] = path.read_bytes()
@@ -114,7 +124,7 @@ def fetch_messages(
         return out
     entries = parse_idx(r.text)
     for i in todo:
-        entry = find(entries, patterns[i])
+        entry = find(entries, patterns[i], which[i])
         if entry is None:
             log.debug("no %s in %s", patterns[i], url)
             continue
@@ -123,7 +133,7 @@ def fetch_messages(
             continue
         out[i] = data
         if cache_dir is not None:
-            write_atomic(_cache_path(cache_dir, url, patterns[i]), data)
+            write_atomic(_cache_path(cache_dir, url, keys[i]), data)
     return out
 
 
@@ -189,6 +199,23 @@ def scanning_mode(raw: bytes) -> int:
             return raw[off + at] if at is not None and at < length else 0
         off += length
     return 0
+
+
+def first_surface(raw: bytes) -> int | None:
+    """The type of a message's first fixed surface (GRIB2 code table 4.5) from section 4,
+    such as 1 (the ground) or NBM's local 195–197 (its first to third cloud layer); None if
+    the message has no section 4 that says."""
+    off = 16
+    while off + 5 <= len(raw):
+        length = int.from_bytes(raw[off : off + 4], "big")
+        number = raw[off + 4]
+        if length <= 0 or number > 7:
+            return None
+        if number == 4:
+            # Product templates 4.0–4.15 put it at octet 23 (0-based 22).
+            return raw[off + 22] if length > 22 else None
+        off += length
+    return None
 
 
 def unsnake(values: np.ndarray) -> np.ndarray:
