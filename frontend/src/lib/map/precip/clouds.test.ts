@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLOUD_ADJUST_FROM, cloudAdjustAt } from './cloudlayer';
-import { cloudAt, HAS_HEIGHTS, HAS_TOPS, parseClouds } from './clouds';
+import { coverAt, HAS_HEIGHTS, HAS_TOPS, parseClouds } from './clouds';
 
 /** A frame's inflated bytes as the server writes them (cloudheights.py). */
 function frame(planes: number[][], w: number, h: number, flags: number, stepDm = 3): Uint8Array {
@@ -59,29 +59,29 @@ describe('cloud frames', () => {
 	});
 });
 
-describe('the ground under the cloud', () => {
-	const deck = { low: 100, above: 0, base: 1500, top: 2500 };
+describe('the cloud against the terrain', () => {
+	const deck = { cover: 100, above: 0, top: 2500 };
 
-	it('fogs ground inside the cloud and clears summits above it', () => {
-		expect(cloudAt(2000, deck).fog).toBeCloseTo(1);
-		expect(cloudAt(3000, deck).fog).toBe(0);
-		expect(cloudAt(3000, deck).shade).toBe(0);
+	it('covers everything below a full deck’s top, like a layer', () => {
+		expect(coverAt(400, deck)).toBe(100); // a valley under it
+		expect(coverAt(2000, deck)).toBe(100); // a ridge inside it
 	});
 
-	it('shades valleys beneath the cloud', () => {
-		const v = cloudAt(800, deck);
-		expect(v.fog).toBe(0);
-		expect(v.shade).toBeCloseTo(1);
+	it('lets summits above the top show through, under only higher cloud', () => {
+		expect(coverAt(3000, deck)).toBe(0);
+		expect(coverAt(3000, { ...deck, above: 40 })).toBe(40);
+		// Higher cloud never counts for more than the frame's cover.
+		expect(coverAt(3000, { cover: 30, above: 60, top: 2500 })).toBe(30);
 	});
 
-	it('has a soft cloud line', () => {
-		const mid = cloudAt(1500, deck).fog;
-		expect(mid).toBeGreaterThan(0.3);
-		expect(mid).toBeLessThan(0.7);
+	it('has a soft edge at the top', () => {
+		const mid = coverAt(2500, deck);
+		expect(mid).toBeGreaterThan(30);
+		expect(mid).toBeLessThan(70);
 	});
 
-	it('shades a summit above the low cloud only by higher cloud', () => {
-		expect(cloudAt(3000, { ...deck, above: 40 }).shade).toBeCloseTo(0.4);
+	it('keeps partial cover partial', () => {
+		expect(coverAt(1000, { cover: 35, above: 0, top: 2500 })).toBe(35);
 	});
 
 	it('fades in the terrain view over a zoom level', () => {

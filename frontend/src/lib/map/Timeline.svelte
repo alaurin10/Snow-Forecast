@@ -435,7 +435,7 @@
 					>
 					{#if adjusted && weather === 'clouds'}<span
 							class="adj"
-							title="Ground inside the cloud is fogged; ground above its top is clear. Cloud heights from NOAA's National Blend of Models: an estimate."
+							title="Summits above the cloud's top show through. Cloud tops from NOAA's National Blend of Models: an estimate."
 							>at cloud height</span
 						>{/if}
 				</div>

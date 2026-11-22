@@ -348,7 +348,7 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 					? `${north} in Canada, ${south} in the US`
 					: north || south;
 			const heights = f.data
-				? " Zoomed in, the cloud is drawn at its height where NOAA's National Blend of Models gives one (the US and southern Canada, about 3½ days ahead): ground inside the cloud is fogged, summits above it are clear. An estimate."
+				? " Zoomed in, where NOAA's National Blend of Models gives the cloud's top (the US and southern Canada, about 1½ days ahead), summits standing above it show through. An estimate."
 				: '';
 			return `Forecast cloud cover from ${from}: the thicker the cloud, the greyer.${heights}`;
 		}

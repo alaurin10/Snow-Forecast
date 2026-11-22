@@ -3,8 +3,8 @@
 // A frame is the total cover and, where NOAA's National Blend of Models gives cloud
 // heights (the US and Canada to about 55°N, to ~84 h), the low cloud's base, top and
 // cover and the cover of the cloud above it, in metres above sea level. Zoomed in, the map
-// holds each pixel's elevation against them: ground inside the cloud is fog, ground above
-// its top is clear, ground beneath its base lightly shaded (./cloudgl.ts).
+// holds each pixel's elevation against the cloud's top: ground above it shows through,
+// under only the cloud higher up (./cloudgl.ts).
 //
 // The file is a gzip stream of a 16-byte header ("SWC1", width, height, flags, metres per
 // height step / 10, region pixels per plane pixel) and byte planes, each row stored as the
@@ -79,27 +79,14 @@ export function parseClouds(raw: Uint8Array): CloudPlanes | null {
 }
 
 /**
- * What the ground at `elev` metres looks like under a pixel's clouds (the shader's sums,
- * for tests and words): `fog` the share of it hidden in cloud, `shade` the dimming of
- * ground beneath cloud. Covers in %, heights in metres (`top` Infinity: unknown).
+ * The cover (%) drawn over ground at `elev` metres (the shader's sums, for tests and
+ * words): the frame's cover below the low cloud's top, only the cloud higher up above it.
  */
-export function cloudAt(
-	elev: number,
-	c: { low: number; above: number; base: number; top: number }
-): { fog: number; shade: number } {
-	const edge = (a: number, b: number, x: number) => {
-		const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-		return t * t * (3 - 2 * t);
-	};
-	const inside =
-		edge(c.base - FEATHER_M, c.base + FEATHER_M, elev) *
-		(1 - edge(c.top - FEATHER_M, c.top + FEATHER_M, elev));
-	const below = 1 - edge(c.base - FEATHER_M, c.base + FEATHER_M, elev);
-	const low = c.low / 100;
-	const above = c.above / 100;
-	const overhead = below * (1 - (1 - low) * (1 - above)) + (1 - below) * above;
-	return { fog: low * inside, shade: overhead * (1 - inside * low) };
+export function coverAt(elev: number, c: { cover: number; above: number; top: number }): number {
+	const t = Math.min(1, Math.max(0, (elev - (c.top - FEATHER_M)) / (2 * FEATHER_M)));
+	const out = t * t * (3 - 2 * t);
+	return c.cover + (Math.min(c.above, c.cover) - c.cover) * out;
 }
 
-/** Metres over which the ground goes into or out of the cloud (a soft cloud line). */
+/** Metres over which ground rises out of the cloud's top (a soft edge). */
 export const FEATHER_M = 60;
