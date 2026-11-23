@@ -21,6 +21,7 @@ import {
 	moveGroup,
 	moveLocation,
 	pickBand,
+	placeLabels,
 	readGroups,
 	removeGroup,
 	removeLocation,
@@ -357,5 +358,48 @@ describe('the freezing level against a location', () => {
 		expect(fzSide(2200, 2000)?.word).toBe('wet');
 		expect(fzSide(2400, 2000)?.word).toBe('warm');
 		expect(fzSide(null, 2000)).toBeNull();
+	});
+});
+
+describe('labels at the ends of the lines', () => {
+	const at = (...ys: number[]) => ys.map((y, i) => ({ id: `l${i}`, at: y }));
+	const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+
+	it('puts well-spaced labels right at their lines', () => {
+		const got = placeLabels(at(20, 80, 150), 17, 8, 200);
+		expect(got.map((g) => g.px)).toEqual([20, 80, 150]);
+	});
+
+	it('spreads two close labels around their middle, a little each way', () => {
+		const got = placeLabels(at(100, 110), 17, 8, 200);
+		expect(got.map((g) => g.px)).toEqual([96.5, 113.5]);
+	});
+
+	it('gives no label to lines that end on top of each other, and keeps the rest', () => {
+		// Two lines ending near 0 at the foot of the plot, one well clear of them.
+		const got = placeLabels(at(171.5, 209, 210), 17, 7.5, 202.5);
+		expect(ids(got)).toEqual(['l0']);
+		expect(got[0].px).toBe(171.5);
+		// Three at the same spot, and one alone.
+		expect(ids(placeLabels(at(30, 100, 100, 101), 17, 8, 200))).toEqual(['l0']);
+	});
+
+	it('leaves out a bunch that would have to move too far from its lines', () => {
+		// Lines 9 px apart, spread 17 px apart: four move the outer two 12 px (kept); five
+		// move them 16 px (too far, so none).
+		expect(placeLabels(at(100, 109, 118, 127), 17, 8, 300)).toHaveLength(4);
+		expect(placeLabels(at(100, 109, 118, 127, 136), 17, 8, 300)).toEqual([]);
+	});
+
+	it('keeps the lines’ order and never overlaps', () => {
+		const got = placeLabels(at(150, 40, 50, 120), 17, 8, 200);
+		expect(ids(got)).toEqual(['l1', 'l2', 'l3', 'l0']);
+		for (let i = 1; i < got.length; i++)
+			expect(got[i].px - got[i - 1].px).toBeGreaterThanOrEqual(17);
+	});
+
+	it('stays inside the plot', () => {
+		expect(placeLabels(at(195), 17, 8, 192).map((g) => g.px)).toEqual([192]);
+		expect(placeLabels(at(196, 199), 17, 8, 192)).toEqual([]);
 	});
 });

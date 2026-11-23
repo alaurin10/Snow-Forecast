@@ -525,6 +525,47 @@ export function maxWindowTotal(steps: (Step | null)[], n: number): number {
 export const rainyDay = (c: DayCell): boolean => c.snow < 0.25 && c.rain >= 1;
 
 /**
+ * Where to put the labels at the ends of the lines (all in px down the plot). Each label
+ * wants to sit at its line's end (`at`). Lines that end within `near` of another line
+ * (nearly on top of each other) get no label: one label can't say which of them it
+ * names, and the readout above names every line anyway. The rest are spread apart
+ * around their middle where closer than `gap`, kept between `lo` and `hi`; a bunch that
+ * would still have to move more than `maxShift` from its lines is left out too. Labels
+ * kept never overlap and keep their lines' order, so their callouts never cross.
+ */
+export function placeLabels<T extends { at: number }>(
+	items: T[],
+	gap: number,
+	lo: number,
+	hi: number,
+	near = gap / 2,
+	maxShift = gap * 0.75
+): (T & { px: number })[] {
+	const clear = items.filter((a) => items.every((b) => b === a || Math.abs(b.at - a.at) >= near));
+	const top = (m: T[]) => {
+		const span = (m.length - 1) * gap;
+		const mid = m.reduce((a, x) => a + x.at, 0) / m.length;
+		return Math.max(lo, Math.min(hi - span, mid - span / 2));
+	};
+	const bunches: { members: T[]; top: number }[] = [];
+	for (const it of [...clear].sort((a, b) => a.at - b.at)) {
+		bunches.push({ members: [it], top: top([it]) });
+		// Merge with the bunch above while the two would overlap.
+		while (bunches.length > 1) {
+			const b = bunches[bunches.length - 1];
+			const a = bunches[bunches.length - 2];
+			if (b.top - (a.top + (a.members.length - 1) * gap) >= gap) break;
+			const members = [...a.members, ...b.members];
+			bunches.splice(-2, 2, { members, top: top(members) });
+		}
+	}
+	return bunches.flatMap((b) => {
+		const placed = b.members.map((m, i) => ({ ...m, px: b.top + i * gap }));
+		return placed.every((p) => Math.abs(p.px - p.at) <= maxShift) ? placed : [];
+	});
+}
+
+/**
  * The freezing level against a location's elevation: how far above or below it is, and
  * what that means for snow there (the snow level is 305 m below the freezing level).
  */

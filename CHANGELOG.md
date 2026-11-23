@@ -10,8 +10,10 @@ Notable changes to Snow Watch. The format follows
 - **Compare**, a new page and the third tab: the locations you choose on one chart, to see
   where conditions look best. Nothing is picked for you: tick up to 8 locations, then
   Compare. Up to 4 are drawn as solid lines, one per location in its own colour, each
-  named at its end (with its value) and keyed above the chart (tap a location's name to
-  draw or hide its line; on a desktop, pointing at a location picks out its line), for snow (a running total over the days in
+  with a card above the chart (its colour down the edge, name, value and elevation; two by
+  two on phones) and named at its end where it ends clear of the others (lines that end on
+  top of each other go unlabelled rather than cluttered). Tap a location's name to draw or
+  hide its line; on a desktop, pointing at a location picks out its line. For snow (a running total over the days in
   view), temperature, wind gusts (with the lift-hold gust marked), freezing level (with a
   tick at each location's elevation, and how far above or below it the freezing level
   is), snow ratio, and cloud cover (a lane per location). Every location gets a row of ten

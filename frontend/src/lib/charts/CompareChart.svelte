@@ -11,6 +11,7 @@
 		METRIC_NAMES,
 		stepValue,
 		windowTotals,
+		placeLabels,
 		maxWindowTotal,
 		MAX_LINES,
 		type CompareMetric,
@@ -210,7 +211,8 @@
 			} else if (hr === 12) {
 				out.push({
 					left: at(i),
-					name: weekday(d),
+					// Ten days on a phone leave about 27 px a day: two letters fit.
+					name: R >= 10 && phone ? weekday(d).slice(0, 2) : weekday(d),
 					sub: R >= 10 ? String(Number(d.slice(8))) : monthDay(d),
 					strong: true
 				});
@@ -343,8 +345,8 @@
 				})
 	);
 
-	// A label at the end of every line: its name and value (on two lines on phones), joined
-	// to the line by a short leader in its colour, and nudged apart so they never overlap.
+	// A label at the end of each line, joined to it by a thin callout in its colour: name and
+	// value, or the name alone on phones (the cards above give the values there).
 	let plotH = $state(240);
 	const shortName = (name: string, all: string[]) => {
 		const words = name.split(/[\s/]+/).filter(Boolean);
@@ -387,22 +389,16 @@
 							name: shortName(track.name, names),
 							full: track.name,
 							value: endValue(v),
-							at: (y(v) / H) * plotH,
-							px: (y(v) / H) * plotH
+							at: (y(v) / H) * plotH
 						}
 					];
 			}
 			return [];
 		});
-		const GAP = phone ? 30 : 19;
-		const half = GAP / 2 - 1;
-		const sorted = [...raw].sort((a, b) => a.px - b.px);
-		for (let i = 1; i < sorted.length; i++)
-			sorted[i].px = Math.max(sorted[i].px, sorted[i - 1].px + GAP);
-		const over = sorted.length ? sorted[sorted.length - 1].px - (plotH - half) : 0;
-		if (over > 0) for (const s of sorted) s.px -= over;
-		for (const s of sorted) s.px = Math.max(half, s.px);
-		return sorted;
+		// Lines that end too close together for their labels to stay by them go unlabelled
+		// here; the readout above names every line.
+		const GAP = phone ? 17 : 19;
+		return placeLabels(raw, GAP, GAP / 2 - 1, plotH - GAP / 2 + 1);
 	});
 
 	const axisTitle = $derived(
@@ -464,7 +460,7 @@
 					<span class="rv"
 						><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
 					>
-					{#if !phone}<span class="where">{r.where}</span>{/if}
+					<span class="where">{r.where}</span>
 				</div>
 			{/each}
 			{#each { length: spare }, i (i)}<div class="read spare" aria-hidden="true"></div>{/each}
@@ -565,7 +561,7 @@
 					title={e.full}
 					onpointerenter={(ev) => mark(ev, e.id)}
 					onpointerleave={(ev) => mark(ev, null)}
-					><span class="ename">{e.name}</span><b class="num">{e.value}</b></span
+					><span class="ename">{e.name}</span>{#if !phone}<b class="num">{e.value}</b>{/if}</span
 				>{/each}
 		</div>
 	</div>
@@ -591,7 +587,7 @@
 	.cc.phone {
 		gap: 8px;
 		--plot-h: 210px;
-		--ends-w: 84px;
+		--ends-w: 80px;
 	}
 	/* The six metrics: a well with the chosen one raised (3 + 3 on phones). */
 	.metrics {
@@ -741,34 +737,20 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	/* Phones: a row per line, the name on the left, the value and its note on the right. */
+	/* Phones: the same cards, two by two. */
 	.phone .reads {
-		grid-template-columns: 1fr;
-		gap: 0;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
 	}
-	.phone .read,
+	.phone .read {
+		height: 62px;
+		padding: 6px 9px;
+	}
 	.phone .read:not(.spare) {
-		height: 24px;
-		padding: 0;
-		background: transparent;
-		box-shadow: none;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 10px;
-		border-radius: 0;
-	}
-	.phone .who {
-		font-size: 0.8rem;
-		color: var(--text);
-	}
-	.phone .rv {
-		justify-content: flex-end;
+		padding-left: 12px;
 	}
 	.phone .rval {
-		font-size: 0.92rem;
-	}
-	.phone .rdet {
-		max-width: 110px;
+		font-size: 0.98rem;
 	}
 
 	.axes {
@@ -1001,13 +983,8 @@
 		font-weight: 600;
 		color: var(--text-2);
 	}
-	/* Phones: the name over its value, in a column narrow enough to leave the plot room. */
+	/* Phones: the name alone (the cards give the values), in a narrow column. */
 	.phone .end {
-		display: grid;
-		gap: 0;
-		font-size: 0.7rem;
-	}
-	.phone .end b {
 		font-size: 0.7rem;
 	}
 	.xaxis {
