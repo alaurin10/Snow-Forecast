@@ -72,6 +72,11 @@ Decided by the owner, and followed everywhere below:
 - **One line per location.** Charts that draw several lines for one metric on a
   location page (temperature with its model range, wind with gusts, freezing level with
   its range) draw a single line per location in Compare.
+- **Groups stay in the browser**, like the app's other settings; "Copy link" moves one
+  to another device. No server storage.
+- **A new comparison starts at Mid.** A group keeps the band it was left at.
+- **Wind is drawn as gusts**, with sustained speed and direction in the readout.
+- **Up to 8 locations** in a comparison or group.
 
 ---
 
@@ -513,18 +518,8 @@ foot of snow with a lift-closing wind), and the app's rule is facts, not verdict
 
 ---
 
-## 10. Open questions for the owner
+## 10. Open questions
 
-Each has a recommendation; the plan works either way.
-
-1. **Groups in the browser, or on the server?** Recommended: in the browser, with "Copy
-   link" to move one to another device. On the server they'd follow you to every
-   device, but every visitor would see them, editing them would need the owner
-   sign-in, and it needs a database table and owner endpoints.
-2. **Default band for a new comparison: Mid or Summit?** Recommended: Mid, to match the
-   Overview and Calendar. A group remembers its own band either way.
-3. **Wind: gusts or sustained?** Recommended: gusts (what holds lifts), with sustained
-   speed in the readout. For a touring group, sustained ridge wind may matter more; the
-   group could remember this too.
-4. **8 locations per group?** Recommended: 8, so the rows and the chart fit on a phone
-   screen. 10–12 would still work, with more scrolling.
+None. The owner settled the last four on 23 Nov (see "Owner review"): groups stay in
+the browser, a new comparison starts at Mid, wind is gusts, and a group holds up to 8
+locations.
