@@ -3,6 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 const PAGES = [
 	'/',
 	'/calendar',
+	'/compare',
+	'/compare?loc=crystal,whistler,rainy&band=summit&metric=fl&range=3',
 	'/map',
 	'/settings',
 	'/about',

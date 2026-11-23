@@ -1,6 +1,7 @@
 // Per-device viewer preferences, kept in localStorage (which can be missing
 // or blocked, so every access is guarded).
 import type { UnitSystem } from './units';
+import { readGroups, type Group } from './compare';
 
 /** Colour mode. */
 export type Theme = 'auto' | 'light' | 'dark';
@@ -167,6 +168,27 @@ class Prefs {
 
 	/** Overview order on phones: the order set on the Manage page, or most snow first. */
 	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
+
+	/** Compare: saved groups of locations (this browser only), the comparison open last
+	 *  (its query string) and the location rows' order. */
+	compareGroups = $state<Group[]>(readGroups(read('sw.compareGroups')));
+	compareOpen = $state<string>(read('sw.compareOpen') ?? '');
+	compareSort = $state<'mine' | 'snow'>(load('sw.compareSort', ['mine', 'snow'] as const, 'mine'));
+
+	setCompareGroups(groups: Group[]) {
+		this.compareGroups = groups;
+		save('sw.compareGroups', JSON.stringify(groups));
+	}
+
+	setCompareOpen(query: string) {
+		this.compareOpen = query;
+		save('sw.compareOpen', query);
+	}
+
+	setCompareSort(s: 'mine' | 'snow') {
+		this.compareSort = s;
+		save('sw.compareSort', s);
+	}
 
 	/** Webcams tab: start every camera's live video on opening it (this device only). */
 	camsAutoplay = $state<'on' | 'off'>(load('sw.camsAutoplay', ['on', 'off'] as const, 'off'));
