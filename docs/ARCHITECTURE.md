@@ -56,10 +56,13 @@ backend/snowwatch/
   precip.py (re-exports maps/) tiles.py osm.py (runs, huts, glaciers, routes …)
   lookups.py push.py verify.py
 frontend/src/
-  routes/     overview, location/[id], map, calendar, more, status, about, admin
+  routes/     overview, location/[id], map, compare, calendar, more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
               backcountry/ confidence/ observed/ manage/ share/ + small helpers
               railui.svelte.ts (the desktop rail folded or open over the full-window map)
+              compare.ts (Compare: lining up several locations' steps on one timeline, day
+              cells, the comparison's edits, its URL and the groups kept in the browser);
+              charts/CompareChart, components/CompareRows, CompareAdd, CompareGroups
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend,
               Measure and Profile (measure.ts: lines, GPX, stats); DockItem and DockTabs (the

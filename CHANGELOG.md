@@ -6,7 +6,26 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Compare**, a new page and the third tab: the locations you choose on one chart, to see
+  where conditions look best. Nothing is picked for you: tick up to 8 locations, then
+  Compare. Up to 4 are drawn as solid lines, one per location in its own colour (tap a
+  location's name to draw or hide its line), for snow (a running total over the days in
+  view), temperature, wind gusts (with the lift-hold gust marked), freezing level (with a
+  tick at each location's elevation, and how far above or below it the freezing level
+  is), snow ratio, and cloud cover (a lane per location). Every location gets a row of ten
+  days at the chosen band and a total for the days the chart shows; drag or tap the days
+  to move the chart. One Base / Mid / Summit switch covers every location, and each one's
+  real elevation is shown. Save a comparison as a group ("Washington touring") to open it
+  again later; a group opens the way you left it and keeps your changes. Groups are kept
+  in this browser; Copy link takes one to another device. The comparison is in the page's
+  address, so a link opens it and Back undoes adding or removing a location. Plan:
+  `docs/COMPARE-PLAN.md`.
+
 ### Changed
+- **The tabs and the rail are in one order**: Overview · Map · Compare · Calendar ·
+  Settings (the rail had Calendar before Map). The phone tab bar's icons-only width grows
+  from 220 to 248 px for the fifth tab, and the map's buttons stay centred beside it.
 - **Temperature moves smoothly, and its slider is finer up close.** The map now draws the
   Temperature layer itself from numbers, as it does the snow total: colours run smoothly
   (with a crisp break at 0 °C), the slider glides between forecast frames rather than

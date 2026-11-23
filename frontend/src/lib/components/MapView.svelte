@@ -3450,8 +3450,8 @@
 		gap: 8px;
 	}
 	/* Phones and tablets: the map's buttons at the bottom right, under the thumb, bigger,
-	   and centred in the gap between the tab bar (220 px wide on the map, centred) and the
-	   edge. Layers, the most used, is level with the tab bar, the easiest place to reach;
+	   and centred in the gap between the tab bar (--tabbar-compact wide on the map,
+	   centred) and the edge. Layers, the most used, is level with the tab bar, the easiest place to reach;
 	   it stays put whatever opens above it. The rest stand in a column above it, above
 	   the row of tabs at the foot (so the row has the width for Base, Terrain and
 	   Weather) and any of those controls that is open. The compass on top, the zoom buttons left to pinch and double tap.
@@ -3459,7 +3459,7 @@
 	@media (max-width: 1099px) {
 		.wrap {
 			--tool: 48px;
-			--tool-right: clamp(4px, calc((100vw - 220px) / 4 - var(--tool) / 2), 40px);
+			--tool-right: clamp(4px, calc((100vw - var(--tabbar-compact)) / 4 - var(--tool) / 2), 40px);
 		}
 		.wrap .tool {
 			width: var(--tool);

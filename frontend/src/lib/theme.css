@@ -79,6 +79,13 @@
 	--s5: #c2479f;
 	--s6: #26965f;
 	--s7: #9b6be0;
+	/* Compare: one colour per location's line (docs/COMPARE-PLAN.md 3.1). The first three
+	   are series colours; the fourth has its own step per mode. Checked as a palette, all
+	   pairs, against the panel surface in each mode. */
+	--cmp1: var(--s1);
+	--cmp2: var(--s2);
+	--cmp3: var(--s5);
+	--cmp4: #5b3fb5;
 	/* North American avalanche danger scale; always shown with the number and word. */
 	--d1: #50b848;
 	--d2: #fff200;
@@ -94,6 +101,9 @@
 	--stress-3: #c0177c;
 
 	/* Language: shape, type, motion. */
+	/* The phone tab bar's width when it's icons only (on the map and while scrolling);
+	   the map's buttons are placed in the gap beside it. */
+	--tabbar-compact: 248px;
 	--radius: 24px;
 	--radius-sm: 16px;
 	--blur-glass: blur(22px) saturate(1.7);
@@ -147,6 +157,7 @@
 	--rain-ink: #5fd39a;
 	--rain-cell: rgba(61, 182, 122, 0.28);
 	--rain-cell-ink: #c9f2dc;
+	--cmp4: #34a99a;
 	--accent: #b9b4ff;
 	--accent-soft: rgba(185, 180, 255, 0.16);
 	--accent-ink: #d6d3ff;

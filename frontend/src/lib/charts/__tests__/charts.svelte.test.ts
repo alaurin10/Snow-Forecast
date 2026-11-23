@@ -12,6 +12,9 @@ import ModelAgreement from '../ModelAgreement.svelte';
 import ModelDays from '../ModelDays.svelte';
 import { dayReads } from '../../confidence';
 import TrendChart from '../TrendChart.svelte';
+import CompareChart from '../CompareChart.svelte';
+import rainy from '../../fixtures/rainy.json';
+import { buildTimeline, COMPARE_RANGES, METRICS, windowFor, type Comparison } from '../../compare';
 import { pathPoints } from './marks';
 
 const snowy = whistler as unknown as Snapshot;
@@ -88,4 +91,63 @@ describe.each([
 it('empty states render without errors', () => {
 	const t = render(TrendChart, { props: { runs: [], units: 'imperial', width: 300 } });
 	expect(t.container.textContent).toContain('two or more runs');
+});
+
+describe('compare chart', () => {
+	const locs = [
+		{ id: 'whistler', name: 'Whistler', snap: snowy },
+		{ id: 'crystal', name: 'Crystal Mountain', snap: dry },
+		{ id: 'rainy', name: 'Heather–Maple / Rainy Pass', snap: rainy as unknown as Snapshot }
+	];
+
+	it.each(COMPARE_RANGES.map((r) => [r]))(
+		'keeps every mark inside its plot for every metric, %i days, 1 to 3 lines',
+		(range) => {
+			for (const band of ['base', 'summit'] as const) {
+				const timeline = buildTimeline(locs, band, range);
+				for (const metric of METRICS)
+					for (const on of [
+						['whistler'],
+						['whistler', null, 'rainy'],
+						['crystal', 'whistler', 'rainy']
+					]) {
+						const cmp: Comparison = {
+							locs: locs.map((l) => l.id),
+							on,
+							band,
+							metric,
+							range
+						};
+						for (const startMs of [null, Date.parse(timeline.slots[timeline.slots.length - 1].t)]) {
+							const win = windowFor(timeline.slots, range, startMs);
+							const { container } = render(CompareChart, {
+								props: { timeline, cmp, units: 'imperial', win, onmetric: () => {} }
+							});
+							expectInViewBox(container);
+							const drawn = on.filter(Boolean).length;
+							if (metric === 'cloud')
+								expect(container.querySelectorAll('rect.cloud').length).toBeGreaterThan(0);
+							else expect(container.querySelectorAll('path.line').length).toBe(drawn);
+							cleanup();
+						}
+					}
+			}
+		}
+	);
+
+	it('says how to draw a line when none is on', () => {
+		const timeline = buildTimeline(locs, 'mid', 5);
+		const cmp: Comparison = { locs: ['whistler'], on: [], band: 'mid', metric: 'snow', range: 5 };
+		const { container } = render(CompareChart, {
+			props: {
+				timeline,
+				cmp,
+				units: 'metric',
+				win: windowFor(timeline.slots, 5, null),
+				onmetric: () => {}
+			}
+		});
+		expect(container.textContent).toContain('Tap a location’s name below');
+		expect(container.querySelectorAll('path.line').length).toBe(0);
+	});
 });

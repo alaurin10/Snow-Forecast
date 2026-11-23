@@ -1,5 +1,9 @@
 # Snow Watch: Compare plan (conditions side by side across locations)
 
+Status: **milestone 1 built** (23 Nov 2026): the page, groups, the six metrics, the
+location rows, nav order. Milestones 2 and 3 are still to do. "Built: what changed"
+at the end lists where the build differs from the text below.
+
 ## Context
 
 The use case: you're choosing where to go, whether that's this weekend at a resort or
@@ -172,7 +176,7 @@ colour, and turning one off never repaints the others.
 | 1 | `--s1` `#4a8fe7` blue | same | existing token |
 | 2 | `--s2` `#dd6b20` orange | same | existing token |
 | 3 | `--s5` `#c2479f` magenta | same | existing token |
-| 4 | new `--cmp4`, `#5b3fb5` violet | new, around `#36ab9c` teal | needs its own step per mode |
+| 4 | new `--cmp4`, `#5b3fb5` violet | new `--cmp4`, `#34a99a` teal | its own step per mode |
 
 Checked with the dataviz palette validator against the panel surfaces (`#f7f9fc` light,
 `#222d44` dark), **all pairs**, since overlapping lines put every pair on screen together:
@@ -509,7 +513,13 @@ foot of snow with a lift-closing wind), and the app's rule is facts, not verdict
   switch band and metric, scrub; no sideways scroll at 380 px with 8 locations; the page
   still opens offline with the saved snapshots.
 - **Palette**: re-run `validate_palette.js --pairs all` for light and dark with the final
-  `--cmp4`, and keep the result in this file.
+  `--cmp4`, and keep the result in this file. Result (23 Nov 2026, all pairs):
+  light `#4a8fe7 #dd6b20 #c2479f #5b3fb5` on `#f7f9fc`: every check passes (worst
+  colour-blind ΔE 9.4, normal 20.3); dark `#4a8fe7 #dd6b20 #c2479f #34a99a` on `#222d44`:
+  every check passes (worst normal ΔE 15.6), with colour-blind ΔE 7.6 between the teal
+  and magenta, in the 6–8 band that needs labels; every line has them (the readout rows,
+  the values at the line ends and the swatches on the rows). `#36ab9c` kept 8.1 but sat
+  just outside the lightness band.
 - **Look at it**: screenshots at 380, 768, 1280 and 1440 px, light and dark, with four
   lines on every metric and eight location rows; check that line-end labels never
   overlap and the readout never changes height.
@@ -523,3 +533,32 @@ foot of snow with a lift-closing wind), and the app's rule is facts, not verdict
 None. The owner settled the last four on 23 Nov (see "Owner review"): groups stay in
 the browser, a new comparison starts at Mid, wind is gusts, and a group holds up to 8
 locations.
+
+---
+
+## Built: what changed (milestone 1)
+
+Where the build differs from the plan above, and why:
+
+- **First visit**: you tick locations in the list, then press **Compare** (the list
+  stayed in place while you picked; adding the first location used to replace it with
+  the chart at once).
+- **Snow line and totals**: the snow line is a running total from the start of the
+  window (not from now), and a row's summary is worked out from the same steps the chart
+  draws, so a line always ends at its row's total. The snow scale is the snowiest window
+  anywhere in the forecast, so lines keep their heights as the window moves.
+- **The window on the rows**: days outside the chart are faded, rather than a capsule
+  drawn across all the rows (the rows have name lines between them on phones).
+- **Day cells**: numbers only (the unit is in the summary column's heading); freezing
+  level in thousands ("4.2k").
+- **Readout on desktop**: one card per line: name; value and note; band and elevation.
+- **Copy link** is a button in the page's header (on phones the system share sheet).
+  Links keep their commas readable (`loc=rainy,crystal`).
+- **Compact tab bar**: 248 px (`--tabbar-compact` in `theme.css`, which the map's
+  buttons also use), the widest that keeps the Layers button clear of it on a 360 px
+  phone.
+- **Stale forecasts**: a row says "updated … ago" once its forecast is more than 9 hours
+  old (runs are every 3 hours).
+- **Back undoes** adding and removing locations; other changes replace the history
+  entry. Every change is a navigation to the new address (`goto(resolve(…))`), so the
+  address is always what's open.

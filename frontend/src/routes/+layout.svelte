@@ -108,18 +108,20 @@
 		overview: 'M4 6h16M4 12h16M4 18h10',
 		map: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14',
 		calendar: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4',
+		// Two lines crossing on a pair of axes.
+		compare: 'M4 4v16h16M7 15l4-5 3 3 5-6M7 9l4 3 3-2 5 5',
 		// A gear (Feather icons, MIT).
 		settings:
 			'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'
 	};
-	// Phones and tablets: the thumb-reach order. Desktop: the rail's order.
+	// The same order on phones (the tab bar) and desktops (the rail).
 	const tabs = [
 		{ href: '/', label: 'Overview', icon: ICONS.overview },
 		{ href: '/map', label: 'Map', icon: ICONS.map },
+		{ href: '/compare', label: 'Compare', icon: ICONS.compare },
 		{ href: '/calendar', label: 'Calendar', icon: ICONS.calendar },
 		{ href: '/settings', label: 'Settings', icon: ICONS.settings }
 	] as const;
-	const railNav = [tabs[0], tabs[2], tabs[1], tabs[3]];
 	/** Desktop map page: the map fills the window and the rail floats over it, foldable. */
 	const overMap = $derived(viewport.desktop && page.route.id === '/map');
 	const folded = $derived(overMap && railUi.folded);
@@ -230,7 +232,7 @@
 				</button>
 			</div>
 			<nav class="railnav" aria-label="Main">
-				{#each railNav as t (t.href)}
+				{#each tabs as t (t.href)}
 					<a
 						href={resolve(t.href)}
 						aria-current={active(t.href) && (t.href !== '/' || !sections.id) ? 'page' : undefined}
@@ -756,7 +758,7 @@
 		max-width: 440px;
 		margin: 0 auto;
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(5, 1fr);
 		gap: 2px;
 		padding: 5px;
 		border-radius: 999px;
@@ -765,7 +767,7 @@
 			padding var(--spring);
 	}
 	.tabbar.compact {
-		max-width: 220px;
+		max-width: var(--tabbar-compact);
 	}
 	.tabbar a {
 		display: grid;
