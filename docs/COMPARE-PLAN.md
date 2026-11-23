@@ -551,17 +551,14 @@ Where the build differs from the plan above, and why:
   drawn across all the rows (the rows have name lines between them on phones).
 - **Day cells**: numbers only (the unit is in the summary column's heading); freezing
   level in thousands ("4.2k").
-- **Readout on desktop**: one card per line: name; value and note; band and elevation,
-  with the line's colour down the card's left edge.
 - **Telling the lines apart** (owner review, 23 Nov): the readout is a card per line on
-  every screen (two by two on phones), with the line's colour down its edge; the colour
-  keys are bolder (18 × 5 px) and the lines 2.5 px. Lines are named at their ends (name
-  and value; the name alone on phones, where the cards give values), joined by a thin
-  callout in their colour, but only where a label can sit by its own line: lines that
-  end within half a label's height of another get no label, and a bunch that would
-  have to spread too far is left out (`placeLabels` in `compare.ts`). The cards always
-  name every line. On a desktop, pointing at a location (its row, card or label) picks
-  out its line and fades the others.
+  every screen, with the line's colour down its edge, its name and its value; two by two
+  on phones, where a card is just those two lines (the rows below give each location's
+  elevation), and four across on wider screens, with the band and elevation under the
+  value. The colour keys are bold (18 × 5 px) and the lines 2.5 px. The plot has no
+  labels of its own: names at the line ends were tried and taken out, as they cost the
+  plot width and repeated the cards. On a desktop, pointing at a location (its row or its
+  card) picks out its line and fades the others.
 - **Copy link** is a button in the page's header (on phones the system share sheet).
   Links keep their commas readable (`loc=rainy,crystal`).
 - **Compact tab bar**: 248 px (`--tabbar-compact` in `theme.css`, which the map's

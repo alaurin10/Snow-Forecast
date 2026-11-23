@@ -11,7 +11,6 @@
 		METRIC_NAMES,
 		stepValue,
 		windowTotals,
-		placeLabels,
 		maxWindowTotal,
 		MAX_LINES,
 		type CompareMetric,
@@ -345,62 +344,6 @@
 				})
 	);
 
-	// A label at the end of each line, joined to it by a thin callout in its colour: name and
-	// value, or the name alone on phones (the cards above give the values there).
-	let plotH = $state(240);
-	const shortName = (name: string, all: string[]) => {
-		const words = name.split(/[\s/]+/).filter(Boolean);
-		for (let k = 1; k <= words.length; k++) {
-			const s = words.slice(0, k).join(' ');
-			if (s.length < 4 && k < words.length) continue;
-			const clash = all.some(
-				(o) =>
-					o !== name &&
-					o
-						.split(/[\s/]+/)
-						.slice(0, k)
-						.join(' ') === s
-			);
-			if (!clash) return s;
-		}
-		return name;
-	};
-	const endValue = (v: number) => {
-		if (metric === 'snow') return v.toFixed(c.snowDigits);
-		if (metric === 'temp') return `${Math.round(v)}°`;
-		if (metric === 'fl') {
-			const step = units === 'imperial' ? 50 : 10;
-			return (Math.round(v / step) * step).toLocaleString('en-US');
-		}
-		if (metric === 'slr') return `${Math.round(v)}:1`;
-		return `${Math.round(v)}`;
-	};
-	const ends = $derived.by(() => {
-		if (metric === 'cloud') return [];
-		const names = lines.map((l) => l.track.name);
-		const raw = lines.flatMap(({ slot, track }) => {
-			for (let k = N - 1; k >= 0; k--) {
-				const v = valIn(track, k);
-				if (v !== null)
-					return [
-						{
-							slot,
-							id: track.id,
-							name: shortName(track.name, names),
-							full: track.name,
-							value: endValue(v),
-							at: (y(v) / H) * plotH
-						}
-					];
-			}
-			return [];
-		});
-		// Lines that end too close together for their labels to stay by them go unlabelled
-		// here; the readout above names every line.
-		const GAP = phone ? 17 : 19;
-		return placeLabels(raw, GAP, GAP / 2 - 1, plotH - GAP / 2 + 1);
-	});
-
 	const axisTitle = $derived(
 		{
 			snow: `Snow from ${win.off === 0 || !steps[0] ? 'now' : `${weekday(dateOf(steps[0].t))} ${hourLabel(steps[0].t)}`} (${c.snowUnit})`,
@@ -460,7 +403,7 @@
 					<span class="rv"
 						><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
 					>
-					<span class="where">{r.where}</span>
+					{#if !phone}<span class="where">{r.where}</span>{/if}
 				</div>
 			{/each}
 			{#each { length: spare }, i (i)}<div class="read spare" aria-hidden="true"></div>{/each}
@@ -474,7 +417,6 @@
 		</div>
 		<div
 			class="plot"
-			bind:clientHeight={plotH}
 			role="slider"
 			tabindex="0"
 			aria-label="Compare chart: {axisTitle}"
@@ -543,27 +485,6 @@
 					></div>{/each}
 			{/if}
 		</div>
-		<div class="ends" aria-hidden="true">
-			<svg class="leaders" width="10" height={plotH}>
-				{#each ends as e (e.id)}<path
-						d="M1 {e.at.toFixed(1)}H3L8 {e.px.toFixed(1)}H10"
-						class="leader s{e.slot}"
-						class:faded={hl !== null && hl !== e.id}
-					/>{/each}
-			</svg>
-			<!-- Hover only marks the line; the readout above says the same for screen readers. -->
-			{#each ends as e (e.id)}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<span
-					class="end"
-					class:faded={hl !== null && hl !== e.id}
-					style:top="{e.px}px"
-					title={e.full}
-					onpointerenter={(ev) => mark(ev, e.id)}
-					onpointerleave={(ev) => mark(ev, null)}
-					><span class="ename">{e.name}</span>{#if !phone}<b class="num">{e.value}</b>{/if}</span
-				>{/each}
-		</div>
 	</div>
 	<div class="xaxis" aria-hidden="true">
 		<div class="yspace"></div>
@@ -572,7 +493,6 @@
 					>{x.name}{#if x.sub}<small>{x.sub}</small>{/if}</span
 				>{/each}
 		</div>
-		<div class="endspace"></div>
 	</div>
 </div>
 
@@ -582,12 +502,10 @@
 		gap: 12px;
 		min-width: 0;
 		--plot-h: 280px;
-		--ends-w: 136px;
 	}
 	.cc.phone {
 		gap: 8px;
 		--plot-h: 210px;
-		--ends-w: 80px;
 	}
 	/* The six metrics: a well with the chosen one raised (3 + 3 on phones). */
 	.metrics {
@@ -743,8 +661,8 @@
 		gap: 6px;
 	}
 	.phone .read {
-		height: 62px;
-		padding: 6px 9px;
+		height: 46px;
+		padding: 5px 9px;
 	}
 	.phone .read:not(.spare) {
 		padding-left: 12px;
@@ -832,9 +750,7 @@
 		stroke-width: 4;
 	}
 	.line.faded,
-	.dot.faded,
-	.leader.faded,
-	.end.faded {
+	.dot.faded {
 		opacity: 0.25;
 	}
 	.cloud {
@@ -936,57 +852,6 @@
 		border: 2.5px solid var(--k);
 		pointer-events: none;
 	}
-	.ends {
-		position: relative;
-		width: var(--ends-w);
-		height: var(--plot-h);
-		flex-shrink: 0;
-		margin-left: -8px;
-	}
-	.leaders {
-		position: absolute;
-		left: 0;
-		top: 0;
-		overflow: visible;
-	}
-	/* A thin callout, not a continuation of the line: it mustn't read as data. */
-	.leader {
-		fill: none;
-		stroke: var(--k);
-		stroke-width: 1.25;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		transition: opacity var(--ease);
-	}
-	.end {
-		position: absolute;
-		left: 12px;
-		right: 0;
-		transform: translateY(-50%);
-		display: flex;
-		align-items: baseline;
-		gap: 5px;
-		font-size: 0.76rem;
-		line-height: 1.15;
-		color: var(--text);
-		white-space: nowrap;
-		transition: opacity var(--ease);
-	}
-	.ename {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		font-weight: 600;
-	}
-	.end b {
-		flex: 0 0 auto;
-		font-weight: 600;
-		color: var(--text-2);
-	}
-	/* Phones: the name alone (the cards give the values), in a narrow column. */
-	.phone .end {
-		font-size: 0.7rem;
-	}
 	.xaxis {
 		display: flex;
 		gap: 8px;
@@ -999,11 +864,6 @@
 	}
 	.phone .yspace {
 		width: 38px;
-	}
-	.endspace {
-		width: var(--ends-w);
-		flex-shrink: 0;
-		margin-left: -8px;
 	}
 	.xticks {
 		position: relative;

@@ -172,32 +172,21 @@ test('every metric draws on a phone without sideways scrolling', async ({ page }
 	expect(problems).toEqual([]);
 });
 
-test('lines are named at their ends, except where they end on top of each other', async ({
+test('the cards above the chart name every line; the plot has no labels of its own', async ({
 	page
-}) => {
-	const url = '/compare?loc=rainy,crystal,snoqualmie,whistler&band=summit';
-	const labels = page.locator('.ends .end');
-	// Temperature over 10 days: four line ends well apart, four labels.
-	await page.goto(`${url}&metric=temp&range=10`, { waitUntil: 'networkidle' });
-	await expect(labels).toHaveCount(4);
-	for (const name of ['Snoqualmie', 'Crystal', 'Heather–M', 'Whistler'])
-		await expect(labels.filter({ hasText: name })).toHaveCount(1);
-	const boxes = await labels.evaluateAll((els) =>
-		els.map((el) => el.getBoundingClientRect()).map((r) => [r.top, r.bottom])
-	);
-	boxes.sort((a, b) => a[0] - b[0]);
-	for (let i = 1; i < boxes.length; i++)
-		expect(boxes[i][0]).toBeGreaterThanOrEqual(boxes[i - 1][1] - 1);
-	// Snow: Crystal and Snoqualmie both end near nothing, on top of each other, so only
-	// the other two are labelled; the readout cards name all four.
-	await page.goto(`${url}&metric=snow&range=5`, { waitUntil: 'networkidle' });
-	await expect(labels).toHaveCount(2);
-	await expect(labels.filter({ hasText: 'Whistler' })).toHaveCount(1);
-	await expect(labels.filter({ hasText: 'Crystal' })).toHaveCount(0);
-	await expect(page.locator('.read:not(.spare)')).toHaveCount(4);
-	// Gusts: all four end bunched together, so none is labelled.
-	await page.goto(`${url}&metric=wind&range=5`, { waitUntil: 'networkidle' });
-	await expect(labels).toHaveCount(0);
+}, info) => {
+	await page.goto('/compare?loc=rainy,crystal,snoqualmie,whistler&band=summit&metric=temp', {
+		waitUntil: 'networkidle'
+	});
+	const cards = page.locator('.read:not(.spare)');
+	await expect(cards).toHaveCount(4);
+	for (const name of ['Heather–Maple', 'Crystal Mountain', 'Snoqualmie Pass', 'Whistler'])
+		await expect(cards.filter({ hasText: name })).toHaveCount(1);
+	await expect(page.locator('.ends, .end')).toHaveCount(0);
+	// On phones the cards are two lines (name; value), with the elevation left to the rows.
+	const where = cards.first().locator('.where');
+	if (info.project.name === 'phone') await expect(where).toHaveCount(0);
+	else await expect(where).toHaveText(/Maple Pass · [\d,]+ ft/);
 });
 
 test('pointing at a location picks out its line', async ({ page }, info) => {
