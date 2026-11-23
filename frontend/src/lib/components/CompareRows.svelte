@@ -62,6 +62,10 @@
 		onday: (k: number) => void;
 		/** Move the chart a day earlier (-1) or later (1). */
 		onstep: (by: -1 | 1) => void;
+		/** Pointing at a row with a mouse (its line stands out), or leaving it (null). */
+		onhighlight?: (id: string | null) => void;
+		/** The location being pointed at, here or on the chart. */
+		hl?: string | null;
 	}
 
 	let {
@@ -82,7 +86,9 @@
 		onmove,
 		onadd,
 		onday,
-		onstep
+		onstep,
+		onhighlight,
+		hl = null
 	}: Props = $props();
 
 	const phone = $derived(viewport.phone);
@@ -244,7 +250,12 @@
 
 	<ul class="list">
 		{#each rows as r (r.id)}
-			<li class="row">
+			<li
+				class="row"
+				class:hl={hl === r.id && r.slot >= 0}
+				onpointerenter={(e) => e.pointerType === 'mouse' && onhighlight?.(r.id)}
+				onpointerleave={(e) => e.pointerType === 'mouse' && onhighlight?.(null)}
+			>
 				<div class="name">
 					{#if editing}
 						<span class="who"
@@ -404,6 +415,16 @@
 		font-size: 0.86rem;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+	/* The row being pointed at, while its line stands out on the chart. */
+	.list .row {
+		margin: -4px -8px;
+		padding: 4px 8px;
+		border-radius: 14px;
+		transition: background-color var(--ease);
+	}
+	.list .row.hl {
+		background: var(--hover);
 	}
 	.list {
 		list-style: none;

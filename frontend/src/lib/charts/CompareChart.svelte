@@ -37,6 +37,8 @@
 		onmetric: (m: CompareMetric) => void;
 		/** Shown in the plot when no line is drawn. */
 		empty?: string;
+		/** The location being pointed at (here or in its row): its line stands out. */
+		hl?: string | null;
 	}
 
 	let {
@@ -46,7 +48,8 @@
 		win,
 		hoverT = $bindable(null),
 		onmetric,
-		empty = 'Tap a location’s name below to draw its line.'
+		empty = 'Tap a location’s name below to draw its line.',
+		hl = $bindable(null)
 	}: Props = $props();
 
 	const phone = $derived(viewport.phone);
@@ -340,8 +343,8 @@
 				})
 	);
 
-	// Labels at the end of each line: name and value (the value alone on phones), nudged
-	// apart so they never overlap.
+	// A label at the end of every line: its name and value (on two lines on phones), joined
+	// to the line by a short leader in its colour, and nudged apart so they never overlap.
 	let plotH = $state(240);
 	const shortName = (name: string, all: string[]) => {
 		const words = name.split(/[\s/]+/).filter(Boolean);
@@ -382,20 +385,23 @@
 							slot,
 							id: track.id,
 							name: shortName(track.name, names),
+							full: track.name,
 							value: endValue(v),
+							at: (y(v) / H) * plotH,
 							px: (y(v) / H) * plotH
 						}
 					];
 			}
 			return [];
 		});
-		const GAP = 17;
+		const GAP = phone ? 30 : 19;
+		const half = GAP / 2 - 1;
 		const sorted = [...raw].sort((a, b) => a.px - b.px);
 		for (let i = 1; i < sorted.length; i++)
 			sorted[i].px = Math.max(sorted[i].px, sorted[i - 1].px + GAP);
-		const over = sorted.length ? sorted[sorted.length - 1].px - (plotH - 8) : 0;
+		const over = sorted.length ? sorted[sorted.length - 1].px - (plotH - half) : 0;
 		if (over > 0) for (const s of sorted) s.px -= over;
-		for (const s of sorted) s.px = Math.max(8, s.px);
+		for (const s of sorted) s.px = Math.max(half, s.px);
 		return sorted;
 	});
 
@@ -424,6 +430,10 @@
 		else return;
 		e.preventDefault();
 	}
+	/** Pointing with a mouse marks a location; touch has no hover, so it doesn't. */
+	const mark = (e: PointerEvent, id: string | null) => {
+		if (e.pointerType === 'mouse') hl = id;
+	};
 	const valueText = $derived(
 		reads.length ? `${when}: ${reads.map((r) => `${r.name} ${r.value}`).join(', ')}` : empty
 	);
@@ -442,7 +452,14 @@
 		<div class="when">{reads.length ? when : ''}</div>
 		<div class="reads">
 			{#each reads as r (r.id)}
-				<div class="read">
+				<div
+					class="read s{r.slot}"
+					class:hl={hl === r.id}
+					role="group"
+					aria-label={r.name}
+					onpointerenter={(e) => mark(e, r.id)}
+					onpointerleave={(e) => mark(e, null)}
+				>
 					<span class="who"><i class="key s{r.slot}"></i><span class="rname">{r.name}</span></span>
 					<span class="rv"
 						><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
@@ -497,7 +514,12 @@
 							fill-opacity={cell.op.toFixed(3)}
 						/>{/each}
 				{/each}
-				{#each paths as p (p.id)}<path d={p.d} class="line s{p.slot}" />{/each}
+				{#each paths as p (p.id)}<path
+						d={p.d}
+						class="line s{p.slot}"
+						class:faded={hl !== null && hl !== p.id}
+						class:hl={hl === p.id}
+					/>{/each}
 			</svg>
 			{#if metric === 'slr'}
 				{#each ZONES as z (z.cls)}<span class="zonename" style:top={pct((y(z.hi) + y(z.lo)) / 2)}
@@ -519,16 +541,31 @@
 				<div class="cursor" style:left="{((hv + 0.5) / N) * 100}%"></div>
 				{#each dots as d (d.id)}<div
 						class="dot s{d.slot}"
+						class:faded={hl !== null && hl !== d.id}
 						style:left="{((hv + 0.5) / N) * 100}%"
 						style:top={d.top}
 					></div>{/each}
 			{/if}
 		</div>
 		<div class="ends" aria-hidden="true">
-			{#each ends as e (e.id)}<span class="end" style:top="{e.px}px"
-					><i class="key s{e.slot}"></i>{#if !phone}<span class="ename">{e.name}</span>{/if}<b
-						class="num">{e.value}</b
-					></span
+			<svg class="leaders" width="10" height={plotH}>
+				{#each ends as e (e.id)}<path
+						d="M1 {e.at.toFixed(1)}H3L8 {e.px.toFixed(1)}H10"
+						class="leader s{e.slot}"
+						class:faded={hl !== null && hl !== e.id}
+					/>{/each}
+			</svg>
+			<!-- Hover only marks the line; the readout above says the same for screen readers. -->
+			{#each ends as e (e.id)}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<span
+					class="end"
+					class:faded={hl !== null && hl !== e.id}
+					style:top="{e.px}px"
+					title={e.full}
+					onpointerenter={(ev) => mark(ev, e.id)}
+					onpointerleave={(ev) => mark(ev, null)}
+					><span class="ename">{e.name}</span><b class="num">{e.value}</b></span
 				>{/each}
 		</div>
 	</div>
@@ -549,12 +586,12 @@
 		gap: 12px;
 		min-width: 0;
 		--plot-h: 280px;
-		--ends-w: 128px;
+		--ends-w: 136px;
 	}
 	.cc.phone {
 		gap: 8px;
-		--plot-h: 200px;
-		--ends-w: 40px;
+		--plot-h: 210px;
+		--ends-w: 84px;
 	}
 	/* The six metrics: a well with the chosen one raised (3 + 3 on phones). */
 	.metrics {
@@ -608,12 +645,13 @@
 	.s3 {
 		--k: var(--cmp4);
 	}
+	/* The colour key: a short, thick stroke of the line's colour. */
 	.key {
 		display: inline-block;
 		flex: 0 0 auto;
-		width: 14px;
-		height: 3px;
-		border-radius: 2px;
+		width: 18px;
+		height: 5px;
+		border-radius: 3px;
 		background: var(--k);
 	}
 
@@ -647,6 +685,15 @@
 		padding: 7px 10px;
 		border-radius: 14px;
 		background: var(--surface-2);
+	}
+	/* Each card carries its line's colour down its left edge. */
+	.read:not(.spare) {
+		padding-left: 14px;
+		box-shadow: inset 4px 0 0 var(--k);
+		transition: background-color var(--ease);
+	}
+	.read.hl {
+		background: color-mix(in srgb, var(--k) 14%, var(--surface-2));
 	}
 	.read.spare {
 		background: transparent;
@@ -699,10 +746,12 @@
 		grid-template-columns: 1fr;
 		gap: 0;
 	}
-	.phone .read {
+	.phone .read,
+	.phone .read:not(.spare) {
 		height: 24px;
 		padding: 0;
 		background: transparent;
+		box-shadow: none;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 10px;
@@ -790,9 +839,21 @@
 	.line {
 		fill: none;
 		stroke: var(--k);
-		stroke-width: 2;
+		stroke-width: 2.5;
+		transition:
+			opacity var(--ease),
+			stroke-width var(--ease);
 		stroke-linejoin: round;
 		stroke-linecap: round;
+	}
+	.line.hl {
+		stroke-width: 4;
+	}
+	.line.faded,
+	.dot.faded,
+	.leader.faded,
+	.end.faded {
+		opacity: 0.25;
 	}
 	.cloud {
 		fill: rgb(var(--cloud));
@@ -898,30 +959,56 @@
 		width: var(--ends-w);
 		height: var(--plot-h);
 		flex-shrink: 0;
+		margin-left: -8px;
+	}
+	.leaders {
+		position: absolute;
+		left: 0;
+		top: 0;
+		overflow: visible;
+	}
+	/* A thin callout, not a continuation of the line: it mustn't read as data. */
+	.leader {
+		fill: none;
+		stroke: var(--k);
+		stroke-width: 1.25;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		transition: opacity var(--ease);
 	}
 	.end {
 		position: absolute;
-		left: 0;
+		left: 12px;
 		right: 0;
 		transform: translateY(-50%);
 		display: flex;
-		align-items: center;
+		align-items: baseline;
 		gap: 5px;
-		font-size: 0.72rem;
-		color: var(--text-2);
+		font-size: 0.76rem;
+		line-height: 1.15;
+		color: var(--text);
 		white-space: nowrap;
-	}
-	.end .key {
-		width: 8px;
+		transition: opacity var(--ease);
 	}
 	.ename {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		font-weight: 600;
 	}
 	.end b {
+		flex: 0 0 auto;
 		font-weight: 600;
-		color: var(--text);
+		color: var(--text-2);
+	}
+	/* Phones: the name over its value, in a column narrow enough to leave the plot room. */
+	.phone .end {
+		display: grid;
+		gap: 0;
+		font-size: 0.7rem;
+	}
+	.phone .end b {
+		font-size: 0.7rem;
 	}
 	.xaxis {
 		display: flex;
@@ -939,6 +1026,7 @@
 	.endspace {
 		width: var(--ends-w);
 		flex-shrink: 0;
+		margin-left: -8px;
 	}
 	.xticks {
 		position: relative;

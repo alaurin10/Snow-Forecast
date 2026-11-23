@@ -138,6 +138,8 @@
 	// --- The window the chart shows, moved from the rows ---------------------------------
 	let startMs = $state<number | null>(null);
 	let hoverT = $state<string | null>(null);
+	/** The location pointed at (desktop): its line stands out. */
+	let hl = $state<string | null>(null);
 	const win = $derived(windowFor(timeline.slots, cmp.range, startMs));
 	const inView = $derived(windowDays(timeline.slots, win, timeline.dates));
 	function showDay(k: number) {
@@ -398,6 +400,7 @@
 			units={prefs.units}
 			{win}
 			bind:hoverT
+			bind:hl
 			onmetric={(m) => commit({ ...cmp, metric: m })}
 			empty={loaded.length ? undefined : 'Loading…'}
 		/>
@@ -420,6 +423,8 @@
 			onadd={() => (adding = true)}
 			onday={centreOn}
 			onstep={stepDay}
+			{hl}
+			onhighlight={(id) => (hl = id)}
 		/>
 		<div class="rangebar">
 			<div class="seg" role="group" aria-label="Time range">

@@ -551,7 +551,13 @@ Where the build differs from the plan above, and why:
   drawn across all the rows (the rows have name lines between them on phones).
 - **Day cells**: numbers only (the unit is in the summary column's heading); freezing
   level in thousands ("4.2k").
-- **Readout on desktop**: one card per line: name; value and note; band and elevation.
+- **Readout on desktop**: one card per line: name; value and note; band and elevation,
+  with the line's colour down the card's left edge.
+- **Telling the lines apart** (owner review, 23 Nov): every line is named at its end on
+  every screen, phones included (the name over the value there, in an 84 px column),
+  joined to the line by a thin callout in its colour; the colour keys are bolder (18 × 5
+  px) and the lines 2.5 px. On a desktop, pointing at a location (its row, its card or
+  its label) picks out its line and fades the others.
 - **Copy link** is a button in the page's header (on phones the system share sheet).
   Links keep their commas readable (`loc=rainy,crystal`).
 - **Compact tab bar**: 248 px (`--tabbar-compact` in `theme.css`, which the map's

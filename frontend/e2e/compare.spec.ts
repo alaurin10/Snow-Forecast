@@ -171,3 +171,31 @@ test('every metric draws on a phone without sideways scrolling', async ({ page }
 	expect((await page.locator('.readout').boundingBox())!.height).toBe(before);
 	expect(problems).toEqual([]);
 });
+
+test('every line is named at its end, on phones too', async ({ page }) => {
+	await page.goto('/compare?loc=rainy,crystal,snoqualmie,whistler&band=summit', {
+		waitUntil: 'networkidle'
+	});
+	const labels = page.locator('.ends .end .ename');
+	await expect(labels).toHaveCount(4);
+	await expect(labels).toContainText(['Whistler']);
+	for (const name of ['Heather–Ma', 'Crystal', 'Snoqualmie', 'Whistler'])
+		await expect(page.locator('.ends .end', { hasText: name })).toHaveCount(1);
+	// Labels never overlap one another.
+	const boxes = await labels.evaluateAll((els) =>
+		els.map((el) => el.parentElement!.getBoundingClientRect()).map((r) => [r.top, r.bottom])
+	);
+	boxes.sort((a, b) => a[0] - b[0]);
+	for (let i = 1; i < boxes.length; i++)
+		expect(boxes[i][0]).toBeGreaterThanOrEqual(boxes[i - 1][1] - 1);
+});
+
+test('pointing at a location picks out its line', async ({ page }, info) => {
+	test.skip(info.project.name !== 'desktop', 'a mouse pointer');
+	await page.goto('/compare?loc=rainy,crystal,whistler&band=summit', { waitUntil: 'networkidle' });
+	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).hover();
+	await expect(page.locator('.plot path.line.hl')).toHaveCount(1);
+	await expect(page.locator('.plot path.line.faded')).toHaveCount(2);
+	await page.locator('h1').hover();
+	await expect(page.locator('.plot path.line.faded')).toHaveCount(0);
+});
