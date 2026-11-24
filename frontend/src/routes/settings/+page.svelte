@@ -204,14 +204,15 @@
 				>
 				<button
 					aria-pressed={prefs.snowTotal === 'window'}
-					onclick={() => prefs.setSnowTotal('window')}>From the first day shown</button
+					onclick={() => prefs.setSnowTotal('window')}>Timeline window</button
 				>
 			</div>
 		</div>
 		<p class="faint small hint">
 			How the snow line adds up on the forecast and Compare charts. From now, it’s a running total,
-			so lines keep their place as you move along the timeline. From the first day shown, it starts
-			at zero where the chart starts, so each line ends at its total for those days.
+			so lines keep their place as you move along the timeline. Timeline window starts at zero where
+			the chart starts, so each line ends at its total for those days. Compare has this switch under
+			its chart too.
 		</p>
 		<div class="row">
 			<span>Timeline</span>

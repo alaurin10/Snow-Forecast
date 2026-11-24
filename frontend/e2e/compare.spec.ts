@@ -1,5 +1,5 @@
-// Compare: picking locations by hand, lines on and off, groups kept in the browser and
-// moved by link, and the page's layout on a phone (docs/COMPARE-PLAN.md).
+// Compare: picking up to four locations by hand, each one a line; groups kept in the
+// browser and moved by link; and the page's layout on a phone (docs/COMPARE-PLAN.md).
 import { expect, test, type Page } from '@playwright/test';
 
 /** Page errors, collected while a test runs. */
@@ -8,6 +8,9 @@ function watch(page: Page): string[] {
 	page.on('pageerror', (e) => problems.push(e.message));
 	return problems;
 }
+
+/** The location cards above the chart (not the free places). */
+const cards = (page: Page) => page.locator('.reads .read:not(.spare)');
 
 const sideways = (page: Page) =>
 	page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -44,31 +47,38 @@ test('nothing is picked for you; tick some, then Compare', async ({ page }) => {
 	await expect(go).toHaveText('Compare 2 locations');
 	await go.click();
 	await expect(page).toHaveURL(/loc=crystal,whistler/);
-	await expect(page.locator('.cr .list li')).toHaveCount(2);
+	await expect(cards(page)).toHaveCount(2);
 	// Both are lines: two coloured paths on the chart.
 	await expect(page.locator('.plot path.line')).toHaveCount(2);
 	expect(await sideways(page)).toBeLessThanOrEqual(1);
 	expect(problems).toEqual([]);
 });
 
-test('lines turn on and off from the rows, at most four at once', async ({ page }) => {
+test('four locations at most, each one a line; an old link keeps the four it drew', async ({
+	page
+}) => {
 	const problems = watch(page);
-	await page.goto('/compare?loc=crystal,snoqualmie,rainy,whistler,revelstoke', {
-		waitUntil: 'networkidle'
-	});
-	const rows = page.locator('.cr .list li');
-	await expect(rows).toHaveCount(5);
+	// Comparisons used to hold eight, four of them drawn: those four are the ones kept.
+	await page.goto(
+		'/compare?loc=crystal,snoqualmie,rainy,whistler,revelstoke&on=crystal,revelstoke,rainy,whistler',
+		{ waitUntil: 'networkidle' }
+	);
+	await expect(cards(page)).toHaveCount(4);
+	await expect(cards(page).filter({ hasText: 'Snoqualmie' })).toHaveCount(0);
 	await expect(page.locator('.plot path.line')).toHaveCount(4);
-	// The fifth joined as a row only; four lines are on, so it can't be drawn yet.
-	const revel = page.getByRole('button', { name: /^Revelstoke: line hidden/ });
-	await revel.click();
-	await expect(page.getByRole('status')).toContainText('Up to 4 lines at once');
-	await expect(page.locator('.plot path.line')).toHaveCount(4);
-	// Turning one off frees its colour, and the next line takes that colour.
-	await page.getByRole('button', { name: /^Snoqualmie Pass: line drawn/ }).click();
-	await expect(page).toHaveURL(/on=crystal,,rainy,whistler/);
-	await revel.click();
-	await expect(page).toHaveURL(/on=crystal,revelstoke,rainy,whistler/);
+	// Full: no Add card, and the list won't take a fifth.
+	await expect(page.getByRole('button', { name: 'Add location' })).toHaveCount(0);
+	await page.getByRole('button', { name: 'Change locations' }).click();
+	const sheet = page.getByRole('dialog', { name: 'Locations' });
+	await expect(sheet.getByText('4 of 4 picked')).toBeVisible();
+	const item = (name: string) => sheet.locator('.add .item').filter({ hasText: name });
+	await expect(item('Snoqualmie Pass')).toBeDisabled();
+	// Taking one out frees its colour; the next one in takes that colour.
+	await item('Crystal Mountain').click();
+	await expect(page).toHaveURL(/on=,revelstoke,rainy,whistler/);
+	await item('Snoqualmie Pass').click();
+	await expect(page).toHaveURL(/on=snoqualmie,revelstoke,rainy,whistler/);
+	await sheet.getByRole('button', { name: 'Done' }).click();
 	await expect(page.locator('.plot path.line')).toHaveCount(4);
 	expect(problems).toEqual([]);
 });
@@ -92,10 +102,10 @@ test('a group is saved in the browser, opens as it was left, and travels by link
 	await page.getByRole('button', { name: 'Add location' }).click();
 	await page.locator('.add .item').filter({ hasText: 'Snoqualmie Pass' }).click();
 	await page.getByRole('button', { name: 'Done' }).click();
-	await expect(page.locator('.cr .list li')).toHaveCount(3);
+	await expect(cards(page)).toHaveCount(3);
 	await page.goto('/compare', { waitUntil: 'networkidle' });
 	await expect(page).toHaveURL(/name=Washington\+touring/);
-	await expect(page.locator('.cr .list li')).toHaveCount(3);
+	await expect(cards(page)).toHaveCount(3);
 	await expect(
 		page.getByRole('group', { name: 'Elevation' }).getByRole('button', { name: 'Summit' })
 	).toHaveAttribute('aria-pressed', 'true');
@@ -109,7 +119,7 @@ test('a group is saved in the browser, opens as it was left, and travels by link
 	await expect(page.getByRole('heading', { name: 'Choose locations to compare' })).toBeVisible();
 	await page.locator('.gpill').click();
 	await page.getByRole('button', { name: /^Washington touring/ }).click();
-	await expect(page.locator('.cr .list li')).toHaveCount(3);
+	await expect(cards(page)).toHaveCount(3);
 
 	// Its link, opened in a browser that has never seen it, offers to save it there.
 	const link = page.url();
@@ -118,7 +128,7 @@ test('a group is saved in the browser, opens as it was left, and travels by link
 	await p2.goto(link, { waitUntil: 'networkidle' });
 	await expect(p2.locator('.gname')).toHaveText('Washington touring');
 	await expect(p2.getByRole('button', { name: 'Save group' })).toBeVisible();
-	await expect(p2.locator('.cr .list li')).toHaveCount(3);
+	await expect(cards(p2)).toHaveCount(3);
 	await other.close();
 	expect(problems).toEqual([]);
 });
@@ -137,22 +147,25 @@ test('deleting a group can be undone', async ({ page }) => {
 	await expect(page.locator('.gname')).toHaveText('Resorts');
 });
 
-test('Edit removes and reorders; Back undoes a removal', async ({ page }) => {
+test('Change locations takes one out; Back puts it back', async ({ page }) => {
 	await page.goto('/compare?loc=crystal,whistler,rainy', { waitUntil: 'networkidle' });
-	await page.getByRole('button', { name: 'Edit', exact: true }).click();
-	await page.getByRole('button', { name: /^Move Heather–Maple .* up$/ }).click();
-	await expect(page).toHaveURL(/loc=crystal,rainy,whistler/);
-	await page.getByRole('button', { name: 'Remove Whistler' }).click();
+	await page.getByRole('button', { name: 'Change locations' }).click();
+	const sheet = page.getByRole('dialog', { name: 'Locations' });
+	await sheet.locator('.add .item').filter({ hasText: 'Whistler' }).click();
+	await sheet.getByRole('button', { name: 'Done' }).click();
 	await expect(page).toHaveURL(/loc=crystal,rainy&/);
+	await expect(cards(page)).toHaveCount(2);
+	// A free place offers Add location.
+	await expect(page.getByRole('button', { name: 'Add location' })).toBeVisible();
 	await page.goBack();
-	await expect(page).toHaveURL(/loc=crystal,rainy,whistler/);
-	await expect(page.locator('.cr .list li')).toHaveCount(3);
+	await expect(page).toHaveURL(/loc=crystal,whistler,rainy/);
+	await expect(cards(page)).toHaveCount(3);
 });
 
 test('every metric draws on a phone without sideways scrolling', async ({ page }, info) => {
 	test.skip(info.project.name !== 'phone', 'the phone layout');
 	const problems = watch(page);
-	await page.goto('/compare?loc=crystal,snoqualmie,rainy,whistler,revelstoke,sunshine', {
+	await page.goto('/compare?loc=crystal,snoqualmie,rainy,whistler', {
 		waitUntil: 'networkidle'
 	});
 	const metrics = page.getByRole('group', { name: 'Chart metric' });
@@ -164,10 +177,10 @@ test('every metric draws on a phone without sideways scrolling', async ({ page }
 		);
 		expect(await sideways(page)).toBeLessThanOrEqual(1);
 	}
-	// The readout keeps its height whether or not every line is drawn.
+	// The readout keeps its height with fewer locations: room for four cards, always.
 	const before = (await page.locator('.readout').boundingBox())!.height;
-	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).click();
-	await expect(page.locator('.plot path.line').first()).toBeAttached();
+	await page.goto('/compare?loc=crystal', { waitUntil: 'networkidle' });
+	await expect(page.locator('.plot path.line')).toHaveCount(1);
 	expect((await page.locator('.readout').boundingBox())!.height).toBe(before);
 	expect(problems).toEqual([]);
 });
@@ -183,7 +196,7 @@ test('the cards above the chart name every line; the plot has no labels of its o
 	for (const name of ['Heather–Maple', 'Crystal Mountain', 'Snoqualmie Pass', 'Whistler'])
 		await expect(cards.filter({ hasText: name })).toHaveCount(1);
 	await expect(page.locator('.ends, .end')).toHaveCount(0);
-	// On phones the cards are two lines (name; value), with the elevation left to the rows.
+	// On phones the cards are two lines (name; value); wider screens add the elevation.
 	const where = cards.first().locator('.where');
 	if (info.project.name === 'phone') await expect(where).toHaveCount(0);
 	else await expect(where).toHaveText(/Maple Pass · [\d,]+ ft/);
@@ -192,7 +205,7 @@ test('the cards above the chart name every line; the plot has no labels of its o
 test('pointing at a location picks out its line', async ({ page }, info) => {
 	test.skip(info.project.name !== 'desktop', 'a mouse pointer');
 	await page.goto('/compare?loc=rainy,crystal,whistler&band=summit', { waitUntil: 'networkidle' });
-	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).hover();
+	await cards(page).filter({ hasText: 'Crystal Mountain' }).hover();
 	await expect(page.locator('.plot path.line.hl')).toHaveCount(1);
 	await expect(page.locator('.plot path.line.faded')).toHaveCount(2);
 	await page.locator('h1').hover();
@@ -203,11 +216,11 @@ test('the timeline and the range sit right under the chart, and move it', async 
 	await page.goto('/compare?loc=crystal,whistler&band=summit&metric=temp&range=3', {
 		waitUntil: 'networkidle'
 	});
-	// In the card: the plot, then the timeline, then the range, then the rows.
+	// In the card: the plot, then the timeline, then the range.
 	const order = await page
 		.locator('.chartcard')
 		.evaluate((card) =>
-			['.plot', '.ct .track', '[aria-label="Time range"]', '.cr'].map((sel) =>
+			['.plot', '.ct .track', '[aria-label="Time range"]'].map((sel) =>
 				Math.round(card.querySelector(sel)!.getBoundingClientRect().top)
 			)
 		);
@@ -232,13 +245,10 @@ test('the timeline and the range sit right under the chart, and move it', async 
 	await expect(page.locator('.ct .note')).toContainText('Showing all');
 });
 
-test('the list under the chart has no day cells: a name, its height and its total', async ({
-	page
-}) => {
+test('no list under the chart: the cards above it name every location', async ({ page }) => {
 	await page.goto('/compare?loc=crystal,whistler&band=summit', { waitUntil: 'networkidle' });
-	await expect(page.locator('.cr .list li')).toHaveCount(2);
-	await expect(page.locator('.cellbox, .heat')).toHaveCount(0);
-	await expect(page.locator('.cr .list li').first().locator('.sum')).toHaveText(/^\d+\.\d$/);
+	await expect(cards(page)).toHaveCount(2);
+	await expect(page.locator('.cr, .cellbox, .heat')).toHaveCount(0);
 });
 
 test('tapping a location’s card picks out its line; again clears it; another switches', async ({
@@ -282,8 +292,11 @@ test('on a desktop, pointing wins while it lasts, then the selection shows again
 	expect(await lineOf()).not.toBe(crystal);
 	await page.locator('h1').hover();
 	expect(await lineOf()).toBe(crystal);
-	// Turning the selected location's line off clears the selection.
-	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).click();
+	// Taking the selected location out clears the selection.
+	await page.getByRole('button', { name: 'Change locations' }).click();
+	const sheet = page.getByRole('dialog', { name: 'Locations' });
+	await sheet.locator('.add .item').filter({ hasText: 'Crystal Mountain' }).click();
+	await sheet.getByRole('button', { name: 'Done' }).click();
 	await page.locator('h1').hover();
 	await expect(page.locator('.plot path.line.faded')).toHaveCount(0);
 });
@@ -318,28 +331,32 @@ test('the Timeline button hides the timeline, leaving the chart its height', asy
 	await expect(page.locator('.ct')).toHaveCount(1);
 });
 
-test('snow totals follow the setting: from now, or from the first day shown', async ({ page }) => {
+test('the snow total switch under the chart: from now, or the timeline window', async ({
+	page
+}) => {
 	await page.goto('/compare?loc=whistler&band=summit&metric=snow&range=3', {
 		waitUntil: 'networkidle'
 	});
 	// Move the window three days on, then read Whistler's card at the window's end.
-	await page.getByRole('button', { name: 'One day later' }).click();
-	await page.getByRole('button', { name: 'One day later' }).click();
-	await page.getByRole('button', { name: 'One day later' }).click();
+	for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'One day later' }).click();
 	const value = page.locator('.read:not(.spare) .rval').first();
 	const fromNow = parseFloat((await value.textContent()) ?? '0');
 	await expect(page.locator('.axes')).toContainText('Snow from now');
-	await page.goto('/settings');
-	await page.getByRole('button', { name: 'From the first day shown' }).click();
-	await page.goto('/compare?loc=whistler&band=summit&metric=snow&range=3', {
-		waitUntil: 'networkidle'
-	});
-	for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'One day later' }).click();
+	const total = page.getByRole('group', { name: 'Snow total' });
+	await expect(total.getByRole('button', { name: 'From now' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await total.getByRole('button', { name: 'Timeline window' }).click();
 	await expect(page.locator('.axes')).not.toContainText('Snow from now');
-	const fromStart = parseFloat((await value.textContent()) ?? '0');
-	expect(fromStart).toBeLessThan(fromNow);
-	// The row's total for the days shown matches the line's end now.
-	await expect(page.locator('.cr .list .sum').first()).toHaveText(fromStart.toFixed(1));
+	await expect
+		.poll(async () => parseFloat((await value.textContent()) ?? '0'))
+		.toBeLessThan(fromNow);
+	// It's the Settings switch too, so the forecast chart follows.
+	expect(await page.evaluate(() => localStorage.getItem('sw.snowTotal'))).toBe('window');
+	// Only snow adds up: other metrics don't show it.
+	await page.getByRole('group', { name: 'Chart metric' }).getByRole('button').nth(1).click();
+	await expect(total).toHaveCount(0);
 });
 
 test('a location page’s Compare button starts a comparison with it, the Add list open', async ({
@@ -352,11 +369,11 @@ test('a location page’s Compare button starts a comparison with it, the Add li
 		.click();
 	await expect(page).toHaveURL(/\/compare\?loc=crystal&/);
 	await expect(page).not.toHaveURL(/add=1/);
-	const sheet = page.getByRole('dialog', { name: 'Add locations' });
+	const sheet = page.getByRole('dialog', { name: 'Locations' });
 	await expect(sheet).toBeVisible();
 	await sheet.locator('.add .item').filter({ hasText: 'Whistler' }).click();
 	await sheet.getByRole('button', { name: 'Done' }).click();
-	await expect(page.locator('.cr .list li')).toHaveCount(2);
+	await expect(cards(page)).toHaveCount(2);
 });
 
 test('the Add list shows and ranks the metric being compared', async ({ page }) => {
@@ -364,7 +381,7 @@ test('the Add list shows and ranks the metric being compared', async ({ page }) 
 		waitUntil: 'networkidle'
 	});
 	await page.getByRole('button', { name: 'Add location' }).click();
-	const sheet = page.getByRole('dialog', { name: 'Add locations' });
+	const sheet = page.getByRole('dialog', { name: 'Locations' });
 	await expect(sheet.locator('.what')).toContainText('Snow, the days the chart shows, summit');
 	await sheet.getByRole('button', { name: /^Order: my order/ }).click();
 	await expect(sheet.getByRole('button', { name: /^Order: most snow first/ })).toBeVisible();

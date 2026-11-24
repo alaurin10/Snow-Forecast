@@ -172,11 +172,10 @@ class Prefs {
 	/** Overview order on phones: the order set on the Manage page, or most snow first. */
 	sort = $state<'mine' | 'snow'>(load('sw.sort', ['mine', 'snow'] as const, 'mine'));
 
-	/** Compare: saved groups of locations (this browser only), the comparison open last
-	 *  (its query string) and the location rows' order. */
+	/** Compare: saved groups of locations (this browser only) and the comparison open last
+	 *  (its query string). */
 	compareGroups = $state<Group[]>(readGroups(read('sw.compareGroups')));
 	compareOpen = $state<string>(read('sw.compareOpen') ?? '');
-	compareSort = $state<'mine' | 'snow'>(load('sw.compareSort', ['mine', 'snow'] as const, 'mine'));
 
 	setCompareGroups(groups: Group[]) {
 		this.compareGroups = groups;
@@ -186,11 +185,6 @@ class Prefs {
 	setCompareOpen(query: string) {
 		this.compareOpen = query;
 		save('sw.compareOpen', query);
-	}
-
-	setCompareSort(s: 'mine' | 'snow') {
-		this.compareSort = s;
-		save('sw.compareSort', s);
 	}
 
 	/** Webcams tab: start every camera's live video on opening it (this device only). */

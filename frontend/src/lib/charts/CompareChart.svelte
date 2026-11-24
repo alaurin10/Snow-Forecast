@@ -1,6 +1,7 @@
 <!-- Compare: the chosen locations on one chart. One solid line per location, in its own
      colour, for every metric (cloud cover as its percentage). The readout sits above the plot, where a finger scrubbing
-     the plot doesn't cover it, and always keeps room for four rows so nothing moves.
+     the plot doesn't cover it, and always keeps room for four cards so nothing moves: a
+     location still loading holds its place, and a free place offers Add location.
      On the freezing-level view, a tick on the right edge marks each location's elevation. -->
 <script lang="ts">
 	import {
@@ -8,7 +9,7 @@
 		LIFT_HOLD_KMH,
 		METRICS,
 		METRIC_NAMES,
-		MAX_LINES,
+		MAX_LOCS,
 		chartAxis,
 		chartLines,
 		lineValues,
@@ -48,6 +49,12 @@
 		onhover?: (id: string | null) => void;
 		/** Tapping or clicking a card: select it, or clear it if it's the one selected. */
 		onselect?: (id: string) => void;
+		/** Locations with no line (yet): a card each, holding its place and saying why. */
+		others?: { id: string; name: string; slot: number; note: string }[];
+		/** Add location, offered in the first free card. */
+		onadd?: () => void;
+		/** Change locations: the button beside the time. */
+		onedit?: () => void;
 	}
 
 	let {
@@ -57,12 +64,15 @@
 		win,
 		hoverT = $bindable(null),
 		onmetric,
-		empty = 'Tap a location’s name below to draw its line.',
+		empty = 'Loading…',
 		hl = null,
 		total = 'run',
 		selected = null,
 		onhover,
-		onselect
+		onselect,
+		others = [],
+		onadd,
+		onedit
 	}: Props = $props();
 
 	const phone = $derived(viewport.phone);
@@ -258,8 +268,15 @@
 			...reading(track.steps[win.off + hv], track, hv)
 		}))
 	);
-	/** Room for four rows, always: placeholders after the charted ones. */
-	const spare = $derived(Math.max(0, MAX_LINES - reads.length));
+	/** The cards in colour order: lines, and locations waiting for theirs. */
+	const cards = $derived(
+		[
+			...reads.map((r) => ({ ...r, note: null as string | null })),
+			...others.map((o) => ({ ...o, value: '', detail: '', where: '' }))
+		].sort((a, b) => a.slot - b.slot)
+	);
+	/** Room for four cards, always: placeholders after the locations. */
+	const spare = $derived(Math.max(0, MAX_LOCS - cards.length));
 
 	// Reference lines: freezing on the temperature view, the lift-hold gust on wind.
 	const refs = $derived.by(() => {
@@ -338,26 +355,56 @@
 	</div>
 
 	<div class="readout">
-		<div class="when">{reads.length ? when : ''}</div>
-		<div class="reads">
-			{#each reads as r (r.id)}
-				<button
-					class="read s{r.slot}"
-					class:hl={hl === r.id}
-					aria-pressed={selected === r.id}
-					title={selected === r.id ? 'Selected: tap to clear' : 'Tap to pick out its line'}
-					onclick={() => onselect?.(r.id)}
-					onpointerenter={(e) => mark(e, r.id)}
-					onpointerleave={(e) => mark(e, null)}
-				>
-					<span class="who"><i class="key s{r.slot}"></i><span class="rname">{r.name}</span></span>
-					<span class="rv"
-						><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
+		<div class="whenrow">
+			<div class="when">{reads.length ? when : ''}</div>
+			{#if onedit}
+				<button class="edit" onclick={onedit} aria-label="Change locations" aria-haspopup="dialog">
+					<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
+						><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" /></svg
 					>
-					{#if !phone}<span class="where">{r.where}</span>{/if}
+					<span>Locations</span>
 				</button>
+			{/if}
+		</div>
+		<div class="reads">
+			{#each cards as r (r.id)}
+				{#if r.note !== null}
+					<div class="read idle s{r.slot}">
+						<span class="who"><i class="key s{r.slot}"></i><span class="rname">{r.name}</span></span
+						>
+						<span class="rv"><span class="rdet">{r.note}</span></span>
+					</div>
+				{:else}
+					<button
+						class="read s{r.slot}"
+						class:hl={hl === r.id}
+						aria-pressed={selected === r.id}
+						title={selected === r.id ? 'Selected: tap to clear' : 'Tap to pick out its line'}
+						onclick={() => onselect?.(r.id)}
+						onpointerenter={(e) => mark(e, r.id)}
+						onpointerleave={(e) => mark(e, null)}
+					>
+						<span class="who"><i class="key s{r.slot}"></i><span class="rname">{r.name}</span></span
+						>
+						<span class="rv"
+							><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
+						>
+						{#if !phone}<span class="where">{r.where}</span>{/if}
+					</button>
+				{/if}
 			{/each}
-			{#each { length: spare }, i (i)}<div class="read spare" aria-hidden="true"></div>{/each}
+			{#each { length: spare }, i (i)}
+				{#if i === 0 && onadd}
+					<button class="read spare add" onclick={onadd} aria-haspopup="dialog">
+						<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+							><path d="M12 5v14M5 12h14" /></svg
+						>
+						<span>Add location</span>
+					</button>
+				{:else}
+					<div class="read spare" aria-hidden="true"></div>
+				{/if}
+			{/each}
 		</div>
 	</div>
 
@@ -512,7 +559,15 @@
 		display: grid;
 		gap: 4px;
 	}
+	.whenrow {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-height: 28px;
+	}
 	.when {
+		min-width: 0;
 		height: 18px;
 		font-size: 0.8rem;
 		font-weight: 600;
@@ -553,6 +608,49 @@
 	}
 	.read.spare {
 		background: transparent;
+	}
+	.read.idle {
+		cursor: default;
+	}
+	.read.add {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		border: 1.5px dashed var(--border);
+		color: var(--text-2);
+		font-size: 0.8rem;
+		font-weight: 600;
+	}
+	.read.add:hover {
+		background: var(--hover);
+		color: var(--text);
+	}
+	.read.add svg,
+	.edit svg {
+		flex: 0 0 auto;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.edit {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-height: 28px;
+		padding: 0 10px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text-2);
+		font-size: 0.76rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.edit:hover {
+		color: var(--text);
 	}
 	.who {
 		display: flex;

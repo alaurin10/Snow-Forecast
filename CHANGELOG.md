@@ -16,6 +16,14 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Compare holds four locations, every one a line.** It used to take eight with only four
+  drawn; now what you pick is what the chart shows. Old links and groups with more open
+  with the four they drew. The list of locations under the chart is gone (the cards above
+  the chart say the same): a free card offers **Add location**, and **Locations** beside
+  the time opens the list to add or take one out.
+- **The snow total switch sits under Compare's chart** when it shows snow with the
+  timeline: *From now* or *Timeline window* (the Settings switch, renamed from "From the
+  first day shown").
 - **Snow totals add up the same way on the forecast and Compare charts**, set in Settings
   → Snow total on charts: *From now* (the default, a running total, so lines keep their
   place as you move along the timeline) or *From the first day shown* (starting at zero

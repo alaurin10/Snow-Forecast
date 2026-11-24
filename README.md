@@ -17,9 +17,9 @@ snow stations measured, and the official avalanche rating.
   plus HRRR, NBM and HRDPS for the first 48 h, updated four times a day.
 - **Uncertainty you can see**: ensemble ranges, chance-of-snow curves, model
   agreement, outliers flagged, and how the forecast changed over the last runs.
-- **Compare**: up to 8 locations side by side at one band (base, mid or summit), with up
-  to 4 on one chart: snow, temperature, wind gusts, cloud, freezing level and snow ratio,
-  day by day. Save a set as a group (kept in your browser) to open it again later.
+- **Compare**: up to 4 locations on one chart at one band (base, mid or summit): snow,
+  temperature, wind gusts, cloud, freezing level and snow ratio, with a timeline to move
+  along the days. Save a set as a group (kept in your browser) to open it again later.
 - **Overview, calendar and map**: where and when the snow is, storm cycles, a
   radar and forecast precipitation map with ski runs and 3D terrain, and forecast
   snow level, wind and temperature (adjusted to the height of the terrain) layers.

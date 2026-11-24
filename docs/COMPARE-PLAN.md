@@ -1,6 +1,7 @@
 # Snow Watch: Compare plan (conditions side by side across locations)
 
-Status: **built** (24 Nov 2026): milestone 1, the Compare button on location pages and
+Status: **built** (24 Nov 2026), then cut to four locations, each one a line, with no
+list under the chart (owner review, 24 Nov; see the end): milestone 1, the Compare button on location pages and
 the share image (milestone 2) and the ranked Add list with `/api/compare` (milestone 3).
 The day comparison sheet (milestone 2) was left out: the owner found day-by-day tables
 under the chart repeated it. "Built: what changed"
@@ -593,3 +594,12 @@ Where the build differs from the plan above, and why:
   take it; the forecast chart's running total and its scale follow it too.
 - **Timeline button** (owner review, 24 Nov): Compare shows or hides its timeline with
   the forecast chart's setting (`prefs.showTimeline`); the plot's height doesn't change.
+- **Four locations, every one a line** (owner review, 24 Nov): eight locations with four
+  drawn was confusing, so `MAX_LOCS` is 4 and there are no lines to turn on or off; each
+  location keeps a colour slot (`on`) while others come and go. Old links and groups with
+  more keep the four their `on` drew, then the first of the rest. The location rows under
+  the chart (and their sort and reordering) are gone, as the cards said the same: a free
+  card offers Add location, a location still loading holds its card, the Locations
+  button beside the time opens the list, and an old forecast gets a note under the chart.
+  The snow total switch (*From now* / *Timeline window*) sits under the chart when it
+  shows snow with the timeline.

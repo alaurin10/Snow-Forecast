@@ -1,8 +1,8 @@
-<!-- Compare: the locations you choose, on one chart and day by day (docs/COMPARE-PLAN.md).
+<!-- Compare: the locations you choose, on one chart (docs/COMPARE-PLAN.md).
      Nothing is picked for you. The open comparison lives in the URL (so a link opens it
      and Back undoes adding or removing a location); a group is a comparison saved under a
      name in this browser, kept up to date as you change it. One band for every location,
-     with each one's real elevation shown; up to 8 locations, up to 4 of them as lines. -->
+     with each one's real elevation shown; up to four locations, each one a line. -->
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -29,7 +29,6 @@
 		findGroup,
 		fromQuery,
 		hoursAhead,
-		lineSlot,
 		MAX_GROUPS,
 		MAX_LOCS,
 		RANK,
@@ -39,14 +38,10 @@
 		summaryText,
 		METRIC_NAMES,
 		moveGroup,
-		moveLocation,
-		pickBand,
 		removeGroup,
 		removeLocation,
 		renameGroup,
 		restoreGroup,
-		summarizeSteps,
-		toggleLine,
 		toQuery,
 		updateGroup,
 		windowDays,
@@ -60,7 +55,6 @@
 	import ErrorNote from '../../lib/components/ErrorNote.svelte';
 	import Sheet from '../../lib/components/Sheet.svelte';
 	import CompareChart from '../../lib/charts/CompareChart.svelte';
-	import CompareRows, { type RowView } from '../../lib/components/CompareRows.svelte';
 	import CompareTimeline, { type TimelineDay } from '../../lib/components/CompareTimeline.svelte';
 	import CompareAdd, { type AddItem } from '../../lib/components/CompareAdd.svelte';
 	import CompareGroups from '../../lib/components/CompareGroups.svelte';
@@ -69,7 +63,7 @@
 	import { compareColors, drawCompareCard } from '../../lib/share/compareCard';
 
 	const BAND_NAMES: Record<BandName, string> = { base: 'Base', mid: 'Mid', summit: 'Summit' };
-	/** A forecast older than this gets a note on its row (runs are every 3 hours). */
+	/** A forecast older than this gets a note under the chart (runs are every 3 hours). */
 	const STALE_H = 9;
 
 	let rows = $state<OverviewRow[] | null>(null);
@@ -178,71 +172,53 @@
 		windowSpan(timeline.slots, win, dayStarts(timeline.ref?.band.hourly.t ?? [], timeline.dates))
 	);
 
-	// --- The rows ----------------------------------------------------------------------------
-	let editing = $state(false);
-	const rowViews = $derived<RowView[]>(
-		cmp.locs.map((id) => {
+	// --- Locations without a line, the timeline's bars, and old forecasts ----------------
+	/** A card for each location whose forecast hasn't come (or won't). */
+	const others = $derived(
+		cmp.locs.flatMap((id, i) => {
 			const s = snaps[id];
-			const base = {
-				id,
-				name: nameOf(id),
-				slot: lineSlot(cmp, id),
-				elev_m: null,
-				bandLabel: '',
-				cells: [],
-				summary: null,
-				stale: null
-			};
-			if (!s) return { ...base, state: 'loading' };
-			if (s === 'error') {
-				const ov = rows?.find((r) => r.id === id);
-				return { ...base, state: ov && ov.run_id == null ? 'nodata' : 'error' };
-			}
-			const band = pickBand(s, cmp.band);
-			const cells = dayCells(band, timeline.dates);
-			const track = timeline.tracks.find((t) => t.id === id);
-			const hours = (Date.now() - Date.parse(s.generated_at)) / 3600e3;
-			return {
-				...base,
-				state: 'ok',
-				elev_m: band.elev_m,
-				bandLabel: band.label,
-				cells,
-				summary: track ? summarizeSteps(track.steps.slice(win.off, win.off + win.n)) : null,
-				stale: hours > STALE_H ? `updated ${ago(s.generated_at)}` : null
-			};
+			if (s && s !== 'error') return [];
+			const ov = rows?.find((r) => r.id === id);
+			const note = !s ? 'Loading…' : ov && ov.run_id == null ? 'No forecast yet' : 'Couldn’t load';
+			const slot = cmp.on.indexOf(id);
+			return [{ id, name: nameOf(id), slot: slot < 0 ? 10 + i : slot, note }];
 		})
 	);
-	const timelineDays = $derived<TimelineDay[]>(
-		timeline.dates.map((date, k) => {
+	const timelineDays = $derived.by<TimelineDay[]>(() => {
+		const lines = timeline.tracks.flatMap((t) => {
+			const slot = cmp.on.indexOf(t.id);
+			return slot < 0
+				? []
+				: [{ id: t.id, name: t.name, slot, cells: dayCells(t.band, timeline.dates) }];
+		});
+		lines.sort((a, b) => a.slot - b.slot);
+		return timeline.dates.map((date, k) => {
 			const wd = weekday(date);
 			return {
 				date,
 				label: k === 0 ? 'Today' : wd,
 				short: k === 0 ? 'Tod' : wd.slice(0, 2),
-				bars: rowViews
-					.filter((r) => r.slot >= 0 && r.state === 'ok')
-					.sort((a, b) => a.slot - b.slot)
-					.map((r) => ({ id: r.id, name: r.name, slot: r.slot, cm: r.cells[k]?.snow ?? 0 }))
+				bars: lines.map((l) => ({
+					id: l.id,
+					name: l.name,
+					slot: l.slot,
+					cm: l.cells[k]?.snow ?? 0
+				}))
 			};
-		})
-	);
-	const shownRows = $derived(
-		prefs.compareSort === 'snow'
-			? [...rowViews].sort((a, b) => (b.summary?.snow ?? -1) - (a.summary?.snow ?? -1))
-			: rowViews
-	);
-	$effect(() => {
-		if (!cmp.locs.length) untrack(() => (editing = false));
+		});
+	});
+	const staleNote = $derived.by(() => {
+		const old = loaded.filter(
+			(l) => (Date.now() - Date.parse(l.snap.generated_at)) / 3600e3 > STALE_H
+		);
+		return old
+			.map((l) => `${l.name}’s forecast was updated ${ago(l.snap.generated_at)}.`)
+			.join(' ');
 	});
 
-	function toggle(id: string) {
-		const r = toggleLine(cmp, id);
-		if (r.full) toast('Up to 4 lines at once: turn one off first.');
-		else commit(r.cmp);
-	}
 	function pick(id: string) {
-		commit(cmp.locs.includes(id) ? removeLocation(cmp, id) : addLocation(cmp, id), true);
+		if (cmp.locs.includes(id)) commit(removeLocation(cmp, id), true);
+		else if (cmp.locs.length < MAX_LOCS) commit(addLocation(cmp, id), true);
 	}
 
 	// --- Adding locations ------------------------------------------------------------------
@@ -488,8 +464,8 @@
 	<section class="card pick">
 		<h2>Choose locations to compare</h2>
 		<p class="muted">
-			Pick up to {MAX_LOCS}. Up to four are drawn as lines on one chart; every one gets a row of
-			days. Save the set as a group to open it again later.
+			Pick up to {MAX_LOCS}: each one is a line on the chart. Save the set as a group to open it
+			again later.
 		</p>
 		<CompareAdd
 			items={addItems}
@@ -520,7 +496,9 @@
 			onhover={(id) => (hover = id)}
 			onselect={select}
 			onmetric={(m) => commit({ ...cmp, metric: m })}
-			empty={loaded.length ? undefined : 'Loading…'}
+			{others}
+			onadd={cmp.locs.length < MAX_LOCS ? () => (adding = true) : undefined}
+			onedit={() => (adding = true)}
 		/>
 		{#if prefs.showTimeline === 'on'}
 			<CompareTimeline
@@ -558,24 +536,23 @@
 				<span>Timeline</span>
 			</button>
 		</div>
-		{#if zoneNote}<p class="zone faint">{zoneNote}</p>{/if}
-		<div class="rowsblock">
-			<CompareRows
-				rows={shownRows}
-				metric={cmp.metric}
-				units={prefs.units}
-				sort={prefs.compareSort}
-				full={cmp.locs.length >= MAX_LOCS}
-				bind:editing
-				onsort={() => prefs.setCompareSort(prefs.compareSort === 'mine' ? 'snow' : 'mine')}
-				ontoggle={toggle}
-				onremove={(id) => commit(removeLocation(cmp, id), true)}
-				onmove={(id, by) => commit(moveLocation(cmp, id, by))}
-				onadd={() => (adding = true)}
-				{hl}
-				onhighlight={(id) => (hover = id)}
-			/>
-		</div>
+		{#if cmp.metric === 'snow' && prefs.showTimeline === 'on'}
+			<div class="totalbar">
+				<span class="faint" id="snow-total">Snow total</span>
+				<div class="seg" role="group" aria-labelledby="snow-total">
+					<button aria-pressed={prefs.snowTotal === 'run'} onclick={() => prefs.setSnowTotal('run')}
+						>From now</button
+					>
+					<button
+						aria-pressed={prefs.snowTotal === 'window'}
+						onclick={() => prefs.setSnowTotal('window')}>Timeline window</button
+					>
+				</div>
+			</div>
+		{/if}
+		{#if zoneNote || staleNote}
+			<p class="zone faint">{zoneNote}{zoneNote && staleNote ? ' ' : ''}{staleNote}</p>
+		{/if}
 	</section>
 	<p class="callink">
 		<a href={resolve('/calendar')}>Every location, snow only: Calendar</a>
@@ -584,8 +561,8 @@
 
 {#if adding}
 	<Sheet
-		title="Add locations"
-		sub="Up to {MAX_LOCS} in one comparison"
+		title="Locations"
+		sub="Up to {MAX_LOCS} in one comparison, each one a line"
 		onclose={() => (adding = false)}
 	>
 		<CompareAdd
@@ -629,8 +606,8 @@
 			/>
 			{#if saveErr}<p class="err" role="alert">{saveErr}</p>{/if}
 			<p class="faint">
-				Kept in this browser. It opens the way you leave it: its locations, lines, elevation, metric
-				and days.
+				Kept in this browser. It opens the way you leave it: its locations, elevation, metric and
+				days.
 			</p>
 			<button class="btn" type="submit">Save</button>
 		</form>
@@ -805,9 +782,20 @@
 		min-height: 36px;
 		padding: 0 16px;
 	}
-	.rowsblock {
-		padding-top: 16px;
-		border-top: 1px solid var(--grid);
+	/* Snow from now or from the window's start: with the timeline, since it moves the window. */
+	.totalbar {
+		margin-top: -8px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		font-size: 0.8rem;
+	}
+	.totalbar .seg button {
+		min-height: 32px;
+		padding: 0 14px;
+		font-size: 0.8rem;
 	}
 	.zone {
 		margin: -8px 0 0;

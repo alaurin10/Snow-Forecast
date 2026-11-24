@@ -1,6 +1,6 @@
 // Compare: several locations on one chart. The data side: each location's steps at one
-// band, lined up on one timeline; its days for the location rows; and the comparison
-// itself (which locations, which are lines, band, metric, range), how it travels in a
+// band, lined up on one timeline; its days for the timeline's bars; and the comparison
+// itself (which locations and their colours, band, metric, range), how it travels in a
 // URL and how it's kept as a named group. Values stay metric; the page converts them.
 import type { BandOut, CompareDay, Snapshot } from './types.gen';
 import { buildSteps, niceAxis, STEP, type Range, type Step } from './charts/forecast';
@@ -22,10 +22,9 @@ export const BANDS: readonly BandName[] = ['base', 'mid', 'summit'];
 export const COMPARE_RANGES = [1, 3, 5, 10] as const satisfies readonly Range[];
 export type CompareRange = (typeof COMPARE_RANGES)[number];
 
-/** Locations in one comparison or group: each is a row of days. */
-export const MAX_LOCS = 8;
-/** Lines on the chart at once: the most colours that stay distinct (docs/COMPARE-PLAN.md). */
-export const MAX_LINES = 4;
+/** Locations in one comparison or group, every one a line on the chart: four is the most
+ *  colours that stay distinct on one chart (docs/COMPARE-PLAN.md). */
+export const MAX_LOCS = 4;
 export const MAX_GROUPS = 20;
 export const MAX_NAME = 40;
 /** The snow level sits this far below the freezing level (config: snow_level_offset_m). */
@@ -36,7 +35,8 @@ export const LIFT_HOLD_KMH = 70;
 export interface Comparison {
 	/** The locations, in the comparison's own order. */
 	locs: string[];
-	/** Line slots: the index is the line's colour; null is a free colour. */
+	/** Colour slots: the index is the line's colour; null is a free colour. Every location
+	 *  has one, and keeps it while others come and go. */
 	on: (string | null)[];
 	band: BandName;
 	metric: CompareMetric;
@@ -63,7 +63,7 @@ const trim = (on: (string | null)[]) => {
 	return out;
 };
 const freeSlot = (on: (string | null)[]) => {
-	for (let i = 0; i < MAX_LINES; i++) if (on[i] === null || on[i] === undefined) return i;
+	for (let i = 0; i < MAX_LOCS; i++) if (on[i] === null || on[i] === undefined) return i;
 	return -1;
 };
 const place = (on: (string | null)[], i: number, id: string) => {
@@ -73,17 +73,16 @@ const place = (on: (string | null)[], i: number, id: string) => {
 	return out;
 };
 
-/** The line's colour slot (0–3), or -1 when the location isn't drawn as a line. */
+/** The line's colour slot (0–3), or -1 when the location isn't in the comparison. */
 export const lineSlot = (c: Comparison, id: string): number => c.on.indexOf(id);
-export const linesOn = (c: Comparison): number => c.on.filter((x) => x !== null).length;
 
-/** Adds a location at the end; it's drawn as a line while a colour is free. */
+/** Adds a location at the end, in the lowest free colour. */
 export function addLocation(c: Comparison, id: string): Comparison {
 	if (c.locs.includes(id) || c.locs.length >= MAX_LOCS) return c;
-	const free = freeSlot(c.on);
-	return { ...c, locs: [...c.locs, id], on: free < 0 ? c.on : place(c.on, free, id) };
+	return { ...c, locs: [...c.locs, id], on: place(c.on, freeSlot(c.on), id) };
 }
 
+/** Removes a location; the others keep their colours. */
 export function removeLocation(c: Comparison, id: string): Comparison {
 	return {
 		...c,
@@ -92,54 +91,30 @@ export function removeLocation(c: Comparison, id: string): Comparison {
 	};
 }
 
-/** Turns a location's line on (taking the lowest free colour) or off. With every colour
- *  taken, nothing changes and `full` says why: the app never turns a line off for you. */
-export function toggleLine(c: Comparison, id: string): { cmp: Comparison; full: boolean } {
-	if (!c.locs.includes(id)) return { cmp: c, full: false };
-	if (c.on.includes(id))
-		return { cmp: { ...c, on: trim(c.on.map((x) => (x === id ? null : x))) }, full: false };
-	const free = freeSlot(c.on);
-	if (free < 0) return { cmp: c, full: true };
-	return { cmp: { ...c, on: place(c.on, free, id) }, full: false };
-}
-
-/** Moves a location one place up (-1) or down (1) in the comparison's order. */
-export function moveLocation(c: Comparison, id: string, by: -1 | 1): Comparison {
-	const i = c.locs.indexOf(id);
-	const j = i + by;
-	if (i < 0 || j < 0 || j >= c.locs.length) return c;
-	const locs = [...c.locs];
-	[locs[i], locs[j]] = [locs[j], locs[i]];
-	return { ...c, locs };
-}
-
 // --- Checking what comes from a URL or from storage ----------------------------------
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** A comparison from untrusted parts: bad values fall back, unknown or repeated ids and
- *  anything past the limits are dropped. Without `on`, the first locations are lines. */
+/** A comparison from untrusted parts: bad values fall back, unknown or repeated ids are
+ *  dropped, and every location gets a colour. Past four locations (comparisons used to hold
+ *  eight, four of them drawn), the ones `on` drew are kept, then the first of the rest. */
 export function clean(
 	raw: { locs?: unknown; on?: unknown; band?: unknown; metric?: unknown; range?: unknown },
 	known?: Set<string>
 ): Comparison {
-	const locs: string[] = [];
-	for (const id of Array.isArray(raw.locs) ? raw.locs : [])
-		if (
-			typeof id === 'string' &&
-			ID.test(id) &&
-			!locs.includes(id) &&
-			(!known || known.has(id)) &&
-			locs.length < MAX_LOCS
-		)
-			locs.push(id);
-	let on: (string | null)[];
-	if (Array.isArray(raw.on)) {
-		on = [];
-		for (const id of raw.on.slice(0, MAX_LINES))
-			on.push(typeof id === 'string' && locs.includes(id) && !on.includes(id) ? id : null);
-		on = trim(on);
-	} else on = locs.slice(0, MAX_LINES);
+	const all: string[] = [];
+	for (const id of Array.isArray(raw.locs) ? raw.locs.slice(0, 64) : [])
+		if (typeof id === 'string' && ID.test(id) && !all.includes(id) && (!known || known.has(id)))
+			all.push(id);
+	const onRaw: unknown[] = Array.isArray(raw.on) ? raw.on.slice(0, 8) : [];
+	const keep = new Set(all.filter((id) => onRaw.includes(id)).slice(0, MAX_LOCS));
+	for (const id of all) if (keep.size < MAX_LOCS) keep.add(id);
+	const locs = all.filter((id) => keep.has(id));
+	let on: (string | null)[] = [];
+	for (const id of onRaw.slice(0, MAX_LOCS))
+		on.push(typeof id === 'string' && locs.includes(id) && !on.includes(id) ? id : null);
+	for (const id of locs) if (!on.includes(id)) on = place(on, freeSlot(on), id);
+	on = trim(on);
 	const band = BANDS.includes(raw.band as BandName) ? (raw.band as BandName) : 'mid';
 	const metric = METRICS.includes(raw.metric as CompareMetric)
 		? (raw.metric as CompareMetric)

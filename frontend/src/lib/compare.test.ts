@@ -29,7 +29,6 @@ import {
 	hoursAhead,
 	MAX_GROUPS,
 	moveGroup,
-	moveLocation,
 	pickBand,
 	readGroups,
 	removeGroup,
@@ -40,7 +39,6 @@ import {
 	maxWindowTotal,
 	summarizeSteps,
 	windowTotals,
-	toggleLine,
 	toQuery,
 	updateGroup,
 	windowDays,
@@ -62,49 +60,21 @@ const cmp = (locs: string[], on?: (string | null)[]): Comparison => ({
 });
 
 describe('editing a comparison', () => {
-	it('adds locations as lines while a colour is free, then as rows only', () => {
+	it('gives each location its own colour, and holds at most four, never one twice', () => {
 		let c = emptyComparison();
-		for (const id of ['a', 'b', 'c', 'd', 'e']) c = addLocation(c, id);
-		expect(c.locs).toEqual(['a', 'b', 'c', 'd', 'e']);
+		for (const id of ['a', 'b', 'c', 'd', 'e', 'a']) c = addLocation(c, id);
+		expect(c.locs).toEqual(['a', 'b', 'c', 'd']);
 		expect(c.on).toEqual(['a', 'b', 'c', 'd']);
 	});
 
-	it('holds at most 8 locations and never adds one twice', () => {
-		let c = emptyComparison();
-		for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'a']) c = addLocation(c, id);
-		expect(c.locs).toHaveLength(8);
-		expect(c.locs).not.toContain('i');
-	});
-
-	it('keeps every other line its colour when one is turned off', () => {
-		const c = cmp(['a', 'b', 'c']);
-		const off = toggleLine(c, 'b').cmp;
-		expect(off.on).toEqual(['a', null, 'c']);
-		// A new line takes the free colour in the middle, not the next one along.
-		expect(toggleLine(off, 'b').cmp.on).toEqual(['a', 'b', 'c']);
-		const withD = addLocation(off, 'd');
-		expect(withD.on).toEqual(['a', 'd', 'c']);
-	});
-
-	it('refuses a fifth line and changes nothing', () => {
-		const c = cmp(['a', 'b', 'c', 'd', 'e']);
-		const r = toggleLine(c, 'e');
-		expect(r.full).toBe(true);
-		expect(r.cmp).toBe(c);
-	});
-
-	it('removing a location frees its colour and drops trailing free slots', () => {
+	it('removing a location frees its colour; the others keep theirs', () => {
 		const c = removeLocation(cmp(['a', 'b', 'c']), 'c');
 		expect(c.locs).toEqual(['a', 'b']);
 		expect(c.on).toEqual(['a', 'b']);
-		expect(removeLocation(cmp(['a', 'b', 'c']), 'b').on).toEqual(['a', null, 'c']);
-	});
-
-	it('moves a location up or down, and not past either end', () => {
-		const c = cmp(['a', 'b', 'c']);
-		expect(moveLocation(c, 'b', -1).locs).toEqual(['b', 'a', 'c']);
-		expect(moveLocation(c, 'c', 1)).toBe(c);
-		expect(moveLocation(c, 'a', -1)).toBe(c);
+		const gap = removeLocation(cmp(['a', 'b', 'c']), 'b');
+		expect(gap.on).toEqual(['a', null, 'c']);
+		// A new location takes the free colour in the middle, not the next one along.
+		expect(addLocation(gap, 'd').on).toEqual(['a', 'd', 'c']);
 	});
 });
 
@@ -112,7 +82,7 @@ describe('the URL', () => {
 	it('round-trips a comparison and its group name', () => {
 		const c: Comparison = {
 			locs: ['rainy', 'crystal', 'whistler'],
-			on: ['rainy', null, 'whistler'],
+			on: ['rainy', 'whistler', null, 'crystal'],
 			band: 'summit',
 			metric: 'fl',
 			range: 10
@@ -129,22 +99,29 @@ describe('the URL', () => {
 		expect(fromQuery(new URLSearchParams('loc='))?.cmp.locs).toEqual([]);
 	});
 
-	it('drops unknown ids, repeats, bad values and anything past the limits', () => {
-		const known = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
+	it('drops unknown ids, repeats and bad values, and colours every location', () => {
+		const known = new Set(['a', 'b', 'c']);
 		const got = fromQuery(
-			new URLSearchParams('loc=a,zz,a,b,c,d,e,f,g,h,i&on=a,a,zz,b,c&band=top&metric=x&range=7'),
+			new URLSearchParams('loc=a,zz,a,b,c&on=a,a,,b&band=top&metric=x&range=7'),
 			known
 		)!;
-		expect(got.cmp.locs).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
-		expect(got.cmp.on).toEqual(['a', null, null, 'b']);
+		expect(got.cmp.locs).toEqual(['a', 'b', 'c']);
+		expect(got.cmp.on).toEqual(['a', 'c', null, 'b']);
 		expect(got.cmp.band).toBe('mid');
 		expect(got.cmp.metric).toBe('snow');
 		expect(got.cmp.range).toBe(5);
 	});
 
-	it('draws the first four as lines when the link says nothing about lines', () => {
+	it('keeps the first four when the link says nothing about colours', () => {
 		const got = fromQuery(new URLSearchParams('loc=a,b,c,d,e'))!;
+		expect(got.cmp.locs).toEqual(['a', 'b', 'c', 'd']);
 		expect(got.cmp.on).toEqual(['a', 'b', 'c', 'd']);
+	});
+
+	it('opens an old eight-location link with the four it drew', () => {
+		const got = fromQuery(new URLSearchParams('loc=a,b,c,d,e,f,g,h&on=f,,b,h'))!;
+		expect(got.cmp.locs).toEqual(['a', 'b', 'f', 'h']);
+		expect(got.cmp.on).toEqual(['f', 'a', 'b', 'h']);
 	});
 
 	it('rejects ids that could break out of the URL', () => {
@@ -398,11 +375,11 @@ describe('what the chart draws', () => {
 	);
 	const cmp: Comparison = {
 		...emptyComparison(),
-		locs: ['whistler', 'crystal'],
+		locs: ['crystal'],
 		on: [null, 'crystal']
 	};
 
-	it('draws the lines that are on, keeping their colours', () => {
+	it('draws each location in its own colour, only those in the comparison', () => {
 		expect(chartLines(t, cmp).map((l) => [l.slot, l.track.id])).toEqual([[1, 'crystal']]);
 	});
 
