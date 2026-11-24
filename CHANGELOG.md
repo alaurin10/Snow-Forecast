@@ -6,6 +6,16 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Compare's day range and a timeline sit right under the chart.** The 1 / 3 / 5 / 10
+  day buttons follow the chart directly, with a timeline above them as on a location's
+  forecast: one column per day with a small bar of each drawn location's snow in its
+  line's colour, and the chart's window raised across it. Drag the window, tap a day or
+  step with ‹ ›. The location rows below still fade the days outside the chart, but no
+  longer move it.
+- **Compare's cloud cover is a line per location**, its percentage of the sky on a
+  0–100 % scale, like the other metrics, instead of a grey strip per location.
+
 ### Added
 - **Compare**, a new page and the third tab: the locations you choose on one chart, to see
   where conditions look best. Nothing is picked for you: tick up to 8 locations, then

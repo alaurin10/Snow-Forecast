@@ -125,9 +125,7 @@ describe('compare chart', () => {
 							});
 							expectInViewBox(container);
 							const drawn = on.filter(Boolean).length;
-							if (metric === 'cloud')
-								expect(container.querySelectorAll('rect.cloud').length).toBeGreaterThan(0);
-							else expect(container.querySelectorAll('path.line').length).toBe(drawn);
+							expect(container.querySelectorAll('path.line').length).toBe(drawn);
 							cleanup();
 						}
 					}

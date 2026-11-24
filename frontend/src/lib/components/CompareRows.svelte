@@ -2,8 +2,8 @@
      legend and its switch: tap it to draw or hide the location's line (a filled swatch in
      the line's colour when drawn, an empty ring when not). Ten day cells follow, at the
      chosen band (the Calendar's cells for snow, the day's figure for the other metrics),
-     then a summary of the days the chart shows. Cells outside those days are faded; drag
-     or tap the days to move the chart. Phones put the name above a full-width row of
+     then a summary of the days the chart shows. Cells outside those days are faded (the
+     timeline under the chart moves them). Phones put the name above a full-width row of
      cells, as the Calendar does. Edit removes and reorders. -->
 <script module lang="ts">
 	import type { DayCell, Summary } from '../compare';
@@ -45,10 +45,8 @@
 		units: UnitSystem;
 		/** The days the chart shows (indexes into `dates`). */
 		inView: { from: number; to: number };
-		/** The chart shows every day: nothing to move. */
+		/** The chart shows every day. */
 		whole: boolean;
-		canPrev: boolean;
-		canNext: boolean;
 		sort: 'mine' | 'snow';
 		/** The comparison holds as many locations as it can. */
 		full: boolean;
@@ -58,10 +56,6 @@
 		onremove: (id: string) => void;
 		onmove: (id: string, by: -1 | 1) => void;
 		onadd: () => void;
-		/** Centre the chart on day `k`. */
-		onday: (k: number) => void;
-		/** Move the chart a day earlier (-1) or later (1). */
-		onstep: (by: -1 | 1) => void;
 		/** Pointing at a row with a mouse (its line stands out), or leaving it (null). */
 		onhighlight?: (id: string | null) => void;
 		/** The location being pointed at, here or on the chart. */
@@ -75,8 +69,6 @@
 		units,
 		inView,
 		whole,
-		canPrev,
-		canNext,
 		sort,
 		full,
 		editing = $bindable(false),
@@ -85,8 +77,6 @@
 		onremove,
 		onmove,
 		onadd,
-		onday,
-		onstep,
 		onhighlight,
 		hl = null
 	}: Props = $props();
@@ -189,27 +179,6 @@
 		if (metric === 'slr') return s.slr === null ? '–' : `${Math.round(s.slr)}:1`;
 		return s.cloud === null ? '–' : `${Math.round(s.cloud)}%`;
 	}
-
-	// Dragging or tapping across a row's cells moves the chart's window.
-	let dragging = false;
-	const dayAt = (e: PointerEvent) => {
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		return Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
-	};
-	function down(e: PointerEvent) {
-		if (whole) return;
-		dragging = true;
-		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-		onday(dayAt(e));
-	}
-	function daysKey(e: KeyboardEvent) {
-		if (whole) return;
-		if (e.key === 'ArrowRight' && canNext) onstep(1);
-		else if (e.key === 'ArrowLeft' && canPrev) onstep(-1);
-		else if (e.key === 'Home') onday(0);
-		else return;
-		e.preventDefault();
-	}
 </script>
 
 <div class="cr" class:phone class:editing style:--n={n}>
@@ -226,19 +195,7 @@
 				{sort === 'mine' ? 'My order' : 'Most snow'}
 			</button>
 		</div>
-		<div
-			class="cells days"
-			role="slider"
-			tabindex={whole ? -1 : 0}
-			aria-label="Days the chart shows"
-			aria-valuemin={0}
-			aria-valuemax={n - 1}
-			aria-valuenow={inView.from}
-			aria-valuetext={dates.length
-				? `${dayName(dates[inView.from] ?? dates[0])} to ${dayName(dates[inView.to] ?? dates[0])}`
-				: ''}
-			onkeydown={daysKey}
-		>
+		<div class="cells days" aria-hidden="true">
 			{#each days as d, k (d.date)}
 				<span class="day" class:in={isIn(k)} class:weekend={d.weekend}
 					>{d.label}{#if !phone}<small>{d.num}</small>{/if}</span
@@ -304,14 +261,7 @@
 					</div>
 					<div class="sum"></div>
 				{:else if r.state === 'ok'}
-					<!-- svelte-ignore a11y_no_static_element_interactions (the days row above is the keyboard control) -->
-					<div
-						class="cells"
-						onpointerdown={down}
-						onpointermove={(e) => dragging && onday(dayAt(e))}
-						onpointerup={() => (dragging = false)}
-						onpointercancel={() => (dragging = false)}
-					>
+					<div class="cells">
 						{#each r.cells as d, k (d.date)}
 							{@const x = cell(d)}
 							<span
@@ -338,22 +288,6 @@
 	</ul>
 
 	<div class="foot">
-		{#if !whole}
-			<button
-				class="step"
-				aria-label="One day earlier"
-				disabled={!canPrev}
-				onclick={() => onstep(-1)}
-				><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
-					><path d="M15 5l-7 7 7 7" /></svg
-				></button
-			>
-			<button class="step" aria-label="One day later" disabled={!canNext} onclick={() => onstep(1)}
-				><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
-					><path d="M9 5l7 7-7 7" /></svg
-				></button
-			>
-		{/if}
 		<button class="add" onclick={onadd} disabled={full || editing}>
 			<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
 				><path d="M12 5v14M5 12h14" /></svg
@@ -406,8 +340,6 @@
 		grid-template-columns: repeat(var(--n), minmax(0, 1fr));
 		gap: 3px;
 		min-width: 0;
-		touch-action: pan-y;
-		user-select: none;
 	}
 	.sum {
 		grid-area: sum;
@@ -614,22 +546,6 @@
 		margin-top: 4px;
 		flex-wrap: wrap;
 	}
-	.step {
-		display: grid;
-		place-items: center;
-		width: 40px;
-		height: 36px;
-		border: 0;
-		border-radius: 12px;
-		background: var(--surface-2);
-		color: var(--text-2);
-		cursor: pointer;
-	}
-	.step:disabled {
-		opacity: 0.35;
-		cursor: default;
-	}
-	.step svg,
 	.add svg,
 	.sortbtn svg {
 		fill: none;
@@ -652,9 +568,6 @@
 		font-weight: 600;
 		color: var(--text);
 		cursor: pointer;
-	}
-	.add {
-		margin-left: 4px;
 	}
 	.add:disabled {
 		opacity: 0.45;

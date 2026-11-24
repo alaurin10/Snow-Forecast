@@ -32,16 +32,12 @@ describe('CompareRows', () => {
 		units: 'imperial' as const,
 		inView: { from: 1, to: 3 },
 		whole: false,
-		canPrev: true,
-		canNext: true,
 		sort: 'mine' as const,
 		full: false,
 		onsort: () => {},
 		onremove: () => {},
 		onmove: () => {},
-		onadd: () => {},
-		onday: () => {},
-		onstep: () => {}
+		onadd: () => {}
 	};
 
 	it('switches a line from its name, and says whether it is drawn', async () => {

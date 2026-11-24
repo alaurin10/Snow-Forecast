@@ -12,7 +12,7 @@
 	import { prefs } from '../../lib/prefs.svelte';
 	import { viewport } from '../../lib/viewport.svelte';
 	import { friendlyError } from '../../lib/errors';
-	import { ago } from '../../lib/time';
+	import { ago, weekday } from '../../lib/time';
 	import { snow } from '../../lib/units';
 	import type { OverviewRow, Snapshot } from '../../lib/types.gen';
 	import {
@@ -44,6 +44,8 @@
 		toQuery,
 		updateGroup,
 		windowDays,
+		windowSpan,
+		dayStarts,
 		windowFor,
 		type BandName,
 		type Comparison,
@@ -53,6 +55,7 @@
 	import Sheet from '../../lib/components/Sheet.svelte';
 	import CompareChart from '../../lib/charts/CompareChart.svelte';
 	import CompareRows, { type RowView } from '../../lib/components/CompareRows.svelte';
+	import CompareTimeline, { type TimelineDay } from '../../lib/components/CompareTimeline.svelte';
 	import CompareAdd, { type AddItem } from '../../lib/components/CompareAdd.svelte';
 	import CompareGroups from '../../lib/components/CompareGroups.svelte';
 
@@ -135,7 +138,7 @@
 	);
 	const timeline = $derived(buildTimeline(loaded, cmp.band, cmp.range));
 
-	// --- The window the chart shows, moved from the rows ---------------------------------
+	// --- The window the chart shows, moved with the timeline under it ------------------
 	let startMs = $state<number | null>(null);
 	let hoverT = $state<string | null>(null);
 	/** The location pointed at (desktop): its line stands out. */
@@ -149,6 +152,9 @@
 	}
 	const centreOn = (k: number) => showDay(k - Math.floor((cmp.range - 1) / 2));
 	const stepDay = (by: -1 | 1) => showDay(inView.from + by);
+	const span = $derived(
+		windowSpan(timeline.slots, win, dayStarts(timeline.ref?.band.hourly.t ?? [], timeline.dates))
+	);
 
 	// --- The rows ----------------------------------------------------------------------------
 	let editing = $state(false);
@@ -182,6 +188,20 @@
 				cells,
 				summary: track ? summarizeSteps(track.steps.slice(win.off, win.off + win.n)) : null,
 				stale: hours > STALE_H ? `updated ${ago(s.generated_at)}` : null
+			};
+		})
+	);
+	const timelineDays = $derived<TimelineDay[]>(
+		timeline.dates.map((date, k) => {
+			const wd = weekday(date);
+			return {
+				date,
+				label: k === 0 ? 'Today' : wd,
+				short: k === 0 ? 'Tod' : wd.slice(0, 2),
+				bars: rowViews
+					.filter((r) => r.slot >= 0 && r.state === 'ok')
+					.sort((a, b) => a.slot - b.slot)
+					.map((r) => ({ id: r.id, name: r.name, slot: r.slot, cm: r.cells[k]?.snow ?? 0 }))
 			};
 		})
 	);
@@ -404,27 +424,18 @@
 			onmetric={(m) => commit({ ...cmp, metric: m })}
 			empty={loaded.length ? undefined : 'Loading…'}
 		/>
-		<CompareRows
-			rows={shownRows}
-			dates={timeline.dates}
-			metric={cmp.metric}
-			units={prefs.units}
+		<CompareTimeline
+			days={timelineDays}
+			{span}
 			{inView}
 			whole={win.maxOff === 0}
 			canPrev={win.off > 0}
 			canNext={win.off < win.maxOff}
-			sort={prefs.compareSort}
-			full={cmp.locs.length >= MAX_LOCS}
-			bind:editing
-			onsort={() => prefs.setCompareSort(prefs.compareSort === 'mine' ? 'snow' : 'mine')}
-			ontoggle={toggle}
-			onremove={(id) => commit(removeLocation(cmp, id), true)}
-			onmove={(id, by) => commit(moveLocation(cmp, id, by))}
-			onadd={() => (adding = true)}
+			range={cmp.range}
+			units={prefs.units}
 			onday={centreOn}
 			onstep={stepDay}
-			{hl}
-			onhighlight={(id) => (hl = id)}
+			onhome={() => showDay(0)}
 		/>
 		<div class="rangebar">
 			<div class="seg" role="group" aria-label="Time range">
@@ -436,6 +447,26 @@
 			</div>
 		</div>
 		{#if zoneNote}<p class="zone faint">{zoneNote}</p>{/if}
+		<div class="rowsblock">
+			<CompareRows
+				rows={shownRows}
+				dates={timeline.dates}
+				metric={cmp.metric}
+				units={prefs.units}
+				{inView}
+				whole={win.maxOff === 0}
+				sort={prefs.compareSort}
+				full={cmp.locs.length >= MAX_LOCS}
+				bind:editing
+				onsort={() => prefs.setCompareSort(prefs.compareSort === 'mine' ? 'snow' : 'mine')}
+				ontoggle={toggle}
+				onremove={(id) => commit(removeLocation(cmp, id), true)}
+				onmove={(id, by) => commit(moveLocation(cmp, id, by))}
+				onadd={() => (adding = true)}
+				{hl}
+				onhighlight={(id) => (hl = id)}
+			/>
+		</div>
 	</section>
 	<p class="callink">
 		<a href={resolve('/calendar')}>Every location, snow only: Calendar</a>
@@ -606,13 +637,19 @@
 		display: grid;
 		gap: 18px;
 	}
+	/* The range sits with the timeline, right under the chart. */
 	.rangebar {
+		margin-top: -8px;
 		display: flex;
 		justify-content: center;
 	}
 	.rangebar .seg button {
 		min-height: 36px;
 		padding: 0 16px;
+	}
+	.rowsblock {
+		padding-top: 16px;
+		border-top: 1px solid var(--grid);
 	}
 	.zone {
 		margin: -8px 0 0;

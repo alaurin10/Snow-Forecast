@@ -417,6 +417,38 @@ export function windowDays(slots: Step[], w: Win, dates: string[]): { from: numb
 	return { from: Math.min(...ks), to: Math.max(...ks) };
 }
 
+/** Where each forecast day starts (ms) on the timeline: now for the first, then the first
+ *  hour of each later date (midnight) in the reference location's times. */
+export function dayStarts(t: string[], dates: string[]): number[] {
+	return dates.map((d, k) => {
+		if (k === 0) return t.length ? Date.parse(t[0]) : 0;
+		const i = t.findIndex((x) => dateOf(x) === d);
+		return i < 0 ? NaN : Date.parse(t[i]);
+	});
+}
+
+/** The window as a stretch of the timeline, in days from its left edge (fractions where it
+ *  starts or ends inside a day), as the forecast page's timeline draws it. At either end of
+ *  the data it meets the edge, as steps of 6 or 12 h start a little after now. */
+export function windowSpan(slots: Step[], w: Win, starts: number[]): { from: number; to: number } {
+	const n = starts.length;
+	if (!slots.length || !n || w.n < 1) return { from: 0, to: n };
+	const pos = (ms: number) => {
+		if (ms <= starts[0]) return 0;
+		for (let k = 0; k < n; k++) {
+			const s0 = starts[k];
+			const s1 = k + 1 < n ? starts[k + 1] : s0 + 24 * 3600e3;
+			if (ms < s1) return k + (ms - s0) / (s1 - s0);
+		}
+		return n;
+	};
+	const last = slots[w.off + w.n - 1];
+	return {
+		from: w.off === 0 ? 0 : pos(Date.parse(slots[w.off].t)),
+		to: w.off >= w.maxOff ? n : pos(Date.parse(last.t) + last.hours * 3600e3)
+	};
+}
+
 /** Where a window starting on day `k` begins: now for the first day, else its first slot. */
 export function dayStart(slots: Step[], dates: string[], k: number): number | null {
 	if (k <= 0) return null;
