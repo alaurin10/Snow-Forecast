@@ -1,7 +1,7 @@
 // Every chart rendered from a real snapshot (Whistler: snowy; Crystal: mostly
 // dry), checking that every data mark stays inside its plot area.
-import { describe, expect, it, afterEach } from 'vitest';
-import { cleanup, render } from '@testing-library/svelte';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { expectMarksInside } from './marks';
 import whistler from '../../fixtures/whistler.json';
 import crystal from '../../fixtures/crystal.json';
@@ -133,19 +133,38 @@ describe('compare chart', () => {
 		}
 	);
 
-	it('says how to draw a line when none is on', () => {
-		const timeline = buildTimeline(locs, 'mid', 5);
-		const cmp: Comparison = { locs: ['whistler'], on: [], band: 'mid', metric: 'snow', range: 5 };
+	it('holds a card for a location still loading, and offers Add location in a free one', async () => {
+		const timeline = buildTimeline(locs.slice(0, 1), 'mid', 5);
+		const cmp: Comparison = {
+			locs: ['whistler', 'crystal'],
+			on: ['whistler', 'crystal'],
+			band: 'mid',
+			metric: 'snow',
+			range: 5
+		};
+		const onadd = vi.fn();
+		const onedit = vi.fn();
 		const { container } = render(CompareChart, {
 			props: {
 				timeline,
 				cmp,
 				units: 'metric',
 				win: windowFor(timeline.slots, 5, null),
-				onmetric: () => {}
+				onmetric: () => {},
+				others: [{ id: 'crystal', name: 'Crystal Mountain', slot: 1, note: 'Loading…' }],
+				onadd,
+				onedit
 			}
 		});
-		expect(container.textContent).toContain('Tap a location’s name below');
-		expect(container.querySelectorAll('path.line').length).toBe(0);
+		const cards = [...container.querySelectorAll('.reads > *')];
+		expect(cards).toHaveLength(4);
+		expect(cards[1].textContent).toContain('Crystal Mountain');
+		expect(cards[1].textContent).toContain('Loading…');
+		expect(container.querySelectorAll('.read.add')).toHaveLength(1);
+		await fireEvent.click(screen.getByRole('button', { name: 'Add location' }));
+		expect(onadd).toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Change locations' }));
+		expect(onedit).toHaveBeenCalled();
+		expect(container.querySelectorAll('path.line').length).toBe(1);
 	});
 });

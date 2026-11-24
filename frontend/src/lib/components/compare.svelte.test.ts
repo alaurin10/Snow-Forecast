@@ -1,103 +1,10 @@
-// Compare's location rows and group menu: the name switches a line, cells fade outside the
-// chart's days, Edit removes and reorders, and the groups menu opens, renames and deletes.
+// Compare's Add list and group menu: the list ticks nothing by itself, searches and stops
+// at four; the groups menu opens, renames and deletes.
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import CompareRows, { type RowView } from './CompareRows.svelte';
 import CompareGroups from './CompareGroups.svelte';
 import CompareAdd from './CompareAdd.svelte';
-import crystal from '../fixtures/crystal.json';
-import type { Snapshot } from '../types.gen';
-import { buildTimeline, dayCells, emptyComparison, summarizeSteps, type Group } from '../compare';
-
-const C = crystal as unknown as Snapshot;
-const t = buildTimeline([{ id: 'crystal', name: 'Crystal Mountain', snap: C }], 'mid', 3);
-const cells = dayCells(C.bands[1], t.dates);
-const row = (id: string, name: string, slot: number): RowView => ({
-	id,
-	name,
-	slot,
-	state: 'ok',
-	elev_m: 1800,
-	bandLabel: 'Mid-mountain',
-	cells,
-	summary: summarizeSteps(t.tracks[0].steps.slice(0, 24)),
-	stale: null
-});
-
-describe('CompareRows', () => {
-	afterEach(cleanup);
-	const base = {
-		metric: 'snow' as const,
-		units: 'imperial' as const,
-		sort: 'mine' as const,
-		full: false,
-		onsort: () => {},
-		onremove: () => {},
-		onmove: () => {},
-		onadd: () => {}
-	};
-
-	it('switches a line from its name, and says whether it is drawn', async () => {
-		const ontoggle = vi.fn();
-		render(CompareRows, {
-			...base,
-			rows: [row('crystal', 'Crystal Mountain', 0), row('rainy', 'Rainy Pass', -1)],
-			ontoggle
-		});
-		const on = screen.getByRole('button', { name: /^Crystal Mountain: line drawn/ });
-		expect(on.getAttribute('aria-pressed')).toBe('true');
-		const off = screen.getByRole('button', { name: /^Rainy Pass: line hidden/ });
-		expect(off.getAttribute('aria-pressed')).toBe('false');
-		await fireEvent.click(off);
-		expect(ontoggle).toHaveBeenCalledWith('rainy');
-	});
-
-	it('shows each location’s elevation and its summary, and no day cells', () => {
-		const { container } = render(CompareRows, {
-			...base,
-			rows: [row('crystal', 'Crystal Mountain', 0)],
-			ontoggle: () => {}
-		});
-		expect(container.querySelectorAll('.cellbox')).toHaveLength(0);
-		expect(container.textContent).toContain('5,900 ft');
-		expect(container.querySelector('.list .sum')?.textContent).toMatch(/^\d+\.\d$/);
-	});
-
-	it('Edit shows remove and reorder instead of the summary', async () => {
-		const onremove = vi.fn();
-		const onmove = vi.fn();
-		render(CompareRows, {
-			...base,
-			rows: [row('crystal', 'Crystal Mountain', 0), row('rainy', 'Rainy Pass', 1)],
-			ontoggle: () => {},
-			onremove,
-			onmove
-		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-		expect(
-			(screen.getByRole('button', { name: 'Move Crystal Mountain up' }) as HTMLButtonElement)
-				.disabled
-		).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: 'Move Crystal Mountain down' }));
-		expect(onmove).toHaveBeenCalledWith('crystal', 1);
-		await fireEvent.click(screen.getByRole('button', { name: 'Remove Rainy Pass' }));
-		expect(onremove).toHaveBeenCalledWith('rainy');
-		expect(
-			(screen.getByRole('button', { name: /Add location/ }) as HTMLButtonElement).disabled
-		).toBe(true);
-	});
-
-	it('puts the unit in the header, not on every row', () => {
-		const { container } = render(CompareRows, {
-			...base,
-			metric: 'wind',
-			rows: [row('crystal', 'Crystal Mountain', 0)],
-			ontoggle: () => {}
-		});
-		expect(container.querySelector('.head .sum')?.textContent).toBe('Top gust, mph');
-		expect(container.querySelector('.list .sum')?.textContent).toMatch(/^\d+$/);
-	});
-});
+import { emptyComparison, type Group } from '../compare';
 
 describe('CompareAdd', () => {
 	afterEach(cleanup);
@@ -110,18 +17,21 @@ describe('CompareAdd', () => {
 		ready: i !== 8
 	}));
 
-	it('ticks nothing by itself, searches past 8, and stops at 8', async () => {
+	it('ticks nothing by itself, searches past 8, and stops at 4', async () => {
 		const ontoggle = vi.fn();
 		const { rerender } = render(CompareAdd, { items, picked: [], ontoggle });
 		expect(screen.queryAllByRole('button', { pressed: true })).toHaveLength(0);
 		await fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'cascades' } });
 		expect(screen.getAllByRole('button')).toHaveLength(4);
-		await rerender({ items, picked: items.slice(0, 8).map((i) => i.id), ontoggle });
+		await rerender({ items, picked: items.slice(0, 4).map((i) => i.id), ontoggle });
 		await fireEvent.input(screen.getByRole('searchbox'), { target: { value: '' } });
-		expect((screen.getByRole('button', { name: /Location 8/ }) as HTMLButtonElement).disabled).toBe(
+		expect((screen.getByRole('button', { name: /Location 5/ }) as HTMLButtonElement).disabled).toBe(
 			true
 		);
-		expect(screen.getByText(/8 of 8 picked/)).toBeTruthy();
+		expect((screen.getByRole('button', { name: /Location 3/ }) as HTMLButtonElement).disabled).toBe(
+			false
+		);
+		expect(screen.getByText(/4 of 4 picked/)).toBeTruthy();
 	});
 });
 

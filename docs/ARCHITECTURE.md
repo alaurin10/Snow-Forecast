@@ -62,7 +62,7 @@ frontend/src/
               railui.svelte.ts (the desktop rail folded or open over the full-window map)
               compare.ts (Compare: lining up several locations' steps on one timeline, day
               cells, the comparison's edits, its URL and the groups kept in the browser);
-              charts/CompareChart, components/CompareRows, CompareAdd, CompareGroups
+              charts/CompareChart, components/CompareTimeline, CompareAdd, CompareGroups
               map/ (the Map page's pieces: style.ts, layers/, Timeline, LayersSheet,
               TerrainControls, AvalancheControls, SatControls, sat.ts, Legend,
               Measure and Profile (measure.ts: lines, GPX, stats); DockItem and DockTabs (the
