@@ -6,6 +6,15 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Compare from a location**: a Compare button beside Map on every location page opens
+  Compare with that location in it and the Add list open, to pick the others.
+- **Compare's Add list ranks every location** by the metric being compared, over the days
+  the chart shows and at the chosen band (snow total, high and low, top gust, average
+  cloud, lowest freezing level or average snow ratio), with a "best first" order (most
+  snow, coldest, lightest wind, clearest, lowest freezing level, driest snow) beside "My
+  order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
+
 ### Changed
 - **Snow totals add up the same way on the forecast and Compare charts**, set in Settings
   → Snow total on charts: *From now* (the default, a running total, so lines keep their

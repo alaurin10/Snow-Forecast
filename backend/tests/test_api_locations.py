@@ -359,3 +359,27 @@ def test_map_clouds_lists_locations_with_layers(
     now_h = int(captured_at().timestamp()) // 3600 * 3600 + 3600
     assert clouds["start"] == now_h - 3 * 3600 and len(clouds["layers"]) == 3 + 240
     assert any(clouds["layers"])
+
+
+def test_compare_days(client: TestClient) -> None:
+    r = client.get("/api/compare")
+    assert r.status_code == 200
+    rows = {row["id"]: row for row in r.json()["rows"]}
+    assert "sunshine" not in rows  # never pulled
+    crystal = rows["crystal"]
+    assert [b["band"] for b in crystal["bands"]] == ["base", "mid", "summit"]
+    mid = crystal["bands"][1]
+    assert len(mid["days"]) == 10
+    snap = client.get("/api/locations/crystal").json()
+    periods = snap["bands"][1]["periods"]
+    first = mid["days"][0]["date"]
+    want = sum(p["snow_cm"] or 0 for p in periods if p["date"] == first)
+    assert abs(mid["days"][0]["snow_cm"] - want) < 0.01
+    fl = [
+        v
+        for t, v in zip(
+            snap["bands"][1]["hourly"]["t"], snap["bands"][1]["hourly"]["fl_m"], strict=True
+        )
+        if t.startswith(first) and v is not None
+    ]
+    assert mid["days"][0]["fl_min_m"] == min(fl)

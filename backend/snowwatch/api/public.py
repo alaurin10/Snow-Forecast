@@ -18,6 +18,10 @@ from snowwatch.analysis.flags import SEVERITY, avalanche_flag
 from snowwatch.api.models import (
     BandSummary,
     BestDay,
+    CompareBand,
+    CompareDay,
+    CompareOut,
+    CompareRow,
     ConcernOut,
     DangerChip,
     LocationAge,
@@ -42,7 +46,7 @@ from snowwatch.api.models import (
 )
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
-from snowwatch.doc import Snapshot
+from snowwatch.doc import BandOut, Snapshot
 from snowwatch.geo import haversine_km
 from snowwatch.locations import service
 from snowwatch.settings import Settings
@@ -434,6 +438,19 @@ def make_router() -> APIRouter:
             date=day, dates=[PlanDate(date=d, label=labels[d]) for d in dates], rows=rows
         )
 
+    @router.get("/compare", response_model=CompareOut)
+    def compare(conn: Conn, response: Response) -> CompareOut:
+        """Every location's next 10 days at each band, for ranking them on Compare."""
+        snaps = latest_snapshots(conn)
+        rows = []
+        for loc in service.list_locations(conn):
+            snap = snaps.get(loc.id)
+            if snap is None:
+                continue
+            rows.append(CompareRow(id=loc.id, bands=[_compare_band(b) for b in snap.bands]))
+        response.headers["Cache-Control"] = CACHE
+        return CompareOut(rows=rows)
+
     @router.get("/locations/{location_id}")
     def location(location_id: str, conn: Conn, request: Request) -> Response:
         """The latest snapshot, sent as stored (gzipped JSON)."""
@@ -590,3 +607,37 @@ def make_router() -> APIRouter:
         return [RunOut.model_validate(r) for r in repo.recent_runs(conn, limit)]
 
     return router
+
+
+def _mean(xs: list[float]) -> float | None:
+    return sum(xs) / len(xs) if xs else None
+
+
+def _compare_band(band: BandOut) -> CompareBand:
+    """A band's days as the Compare page counts them (lib/compare.ts dayCells)."""
+    dates = list(dict.fromkeys(p.date for p in band.periods))[:10]
+    fl_by_date: dict[str, list[float]] = {}
+    for t, level in zip(band.hourly.t, band.hourly.fl_m, strict=False):
+        if level is not None:
+            fl_by_date.setdefault(t[:10], []).append(level)
+    days = []
+    for d in dates:
+        ps = [p for p in band.periods if p.date == d]
+        tmax = [p.tmax_c for p in ps if p.tmax_c is not None]
+        tmin = [p.tmin_c for p in ps if p.tmin_c is not None]
+        gust = [p.gust_max_kmh for p in ps if p.gust_max_kmh is not None]
+        fl = fl_by_date.get(d, [])
+        days.append(
+            CompareDay(
+                date=d,
+                snow_cm=round(sum(p.snow_cm or 0 for p in ps), 2),
+                rain_mm=round(sum(p.rain_mm or 0 for p in ps), 2),
+                tmax_c=max(tmax) if tmax else None,
+                tmin_c=min(tmin) if tmin else None,
+                gust_kmh=max(gust) if gust else None,
+                fl_min_m=min(fl) if fl else None,
+                slr=_mean([p.slr for p in ps if p.slr is not None]),
+                cloud=_mean([p.cloud_mean for p in ps if p.cloud_mean is not None]),
+            )
+        )
+    return CompareBand(band=band.band, elev_m=band.elev_m, days=days)

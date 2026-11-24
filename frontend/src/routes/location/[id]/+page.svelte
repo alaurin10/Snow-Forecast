@@ -209,6 +209,8 @@
 		lastTab = t;
 	});
 	const MAP_ICON = 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14';
+	// Two lines on a pair of axes, as on the Compare tab.
+	const COMPARE_ICON = 'M4 4v16h16M7 15l4-5 3 3 5-6M7 9l4 3 3-2 5 5';
 	const band = $derived(
 		snap ? (snap.bands.find((b) => b.band === prefs.band) ?? snap.bands[1]) : null
 	);
@@ -436,6 +438,16 @@
 					><path d={MAP_ICON} /></svg
 				>
 			</a>
+			<a
+				class="mmap glass"
+				href="{resolve('/compare')}?loc={encodeURIComponent(id)}&add=1"
+				aria-label="Compare {snap.location.name} with other locations"
+				title="Compare with other locations"
+			>
+				<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
+					><path d={COMPARE_ICON} /></svg
+				>
+			</a>
 		</header>
 		<p class="elevname" aria-hidden="true">
 			{band.label} <span class="faint">· {c.heightUnit}</span>
@@ -503,6 +515,17 @@
 							><path d={MAP_ICON} /></svg
 						>
 						Map
+					</a>
+					<a
+						class="pill glass maplink"
+						href="{resolve('/compare')}?loc={encodeURIComponent(id)}&add=1"
+						aria-label="Compare {snap.location.name} with other locations"
+						title="Compare with other locations"
+					>
+						<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+							><path d={COMPARE_ICON} /></svg
+						>
+						Compare
 					</a>
 				</div>
 			</div>

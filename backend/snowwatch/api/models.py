@@ -177,6 +177,37 @@ class PlanOut(BaseModel):
     rows: list[PlanRow]
 
 
+class CompareDay(BaseModel):
+    """One location's day at one band (a night goes with its evening's date)."""
+
+    date: str
+    snow_cm: float
+    rain_mm: float
+    tmax_c: float | None
+    tmin_c: float | None
+    gust_kmh: float | None
+    fl_min_m: float | None  # the day's lowest freezing level (hourly, calendar day)
+    slr: float | None  # mean ratio over the periods that snow
+    cloud: float | None  # mean cloud cover (%)
+
+
+class CompareBand(BaseModel):
+    band: str
+    elev_m: float
+    days: list[CompareDay]
+
+
+class CompareRow(BaseModel):
+    id: str
+    bands: list[CompareBand]
+
+
+class CompareOut(BaseModel):
+    """Every location's days at each band, for ranking them on Compare's Add list."""
+
+    rows: list[CompareRow]
+
+
 class TrendRun(BaseModel):
     run_id: int
     issued_at: str
@@ -296,6 +327,7 @@ class ApiTypes(BaseModel):
     lookups: LookupStatus
     avalanche: dict[str, AvalancheView]
     plan: PlanOut
+    compare: CompareOut
     verification: VerificationOut
     nearby: NearbyOut
     status: StatusOut
