@@ -242,6 +242,14 @@
 
 	// --- Adding locations ------------------------------------------------------------------
 	let adding = $state(false);
+	// A location page's Compare button: its location, with the Add list open to pick the rest.
+	$effect(() => {
+		if (!page.url.searchParams.has('add')) return;
+		untrack(() => {
+			adding = true;
+			go(toQuery(cmp, urlName), true);
+		});
+	});
 	// First visit (nothing in the comparison): tick several, then Compare.
 	let draft = $state<string[]>([]);
 	function pickDraft(id: string) {

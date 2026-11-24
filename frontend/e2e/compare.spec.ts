@@ -341,3 +341,20 @@ test('snow totals follow the setting: from now, or from the first day shown', as
 	// The row's total for the days shown matches the line's end now.
 	await expect(page.locator('.cr .list .sum').first()).toHaveText(fromStart.toFixed(1));
 });
+
+test('a location page’s Compare button starts a comparison with it, the Add list open', async ({
+	page
+}) => {
+	await page.goto('/location/crystal', { waitUntil: 'networkidle' });
+	await page
+		.getByRole('link', { name: 'Compare Crystal Mountain with other locations' })
+		.first()
+		.click();
+	await expect(page).toHaveURL(/\/compare\?loc=crystal&/);
+	await expect(page).not.toHaveURL(/add=1/);
+	const sheet = page.getByRole('dialog', { name: 'Add locations' });
+	await expect(sheet).toBeVisible();
+	await sheet.locator('.add .item').filter({ hasText: 'Whistler' }).click();
+	await sheet.getByRole('button', { name: 'Done' }).click();
+	await expect(page.locator('.cr .list li')).toHaveCount(2);
+});

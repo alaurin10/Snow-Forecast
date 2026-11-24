@@ -6,6 +6,10 @@ Notable changes to Snow Watch. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Compare from a location**: a Compare button beside Map on every location page opens
+  Compare with that location in it and the Add list open, to pick the others.
+
 ### Changed
 - **Snow totals add up the same way on the forecast and Compare charts**, set in Settings
   → Snow total on charts: *From now* (the default, a running total, so lines keep their
