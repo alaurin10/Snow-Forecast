@@ -31,6 +31,7 @@
 	import { prefs } from '../prefs.svelte';
 	import { HEAVY_CM } from '../daybars';
 	import { scrubLock } from './scrub';
+	import { maxWindowTotal } from '../compare';
 
 	interface Props {
 		band: BandOut;
@@ -105,8 +106,10 @@
 	});
 	const steps = $derived.by(() => {
 		const win = allSteps.slice(off, off + nWin);
-		// A popup's running total starts at its own first step.
-		const base = embedded && win.length ? win[0].cum - win[0].snow : 0;
+		// A popup's running total starts at its own first step, and so does the chart's when
+		// snow totals are set to start at the first day shown (Settings).
+		const fromStart = embedded || prefs.snowTotal === 'window';
+		const base = fromStart && win.length ? win[0].cum - win[0].snow : 0;
 		return base ? win.map((st) => ({ ...st, cum: st.cum - base })) : win;
 	});
 	// A window that moves keeps one scale, so bars don't change height as you pan.
@@ -177,8 +180,23 @@
 	const slrWord = (v: number) =>
 		v < 9.5 ? 'heavy & wet' : v < 12.5 ? 'average' : v < 15.5 ? 'light' : 'dry powder';
 	const yP = (v: number) => H - (v / pAx.max) * (H - 4);
+	// From now: up to the forecast's total. From the first day shown: up to the snowiest
+	// window anywhere, so the line keeps one scale as the window moves.
 	const cumAxis = $derived(
-		niceAxis(0, Math.max(1, c.snow(axSteps[axSteps.length - 1]?.cum ?? 0) ?? 1), 4)
+		niceAxis(
+			0,
+			Math.max(
+				1,
+				c.snow(
+					embedded
+						? (steps[steps.length - 1]?.cum ?? 0)
+						: prefs.snowTotal === 'window'
+							? maxWindowTotal(allSteps, nWin)
+							: (allSteps[allSteps.length - 1]?.cum ?? 0)
+				) ?? 1
+			),
+			4
+		)
 	);
 	const yCum = (v: number) => H - (v / cumAxis.max) * (H - 4);
 
@@ -915,7 +933,7 @@
 	// The big reading above the plot.
 	const reading = $derived(cards.find((k) => k.id === metric));
 	const totalTxt = $derived(
-		`${(c.snow(allSteps[allSteps.length - 1]?.cum ?? 0) ?? 0).toFixed(c.snowDigits)} ${c.snowUnit}`
+		`${(c.snow((prefs.snowTotal === 'window' ? steps : allSteps).at(-1)?.cum ?? 0) ?? 0).toFixed(c.snowDigits)} ${c.snowUnit}`
 	);
 	const cumTxt = $derived(s ? (c.snow(s.cum) ?? 0).toFixed(c.snowDigits) : '0');
 

@@ -553,6 +553,18 @@ Where the build differs from the plan above, and why:
   it, drag, tap or ‹ ›. The rows below fade the days outside the chart but don't move it.
 - **Cloud cover** is one line per location (its percentage), like the other metrics, not
   a lane per location (owner review, 23 Nov).
+- **No day cells** (owner review, 24 Nov): the list under the chart is one line per
+  location (the line switch, band and elevation, the total for the days shown, Edit and
+  Add); the day cells repeated the chart less readably. The timeline's bars still come
+  from each location's days (`dayCells`).
+- **Selecting a location** (owner review, 24 Nov): a tap on its card, or a click on a
+  desktop, picks its line out (one at a time; again to clear, another to switch).
+  Pointing with a mouse wins while it lasts; the selection shows again after. A selection
+  whose line is turned off is cleared.
+- **Share** (milestone 2's share image, early): `lib/share/compareCard.ts` draws the
+  chart as shown, from the same window, scale and lines as the page (`chartLines`,
+  `lineValues`, `chartAxis` in `compare.ts`, shared by both), with the selected
+  location picked out.
 - **Day cells**: numbers only (the unit is in the summary column's heading); freezing
   level in thousands ("4.2k").
 - **Telling the lines apart** (owner review, 23 Nov): the readout is a card per line on
@@ -573,3 +585,9 @@ Where the build differs from the plan above, and why:
 - **Back undoes** adding and removing locations; other changes replace the history
   entry. Every change is a navigation to the new address (`goto(resolve(…))`), so the
   address is always what's open.
+- **Snow totals** (owner review, 24 Nov): one setting for both charts (`prefs.snowTotal`,
+  Settings → Snow total on charts): a running total from now by default, so lines don't
+  jump as the window moves, or from the first day shown. `lineValues` and `chartAxis`
+  take it; the forecast chart's running total and its scale follow it too.
+- **Timeline button** (owner review, 24 Nov): Compare shows or hides its timeline with
+  the forecast chart's setting (`prefs.showTimeline`); the plot's height doesn't change.

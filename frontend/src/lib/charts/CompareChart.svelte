@@ -8,17 +8,19 @@
 		LIFT_HOLD_KMH,
 		METRICS,
 		METRIC_NAMES,
-		stepValue,
-		windowTotals,
-		maxWindowTotal,
 		MAX_LINES,
+		chartAxis,
+		chartLines,
+		lineValues,
+		tickText,
 		type CompareMetric,
 		type Comparison,
 		type Timeline,
 		type Track,
+		type SnowTotal,
 		type Win
 	} from '../compare';
-	import { niceAxis, STEP, type Step } from './forecast';
+	import { STEP, type Step } from './forecast';
 	import { converters, elevation, speed, type UnitSystem } from '../units';
 	import { compass } from '../conditions';
 	import { dateOf, hourLabel, hourOf, monthDay, weekday } from '../time';
@@ -36,8 +38,16 @@
 		onmetric: (m: CompareMetric) => void;
 		/** Shown in the plot when no line is drawn. */
 		empty?: string;
-		/** The location being pointed at (here or in its row): its line stands out. */
+		/** The location that stands out: the one pointed at, or else the one selected. */
 		hl?: string | null;
+		/** Snow as a running total from now, or from the window's first step. */
+		total?: SnowTotal;
+		/** The location selected (tapped or clicked), if any. */
+		selected?: string | null;
+		/** Pointing at a card with a mouse, or leaving it (null). */
+		onhover?: (id: string | null) => void;
+		/** Tapping or clicking a card: select it, or clear it if it's the one selected. */
+		onselect?: (id: string) => void;
 	}
 
 	let {
@@ -48,7 +58,11 @@
 		hoverT = $bindable(null),
 		onmetric,
 		empty = 'Tap a location’s name below to draw its line.',
-		hl = $bindable(null)
+		hl = null,
+		total = 'run',
+		selected = null,
+		onhover,
+		onselect
 	}: Props = $props();
 
 	const phone = $derived(viewport.phone);
@@ -63,60 +77,24 @@
 	const W = $derived(1000 / N);
 
 	/** The charted locations: each line colour that holds a loaded location. */
-	const lines = $derived(
-		cmp.on.flatMap((id, slot) => {
-			const track = id ? timeline.tracks.find((t) => t.id === id) : undefined;
-			return track ? [{ slot, track }] : [];
-		})
-	);
-
-	/** A metric value in display units. */
-	const shown = (v: number | null): number | null => {
-		if (v === null) return null;
-		if (metric === 'snow') return c.snow(v);
-		if (metric === 'temp') return c.temp(v);
-		if (metric === 'wind') return c.speed(v);
-		if (metric === 'fl') return c.height(v);
-		return v;
-	};
-	/** Each charted location's values across the window, in display units. Snow is a
-	 *  running total from the window's first step, so a line ends at its row's total. */
+	const lines = $derived(chartLines(timeline, cmp));
+	/** Each charted location's values across the window, in display units. */
 	const series = $derived(
 		new Map(
-			lines.map(({ track }) => {
-				const inView = track.steps.slice(win.off, win.off + win.n);
-				const vals =
-					metric === 'snow'
-						? windowTotals(inView).map((v) => shown(v))
-						: inView.map((st) => shown(stepValue(st, metric)));
-				return [track.id, vals] as const;
-			})
+			lines.map(({ track }) => [track.id, lineValues(track, metric, win, units, total)] as const)
 		)
 	);
 	/** A track's value at step `k` of the window. */
 	const valIn = (t: Track, k: number) => series.get(t.id)?.[k] ?? null;
-
-	// One scale for the whole forecast (not just the window), so lines keep their heights
-	// as the window moves: snow to the snowiest window anywhere, the rest to every value.
-	const axis = $derived.by(() => {
-		if (metric === 'snow') {
-			const most = lines.map((l) => c.snow(maxWindowTotal(l.track.steps, win.n)) ?? 0);
-			return niceAxis(0, Math.max(units === 'imperial' ? 1 : 2, ...most), 4);
-		}
-		const vals = lines
-			.flatMap(({ track }) => track.steps.map((st) => shown(stepValue(st, metric))))
-			.filter((v): v is number => v !== null);
-		if (metric === 'temp')
-			return niceAxis(Math.min(c.freezing, ...vals) - 2, Math.max(c.freezing, ...vals) + 2, 4);
-		if (metric === 'wind') return niceAxis(0, Math.max(10, ...vals), 4);
-		if (metric === 'fl') {
-			const all = [...vals, ...lines.map((l) => c.height(l.track.band.elev_m) ?? 0)];
-			if (!all.length) return niceAxis(0, units === 'imperial' ? 10000 : 3000, 4);
-			return niceAxis(Math.min(...all) * 0.9, Math.max(...all) * 1.05, 4);
-		}
-		if (metric === 'slr') return { min: 4, max: 20, ticks: [5, 8, 11, 14, 17, 20] };
-		return { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
-	});
+	const axis = $derived(
+		chartAxis(
+			lines.map((l) => l.track),
+			metric,
+			win,
+			units,
+			total
+		)
+	);
 	const y = (v: number) =>
 		Math.min(H, Math.max(0, H - ((v - axis.min) / (axis.max - axis.min)) * H));
 	const pct = (yy: number) => `${((yy / H) * 100).toFixed(2)}%`;
@@ -152,16 +130,7 @@
 	);
 
 	const ticks = $derived(axis.ticks);
-	const tickLabel = (v: number) => {
-		if (metric === 'temp') return `${v}°`;
-		if (metric === 'slr') return `${v}:1`;
-		if (metric === 'cloud') return `${v}%`;
-		if (metric === 'fl')
-			return units === 'imperial'
-				? `${(v / 1000).toLocaleString('en-US')}k ft`
-				: `${v.toLocaleString('en-US')} m`;
-		return `${v}`;
-	};
+	const tickLabel = (v: number) => tickText(v, metric, units);
 	const grid = $derived(ticks.map((v) => `M0 ${y(v).toFixed(1)}H1000`).join(''));
 
 	// Days and hours along the bottom, from the reference location's clock.
@@ -327,7 +296,7 @@
 
 	const axisTitle = $derived(
 		{
-			snow: `Snow from ${win.off === 0 || !steps[0] ? 'now' : `${weekday(dateOf(steps[0].t))} ${hourLabel(steps[0].t)}`} (${c.snowUnit})`,
+			snow: `Snow from ${total === 'run' || win.off === 0 || !steps[0] ? 'now' : `${weekday(dateOf(steps[0].t))} ${hourLabel(steps[0].t)}`} (${c.snowUnit})`,
 			temp: `Temperature (${c.tempUnit})`,
 			wind: `Wind gusts (${c.speedUnit})`,
 			cloud: 'Cloud cover (% of the sky)',
@@ -352,7 +321,7 @@
 	}
 	/** Pointing with a mouse marks a location; touch has no hover, so it doesn't. */
 	const mark = (e: PointerEvent, id: string | null) => {
-		if (e.pointerType === 'mouse') hl = id;
+		if (e.pointerType === 'mouse') onhover?.(id);
 	};
 	const valueText = $derived(
 		reads.length ? `${when}: ${reads.map((r) => `${r.name} ${r.value}`).join(', ')}` : empty
@@ -372,11 +341,12 @@
 		<div class="when">{reads.length ? when : ''}</div>
 		<div class="reads">
 			{#each reads as r (r.id)}
-				<div
+				<button
 					class="read s{r.slot}"
 					class:hl={hl === r.id}
-					role="group"
-					aria-label={r.name}
+					aria-pressed={selected === r.id}
+					title={selected === r.id ? 'Selected: tap to clear' : 'Tap to pick out its line'}
+					onclick={() => onselect?.(r.id)}
 					onpointerenter={(e) => mark(e, r.id)}
 					onpointerleave={(e) => mark(e, null)}
 				>
@@ -385,7 +355,7 @@
 						><strong class="rval num">{r.value}</strong><span class="rdet">{r.detail}</span></span
 					>
 					{#if !phone}<span class="where">{r.where}</span>{/if}
-				</div>
+				</button>
 			{/each}
 			{#each { length: spare }, i (i)}<div class="read spare" aria-hidden="true"></div>{/each}
 		</div>
@@ -558,6 +528,11 @@
 	}
 	.read {
 		min-width: 0;
+		border: 0;
+		font: inherit;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
 		height: 66px;
 		box-sizing: border-box;
 		display: grid;

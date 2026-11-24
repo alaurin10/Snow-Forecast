@@ -32,6 +32,7 @@
 		lineSlot,
 		MAX_GROUPS,
 		MAX_LOCS,
+		METRIC_NAMES,
 		moveGroup,
 		moveLocation,
 		pickBand,
@@ -58,6 +59,9 @@
 	import CompareTimeline, { type TimelineDay } from '../../lib/components/CompareTimeline.svelte';
 	import CompareAdd, { type AddItem } from '../../lib/components/CompareAdd.svelte';
 	import CompareGroups from '../../lib/components/CompareGroups.svelte';
+	import ShareButton from '../../lib/share/ShareButton.svelte';
+	import { paint, slug } from '../../lib/share/canvas';
+	import { compareColors, drawCompareCard } from '../../lib/share/compareCard';
 
 	const BAND_NAMES: Record<BandName, string> = { base: 'Base', mid: 'Mid', summit: 'Summit' };
 	/** A forecast older than this gets a note on its row (runs are every 3 hours). */
@@ -141,8 +145,18 @@
 	// --- The window the chart shows, moved with the timeline under it ------------------
 	let startMs = $state<number | null>(null);
 	let hoverT = $state<string | null>(null);
-	/** The location pointed at (desktop): its line stands out. */
-	let hl = $state<string | null>(null);
+	// Picking out one location's line: pointing at it (a mouse, for as long as it's there)
+	// or selecting it (a tap or click on its card; again to clear, another to switch).
+	// What's pointed at wins; when the pointer leaves, the selection shows again.
+	let hover = $state<string | null>(null);
+	let selected = $state<string | null>(null);
+	const drawn = (id: string | null) => id !== null && cmp.on.includes(id);
+	const hl = $derived(drawn(hover) ? hover : drawn(selected) ? selected : null);
+	const select = (id: string) => (selected = selected === id ? null : id);
+	// A selection whose line goes away is cleared.
+	$effect(() => {
+		if (selected && !cmp.on.includes(selected)) untrack(() => (selected = null));
+	});
 	const win = $derived(windowFor(timeline.slots, cmp.range, startMs));
 	const inView = $derived(windowDays(timeline.slots, win, timeline.dates));
 	function showDay(k: number) {
@@ -150,6 +164,9 @@
 		startMs = dayStart(timeline.slots, timeline.dates, Math.max(0, Math.min(last, k)));
 		hoverT = null;
 	}
+	$effect(() => {
+		if (prefs.showTimeline !== 'on') untrack(() => (startMs = null));
+	});
 	const centreOn = (k: number) => showDay(k - Math.floor((cmp.range - 1) / 2));
 	const stepDay = (by: -1 | 1) => showDay(inView.from + by);
 	const span = $derived(
@@ -313,7 +330,9 @@
 		toast(`Saved “${n}”.`);
 	}
 
-	// --- Copy link ---------------------------------------------------------------------------
+	// --- Share and Copy link ------------------------------------------------------------
+	const shareTitle = $derived(group?.name ?? urlName ?? 'Compare');
+
 	async function copyLink() {
 		const url = `${location.origin}${resolve(`/compare?${toQuery(cmp, group?.name ?? urlName)}`)}`;
 		try {
@@ -357,14 +376,38 @@
 <header class="head">
 	<h1>Compare</h1>
 	{#if cmp.locs.length}
-		<button class="linkbtn glass" onclick={copyLink} aria-label="Copy a link to this comparison">
-			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
-				><path
-					d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"
-				/></svg
-			>
-			<span>Copy link</span>
-		</button>
+		<div class="acts">
+			<button class="linkbtn glass" onclick={copyLink} aria-label="Copy a link to this comparison">
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+					><path
+						d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"
+					/></svg
+				>
+				<span>Copy link</span>
+			</button>
+			<ShareButton
+				label="Share this comparison"
+				filename={slug(`${shareTitle} ${METRIC_NAMES[cmp.metric].long} ${cmp.range} day`)}
+				render={(shape) =>
+					paint(shape, (ctx, p) =>
+						drawCompareCard(
+							ctx,
+							shape,
+							{
+								title: shareTitle,
+								timeline,
+								cmp,
+								win,
+								units: prefs.units,
+								selected: drawn(selected) ? selected : null,
+								colors: compareColors(),
+								total: prefs.snowTotal
+							},
+							p
+						)
+					)}
+			/>
+		</div>
 	{/if}
 </header>
 
@@ -420,23 +463,29 @@
 			units={prefs.units}
 			{win}
 			bind:hoverT
-			bind:hl
+			{hl}
+			{selected}
+			total={prefs.snowTotal}
+			onhover={(id) => (hover = id)}
+			onselect={select}
 			onmetric={(m) => commit({ ...cmp, metric: m })}
 			empty={loaded.length ? undefined : 'Loading…'}
 		/>
-		<CompareTimeline
-			days={timelineDays}
-			{span}
-			{inView}
-			whole={win.maxOff === 0}
-			canPrev={win.off > 0}
-			canNext={win.off < win.maxOff}
-			range={cmp.range}
-			units={prefs.units}
-			onday={centreOn}
-			onstep={stepDay}
-			onhome={() => showDay(0)}
-		/>
+		{#if prefs.showTimeline === 'on'}
+			<CompareTimeline
+				days={timelineDays}
+				{span}
+				{inView}
+				whole={win.maxOff === 0}
+				canPrev={win.off > 0}
+				canNext={win.off < win.maxOff}
+				range={cmp.range}
+				units={prefs.units}
+				onday={centreOn}
+				onstep={stepDay}
+				onhome={() => showDay(0)}
+			/>
+		{/if}
 		<div class="rangebar">
 			<div class="seg" role="group" aria-label="Time range">
 				{#each COMPARE_RANGES as r (r)}
@@ -445,16 +494,25 @@
 					>
 				{/each}
 			</div>
+			<button
+				class="tltoggle"
+				aria-pressed={prefs.showTimeline === 'on'}
+				aria-label={prefs.showTimeline === 'on' ? 'Hide the timeline' : 'Show the timeline'}
+				title={prefs.showTimeline === 'on' ? 'Hide the timeline' : 'Show the timeline'}
+				onclick={() => prefs.setShowTimeline(prefs.showTimeline !== 'on')}
+			>
+				<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"
+					><path d="M3 18h18M6 18v-4M10 18V9M14 18v-6M18 18V7" /></svg
+				>
+				<span>Timeline</span>
+			</button>
 		</div>
 		{#if zoneNote}<p class="zone faint">{zoneNote}</p>{/if}
 		<div class="rowsblock">
 			<CompareRows
 				rows={shownRows}
-				dates={timeline.dates}
 				metric={cmp.metric}
 				units={prefs.units}
-				{inView}
-				whole={win.maxOff === 0}
 				sort={prefs.compareSort}
 				full={cmp.locs.length >= MAX_LOCS}
 				bind:editing
@@ -464,7 +522,7 @@
 				onmove={(id, by) => commit(moveLocation(cmp, id, by))}
 				onadd={() => (adding = true)}
 				{hl}
-				onhighlight={(id) => (hl = id)}
+				onhighlight={(id) => (hover = id)}
 			/>
 		</div>
 	</section>
@@ -553,6 +611,11 @@
 		line-height: 1.05;
 		margin: 0;
 	}
+	.acts {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
 	.bar {
 		display: flex;
 		align-items: center;
@@ -640,8 +703,46 @@
 	/* The range sits with the timeline, right under the chart. */
 	.rangebar {
 		margin-top: -8px;
+		gap: 8px;
+		align-items: center;
 		display: flex;
 		justify-content: center;
+	}
+	.tltoggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 42px;
+		padding: 0 14px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		color: var(--text-2);
+		font-size: 0.84rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.tltoggle[aria-pressed='true'] {
+		background: var(--sel);
+		box-shadow: var(--sel-shadow);
+		color: var(--text);
+	}
+	.tltoggle svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.1;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	@media (max-width: 640px) {
+		.tltoggle {
+			width: 42px;
+			padding: 0;
+			justify-content: center;
+		}
+		.tltoggle span {
+			display: none;
+		}
 	}
 	.rangebar .seg button {
 		min-height: 36px;

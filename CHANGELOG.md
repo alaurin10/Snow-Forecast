@@ -7,6 +7,14 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Snow totals add up the same way on the forecast and Compare charts**, set in Settings
+  → Snow total on charts: *From now* (the default, a running total, so lines keep their
+  place as you move along the timeline) or *From the first day shown* (starting at zero
+  where the chart starts, so each line ends at its total for those days).
+- **Compare has a Timeline button**, as the forecast chart does, sharing its setting;
+  the chart keeps its height with the timeline shown or hidden.
+
+### Changed
 - **Compare's day range and a timeline sit right under the chart.** The 1 / 3 / 5 / 10
   day buttons follow the chart directly, with a timeline above them as on a location's
   forecast: one column per day with a small bar of each drawn location's snow in its
@@ -15,6 +23,18 @@ Notable changes to Snow Watch. The format follows
   longer move it.
 - **Compare's cloud cover is a line per location**, its percentage of the sky on a
   0–100 % scale, like the other metrics, instead of a grey strip per location.
+- **Compare's location list is one line each**: the name (still the line's switch), its
+  band and elevation, and its total for the days shown. The ten day cells under the
+  chart are gone; they repeated the chart in a form that was harder to read.
+- **Pick out one location on Compare**: tap its card above the chart to make its line
+  stand out (the same look as pointing at it on a desktop); tap it again to clear it, or
+  another to switch. On a desktop, pointing still picks a line out while the pointer is
+  there, then the selection shows again; a click selects, as a tap does.
+
+### Added
+- **Share on Compare**: an image of the comparison as it's shown, the metric, band and
+  days in view, each drawn location's number for those days in its colour, the chart at
+  the same scale, and the selected location picked out.
 
 ### Added
 - **Compare**, a new page and the third tab: the locations you choose on one chart, to see

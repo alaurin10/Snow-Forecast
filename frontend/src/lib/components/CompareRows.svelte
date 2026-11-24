@@ -1,10 +1,8 @@
-<!-- Compare: one row per location in the comparison, day by day. The name is the chart's
-     legend and its switch: tap it to draw or hide the location's line (a filled swatch in
-     the line's colour when drawn, an empty ring when not). Ten day cells follow, at the
-     chosen band (the Calendar's cells for snow, the day's figure for the other metrics),
-     then a summary of the days the chart shows. Cells outside those days are faded (the
-     timeline under the chart moves them). Phones put the name above a full-width row of
-     cells, as the Calendar does. Edit removes and reorders. -->
+<!-- Compare: the locations in the comparison, one row each. The name is the chart's switch:
+     tap it to draw or hide the location's line (a filled swatch in the line's colour when
+     drawn, an empty ring when not). Each row also gives the location's band and elevation
+     and a summary of the days the chart shows. Edit removes and reorders; Add brings in
+     more. -->
 <script module lang="ts">
 	import type { DayCell, Summary } from '../compare';
 
@@ -16,6 +14,7 @@
 		state: 'ok' | 'loading' | 'error' | 'nodata';
 		elev_m: number | null;
 		bandLabel: string;
+		/** The location's days (for the timeline's bars). */
 		cells: DayCell[];
 		summary: Summary | null;
 		/** "updated 9 h ago" for an old forecast, else null. */
@@ -24,29 +23,14 @@
 </script>
 
 <script lang="ts">
-	import { bucket } from '../calendar';
-	import { rainyDay, type CompareMetric } from '../compare';
-	import {
-		converters,
-		elevation,
-		snow,
-		snowNum,
-		speed,
-		temperature,
-		type UnitSystem
-	} from '../units';
-	import { monthDay, weekday } from '../time';
+	import { summaryText, type CompareMetric } from '../compare';
+	import { converters, elevation, type UnitSystem } from '../units';
 	import { viewport } from '../viewport.svelte';
 
 	interface Props {
 		rows: RowView[];
-		dates: string[];
 		metric: CompareMetric;
 		units: UnitSystem;
-		/** The days the chart shows (indexes into `dates`). */
-		inView: { from: number; to: number };
-		/** The chart shows every day. */
-		whole: boolean;
 		sort: 'mine' | 'snow';
 		/** The comparison holds as many locations as it can. */
 		full: boolean;
@@ -58,17 +42,14 @@
 		onadd: () => void;
 		/** Pointing at a row with a mouse (its line stands out), or leaving it (null). */
 		onhighlight?: (id: string | null) => void;
-		/** The location being pointed at, here or on the chart. */
+		/** The location that stands out on the chart. */
 		hl?: string | null;
 	}
 
 	let {
 		rows,
-		dates,
 		metric,
 		units,
-		inView,
-		whole,
 		sort,
 		full,
 		editing = $bindable(false),
@@ -83,76 +64,6 @@
 
 	const phone = $derived(viewport.phone);
 	const c = $derived(converters(units));
-	const n = $derived(Math.max(1, dates.length));
-	const isIn = (k: number) => whole || (k >= inView.from && k <= inView.to);
-	const dayName = (d: string) => `${weekday(d)} ${monthDay(d)}`;
-	const days = $derived(
-		dates.map((d, k) => {
-			const wd = weekday(d);
-			return {
-				date: d,
-				label: k === 0 ? (phone ? 'Tod' : 'Today') : phone ? wd.slice(0, 2) : wd,
-				num: String(Number(d.slice(8))),
-				weekend: wd === 'Sat' || wd === 'Sun'
-			};
-		})
-	);
-
-	const round = (v: number | null) => (v === null ? null : Math.round(v));
-	const thousands = (m: number | null) => {
-		const v = c.height(m);
-		return v === null ? '–' : `${(v / 1000).toFixed(1)}k`;
-	};
-	/** A day cell: its class, its text and what a screen reader hears. */
-	function cell(d: DayCell): { cls: string; text: string; label: string } {
-		const day = dayName(d.date);
-		if (!d.has) return { cls: 'heat b0', text: '', label: `${day}: no forecast` };
-		if (metric === 'snow') {
-			const rainy = rainyDay(d);
-			return {
-				cls: `heat b${bucket(d.snow)}${rainy ? ' rainy' : ''}`,
-				text: Number(snowNum(d.snow, units)) > 0 ? snowNum(d.snow, units) : '',
-				label: `${day}: ${snow(d.snow, units)}${rainy ? ', rain' : ''}`
-			};
-		}
-		if (metric === 'temp') {
-			const hi = round(c.temp(d.tmax));
-			return {
-				cls: 'heat b0 val',
-				text: hi === null ? '–' : `${hi}°`,
-				label: `${day}: high ${temperature(d.tmax, units)}, low ${temperature(d.tmin, units)}`
-			};
-		}
-		if (metric === 'wind') {
-			const g = round(c.speed(d.gust));
-			return {
-				cls: 'heat b0 val',
-				text: g === null ? '–' : `${g}`,
-				label: `${day}: top gust ${speed(d.gust, units)}`
-			};
-		}
-		if (metric === 'fl')
-			return {
-				cls: 'heat b0 val',
-				text: thousands(d.flMin),
-				label: `${day}: lowest freezing level ${elevation(d.flMin, units)}`
-			};
-		if (metric === 'slr') {
-			const r = round(d.slr);
-			return {
-				cls: 'heat b0 val',
-				text: r === null ? '·' : phone ? `${r}` : `${r}:1`,
-				label: `${day}: ${r === null ? 'no snow' : `snow ratio ${r}:1`}`
-			};
-		}
-		const cl = round(d.cloud);
-		return {
-			cls: 'heat b0 val',
-			text: cl === null ? '–' : phone ? `${cl}` : `${cl}%`,
-			label: `${day}: cloud ${cl === null ? 'unknown' : `${cl}%`}`
-		};
-	}
-
 	const sumHead = $derived(
 		{
 			snow: `Total, ${c.snowUnit}`,
@@ -163,50 +74,25 @@
 			cloud: 'Average'
 		}[metric]
 	);
-	function sumText(s: Summary | null): string {
-		if (!s) return '';
-		if (metric === 'snow') return snowNum(s.snow, units);
-		if (metric === 'temp') {
-			const hi = round(c.temp(s.tmax));
-			const lo = round(c.temp(s.tmin));
-			return hi === null || lo === null ? '–' : `${hi}°/${lo}°`;
-		}
-		if (metric === 'wind') return `${round(c.speed(s.gust)) ?? '–'}`;
-		if (metric === 'fl') {
-			const v = c.height(s.flMin);
-			return v === null ? '–' : (Math.round(v / 10) * 10).toLocaleString('en-US');
-		}
-		if (metric === 'slr') return s.slr === null ? '–' : `${Math.round(s.slr)}:1`;
-		return s.cloud === null ? '–' : `${Math.round(s.cloud)}%`;
-	}
 </script>
 
-<div class="cr" class:phone class:editing style:--n={n}>
+<div class="cr" class:phone class:editing>
 	<div class="row head">
-		<div class="name">
-			<button
-				class="sortbtn"
-				onclick={onsort}
-				aria-label="Order: {sort === 'mine' ? 'my order' : 'most snow first'}. Change."
+		<button
+			class="sortbtn"
+			onclick={onsort}
+			aria-label="Order: {sort === 'mine' ? 'my order' : 'most snow first'}. Change."
+		>
+			<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
+				><path d="M8 5v14M8 19l-3-3M8 19l3-3M16 19V5M16 5l-3 3M16 5l3 3" /></svg
 			>
-				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
-					><path d="M8 5v14M8 19l-3-3M8 19l3-3M16 19V5M16 5l-3 3M16 5l3 3" /></svg
-				>
-				{sort === 'mine' ? 'My order' : 'Most snow'}
-			</button>
-		</div>
-		<div class="cells days" aria-hidden="true">
-			{#each days as d, k (d.date)}
-				<span class="day" class:in={isIn(k)} class:weekend={d.weekend}
-					>{d.label}{#if !phone}<small>{d.num}</small>{/if}</span
-				>
-			{/each}
-		</div>
-		<div class="sum" title="Over the days the chart shows">{sumHead}</div>
+			{sort === 'mine' ? 'My order' : 'Most snow'}
+		</button>
+		<span class="sum" title="Over the days the chart shows">{sumHead}</span>
 	</div>
 
 	<ul class="list">
-		{#each rows as r (r.id)}
+		{#each rows as r, i (r.id)}
 			<li
 				class="row"
 				class:hl={hl === r.id && r.slot >= 0}
@@ -235,53 +121,33 @@
 						</button>
 					{/if}
 					<small class="sub"
-						>{#if r.elev_m !== null}{phone ? '' : `${r.bandLabel} · `}{elevation(
+						>{#if r.state === 'loading'}Loading…{:else if r.state === 'nodata'}No forecast yet{:else if r.state === 'error'}Couldn’t
+							load its forecast{:else}{phone ? '' : `${r.bandLabel} · `}{elevation(
 								r.elev_m,
 								units
 							)}{/if}{#if r.stale}<span class="stale">{` · ${r.stale}`}</span>{/if}</small
 					>
 				</div>
 				{#if editing}
-					<div class="cells edits">
+					<div class="edits">
 						<button
 							class="ebtn"
 							onclick={() => onmove(r.id, -1)}
 							aria-label="Move {r.name} up"
-							disabled={rows[0]?.id === r.id}>↑</button
+							disabled={i === 0}>↑</button
 						>
 						<button
 							class="ebtn"
 							onclick={() => onmove(r.id, 1)}
 							aria-label="Move {r.name} down"
-							disabled={rows[rows.length - 1]?.id === r.id}>↓</button
+							disabled={i === rows.length - 1}>↓</button
 						>
 						<button class="ebtn remove" onclick={() => onremove(r.id)} aria-label="Remove {r.name}"
 							>Remove</button
 						>
 					</div>
-					<div class="sum"></div>
-				{:else if r.state === 'ok'}
-					<div class="cells">
-						{#each r.cells as d, k (d.date)}
-							{@const x = cell(d)}
-							<span
-								class="{x.cls} cellbox"
-								class:in={isIn(k)}
-								role="img"
-								aria-label="{r.name}, {x.label}">{x.text}</span
-							>
-						{/each}
-					</div>
-					<div class="sum num">{sumText(r.summary)}</div>
 				{:else}
-					<div class="cells msg">
-						{r.state === 'loading'
-							? 'Loading…'
-							: r.state === 'nodata'
-								? 'No forecast yet'
-								: 'Couldn’t load its forecast'}
-					</div>
-					<div class="sum"></div>
+					<span class="sum num">{summaryText(r.summary, metric, units, true)}</span>
 				{/if}
 			</li>
 		{/each}
@@ -306,103 +172,57 @@
 		display: grid;
 		gap: 6px;
 		min-width: 0;
-		--name-w: 210px;
-		--sum-w: 96px;
 	}
 	.row {
-		display: grid;
-		grid-template-columns: var(--name-w) minmax(0, 1fr) var(--sum-w);
-		grid-template-areas: 'name cells sum';
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-	}
-	/* Phones: the name and the summary on one line, the cells full width under them. */
-	.phone .row {
-		grid-template-columns: minmax(0, 1fr) auto;
-		grid-template-areas: 'name sum' 'cells cells';
-		gap: 3px 10px;
-	}
-	.name {
-		grid-area: name;
-		min-width: 0;
-		display: grid;
-		gap: 1px;
-	}
-	.phone .name {
 		display: flex;
-		align-items: baseline;
-		gap: 6px;
-	}
-	.cells {
-		grid-area: cells;
-		display: grid;
-		grid-template-columns: repeat(var(--n), minmax(0, 1fr));
-		gap: 3px;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
 		min-width: 0;
-	}
-	.sum {
-		grid-area: sum;
-		text-align: right;
-		font-size: 0.86rem;
-		font-weight: 600;
-		white-space: nowrap;
-	}
-	/* The row being pointed at, while its line stands out on the chart. */
-	.list .row {
-		margin: -4px -8px;
-		padding: 4px 8px;
-		border-radius: 14px;
-		transition: background-color var(--ease);
-	}
-	.list .row.hl {
-		background: var(--hover);
 	}
 	.list {
 		list-style: none;
 		margin: 0;
 		padding: 0;
 		display: grid;
+		gap: 2px;
+	}
+	/* The row being pointed at, while its line stands out on the chart. */
+	.list .row {
+		min-height: 40px;
+		margin: 0 -8px;
+		padding: 2px 8px;
+		border-radius: 12px;
+		transition: background-color var(--ease);
+	}
+	.list .row.hl {
+		background: var(--hover);
+	}
+	.name {
+		flex: 1 1 auto;
+		min-width: 0;
+		display: flex;
+		align-items: baseline;
 		gap: 8px;
 	}
-	.phone .list {
-		gap: 10px;
+	.sum {
+		flex: 0 0 auto;
+		text-align: right;
+		font-size: 0.9rem;
+		font-weight: 600;
+		white-space: nowrap;
 	}
 	.head .sum {
 		font-size: 0.74rem;
-		font-weight: 600;
 		color: var(--text-2);
 	}
-	.days {
-		cursor: default;
-	}
-	.day {
-		display: grid;
-		justify-items: center;
-		font-size: 0.72rem;
-		font-weight: 600;
-		color: var(--text-3);
-		white-space: nowrap;
-		overflow: hidden;
-		transition: color var(--ease);
-	}
-	.day.weekend {
-		color: var(--accent-ink);
-	}
-	.day:not(.in) {
-		opacity: 0.55;
-	}
-	.day small {
-		font-size: 0.68rem;
-		font-weight: 400;
-	}
 	.sortbtn {
-		justify-self: start;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
 		min-height: 32px;
 		padding: 0 10px 0 6px;
+		margin-left: -6px;
 		border: 0;
 		border-radius: 999px;
 		background: transparent;
@@ -416,10 +236,12 @@
 		color: var(--text);
 	}
 	.who {
+		flex: 0 1 auto;
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		min-width: 0;
+		max-width: 70%;
 		padding: 2px 0;
 		border: 0;
 		background: transparent;
@@ -430,19 +252,13 @@
 	}
 	button.who {
 		cursor: pointer;
-		min-height: 30px;
+		min-height: 34px;
 		border-radius: 8px;
 	}
 	button.who:hover .lname {
 		text-decoration: underline;
 		text-decoration-color: var(--text-3);
 		text-underline-offset: 3px;
-	}
-	.phone .who {
-		flex: 0 1 auto;
-		max-width: 70%;
-		font-size: 0.86rem;
-		min-height: 28px;
 	}
 	.lname {
 		min-width: 0;
@@ -476,47 +292,19 @@
 		border: 2px solid var(--text-3);
 	}
 	.sub {
+		flex: 1 1 0;
 		min-width: 0;
-		font-size: 0.74rem;
+		font-size: 0.76rem;
 		color: var(--text-3);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		padding-left: 20px;
-	}
-	.phone .sub {
-		padding-left: 0;
-		flex: 1 1 0;
 	}
 	.stale {
 		color: var(--warn-ink);
 	}
-	.cellbox {
-		height: 30px;
-		font-size: 0.78rem;
-		transition: opacity var(--ease);
-	}
-	.phone .cellbox {
-		height: 24px;
-		border-radius: 7px;
-		font-size: 0.68rem;
-	}
-	.cellbox.val {
-		font-family: var(--font-num);
-		font-weight: 600;
-		color: var(--text-2);
-		background: var(--surface-2);
-	}
-	.cellbox:not(.in) {
-		opacity: 0.4;
-	}
-	.msg {
-		display: block;
-		font-size: 0.8rem;
-		color: var(--text-3);
-		padding: 6px 0;
-	}
 	.edits {
+		flex: 0 0 auto;
 		display: flex;
 		gap: 6px;
 	}
