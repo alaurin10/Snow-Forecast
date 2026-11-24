@@ -48,6 +48,7 @@
 		windowSpan,
 		dayStarts,
 		windowFor,
+		viewerOffset,
 		type BandName,
 		type Comparison,
 		type Group
@@ -139,7 +140,8 @@
 			return s && s !== 'error' ? [{ id, name: nameOf(id), snap: s }] : [];
 		})
 	);
-	const timeline = $derived(buildTimeline(loaded, cmp.band, cmp.range));
+	// Times read on the viewer's own clock: the location there (or nearest it) sets them.
+	const timeline = $derived(buildTimeline(loaded, cmp.band, cmp.range, viewerOffset()));
 
 	// --- The window the chart shows, moved with the timeline under it ------------------
 	let startMs = $state<number | null>(null);
@@ -498,7 +500,6 @@
 			onmetric={(m) => commit({ ...cmp, metric: m })}
 			{others}
 			onadd={cmp.locs.length < MAX_LOCS ? () => (adding = true) : undefined}
-			onedit={() => (adding = true)}
 		/>
 		{#if prefs.showTimeline === 'on'}
 			<CompareTimeline
@@ -536,8 +537,24 @@
 				<span>Timeline</span>
 			</button>
 		</div>
+		{#if zoneNote || staleNote}
+			<p class="zone faint">{zoneNote}{zoneNote && staleNote ? ' ' : ''}{staleNote}</p>
+		{/if}
+	</section>
+	<div class="below">
+		<button
+			class="lpill glass"
+			onclick={() => (adding = true)}
+			aria-label="Change locations"
+			aria-haspopup="dialog"
+		>
+			<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
+				><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" /></svg
+			>
+			<span>Locations</span>
+		</button>
 		{#if cmp.metric === 'snow' && prefs.showTimeline === 'on'}
-			<div class="totalbar">
+			<div class="totalbar glass">
 				<span class="faint" id="snow-total">Snow total</span>
 				<div class="seg" role="group" aria-labelledby="snow-total">
 					<button aria-pressed={prefs.snowTotal === 'run'} onclick={() => prefs.setSnowTotal('run')}
@@ -550,10 +567,7 @@
 				</div>
 			</div>
 		{/if}
-		{#if zoneNote || staleNote}
-			<p class="zone faint">{zoneNote}{zoneNote && staleNote ? ' ' : ''}{staleNote}</p>
-		{/if}
-	</section>
+	</div>
 	<p class="callink">
 		<a href={resolve('/calendar')}>Every location, snow only: Calendar</a>
 	</p>
@@ -782,14 +796,41 @@
 		min-height: 36px;
 		padding: 0 16px;
 	}
-	/* Snow from now or from the window's start: with the timeline, since it moves the window. */
-	.totalbar {
-		margin-top: -8px;
+	/* Under the chart's card: change locations, and (snow, with the timeline) whether snow
+	   counts from now or from the window's start. */
+	.below {
 		display: flex;
 		align-items: center;
-		justify-content: center;
 		flex-wrap: wrap;
 		gap: 8px;
+		margin-top: 12px;
+	}
+	.lpill {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		min-height: 40px;
+		padding: 0 14px;
+		border-radius: 999px;
+		font-size: 0.88rem;
+		font-weight: 600;
+		color: var(--text);
+		cursor: pointer;
+	}
+	.lpill svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.totalbar {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 3px 3px 3px 12px;
+		border-radius: 999px;
 		font-size: 0.8rem;
 	}
 	.totalbar .seg button {
@@ -886,6 +927,12 @@
 		.chartcard {
 			padding: 14px 12px;
 			gap: 14px;
+		}
+		.totalbar {
+			margin-left: 0;
+			width: 100%;
+			box-sizing: border-box;
+			justify-content: space-between;
 		}
 	}
 </style>

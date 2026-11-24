@@ -343,6 +343,12 @@ test('the snow total switch under the chart: from now, or the timeline window', 
 	const fromNow = parseFloat((await value.textContent()) ?? '0');
 	await expect(page.locator('.axes')).toContainText('Snow from now');
 	const total = page.getByRole('group', { name: 'Snow total' });
+	// It sits under the chart's card, beside Locations, not in it.
+	await expect(page.locator('.chartcard .totalbar, .chartcard .lpill')).toHaveCount(0);
+	await expect(page.locator('.below .totalbar')).toBeVisible();
+	await expect(
+		page.locator('.below').getByRole('button', { name: 'Change locations' })
+	).toBeVisible();
 	await expect(total.getByRole('button', { name: 'From now' })).toHaveAttribute(
 		'aria-pressed',
 		'true'

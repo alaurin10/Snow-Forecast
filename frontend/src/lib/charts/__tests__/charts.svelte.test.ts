@@ -143,7 +143,6 @@ describe('compare chart', () => {
 			range: 5
 		};
 		const onadd = vi.fn();
-		const onedit = vi.fn();
 		const { container } = render(CompareChart, {
 			props: {
 				timeline,
@@ -152,8 +151,7 @@ describe('compare chart', () => {
 				win: windowFor(timeline.slots, 5, null),
 				onmetric: () => {},
 				others: [{ id: 'crystal', name: 'Crystal Mountain', slot: 1, note: 'Loading…' }],
-				onadd,
-				onedit
+				onadd
 			}
 		});
 		const cards = [...container.querySelectorAll('.reads > *')];
@@ -163,8 +161,6 @@ describe('compare chart', () => {
 		expect(container.querySelectorAll('.read.add')).toHaveLength(1);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add location' }));
 		expect(onadd).toHaveBeenCalled();
-		await fireEvent.click(screen.getByRole('button', { name: 'Change locations' }));
-		expect(onedit).toHaveBeenCalled();
 		expect(container.querySelectorAll('path.line').length).toBe(1);
 	});
 });

@@ -268,7 +268,8 @@ export interface Track {
 }
 
 export interface Timeline {
-	/** The location whose steps are the slots: the freshest forecast. */
+	/** The location whose steps are the slots: the one on the viewer's clock (or nearest
+	 *  it), the freshest forecast among those. */
 	ref: Track | null;
 	slots: Step[];
 	tracks: Track[];
@@ -316,8 +317,27 @@ export function align(slots: Step[], steps: Step[]): (Step | null)[] {
 	});
 }
 
-/** Every location's steps at one band, lined up on the freshest forecast's steps. */
-export function buildTimeline(locs: LocSnap[], band: BandName, range: Range): Timeline {
+/** Minutes east of UTC from a "-08:00" style offset (null when there's none). */
+const offsetMin = (o: string): number | null => {
+	const m = /^([+-])(\d\d):(\d\d)$/.exec(o);
+	return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null;
+};
+
+/** The viewer's clock now, in minutes east of UTC. */
+export const viewerOffset = (): number => -new Date().getTimezoneOffset();
+
+/**
+ * Every location's steps at one band, lined up on one location's steps: the one whose
+ * clock is the viewer's (`viewerMin`, minutes east of UTC), or nearest it, so times read
+ * as the viewer's own; the freshest forecast among equals. Without `viewerMin`, the
+ * freshest forecast.
+ */
+export function buildTimeline(
+	locs: LocSnap[],
+	band: BandName,
+	range: Range,
+	viewerMin?: number
+): Timeline {
 	const tracks0 = locs
 		.filter((l) => l.snap.bands?.length)
 		.map((l) => {
@@ -332,9 +352,14 @@ export function buildTimeline(locs: LocSnap[], band: BandName, range: Range): Ti
 			};
 		});
 	if (!tracks0.length) return { ref: null, slots: [], tracks: [], dates: [] };
+	const away = (o: string) => {
+		const m = offsetMin(o);
+		return viewerMin === undefined ? 0 : m === null ? Infinity : Math.abs(m - viewerMin);
+	};
 	let r = 0;
 	tracks0.forEach((t, i) => {
-		if (Date.parse(t.generatedAt) > Date.parse(tracks0[r].generatedAt)) r = i;
+		const d = away(t.offset) - away(tracks0[r].offset);
+		if (d < 0 || (d === 0 && Date.parse(t.generatedAt) > Date.parse(tracks0[r].generatedAt))) r = i;
 	});
 	const slots = tracks0[r].own;
 	const tracks: Track[] = tracks0.map(({ own, ...t }, i) => ({

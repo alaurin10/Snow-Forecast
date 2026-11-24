@@ -255,6 +255,20 @@ describe('one timeline for every location', () => {
 		expect(t.ref?.id).toBe('crystal');
 	});
 
+	it('reads times on the viewer’s clock: the location there, or nearest it', () => {
+		const newer = { ...W, generated_at: '2099-01-01T00:00:00+00:00' };
+		const locs = [
+			{ id: 'whistler', name: 'Whistler', snap: newer },
+			{ id: 'crystal', name: 'Crystal', snap: C }
+		];
+		// Whistler is UTC−7 here and Crystal UTC−8.
+		expect(buildTimeline(locs, 'mid', 3, -480).ref?.id).toBe('crystal');
+		expect(buildTimeline(locs, 'mid', 3, -420).ref?.id).toBe('whistler');
+		expect(buildTimeline(locs, 'mid', 3, -600).ref?.id).toBe('crystal');
+		expect(buildTimeline(locs, 'mid', 3, 60).ref?.id).toBe('whistler');
+		expect(buildTimeline(locs, 'mid', 3).ref?.id).toBe('whistler');
+	});
+
 	it('leaves gaps rather than shifting a step that has no partner', () => {
 		const slots = buildSteps(C.bands[1].hourly, 3, true);
 		// A location whose data starts a day late.
