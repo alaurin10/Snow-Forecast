@@ -4,6 +4,7 @@ import type {
 	BudgetOut,
 	ConcernOut,
 	CatalogItem,
+	CompareOut,
 	JobOut,
 	Location,
 	LocationSummary,
@@ -73,6 +74,16 @@ export function getOverview(): Promise<OverviewRow[]> {
 		overview = { at: Date.now(), p };
 	}
 	return overview.p;
+}
+// Every location's days at each band, for ranking them on Compare (cached a minute).
+let compareDays: { at: number; p: Promise<CompareOut> } | null = null;
+export function getCompareDays(): Promise<CompareOut> {
+	if (!compareDays || Date.now() - compareDays.at > 60_000) {
+		const p = get<CompareOut>('/api/compare');
+		p.catch(() => (compareDays = null));
+		compareDays = { at: Date.now(), p };
+	}
+	return compareDays.p;
 }
 /** Every location's loading roses, for the map's wind-effect layer. */
 export const getMapWind = () => get<MapWindOut>('/api/map/wind');

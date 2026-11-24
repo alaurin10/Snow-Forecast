@@ -2,7 +2,7 @@
 // band, lined up on one timeline; its days for the location rows; and the comparison
 // itself (which locations, which are lines, band, metric, range), how it travels in a
 // URL and how it's kept as a named group. Values stay metric; the page converts them.
-import type { BandOut, Snapshot } from './types.gen';
+import type { BandOut, CompareDay, Snapshot } from './types.gen';
 import { buildSteps, niceAxis, STEP, type Range, type Step } from './charts/forecast';
 import { converters, elevation, snowNum, speed, type UnitSystem } from './units';
 import { dateOf } from './time';
@@ -686,4 +686,64 @@ export function fzSide(
 	if (fl === null || fl === undefined) return null;
 	const diff = fl - elev;
 	return { diff, word: diff <= 0 ? 'snow' : diff <= SNOW_LEVEL_OFFSET_M ? 'wet' : 'warm' };
+}
+
+// --- Ranking every location (the Add list) -------------------------------------------
+
+/** How the Add list ranks locations for each metric, best first. */
+export const RANK: Record<CompareMetric, { label: string; better: 'high' | 'low' }> = {
+	snow: { label: 'Most snow', better: 'high' },
+	temp: { label: 'Coldest', better: 'low' },
+	wind: { label: 'Lightest wind', better: 'low' },
+	cloud: { label: 'Clearest', better: 'low' },
+	fl: { label: 'Lowest freezing level', better: 'low' },
+	slr: { label: 'Driest snow', better: 'high' }
+};
+
+/** A location's summary from the server's days: over `dates` when given, else its first
+ *  five days. */
+export function daysSummary(days: CompareDay[], dates: string[] | null): Summary {
+	const inRange = dates ? days.filter((d) => dates.includes(d.date)) : days.slice(0, 5);
+	const pick = (f: (d: CompareDay) => number | null) => nums(inRange.map(f));
+	const tmax = pick((d) => d.tmax_c);
+	const tmin = pick((d) => d.tmin_c);
+	const gust = pick((d) => d.gust_kmh);
+	const fl = pick((d) => d.fl_min_m);
+	return {
+		snow: inRange.reduce((a, d) => a + d.snow_cm, 0),
+		rain: inRange.reduce((a, d) => a + d.rain_mm, 0),
+		tmax: tmax.length ? Math.max(...tmax) : null,
+		tmin: tmin.length ? Math.min(...tmin) : null,
+		gust: gust.length ? Math.max(...gust) : null,
+		flMin: fl.length ? Math.min(...fl) : null,
+		slr: meanOf(pick((d) => d.slr)),
+		cloud: meanOf(pick((d) => d.cloud))
+	};
+}
+
+/** The number a metric ranks by (null sorts last). */
+export function rankValue(s: Summary | null, metric: CompareMetric): number | null {
+	if (!s) return null;
+	if (metric === 'snow') return s.snow;
+	if (metric === 'temp') return s.tmax;
+	if (metric === 'wind') return s.gust;
+	if (metric === 'cloud') return s.cloud;
+	if (metric === 'fl') return s.flMin;
+	return s.slr;
+}
+
+/** Best first for the metric; ties and missing values keep their order. */
+export function rankOrder<T>(
+	items: T[],
+	value: (it: T) => number | null,
+	metric: CompareMetric
+): T[] {
+	const dir = RANK[metric].better === 'high' ? -1 : 1;
+	return items
+		.map((it, i) => ({ it, i, v: value(it) }))
+		.sort((a, b) => {
+			if (a.v === null || b.v === null) return a.v === null ? (b.v === null ? a.i - b.i : 1) : -1;
+			return (a.v - b.v) * dir || a.i - b.i;
+		})
+		.map((x) => x.it);
 }

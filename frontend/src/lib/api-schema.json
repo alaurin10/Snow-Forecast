@@ -770,6 +770,151 @@
       "title": "CloudsOut",
       "type": "object"
     },
+    "CompareBand": {
+      "properties": {
+        "band": {
+          "type": "string"
+        },
+        "days": {
+          "items": {
+            "$ref": "#/$defs/CompareDay"
+          },
+          "type": "array"
+        },
+        "elev_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "band",
+        "elev_m",
+        "days"
+      ],
+      "title": "CompareBand",
+      "type": "object"
+    },
+    "CompareDay": {
+      "description": "One location's day at one band (a night goes with its evening's date).",
+      "properties": {
+        "cloud": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "type": "string"
+        },
+        "fl_min_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gust_kmh": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rain_mm": {
+          "type": "number"
+        },
+        "slr": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snow_cm": {
+          "type": "number"
+        },
+        "tmax_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmin_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "snow_cm",
+        "rain_mm",
+        "tmax_c",
+        "tmin_c",
+        "gust_kmh",
+        "fl_min_m",
+        "slr",
+        "cloud"
+      ],
+      "title": "CompareDay",
+      "type": "object"
+    },
+    "CompareOut": {
+      "description": "Every location's days at each band, for ranking them on Compare's Add list.",
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/CompareRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "title": "CompareOut",
+      "type": "object"
+    },
+    "CompareRow": {
+      "properties": {
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/CompareBand"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "bands"
+      ],
+      "title": "CompareRow",
+      "type": "object"
+    },
     "ConcernOut": {
       "description": "The experimental terrain concern index's settings (config `terrain:`), for every\nvisitor unless HAZARD_INDEX is off. The browser works the index out from these.",
       "properties": {
@@ -6219,6 +6364,9 @@
       },
       "type": "array"
     },
+    "compare": {
+      "$ref": "#/$defs/CompareOut"
+    },
     "job": {
       "$ref": "#/$defs/JobOut"
     },
@@ -6331,6 +6479,7 @@
     "lookups",
     "avalanche",
     "plan",
+    "compare",
     "verification",
     "nearby",
     "status",

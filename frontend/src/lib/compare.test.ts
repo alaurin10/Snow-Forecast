@@ -8,6 +8,9 @@ import {
 	addLocation,
 	align,
 	buildTimeline,
+	daysSummary,
+	rankOrder,
+	rankValue,
 	chartAxis,
 	chartLines,
 	lineValues,
@@ -466,5 +469,52 @@ describe('snow totals: from now or from the first day shown', () => {
 		const win = chartAxis([wh], 'snow', later, 'metric', 'window');
 		expect(run.max).toBeGreaterThanOrEqual(Math.max(...wh.steps.map((s) => s!.cum)));
 		expect(win.max).toBeLessThanOrEqual(run.max);
+	});
+});
+
+describe('ranking every location for the Add list', () => {
+	const day = (date: string, o: Partial<import('./types.gen').CompareDay> = {}) => ({
+		date,
+		snow_cm: 0,
+		rain_mm: 0,
+		tmax_c: 0,
+		tmin_c: -5,
+		gust_kmh: 20,
+		fl_min_m: 1500,
+		slr: null,
+		cloud: 50,
+		...o
+	});
+	const days = [
+		day('2026-11-05', { snow_cm: 4, gust_kmh: 30 }),
+		day('2026-11-06', { snow_cm: 6, fl_min_m: 900, slr: 14 }),
+		day('2026-11-07', { snow_cm: 10 }),
+		day('2026-11-08'),
+		day('2026-11-09'),
+		day('2026-11-10', { snow_cm: 50 })
+	];
+
+	it('sums the chart’s days, or the first five without them', () => {
+		expect(daysSummary(days, ['2026-11-06', '2026-11-07']).snow).toBe(16);
+		expect(daysSummary(days, null).snow).toBe(20);
+		const s = daysSummary(days, null);
+		expect(s.flMin).toBe(900);
+		expect(s.gust).toBe(30);
+		expect(s.slr).toBe(14);
+	});
+
+	it('puts the best first for each metric, and those without a value last', () => {
+		const items = [
+			{ id: 'a', v: 5 },
+			{ id: 'b', v: null },
+			{ id: 'c', v: 9 },
+			{ id: 'd', v: 1 }
+		];
+		const ids = (m: Parameters<typeof rankOrder>[2]) =>
+			rankOrder(items, (x) => x.v, m).map((x) => x.id);
+		expect(ids('snow')).toEqual(['c', 'a', 'd', 'b']);
+		expect(ids('fl')).toEqual(['d', 'a', 'c', 'b']);
+		expect(rankValue(daysSummary(days, null), 'wind')).toBe(30);
+		expect(rankValue(null, 'snow')).toBeNull();
 	});
 });

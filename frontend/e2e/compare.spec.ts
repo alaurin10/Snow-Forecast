@@ -358,3 +358,19 @@ test('a location page’s Compare button starts a comparison with it, the Add li
 	await sheet.getByRole('button', { name: 'Done' }).click();
 	await expect(page.locator('.cr .list li')).toHaveCount(2);
 });
+
+test('the Add list shows and ranks the metric being compared', async ({ page }) => {
+	await page.goto('/compare?loc=crystal&band=summit&metric=snow&range=5', {
+		waitUntil: 'networkidle'
+	});
+	await page.getByRole('button', { name: 'Add location' }).click();
+	const sheet = page.getByRole('dialog', { name: 'Add locations' });
+	await expect(sheet.locator('.what')).toContainText('Snow, the days the chart shows, summit');
+	await sheet.getByRole('button', { name: /^Order: my order/ }).click();
+	await expect(sheet.getByRole('button', { name: /^Order: most snow first/ })).toBeVisible();
+	const amounts = await sheet
+		.locator('.item:not([disabled]) .amt')
+		.evaluateAll((els) => els.map((e) => parseFloat(e.textContent ?? '0')));
+	expect(amounts.length).toBeGreaterThan(2);
+	expect([...amounts].sort((a, b) => b - a)).toEqual(amounts);
+});

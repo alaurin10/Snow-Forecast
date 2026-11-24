@@ -7,8 +7,8 @@
 		name: string;
 		region: string;
 		kind: string;
-		/** "4.2 in", the next 5 days at mid. */
-		next5: string;
+		/** The figure shown beside it, e.g. "4.2 in". */
+		stat: string;
 		ready: boolean;
 	}
 </script>
@@ -20,9 +20,13 @@
 		items: AddItem[];
 		picked: string[];
 		ontoggle: (id: string) => void;
+		/** What the figures are, e.g. "Snow, next 5 days at mid". */
+		statTitle?: string;
+		/** Ranking: the order's name ("Most snow"), whether it's on, and its switch. */
+		rank?: { label: string; on: boolean; ontoggle: () => void };
 	}
 
-	let { items, picked, ontoggle }: Props = $props();
+	let { items, picked, ontoggle, statTitle = '', rank }: Props = $props();
 	let query = $state('');
 
 	const full = $derived(picked.length >= MAX_LOCS);
@@ -42,11 +46,26 @@
 			bind:value={query}
 		/>
 	{/if}
-	<p class="count" aria-live="polite">
-		{picked.length} of {MAX_LOCS} picked{#if full}<span class="faint">
-				· that’s the most in one comparison</span
-			>{/if}
-	</p>
+	<div class="bar">
+		<p class="count" aria-live="polite">
+			{picked.length} of {MAX_LOCS} picked{#if full}<span class="faint">
+					· that’s the most in one comparison</span
+				>{/if}
+		</p>
+		{#if rank}
+			<button
+				class="rank"
+				onclick={rank.ontoggle}
+				aria-label="Order: {rank.on ? rank.label.toLowerCase() + ' first' : 'my order'}. Change."
+			>
+				<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"
+					><path d="M8 5v14M8 19l-3-3M8 19l3-3M16 19V5M16 5l-3 3M16 5l3 3" /></svg
+				>
+				{rank.on ? rank.label : 'My order'}
+			</button>
+		{/if}
+	</div>
+	{#if statTitle}<p class="what faint">{statTitle}</p>{/if}
 	<ul>
 		{#each shown as it (it.id)}
 			{@const on = picked.includes(it.id)}
@@ -68,7 +87,7 @@
 								· No forecast yet{/if}</small
 						>
 					</span>
-					{#if it.ready}<span class="amt num" title="Next 5 days at mid">{it.next5}</span>{/if}
+					{#if it.ready}<span class="amt num" title={statTitle}>{it.stat}</span>{/if}
 				</button>
 			</li>
 		{:else}
@@ -93,6 +112,37 @@
 		background: var(--surface);
 		color: var(--text);
 		font: inherit;
+	}
+	.bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+	.rank {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 34px;
+		padding: 0 12px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--surface-2);
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--text);
+		cursor: pointer;
+	}
+	.rank svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.what {
+		margin: -4px 0 0;
+		font-size: 0.76rem;
 	}
 	.count {
 		margin: 0;

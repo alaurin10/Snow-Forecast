@@ -8,13 +8,13 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
-	import { getOverview, getSnapshot } from '../../lib/api';
+	import { getCompareDays, getOverview, getSnapshot } from '../../lib/api';
 	import { prefs } from '../../lib/prefs.svelte';
 	import { viewport } from '../../lib/viewport.svelte';
 	import { friendlyError } from '../../lib/errors';
 	import { ago, weekday } from '../../lib/time';
 	import { snow } from '../../lib/units';
-	import type { OverviewRow, Snapshot } from '../../lib/types.gen';
+	import type { CompareOut, OverviewRow, Snapshot } from '../../lib/types.gen';
 	import {
 		addGroup,
 		addLocation,
@@ -32,6 +32,11 @@
 		lineSlot,
 		MAX_GROUPS,
 		MAX_LOCS,
+		RANK,
+		daysSummary,
+		rankOrder,
+		rankValue,
+		summaryText,
 		METRIC_NAMES,
 		moveGroup,
 		moveLocation,
@@ -262,16 +267,48 @@
 		draft = [];
 		commit(next, true);
 	}
-	const addItems = $derived<AddItem[]>(
-		(rows ?? []).map((r) => ({
-			id: r.id,
-			name: r.name,
-			region: r.region,
-			kind: r.kind,
-			next5: snow(r.next5_cm, prefs.units),
-			ready: r.run_id != null
-		}))
+	// Every location's days from the server, so the list can show and rank the metric
+	// being compared, over the days the chart shows, at the chosen band.
+	let allDays = $state<CompareOut | null>(null);
+	$effect(() => {
+		getCompareDays()
+			.then((d) => (allDays = d))
+			.catch(() => {});
+	});
+	let ranked = $state(false);
+	const rankDates = $derived(
+		cmp.locs.length && timeline.dates.length
+			? timeline.dates.slice(inView.from, inView.to + 1)
+			: null
 	);
+	const addSummary = (id: string) => {
+		const b = allDays?.rows.find((r) => r.id === id)?.bands;
+		const band = b?.find((x) => x.band === cmp.band) ?? b?.[1] ?? b?.[0];
+		return band ? daysSummary(band.days, rankDates) : null;
+	};
+	const addStatTitle = $derived(
+		`${{ snow: 'Snow', temp: 'High/low', wind: 'Top gust', cloud: 'Average cloud', fl: 'Lowest freezing level', slr: 'Average ratio' }[cmp.metric]}, ${rankDates ? 'the days the chart shows' : 'next 5 days'}, ${{ base: 'base', mid: 'mid', summit: 'summit' }[cmp.band]}`
+	);
+	const addItems = $derived.by<AddItem[]>(() => {
+		const items = (rows ?? []).map((r) => {
+			const s = addSummary(r.id);
+			return {
+				id: r.id,
+				name: r.name,
+				region: r.region,
+				kind: r.kind,
+				stat: s ? summaryText(s, cmp.metric, prefs.units) : snow(r.next5_cm, prefs.units),
+				ready: r.run_id != null,
+				score: rankValue(s, cmp.metric)
+			};
+		});
+		return ranked ? rankOrder(items, (it) => it.score, cmp.metric) : items;
+	});
+	const addRank = $derived({
+		label: RANK[cmp.metric].label,
+		on: ranked,
+		ontoggle: () => (ranked = !ranked)
+	});
 
 	// --- Groups ------------------------------------------------------------------------------
 	let groupsOpen = $state(false);
@@ -454,7 +491,13 @@
 			Pick up to {MAX_LOCS}. Up to four are drawn as lines on one chart; every one gets a row of
 			days. Save the set as a group to open it again later.
 		</p>
-		<CompareAdd items={addItems} picked={draft} ontoggle={pickDraft} />
+		<CompareAdd
+			items={addItems}
+			picked={draft}
+			ontoggle={pickDraft}
+			statTitle={addStatTitle}
+			rank={addRank}
+		/>
 		<div class="go">
 			<button class="btn" disabled={!draft.length} onclick={startCompare}
 				>{draft.length
@@ -545,7 +588,13 @@
 		sub="Up to {MAX_LOCS} in one comparison"
 		onclose={() => (adding = false)}
 	>
-		<CompareAdd items={addItems} picked={cmp.locs} ontoggle={pick} />
+		<CompareAdd
+			items={addItems}
+			picked={cmp.locs}
+			ontoggle={pick}
+			statTitle={addStatTitle}
+			rank={addRank}
+		/>
 		<button class="btn done" onclick={() => (adding = false)}>Done</button>
 	</Sheet>
 {/if}

@@ -1,7 +1,9 @@
 # Snow Watch: Compare plan (conditions side by side across locations)
 
-Status: **milestone 1 built** (23 Nov 2026): the page, groups, the six metrics, the
-location rows, nav order. Milestones 2 and 3 are still to do. "Built: what changed"
+Status: **built** (24 Nov 2026): milestone 1, the Compare button on location pages and
+the share image (milestone 2) and the ranked Add list with `/api/compare` (milestone 3).
+The day comparison sheet (milestone 2) was left out: the owner found day-by-day tables
+under the chart repeated it. "Built: what changed"
 at the end lists where the build differs from the text below.
 
 ## Context

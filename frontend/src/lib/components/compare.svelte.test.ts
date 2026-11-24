@@ -106,7 +106,7 @@ describe('CompareAdd', () => {
 		name: `Location ${i}`,
 		region: i % 2 ? 'WA Cascades' : 'BC',
 		kind: 'resort',
-		next5: '1.0 in',
+		stat: '1.0 in',
 		ready: i !== 8
 	}));
 

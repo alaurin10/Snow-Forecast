@@ -12,6 +12,7 @@ export interface ApiTypes {
 	avalanche_zones: ZonesOut;
 	budget: BudgetOut;
 	catalog: CatalogItem[];
+	compare: CompareOut;
 	job: JobOut;
 	locations: LocationSummary[];
 	lookups: LookupStatus;
@@ -287,6 +288,49 @@ export interface CatalogItem {
 	name: string;
 	region: string | null;
 	website: string | null;
+}
+/**
+ * Every location's days at each band, for ranking them on Compare's Add list.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CompareOut".
+ */
+export interface CompareOut {
+	rows: CompareRow[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CompareRow".
+ */
+export interface CompareRow {
+	bands: CompareBand[];
+	id: string;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CompareBand".
+ */
+export interface CompareBand {
+	band: string;
+	days: CompareDay[];
+	elev_m: number;
+}
+/**
+ * One location's day at one band (a night goes with its evening's date).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CompareDay".
+ */
+export interface CompareDay {
+	cloud: number | null;
+	date: string;
+	fl_min_m: number | null;
+	gust_kmh: number | null;
+	rain_mm: number;
+	slr: number | null;
+	snow_cm: number;
+	tmax_c: number | null;
+	tmin_c: number | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
