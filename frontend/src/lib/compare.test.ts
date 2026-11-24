@@ -8,6 +8,11 @@ import {
 	addLocation,
 	align,
 	buildTimeline,
+	chartAxis,
+	chartLines,
+	lineValues,
+	summaryText,
+	tickText,
 	clean,
 	cleanName,
 	dayCells,
@@ -376,5 +381,90 @@ describe('the freezing level against a location', () => {
 		expect(fzSide(2200, 2000)?.word).toBe('wet');
 		expect(fzSide(2400, 2000)?.word).toBe('warm');
 		expect(fzSide(null, 2000)).toBeNull();
+	});
+});
+
+describe('what the chart draws', () => {
+	const t = buildTimeline(
+		[
+			{ id: 'whistler', name: 'Whistler', snap: W },
+			{ id: 'crystal', name: 'Crystal', snap: C }
+		],
+		'summit',
+		5
+	);
+	const cmp: Comparison = {
+		...emptyComparison(),
+		locs: ['whistler', 'crystal'],
+		on: [null, 'crystal']
+	};
+
+	it('draws the lines that are on, keeping their colours', () => {
+		expect(chartLines(t, cmp).map((l) => [l.slot, l.track.id])).toEqual([[1, 'crystal']]);
+	});
+
+	it('runs snow as a total from the window’s start, in the viewer’s units', () => {
+		const w = windowFor(t.slots, 5, null);
+		const wh = t.tracks.find((x) => x.id === 'whistler')!;
+		const inches = lineValues(wh, 'snow', w, 'imperial');
+		const cm = lineValues(wh, 'snow', w, 'metric');
+		const last = (xs: (number | null)[]) => xs.filter((v) => v !== null).at(-1)!;
+		expect(last(inches)).toBeCloseTo(last(cm) / 2.54, 6);
+		expect(last(cm)).toBeCloseTo(summarizeSteps(wh.steps.slice(w.off, w.off + w.n)).snow, 6);
+	});
+
+	it('scales freezing level to take in each location’s elevation', () => {
+		const w = windowFor(t.slots, 5, null);
+		const ax = chartAxis(t.tracks, 'fl', w, 'metric');
+		for (const tr of t.tracks) {
+			expect(ax.min).toBeLessThanOrEqual(tr.band.elev_m);
+			expect(ax.max).toBeGreaterThanOrEqual(tr.band.elev_m);
+		}
+		expect(chartAxis(t.tracks, 'cloud', w, 'metric')).toEqual({
+			min: 0,
+			max: 100,
+			ticks: [0, 25, 50, 75, 100]
+		});
+	});
+
+	it('words ticks and summaries in the viewer’s units', () => {
+		expect(tickText(7500, 'fl', 'imperial')).toBe('7.5k ft');
+		expect(tickText(50, 'cloud', 'metric')).toBe('50%');
+		const s = summarizeSteps(t.tracks[0].steps.slice(0, 20));
+		expect(summaryText(s, 'snow', 'imperial')).toMatch(/^\d+\.\d in$/);
+		expect(summaryText(s, 'snow', 'imperial', true)).toMatch(/^\d+\.\d$/);
+		expect(summaryText(s, 'temp', 'imperial')).toMatch(/^-?\d+°\/-?\d+°$/);
+		expect(summaryText(null, 'wind', 'metric')).toBe('');
+	});
+});
+
+describe('snow totals: from now or from the first day shown', () => {
+	const t = buildTimeline([{ id: 'whistler', name: 'Whistler', snap: W }], 'summit', 3);
+	const wh = t.tracks[0];
+	const later = windowFor(t.slots, 3, dayStart(t.slots, t.dates, 3));
+	const last = (xs: (number | null)[]) => xs.filter((v) => v !== null).at(-1)!;
+
+	it('agree while the window starts now', () => {
+		const now = windowFor(t.slots, 3, null);
+		expect(last(lineValues(wh, 'snow', now, 'metric', 'run'))).toBeCloseTo(
+			last(lineValues(wh, 'snow', now, 'metric', 'window')),
+			6
+		);
+	});
+
+	it('differ once it moves: from now keeps counting, the window starts at its first step', () => {
+		const run = lineValues(wh, 'snow', later, 'metric', 'run');
+		const win = lineValues(wh, 'snow', later, 'metric', 'window');
+		const inView = wh.steps.slice(later.off, later.off + later.n);
+		expect(last(win)).toBeCloseTo(summarizeSteps(inView).snow, 6);
+		expect(run[0]).toBeCloseTo(inView[0]!.cum, 6);
+		expect(last(run) - last(win)).toBeCloseTo(inView[0]!.cum - inView[0]!.snow, 6);
+	});
+
+	it('scale to the forecast’s total from now, or to the snowiest window', () => {
+		const run = chartAxis([wh], 'snow', later, 'metric', 'run');
+		const win = chartAxis([wh], 'snow', later, 'metric', 'window');
+		expect(run.max).toBeGreaterThanOrEqual(Math.max(...wh.steps.map((s) => s!.cum)));
+		expect(win.max).toBeLessThanOrEqual(run.max);
 	});
 });

@@ -221,8 +221,6 @@ test('the timeline and the range sit right under the chart, and move it', async 
 	await page.mouse.click(box.x + (box.width * 5.5) / n, box.y + box.height / 2);
 	await expect(when).not.toHaveText(first ?? '');
 	await expect(page.getByRole('button', { name: 'One day earlier' })).toBeEnabled();
-	// The rows fade the days outside the chart to match.
-	await expect(page.locator('.cr .list .cellbox.in').first()).toBeVisible();
 	// Two drawn lines: two bars a day.
 	await expect(track.locator('.day').nth(2).locator('i')).toHaveCount(2);
 	// Ten days show every day: nothing to move.
@@ -232,4 +230,114 @@ test('the timeline and the range sit right under the chart, and move it', async 
 		.click();
 	await expect(page.getByRole('button', { name: 'One day later' })).toBeDisabled();
 	await expect(page.locator('.ct .note')).toContainText('Showing all');
+});
+
+test('the list under the chart has no day cells: a name, its height and its total', async ({
+	page
+}) => {
+	await page.goto('/compare?loc=crystal,whistler&band=summit', { waitUntil: 'networkidle' });
+	await expect(page.locator('.cr .list li')).toHaveCount(2);
+	await expect(page.locator('.cellbox, .heat')).toHaveCount(0);
+	await expect(page.locator('.cr .list li').first().locator('.sum')).toHaveText(/^\d+\.\d$/);
+});
+
+test('tapping a location’s card picks out its line; again clears it; another switches', async ({
+	page
+}) => {
+	await page.goto('/compare?loc=rainy,crystal,whistler&band=summit&metric=temp', {
+		waitUntil: 'networkidle'
+	});
+	const card = (name: string) => page.locator('.read:not(.spare)', { hasText: name });
+	const faded = page.locator('.plot path.line.faded');
+	const picked = page.locator('.plot path.line.hl');
+	await card('Crystal Mountain').click();
+	await expect(card('Crystal Mountain')).toHaveAttribute('aria-pressed', 'true');
+	await expect(picked).toHaveCount(1);
+	await expect(faded).toHaveCount(2);
+	// Only one at a time: another card switches to it.
+	await card('Whistler').click();
+	await expect(card('Whistler')).toHaveAttribute('aria-pressed', 'true');
+	await expect(card('Crystal Mountain')).toHaveAttribute('aria-pressed', 'false');
+	await expect(picked).toHaveCount(1);
+	// The same card again clears it.
+	await card('Whistler').click();
+	await expect(card('Whistler')).toHaveAttribute('aria-pressed', 'false');
+	await page.locator('h1').hover();
+	await expect(faded).toHaveCount(0);
+});
+
+test('on a desktop, pointing wins while it lasts, then the selection shows again', async ({
+	page
+}, info) => {
+	test.skip(info.project.name !== 'desktop', 'a mouse pointer');
+	await page.goto('/compare?loc=rainy,crystal,whistler&band=summit&metric=temp', {
+		waitUntil: 'networkidle'
+	});
+	const card = (name: string) => page.locator('.read:not(.spare)', { hasText: name });
+	const lineOf = async () =>
+		page.locator('.plot path.line.hl').evaluate((el) => el.getAttribute('class'));
+	await card('Crystal Mountain').click();
+	const crystal = await lineOf();
+	await card('Whistler').hover();
+	expect(await lineOf()).not.toBe(crystal);
+	await page.locator('h1').hover();
+	expect(await lineOf()).toBe(crystal);
+	// Turning the selected location's line off clears the selection.
+	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).click();
+	await page.locator('h1').hover();
+	await expect(page.locator('.plot path.line.faded')).toHaveCount(0);
+});
+
+test('Share makes an image of the comparison as it is shown', async ({ page }) => {
+	await page.goto('/compare?loc=crystal,whistler&band=summit&metric=fl&range=3', {
+		waitUntil: 'networkidle'
+	});
+	await page.getByRole('button', { name: 'Share this comparison' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toBeVisible();
+	const img = dialog.getByRole('img', { name: 'What will be shared' });
+	await expect(img).toBeVisible();
+	expect(await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(1000);
+	await page.keyboard.press('Escape');
+	await expect(dialog).toHaveCount(0);
+});
+
+test('the Timeline button hides the timeline, leaving the chart its height', async ({ page }) => {
+	await page.goto('/compare?loc=crystal,whistler&band=summit&range=3', {
+		waitUntil: 'networkidle'
+	});
+	const plot = page.locator('.plot');
+	const h = (await plot.boundingBox())!.height;
+	const toggle = page.getByRole('button', { name: 'Hide the timeline' });
+	await toggle.click();
+	await expect(page.locator('.ct')).toHaveCount(0);
+	expect((await plot.boundingBox())!.height).toBe(h);
+	// The forecast chart shares the setting.
+	expect(await page.evaluate(() => localStorage.getItem('sw.showTimeline'))).toBe('off');
+	await page.getByRole('button', { name: 'Show the timeline' }).click();
+	await expect(page.locator('.ct')).toHaveCount(1);
+});
+
+test('snow totals follow the setting: from now, or from the first day shown', async ({ page }) => {
+	await page.goto('/compare?loc=whistler&band=summit&metric=snow&range=3', {
+		waitUntil: 'networkidle'
+	});
+	// Move the window three days on, then read Whistler's card at the window's end.
+	await page.getByRole('button', { name: 'One day later' }).click();
+	await page.getByRole('button', { name: 'One day later' }).click();
+	await page.getByRole('button', { name: 'One day later' }).click();
+	const value = page.locator('.read:not(.spare) .rval').first();
+	const fromNow = parseFloat((await value.textContent()) ?? '0');
+	await expect(page.locator('.axes')).toContainText('Snow from now');
+	await page.goto('/settings');
+	await page.getByRole('button', { name: 'From the first day shown' }).click();
+	await page.goto('/compare?loc=whistler&band=summit&metric=snow&range=3', {
+		waitUntil: 'networkidle'
+	});
+	for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'One day later' }).click();
+	await expect(page.locator('.axes')).not.toContainText('Snow from now');
+	const fromStart = parseFloat((await value.textContent()) ?? '0');
+	expect(fromStart).toBeLessThan(fromNow);
+	// The row's total for the days shown matches the line's end now.
+	await expect(page.locator('.cr .list .sum').first()).toHaveText(fromStart.toFixed(1));
 });

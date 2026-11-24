@@ -150,6 +150,9 @@ class Prefs {
 	motion = $state<Motion>(load('sw.motion', ['full', 'subtle', 'off'] as const, 'full'));
 	/** The day-scrubbing strip under the forecast chart. */
 	showTimeline = $state<'on' | 'off'>(load('sw.showTimeline', ['on', 'off'] as const, 'on'));
+	/** Snow totals on the forecast and Compare charts: a running total from now (lines keep
+	 *  their place as the window moves) or from the first day the chart shows. */
+	snowTotal = $state<'run' | 'window'>(load('sw.snowTotal', ['run', 'window'] as const, 'run'));
 	band = $state<BandName>(load('sw.band', ['base', 'mid', 'summit'] as const, 'mid'));
 	mapWeather = $state<MapWeather>(loadWeather());
 	mapWind = $state<MapWind>(load('sw.mapWind', ['gust', 'ridge'] as const, 'gust'));
@@ -226,6 +229,11 @@ class Prefs {
 	setShowTimeline(on: boolean) {
 		this.showTimeline = on ? 'on' : 'off';
 		save('sw.showTimeline', this.showTimeline);
+	}
+
+	setSnowTotal(t: 'run' | 'window') {
+		this.snowTotal = t;
+		save('sw.snowTotal', t);
 	}
 
 	setBand(b: BandName) {

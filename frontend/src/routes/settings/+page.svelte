@@ -197,8 +197,25 @@
 			</div>
 		</div>
 		<div class="row">
+			<span>Snow total on charts</span>
+			<div class="seg" role="group" aria-label="Snow total on the forecast and Compare charts">
+				<button aria-pressed={prefs.snowTotal === 'run'} onclick={() => prefs.setSnowTotal('run')}
+					>From now</button
+				>
+				<button
+					aria-pressed={prefs.snowTotal === 'window'}
+					onclick={() => prefs.setSnowTotal('window')}>From the first day shown</button
+				>
+			</div>
+		</div>
+		<p class="faint small hint">
+			How the snow line adds up on the forecast and Compare charts. From now, it’s a running total,
+			so lines keep their place as you move along the timeline. From the first day shown, it starts
+			at zero where the chart starts, so each line ends at its total for those days.
+		</p>
+		<div class="row">
 			<span>Timeline</span>
-			<div class="seg" role="group" aria-label="Timeline under the forecast chart">
+			<div class="seg" role="group" aria-label="Timeline under the forecast and Compare charts">
 				<button
 					aria-pressed={prefs.showTimeline === 'on'}
 					onclick={() => prefs.setShowTimeline(true)}>Show</button
@@ -210,8 +227,8 @@
 			</div>
 		</div>
 		<p class="faint small hint">
-			The strip of days under the forecast chart. Drag it or tap a day to move the chart through the
-			forecast. The chart’s bar-chart button shows or hides it too.
+			The strip of days under the forecast and Compare charts. Drag it or tap a day to move the
+			chart through the forecast. Each chart’s Timeline button shows or hides it too.
 		</p>
 		<h3>Put it on your home screen</h3>
 		<p class="muted small">

@@ -27,11 +27,8 @@ const row = (id: string, name: string, slot: number): RowView => ({
 describe('CompareRows', () => {
 	afterEach(cleanup);
 	const base = {
-		dates: t.dates,
 		metric: 'snow' as const,
 		units: 'imperial' as const,
-		inView: { from: 1, to: 3 },
-		whole: false,
 		sort: 'mine' as const,
 		full: false,
 		onsort: () => {},
@@ -55,21 +52,18 @@ describe('CompareRows', () => {
 		expect(ontoggle).toHaveBeenCalledWith('rainy');
 	});
 
-	it('fades the days outside the chart and shows each one’s elevation', () => {
+	it('shows each location’s elevation and its summary, and no day cells', () => {
 		const { container } = render(CompareRows, {
 			...base,
 			rows: [row('crystal', 'Crystal Mountain', 0)],
 			ontoggle: () => {}
 		});
-		const boxes = [...container.querySelectorAll('.cellbox')];
-		expect(boxes).toHaveLength(t.dates.length);
-		expect(boxes.map((b) => b.classList.contains('in'))).toEqual(
-			t.dates.map((_, k) => k >= 1 && k <= 3)
-		);
+		expect(container.querySelectorAll('.cellbox')).toHaveLength(0);
 		expect(container.textContent).toContain('5,900 ft');
+		expect(container.querySelector('.list .sum')?.textContent).toMatch(/^\d+\.\d$/);
 	});
 
-	it('Edit shows remove and reorder instead of the days', async () => {
+	it('Edit shows remove and reorder instead of the summary', async () => {
 		const onremove = vi.fn();
 		const onmove = vi.fn();
 		render(CompareRows, {
@@ -93,7 +87,7 @@ describe('CompareRows', () => {
 		).toBe(true);
 	});
 
-	it('puts the unit in the header, not in every cell', () => {
+	it('puts the unit in the header, not on every row', () => {
 		const { container } = render(CompareRows, {
 			...base,
 			metric: 'wind',
@@ -101,7 +95,7 @@ describe('CompareRows', () => {
 			ontoggle: () => {}
 		});
 		expect(container.querySelector('.head .sum')?.textContent).toBe('Top gust, mph');
-		expect(container.querySelector('.cellbox')?.textContent).toMatch(/^\d+$/);
+		expect(container.querySelector('.list .sum')?.textContent).toMatch(/^\d+$/);
 	});
 });
 

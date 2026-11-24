@@ -3,7 +3,8 @@
 // itself (which locations, which are lines, band, metric, range), how it travels in a
 // URL and how it's kept as a named group. Values stay metric; the page converts them.
 import type { BandOut, Snapshot } from './types.gen';
-import { buildSteps, STEP, type Range, type Step } from './charts/forecast';
+import { buildSteps, niceAxis, STEP, type Range, type Step } from './charts/forecast';
+import { converters, elevation, snowNum, speed, type UnitSystem } from './units';
 import { dateOf } from './time';
 
 export type CompareMetric = 'snow' | 'temp' | 'wind' | 'cloud' | 'fl' | 'slr';
@@ -383,6 +384,127 @@ export function stepValue(st: Step | null | undefined, metric: CompareMetric): n
 	return st.slr;
 }
 
+// --- What the chart draws (shared by the page and its share image) ---------------------
+
+/** The locations drawn as lines: each line colour holding a loaded location. */
+export function chartLines(t: Timeline, c: Comparison): { slot: number; track: Track }[] {
+	return c.on.flatMap((id, slot) => {
+		const track = id ? t.tracks.find((x) => x.id === id) : undefined;
+		return track ? [{ slot, track }] : [];
+	});
+}
+
+/** A metric value in display units. */
+export function shown(v: number | null, metric: CompareMetric, units: UnitSystem): number | null {
+	if (v === null) return null;
+	const c = converters(units);
+	if (metric === 'snow') return c.snow(v);
+	if (metric === 'temp') return c.temp(v);
+	if (metric === 'wind') return c.speed(v);
+	if (metric === 'fl') return c.height(v);
+	return v;
+}
+
+/** How snow totals run: from now (the forecast's running total, so a line keeps its place
+ *  as the window moves) or from the window's first step. */
+export type SnowTotal = 'run' | 'window';
+
+/** A location's values across the window, in display units. Snow is a running total from
+ *  now, or from the window's first step (then a line ends at its total for the window). */
+export function lineValues(
+	track: Track,
+	metric: CompareMetric,
+	w: Win,
+	units: UnitSystem,
+	total: SnowTotal = 'run'
+): (number | null)[] {
+	const inView = track.steps.slice(w.off, w.off + w.n);
+	if (metric !== 'snow') return inView.map((st) => shown(stepValue(st, metric), metric, units));
+	if (total === 'window') return windowTotals(inView).map((v) => shown(v, metric, units));
+	return inView.map((st) => (st ? shown(st.cum, metric, units) : null));
+}
+
+/** The chart's scale for the whole forecast (not just the window), so lines keep their
+ *  heights as the window moves (freezing level also takes in each location's elevation). */
+export function chartAxis(
+	tracks: Track[],
+	metric: CompareMetric,
+	w: Win,
+	units: UnitSystem,
+	total: SnowTotal = 'run'
+): { min: number; max: number; ticks: number[] } {
+	const c = converters(units);
+	if (metric === 'snow') {
+		// From now: the most any location has by the forecast's end. From the window's
+		// start: the snowiest window anywhere.
+		const most = tracks.map(
+			(t) =>
+				c.snow(
+					total === 'run'
+						? Math.max(0, ...t.steps.map((st) => st?.cum ?? 0))
+						: maxWindowTotal(t.steps, w.n)
+				) ?? 0
+		);
+		return niceAxis(0, Math.max(units === 'imperial' ? 1 : 2, ...most), 4);
+	}
+	const vals = tracks
+		.flatMap((t) => t.steps.map((st) => shown(stepValue(st, metric), metric, units)))
+		.filter((v): v is number => v !== null);
+	if (metric === 'temp')
+		return niceAxis(Math.min(c.freezing, ...vals) - 2, Math.max(c.freezing, ...vals) + 2, 4);
+	if (metric === 'wind') return niceAxis(0, Math.max(10, ...vals), 4);
+	if (metric === 'fl') {
+		const all = [...vals, ...tracks.map((t) => c.height(t.band.elev_m) ?? 0)];
+		if (!all.length) return niceAxis(0, units === 'imperial' ? 10000 : 3000, 4);
+		return niceAxis(Math.min(...all) * 0.9, Math.max(...all) * 1.05, 4);
+	}
+	if (metric === 'slr') return { min: 4, max: 20, ticks: [5, 8, 11, 14, 17, 20] };
+	return { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
+}
+
+/** The axis' tick labels. */
+export function tickText(v: number, metric: CompareMetric, units: UnitSystem): string {
+	if (metric === 'temp') return `${v}°`;
+	if (metric === 'slr') return `${v}:1`;
+	if (metric === 'cloud') return `${v}%`;
+	if (metric === 'fl')
+		return units === 'imperial'
+			? `${(v / 1000).toLocaleString('en-US')}k ft`
+			: `${v.toLocaleString('en-US')} m`;
+	return `${v}`;
+}
+
+/** A location's summary for the window, in words: the snow total, the high and low, the
+ *  top gust, the lowest freezing level, the mean ratio while snowing, the mean cloud.
+ *  `bare` leaves the unit off where a heading gives it. */
+export function summaryText(
+	s: Summary | null,
+	metric: CompareMetric,
+	units: UnitSystem,
+	bare = false
+): string {
+	if (!s) return '';
+	const c = converters(units);
+	const round = (v: number | null) => (v === null ? null : Math.round(v));
+	if (metric === 'snow')
+		return bare ? snowNum(s.snow, units) : `${snowNum(s.snow, units)} ${c.snowUnit}`;
+	if (metric === 'temp') {
+		const hi = round(c.temp(s.tmax));
+		const lo = round(c.temp(s.tmin));
+		return hi === null || lo === null ? '–' : `${hi}°/${lo}°`;
+	}
+	if (metric === 'wind')
+		return s.gust === null ? '–' : bare ? `${round(c.speed(s.gust))}` : speed(s.gust, units);
+	if (metric === 'fl') {
+		if (s.flMin === null) return '–';
+		if (!bare) return elevation(s.flMin, units);
+		const v = c.height(s.flMin) ?? 0;
+		return (Math.round(v / 10) * 10).toLocaleString('en-US');
+	}
+	if (metric === 'slr') return s.slr === null ? '–' : `${Math.round(s.slr)}:1`;
+	return s.cloud === null ? '–' : `${Math.round(s.cloud)}%`;
+}
+
 /** Hours that a location's clock is ahead of the reference's (from "-07:00" style offsets). */
 export function hoursAhead(offset: string, ref: string): number {
 	const mins = (o: string) => {
@@ -552,9 +674,6 @@ export function maxWindowTotal(steps: (Step | null)[], n: number): number {
 	if (steps.length < n) best = pre[pre.length - 1];
 	return best;
 }
-
-/** A day counts as rainy with at least 1 mm of rain and almost no snow (as the Calendar). */
-export const rainyDay = (c: DayCell): boolean => c.snow < 0.25 && c.rain >= 1;
 
 /**
  * The freezing level against a location's elevation: how far above or below it is, and
