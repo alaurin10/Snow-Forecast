@@ -16,6 +16,11 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Compare's Locations button and snow total switch sit under the chart's card**, so the
+  card holds just the chart, its timeline and its range.
+- **Compare reads times on your own clock.** When the locations span time zones, the one
+  in your time zone (or nearest it) sets the chart's times and days, rather than whichever
+  forecast is freshest: from Washington, Pacific time, even with Banff in the comparison.
 - **Compare holds four locations, every one a line.** It used to take eight with only four
   drawn; now what you pick is what the chart shows. Old links and groups with more open
   with the four they drew. The list of locations under the chart is gone (the cards above

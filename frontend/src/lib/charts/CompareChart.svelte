@@ -53,8 +53,6 @@
 		others?: { id: string; name: string; slot: number; note: string }[];
 		/** Add location, offered in the first free card. */
 		onadd?: () => void;
-		/** Change locations: the button beside the time. */
-		onedit?: () => void;
 	}
 
 	let {
@@ -71,8 +69,7 @@
 		onhover,
 		onselect,
 		others = [],
-		onadd,
-		onedit
+		onadd
 	}: Props = $props();
 
 	const phone = $derived(viewport.phone);
@@ -355,17 +352,7 @@
 	</div>
 
 	<div class="readout">
-		<div class="whenrow">
-			<div class="when">{reads.length ? when : ''}</div>
-			{#if onedit}
-				<button class="edit" onclick={onedit} aria-label="Change locations" aria-haspopup="dialog">
-					<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"
-						><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" /></svg
-					>
-					<span>Locations</span>
-				</button>
-			{/if}
-		</div>
+		<div class="when">{reads.length ? when : ''}</div>
 		<div class="reads">
 			{#each cards as r (r.id)}
 				{#if r.note !== null}
@@ -559,13 +546,6 @@
 		display: grid;
 		gap: 4px;
 	}
-	.whenrow {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-		min-height: 28px;
-	}
 	.when {
 		min-width: 0;
 		height: 18px;
@@ -626,31 +606,13 @@
 		background: var(--hover);
 		color: var(--text);
 	}
-	.read.add svg,
-	.edit svg {
+	.read.add svg {
 		flex: 0 0 auto;
 		fill: none;
 		stroke: currentColor;
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-	}
-	.edit {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		min-height: 28px;
-		padding: 0 10px;
-		border: 0;
-		border-radius: 999px;
-		background: var(--surface-2);
-		color: var(--text-2);
-		font-size: 0.76rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-	.edit:hover {
-		color: var(--text);
 	}
 	.who {
 		display: flex;

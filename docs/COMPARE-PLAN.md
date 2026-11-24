@@ -603,3 +603,7 @@ Where the build differs from the plan above, and why:
   button beside the time opens the list, and an old forecast gets a note under the chart.
   The snow total switch (*From now* / *Timeline window*) sits under the chart when it
   shows snow with the timeline.
+- **Whose clock** (owner review, 24 Nov): the timeline's reference is the location on the
+  viewer's clock, or nearest it (`buildTimeline`'s `viewerMin`), the freshest forecast
+  among equals, rather than the freshest forecast. The Locations button and the snow
+  total switch moved out of the chart's card, just under it.
