@@ -547,8 +547,12 @@ Where the build differs from the plan above, and why:
   window (not from now), and a row's summary is worked out from the same steps the chart
   draws, so a line always ends at its row's total. The snow scale is the snowiest window
   anywhere in the forecast, so lines keep their heights as the window moves.
-- **The window on the rows**: days outside the chart are faded, rather than a capsule
-  drawn across all the rows (the rows have name lines between them on phones).
+- **The window**: a timeline right under the chart, as on a location's forecast (owner
+  review, 23 Nov), with the range buttons directly below it: a column per day with a
+  small bar of each drawn location's snow in its line's colour, the window raised across
+  it, drag, tap or ‹ ›. The rows below fade the days outside the chart but don't move it.
+- **Cloud cover** is one line per location (its percentage), like the other metrics, not
+  a lane per location (owner review, 23 Nov).
 - **Day cells**: numbers only (the unit is in the summary column's heading); freezing
   level in thousands ("4.2k").
 - **Telling the lines apart** (owner review, 23 Nov): the readout is a card per line on

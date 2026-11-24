@@ -1,6 +1,5 @@
 <!-- Compare: the chosen locations on one chart. One solid line per location, in its own
-     colour (cloud cover is a lane per location instead, since cloud jumps 0–100 % and
-     its lines would tangle). The readout sits above the plot, where a finger scrubbing
+     colour, for every metric (cloud cover as its percentage). The readout sits above the plot, where a finger scrubbing
      the plot doesn't cover it, and always keeps room for four rows so nothing moves.
      On the freezing-level view, a tick on the right edge marks each location's elevation. -->
 <script lang="ts">
@@ -124,37 +123,20 @@
 	const xAt = (k: number) => k * W + W / 2;
 
 	const paths = $derived(
-		metric === 'cloud'
-			? []
-			: lines.map(({ slot, track }) => {
-					let d = '';
-					let pen = false;
-					for (let k = 0; k < N; k++) {
-						const v = valIn(track, k);
-						if (v === null) {
-							pen = false;
-							continue;
-						}
-						d += `${pen ? 'L' : 'M'}${xAt(k).toFixed(1)} ${y(v).toFixed(1)}`;
-						pen = true;
-					}
-					return { slot, id: track.id, d };
-				})
-	);
-
-	// Cloud: a lane per location, darker for more of the sky covered.
-	const lanes = $derived(
-		metric !== 'cloud'
-			? []
-			: lines.map(({ slot, track }, i) => {
-					const lh = H / lines.length;
-					const cells: { x: number; op: number }[] = [];
-					for (let k = 0; k < N; k++) {
-						const v = stepValue(track.steps[win.off + k], 'cloud');
-						if (v !== null) cells.push({ x: k * W, op: 0.06 + (0.84 * v) / 100 });
-					}
-					return { slot, id: track.id, name: track.name, y0: i * lh, h: lh, cells };
-				})
+		lines.map(({ slot, track }) => {
+			let d = '';
+			let pen = false;
+			for (let k = 0; k < N; k++) {
+				const v = valIn(track, k);
+				if (v === null) {
+					pen = false;
+					continue;
+				}
+				d += `${pen ? 'L' : 'M'}${xAt(k).toFixed(1)} ${y(v).toFixed(1)}`;
+				pen = true;
+			}
+			return { slot, id: track.id, d };
+		})
 	);
 
 	// Night shading helps on the 1 and 3 day views, where steps are hours.
@@ -169,10 +151,11 @@
 			: ''
 	);
 
-	const ticks = $derived(metric === 'cloud' ? [] : axis.ticks);
+	const ticks = $derived(axis.ticks);
 	const tickLabel = (v: number) => {
 		if (metric === 'temp') return `${v}°`;
 		if (metric === 'slr') return `${v}:1`;
+		if (metric === 'cloud') return `${v}%`;
 		if (metric === 'fl')
 			return units === 'imperial'
 				? `${(v / 1000).toLocaleString('en-US')}k ft`
@@ -336,12 +319,10 @@
 	];
 
 	const dots = $derived(
-		metric === 'cloud'
-			? []
-			: lines.flatMap(({ slot, track }) => {
-					const v = valIn(track, hv);
-					return v === null ? [] : [{ slot, id: track.id, top: pct(y(v)) }];
-				})
+		lines.flatMap(({ slot, track }) => {
+			const v = valIn(track, hv);
+			return v === null ? [] : [{ slot, id: track.id, top: pct(y(v)) }];
+		})
 	);
 
 	const axisTitle = $derived(
@@ -349,7 +330,7 @@
 			snow: `Snow from ${win.off === 0 || !steps[0] ? 'now' : `${weekday(dateOf(steps[0].t))} ${hourLabel(steps[0].t)}`} (${c.snowUnit})`,
 			temp: `Temperature (${c.tempUnit})`,
 			wind: `Wind gusts (${c.speedUnit})`,
-			cloud: 'Cloud cover: darker is more of the sky covered',
+			cloud: 'Cloud cover (% of the sky)',
 			fl: `Freezing level (${c.heightUnit}); a tick marks each location’s elevation`,
 			slr: 'Snow ratio (inches of snow from an inch of water)'
 		}[metric]
@@ -442,16 +423,6 @@
 				{/if}
 				<path d={grid} class="grid" />
 				<path d={midnights} class="grid" />
-				{#each lanes as l (l.id)}
-					{#each l.cells as cell (cell.x)}<rect
-							x={cell.x}
-							y={l.y0 + 3}
-							width={W}
-							height={Math.max(0, l.h - 6)}
-							class="cloud"
-							fill-opacity={cell.op.toFixed(3)}
-						/>{/each}
-				{/each}
 				{#each paths as p (p.id)}<path
 						d={p.d}
 						class="line s{p.slot}"
@@ -464,10 +435,6 @@
 						>{z.name}</span
 					>{/each}
 			{/if}
-			{#each lanes as l (l.id)}
-				<span class="lanename" style:top={pct(l.y0 + 6)}><i class="key s{l.slot}"></i>{l.name}</span
-				>
-			{/each}
 			{#each refs as r (r.key)}
 				<div class="ref" style:top={pct(r.y)}></div>
 				<span class="reflbl" style:top={pct(r.y)}>{r.label}</span>
@@ -753,10 +720,6 @@
 	.dot.faded {
 		opacity: 0.25;
 	}
-	.cloud {
-		fill: rgb(var(--cloud));
-		stroke: none;
-	}
 	.zone {
 		stroke: none;
 	}
@@ -772,8 +735,7 @@
 	.z-dry {
 		fill: color-mix(in srgb, var(--snow) 20%, transparent);
 	}
-	.zonename,
-	.lanename {
+	.zonename {
 		position: absolute;
 		font-size: 0.68rem;
 		font-weight: 600;
@@ -784,15 +746,6 @@
 	.zonename {
 		left: 8px;
 		transform: translateY(-50%);
-	}
-	.lanename {
-		left: 6px;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 1px 6px;
-		border-radius: 6px;
-		background: color-mix(in srgb, var(--surface) 82%, transparent);
 	}
 	.ref {
 		position: absolute;

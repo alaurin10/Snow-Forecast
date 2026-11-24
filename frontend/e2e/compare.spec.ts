@@ -167,7 +167,7 @@ test('every metric draws on a phone without sideways scrolling', async ({ page }
 	// The readout keeps its height whether or not every line is drawn.
 	const before = (await page.locator('.readout').boundingBox())!.height;
 	await page.getByRole('button', { name: /^Crystal Mountain: line drawn/ }).click();
-	await expect(page.locator('.plot path.line, .plot rect.cloud').first()).toBeAttached();
+	await expect(page.locator('.plot path.line').first()).toBeAttached();
 	expect((await page.locator('.readout').boundingBox())!.height).toBe(before);
 	expect(problems).toEqual([]);
 });
@@ -197,4 +197,39 @@ test('pointing at a location picks out its line', async ({ page }, info) => {
 	await expect(page.locator('.plot path.line.faded')).toHaveCount(2);
 	await page.locator('h1').hover();
 	await expect(page.locator('.plot path.line.faded')).toHaveCount(0);
+});
+
+test('the timeline and the range sit right under the chart, and move it', async ({ page }) => {
+	await page.goto('/compare?loc=crystal,whistler&band=summit&metric=temp&range=3', {
+		waitUntil: 'networkidle'
+	});
+	// In the card: the plot, then the timeline, then the range, then the rows.
+	const order = await page
+		.locator('.chartcard')
+		.evaluate((card) =>
+			['.plot', '.ct .track', '[aria-label="Time range"]', '.cr'].map((sel) =>
+				Math.round(card.querySelector(sel)!.getBoundingClientRect().top)
+			)
+		);
+	expect([...order].sort((a, b) => a - b)).toEqual(order);
+	const track = page.getByRole('slider', { name: 'Days the chart shows' });
+	const when = page.locator('.readout .when');
+	const first = await when.textContent();
+	// Tap the sixth day: the window centres on it.
+	const box = (await track.boundingBox())!;
+	const n = await track.locator('.day').count();
+	await page.mouse.click(box.x + (box.width * 5.5) / n, box.y + box.height / 2);
+	await expect(when).not.toHaveText(first ?? '');
+	await expect(page.getByRole('button', { name: 'One day earlier' })).toBeEnabled();
+	// The rows fade the days outside the chart to match.
+	await expect(page.locator('.cr .list .cellbox.in').first()).toBeVisible();
+	// Two drawn lines: two bars a day.
+	await expect(track.locator('.day').nth(2).locator('i')).toHaveCount(2);
+	// Ten days show every day: nothing to move.
+	await page
+		.getByRole('group', { name: 'Time range' })
+		.getByRole('button', { name: '10 days' })
+		.click();
+	await expect(page.getByRole('button', { name: 'One day later' })).toBeDisabled();
+	await expect(page.locator('.ct .note')).toContainText('Showing all');
 });

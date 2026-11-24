@@ -12,6 +12,8 @@ import {
 	cleanName,
 	dayCells,
 	dayStart,
+	dayStarts,
+	windowSpan,
 	emptyComparison,
 	findGroup,
 	fromQuery,
@@ -309,6 +311,23 @@ describe('the window and the days', () => {
 		expect(dateOf(t.slots[w.off].t)).toBe(t.dates[2]);
 		expect(windowDays(t.slots, w, t.dates).from).toBe(2);
 		expect(windowFor(t.slots, 3, Date.parse('2030-01-01')).off).toBe(w0.maxOff);
+	});
+
+	it('places the window on the timeline in days, fractions included', () => {
+		const starts = dayStarts(t.ref!.band.hourly.t, t.dates);
+		expect(starts[0]).toBe(Date.parse(t.ref!.band.hourly.t[0]));
+		expect(new Date(starts[1]).toISOString()).toMatch(/T08:00:00/); // midnight, UTC−8
+		const now = windowSpan(t.slots, windowFor(t.slots, 3, null), starts);
+		expect(now.from).toBe(0);
+		// Today's column is only what's left of today (from 1 PM here), so 72 hours from
+		// now end part-way through the fourth column.
+		expect(now.to).toBeGreaterThan(3);
+		expect(now.to).toBeLessThan(4);
+		const later = windowSpan(t.slots, windowFor(t.slots, 3, dayStart(t.slots, t.dates, 2)), starts);
+		expect(later.from).toBeCloseTo(2, 5);
+		expect(later.to - later.from).toBeCloseTo(3, 5);
+		const end = windowFor(t.slots, 3, Date.parse('2030-01-01'));
+		expect(windowSpan(t.slots, end, starts).to).toBe(t.dates.length);
 	});
 
 	it('adds up each day like the Calendar', () => {
