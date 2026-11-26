@@ -22,26 +22,23 @@ const HOUR = 3600;
 
 // ---- Colours (the backend draws with the same ones: keep them in step with palette.py) --
 
-/** Snow level, lower bound in metres above sea level, a band every 250 m. */
-export const SNOWLEVEL: RampStep[] = [
-	{ from: 0, color: '#5b2a86' },
-	{ from: 250, color: '#6b44b5' },
-	{ from: 500, color: '#4e5fc9' },
-	{ from: 750, color: '#3b7dd8' },
-	{ from: 1000, color: '#2f9be0' },
-	{ from: 1250, color: '#33b4d6' },
-	{ from: 1500, color: '#3fc6b8' },
-	{ from: 1750, color: '#5ed19a' },
-	{ from: 2000, color: '#8fd97a' },
-	{ from: 2250, color: '#bfe06a' },
-	{ from: 2500, color: '#e6e35c' },
-	{ from: 2750, color: '#f6cf4f' },
-	{ from: 3000, color: '#f7ad45' },
-	{ from: 3250, color: '#f28a3b' },
-	{ from: 3500, color: '#e5653a' },
-	{ from: 3750, color: '#cf4339' },
-	{ from: 4000, color: '#a82f3a' }
-];
+/**
+ * The snow level as what falls where (palette.py's SNOWLINE): the ground's height above
+ * the snow level decides rain, mix (within MIX_BAND_M of it) or snow. The radar's hues,
+ * light to dark so they part without colour too; rain is drawn lighter (`alpha`) so the
+ * map shows through where most of it is.
+ */
+export const MIX_BAND_M = 150;
+export const SNOWLINE_KINDS = [
+	{ kind: 'rain', label: 'Rain', color: '#9fd49a', alpha: 0.55 },
+	{ kind: 'mix', label: 'Mix', color: '#e0457b', alpha: 1 },
+	{ kind: 'snow', label: 'Snow', color: '#2c5fb8', alpha: 1 }
+] as const;
+
+/** Rain, mix or snow for a height above the snow level (m). */
+export function snowlineKind(above: number): (typeof SNOWLINE_KINDS)[number] {
+	return SNOWLINE_KINDS[above < -MIX_BAND_M ? 0 : above < MIX_BAND_M ? 1 : 2];
+}
 
 /**
  * Temperature, lower bound in °C, a band every 2 °C (the first also holds anything colder,
@@ -130,6 +127,37 @@ export function tempTick(c: number, units: UnitSystem): string {
  */
 export function tempAt(seaC: number, m: number, lapsePerKm = LAPSE_C_PER_M * 1000): number {
 	return seaC - (lapsePerKm * Math.max(0, m)) / 1000;
+}
+
+/** A point's value at time `t`, between the two frames either side (as the map blends
+ *  them); the first or last beyond them; null without any. */
+export function valueAt(list: { t: number; value: number | null }[], t: number): number | null {
+	const at = list.filter((x) => x.value != null) as { t: number; value: number }[];
+	if (!at.length) return null;
+	const j = at.findIndex((x) => x.t >= t);
+	if (j === 0) return at[0].value;
+	if (j < 0) return at[at.length - 1].value;
+	const a = at[j - 1];
+	const b = at[j];
+	return a.value + ((b.value - a.value) * (t - a.t)) / (b.t - a.t);
+}
+
+/**
+ * The height (m) where the temperature layer reaches 0 °C (32 °F) at a point, at time `t`:
+ * the inverse of `tempAt`, between the two frames either side (the map blends them the
+ * same way). 0 when it's below freezing down to sea level; null without the numbers.
+ */
+export function freezingHeightAt(
+	temps: { t: number; sea_c: number | null }[],
+	t: number,
+	lapsePerKm = LAPSE_C_PER_M * 1000
+): number | null {
+	const sea = valueAt(
+		temps.map((x) => ({ t: x.t, value: x.sea_c })),
+		t
+	);
+	if (sea == null || lapsePerKm <= 0) return null;
+	return Math.max(0, (sea / lapsePerKm) * 1000);
 }
 
 /** Wind key: "20" (km/h) or "12" (mph). */
@@ -365,7 +393,7 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 	}
 	if (weather === 'wind') return `Wind gusts near the ground (10 m): ${models}.`;
 	if (weather === 'snowlevel') {
-		return `Snow level: the height above sea level where falling snow turns to rain, from ${models}. The darkest band also means snow reaching the ground everywhere.`;
+		return `Snow level: what falls where, from the snow level (the height where falling snow turns to rain) of ${models}. Snow where the ground stands more than 150 m (500 ft) above it, mix within 150 m of it, rain below; zoomed in, each spot by its own height. The snow level sits below where the air is 32 °F (the temperature layer's line), usually by about 300 m (1,000 ft) and sometimes much more: snow takes a while to melt as it falls into warmer air.`;
 	}
 	if (weather === 'temp') {
 		return `Temperature 2 m above the ground, from ${models}, moved from each model's smoothed ground to the real terrain at 6.5 °C a kilometre: colder on the ridges, warmer in the valleys. Zoomed in, each spot gets the temperature at its own height. An estimate: cold air pooled in valleys (an inversion) isn't in it.`;

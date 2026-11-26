@@ -7,6 +7,16 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
+  colours for the snow level's height, three colours (the radar's blue, pink and green)
+  show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.
+  It's drawn on the device like the temperature, so zoomed in it follows every ridge with
+  the snow level at each spot (not one level for the whole screen), and its slider moves
+  smoothly between the 3-hourly frames.
+- **The map's temperature says where it reaches 32 °F.** Zoomed in, a line under the key
+  gives that height at the map's centre, so it can be read beside the snow level's
+  "Snow above …". The snow level's note says why the two differ: snow usually reaches
+  about 1,000 ft (300 m) below the 32 °F level, and sometimes much further.
 - **Field reports on the map show what was reported**: a tapped report now has the
   observer's signs of instability (coloured as on NWAC's site), their summary (first
   lines, then More) and notes, and their photos, which open the full-screen viewer.
@@ -65,6 +75,13 @@ Notable changes to Snow Watch. The format follows
   photo, not only the small arrows.
 
 ### Fixed
+- **The freezing level (and the snow level from it) is one height for the location.** It
+  was found again at every band, and for models without a freezing level of their own
+  (ECMWF, GEM) the column started at that band's temperature: at a band above the
+  freezing level it skipped the air below the band, so the same model and hour read
+  lower at the summit than at the base, often by several hundred metres (up to 1,700 m
+  in the test captures). Every band now shows the same freezing level, worked out at the
+  lowest band.
 - **The map could go white in 3D on a phone** and stay that way until the app was
   closed. 3D terrain with overlays used more graphics memory than a phone allows (each
   terrain tile drew the map into a 2048 px texture, about 21 MB), so the browser dropped

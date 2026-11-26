@@ -1,32 +1,40 @@
 // The rain/snow line draped on the terrain (docs/MAP-PLAN.md A5's "cheap extra"): with the
-// Snow level layer on and the map zoomed in, terrain above the snow level at the map's
-// centre (for the frame on the slider) is tinted white, and the ±150 m around it where
-// rain and snow mix is tinted pink. A MapLibre colour-relief layer on the elevation tiles,
-// so it follows every ridge and works in 3D.
+// Snow level layer on and the map zoomed in, terrain is tinted as rain, mix or snow by its
+// height against the snow level at the map's centre (for the frame on the slider), in the
+// layer's colours (SNOWLINE_KINDS). A MapLibre colour-relief layer on the elevation tiles,
+// so it follows every ridge and works in 3D. It stands in for the layer drawn from numbers
+// (which gives each spot its own snow level) only where those aren't there.
 import type { ExpressionSpecification, Map as MlMap } from 'maplibre-gl';
+import { MIX_BAND_M, SNOWLINE_KINDS } from '../weather';
 
 export const SNOWLINE_ID = 'snowline';
 /** From here in, the drape replaces the coarse snow-level picture (which fades out by 15). */
 export const SNOWLINE_ZOOM = 10;
 /** Half the height of the band where rain and snow mix. */
-export const MIX_M = 150;
+export const MIX_M = MIX_BAND_M;
 
-/** Colours by elevation: clear below the mix band, pink across it, white above. */
+const rgba = (k: (typeof SNOWLINE_KINDS)[number]) => {
+	const [r, g, b] = [1, 3, 5].map((i) => parseInt(k.color.slice(i, i + 2), 16));
+	return `rgba(${r}, ${g}, ${b}, ${k.alpha})`;
+};
+
+/** Colours by elevation: rain below the mix band, mix across it, snow above. */
 export function snowLineColors(level: number): ExpressionSpecification {
 	const lo = Math.max(1, level - MIX_M);
 	const hi = lo + 2 * MIX_M;
+	const [rain, mix, snow] = SNOWLINE_KINDS.map(rgba);
 	return [
 		'interpolate',
 		['linear'],
 		['elevation'],
 		lo - 0.5,
-		'rgba(0, 0, 0, 0)',
+		rain,
 		lo,
-		'rgba(244, 166, 198, 0.75)',
+		mix,
 		hi - 0.5,
-		'rgba(244, 166, 198, 0.75)',
+		mix,
 		hi,
-		'rgba(240, 247, 255, 0.9)'
+		snow
 	] as unknown as ExpressionSpecification;
 }
 

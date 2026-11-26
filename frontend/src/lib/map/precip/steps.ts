@@ -14,6 +14,10 @@ export const CM_MIN = 0.2;
 /** Temperature frames (the same container): codes 1..255 for −70 °C every 0.5 °C. */
 export const TEMP_MIN = -70;
 export const TEMP_STEP = 0.5;
+/** Snow level frames (the same container): the height above the snow level, codes 1..255
+ *  for −8,225 m every 50 m (half a step off, so the mix band's edges fall between codes). */
+export const LEVEL_MIN = -8225;
+export const LEVEL_STEP = 50;
 export const CM_MAX = 1000;
 export const CM_CODES = 254;
 const SPAN = Math.log(CM_MAX / CM_MIN);

@@ -51,7 +51,9 @@
 	import { prefs, type MapBase, type MapOverlay, type MapWeather } from '../prefs.svelte';
 	import { tick, untrack } from 'svelte';
 	import {
+		freezingHeightAt,
 		hoursAt,
+		valueAt,
 		layerLabel,
 		posAt as markPosAt,
 		layerSource,
@@ -141,7 +143,7 @@
 		setupTerrain
 	} from '../map/layers/terrain';
 	import { TotalLayer } from '../map/precip/totallayer';
-	import { TEMP_SCALE } from '../map/precip/totalgl';
+	import { LEVEL_SCALE, TEMP_SCALE } from '../map/precip/totalgl';
 	import { CloudLayer } from '../map/precip/cloudlayer';
 	import { Clouds3dLayer } from '../map/clouds3d/layer';
 	import type { CloudSite } from '../map/clouds3d/puffs';
@@ -1628,24 +1630,31 @@
 			totalTick++;
 		});
 	}
-	// ---- The temperature, drawn from numbers the same way (TotalLayer, TEMP_SCALE) ---------
-	/** The temperature is drawn that way: the server lists each frame's numbers. */
-	const glTemp = $derived(
-		glOk && weather === 'temp' && on && count > 1 && frames.every((f) => !!f.data)
+	// ---- The temperature and the snow level, drawn from numbers the same way (TotalLayer,
+	// TEMP_SCALE and LEVEL_SCALE): zoomed in, each pixel at its own elevation ------------
+	/** One of them is drawn that way: the server lists each frame's numbers. */
+	const glField = $derived(
+		glOk &&
+			(weather === 'temp' || weather === 'snowlevel') &&
+			on &&
+			count > 1 &&
+			frames.every((f) => !!f.data)
 	);
 	/** Its continuous slider: the frames' hours and the marks (fine near, coarse far). */
-	const tempScale = $derived(glTemp ? tempSlider(frames, now / 1000) : null);
+	const fieldScale = $derived(glField ? tempSlider(frames, now / 1000) : null);
 	/** Where that slider is: hours from the first frame. */
-	let tempHours = $state(0);
-	let tempLayer: TotalLayer | null = null;
-	let tempTick = $state(0);
-	let tempNoted = false;
-	function tempChanged() {
-		if (tempNoted) return;
-		tempNoted = true;
+	let fieldHours = $state(0);
+	let fieldLayer: TotalLayer | null = null;
+	/** Which layer `fieldLayer` draws (each has its own scale). */
+	let fieldLayerFor: MapWeather | null = null;
+	let fieldTick = $state(0);
+	let fieldNoted = false;
+	function fieldChanged() {
+		if (fieldNoted) return;
+		fieldNoted = true;
 		queueMicrotask(() => {
-			tempNoted = false;
-			tempTick++;
+			fieldNoted = false;
+			fieldTick++;
 		});
 	}
 	const waiting = $derived.by(() => {
@@ -1659,10 +1668,10 @@
 			void totalHours;
 			return !!totalLayer?.waiting;
 		}
-		if (glTemp) {
-			void tempTick;
-			void tempHours;
-			return !!tempLayer?.waiting;
+		if (glField) {
+			void fieldTick;
+			void fieldHours;
+			return !!fieldLayer?.waiting;
 		}
 		return (!!current && shown !== current.file) || (!!pick && shown !== pick.file);
 	});
@@ -1739,20 +1748,23 @@
 		totalLayer.setPosition(untrack(() => totalHours));
 	});
 	$effect(() => {
-		const use = glTemp;
+		const use = glField;
 		const tl = timeline;
-		const sc = tempScale;
+		const sc = fieldScale;
 		const list = frames;
+		const kind = weather;
 		if (!ready || !map || !tl) return;
-		if (!use || !sc) {
-			tempLayer?.remove();
-			tempLayer = null;
-			return;
+		if (!use || !sc || (fieldLayer && fieldLayerFor !== kind)) {
+			fieldLayer?.remove();
+			fieldLayer = null;
+			fieldLayerFor = null;
+			if (!use || !sc) return;
 		}
-		const o = weatherOpacity('temp');
-		tempLayer ??= new TotalLayer(map, {
-			id: 'temperature',
-			scale: TEMP_SCALE,
+		const o = weatherOpacity(kind);
+		fieldLayerFor = kind;
+		fieldLayer ??= new TotalLayer(map, {
+			id: kind === 'temp' ? 'temperature' : 'snowlevel-numbers',
+			scale: kind === 'temp' ? TEMP_SCALE : LEVEL_SCALE,
 			fromNothing: false,
 			bounds: tl.bounds,
 			width: tl.width,
@@ -1760,20 +1772,21 @@
 			beforeId: PRECIP_BEFORE,
 			opacity: (z) => opacityAt(o, z),
 			maxzoom: goneAt(o),
-			// Zoomed in, the temperature at each pixel's elevation, from the terrain worker's tiles.
+			// Zoomed in, the temperature (or rain, mix or snow) at each pixel's elevation,
+			// from the terrain worker's tiles.
 			elevation: analysis ? elevationTile : undefined,
-			onChange: tempChanged
+			onChange: fieldChanged
 		});
-		tempLayer.setSteps(
+		fieldLayer.setSteps(
 			list.map((f, i) => ({ file: f.data!, url: dataUrl(f), hours: sc.hours[i] }))
 		);
-		tempLayer.setPosition(untrack(() => tempHours));
+		fieldLayer.setPosition(untrack(() => fieldHours));
 	});
 	$effect(() => {
-		const h = tempHours;
-		const sc = tempScale;
-		if (!glTemp || !sc) return;
-		tempLayer?.setPosition(h);
+		const h = fieldHours;
+		const sc = fieldScale;
+		if (!glField || !sc) return;
+		fieldLayer?.setPosition(h);
 		// The nearest frame stands for the slider elsewhere (its sources, tap-for-numbers).
 		let near = 0;
 		sc.hours.forEach((x, i) => {
@@ -1781,16 +1794,23 @@
 		});
 		if (untrack(() => frame) !== near) frame = near;
 	});
+	// The temperature's slider runs to 10 days, the snow level's to 3½: keep within it.
+	$effect(() => {
+		const sc = fieldScale;
+		if (!sc?.hours.length) return;
+		const end = sc.hours[sc.hours.length - 1];
+		if (untrack(() => fieldHours) > end) fieldHours = end;
+	});
 	/** Playing, each stretch of the temperature slider between two marks takes this long. */
-	const TEMP_MARK_MS = 1800;
+	const FIELD_MARK_MS = 1800;
 	// Play the temperature as one movement along its slider: as long for each stretch
 	// between marks, so the first days pass slowly and the far days quickly.
 	$effect(() => {
-		const sc = tempScale;
-		if (!ready || !playing || !glTemp || !sc) return;
+		const sc = fieldScale;
+		if (!ready || !playing || !glField || !sc) return;
 		const last = sc.marks.length - 1;
 		let p = markPosAt(
-			untrack(() => tempHours),
+			untrack(() => fieldHours),
 			sc.marks
 		);
 		if (p >= last - 1e-3) p = 0;
@@ -1807,18 +1827,18 @@
 				// A few loops, then rest at the start.
 				if (++loops >= 3) {
 					playing = false;
-					tempHours = 0;
+					fieldHours = 0;
 					return;
 				}
 				p = 0;
-				tempHours = 0;
+				fieldHours = 0;
 				hold = 500;
 				return;
 			}
-			if (tempLayer?.waiting && stalled < 3000) return void (stalled += dt);
+			if (fieldLayer?.waiting && stalled < 3000) return void (stalled += dt);
 			stalled = 0;
-			p = Math.min(last, p + dt / TEMP_MARK_MS);
-			tempHours = hoursAt(p, sc.marks);
+			p = Math.min(last, p + dt / FIELD_MARK_MS);
+			fieldHours = hoursAt(p, sc.marks);
 			if (p >= last) hold = 1200;
 		});
 		return () => cancelAnimationFrame(raf);
@@ -2055,7 +2075,7 @@
 			shown = null;
 			return;
 		}
-		if (glRadar || glTotals || glTemp || glCloud) {
+		if (glRadar || glTotals || glField || glCloud) {
 			// The radar, snow total, temperature or cloud layer draws it; the pictures stand
 			// empty.
 			++showToken;
@@ -2209,7 +2229,7 @@
 	// Play: step when the next frame is on hand (or after a short wait), quicker through
 	// observations, and hold a moment on "now" and on the last frame.
 	$effect(() => {
-		if (!ready || !playing || !looping || count < 2 || glRadar || glTemp) return;
+		if (!ready || !playing || !looping || count < 2 || glRadar || glField) return;
 		let hold = 0;
 		let waits = 0;
 		let loops = 0;
@@ -2309,9 +2329,9 @@
 			void totalHours;
 			return !!totalLayer?.adjusted(zoom);
 		}
-		if (glTemp) {
-			void tempTick;
-			return !!tempLayer?.adjusted(zoom);
+		if (glField) {
+			void fieldTick;
+			return !!fieldLayer?.adjusted(zoom);
 		}
 		return !!snowTilesUrl(snowTiles ? pick : undefined, zoom);
 	});
@@ -2327,12 +2347,16 @@
 	});
 
 	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
-	/** The map's forecast at the centre, for the snow level the drape uses. */
+	/** The map's forecast at the centre, for the snow level the drape uses (and the
+	 *  temperature's 32 °F height, so the two can be read side by side). */
 	let levelPoint = $state.raw<PointOut | null>(null);
 	const lineOn = $derived(weather === 'snowlevel' && zoom >= SNOWLINE_ZOOM - 0.5 && !offline);
+	const freezeOn = $derived(
+		weather === 'temp' && !!fieldScale && zoom >= SNOWLINE_ZOOM - 0.5 && !offline
+	);
 	$effect(() => {
 		const c = centre;
-		if (!lineOn) return;
+		if (!lineOn && !freezeOn) return;
 		const have = untrack(() => levelPoint);
 		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < 3) return;
 		let gone = false;
@@ -2341,14 +2365,27 @@
 			.catch((e) => console.error('point', e));
 		return () => (gone = true);
 	});
-	/** The snow level at the map's centre for the frame on the slider. */
+	/** The snow level at the map's centre for the time on the slider. */
 	const centreLevel = $derived.by(() => {
-		if (!lineOn || !levelPoint || !current) return null;
+		if (!lineOn || !levelPoint) return null;
+		const sc = fieldScale;
+		if (glField && sc) return valueAt(levelPoint.snow_level, sc.t0 + fieldHours * 3600);
+		if (!current) return null;
 		const t = current.t;
 		return levelPoint.snow_level.find((x) => x.t === t)?.value ?? null;
 	});
+	/** Where the temperature layer reaches 32 °F at the map's centre, for the time on the
+	 *  slider: the line the colours cross, as a height. */
+	const centreFreeze = $derived.by(() => {
+		const sc = fieldScale;
+		if (!freezeOn || !levelPoint || !sc) return null;
+		const t = sc.t0 + fieldHours * 3600;
+		return freezingHeightAt(levelPoint.temp ?? [], t, levelPoint.temp_lapse_c_per_km ?? undefined);
+	});
+	// Drawn from numbers, the layer itself gives each pixel rain, mix or snow; the drape (one
+	// level for the whole screen) stands in for it only where the numbers aren't there.
 	$effect(() => {
-		const level = centreLevel;
+		const level = glField ? null : centreLevel;
 		if (ready && map && radar) setSnowLine(map, level, PrecipLayer.ID);
 	});
 
@@ -3306,11 +3343,12 @@
 						{label}
 						{waiting}
 						snowLine={centreLevel}
+						freezeLine={centreFreeze}
 						{adjusted}
 						continuous={glTotals}
 						bind:totalHours
-						temp={tempScale}
-						bind:tempHours
+						field={fieldScale}
+						bind:fieldHours
 						ready={ready_}
 						{loadError}
 					/>

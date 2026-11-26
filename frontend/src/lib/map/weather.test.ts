@@ -167,17 +167,17 @@ describe('weather layers', () => {
 });
 
 describe('the rain/snow line on the terrain', () => {
-	it('is clear below the mix band, pink across it, white above', () => {
+	it("is the layer's rain below the mix band, mix across it, snow above", () => {
 		const e = snowLineColors(1500) as unknown as (string | number)[];
 		expect(e.slice(3)).toEqual([
 			1349.5,
-			'rgba(0, 0, 0, 0)',
+			'rgba(159, 212, 154, 0.55)',
 			1350,
-			'rgba(244, 166, 198, 0.75)',
+			'rgba(224, 69, 123, 1)',
 			1649.5,
-			'rgba(244, 166, 198, 0.75)',
+			'rgba(224, 69, 123, 1)',
 			1650,
-			'rgba(240, 247, 255, 0.9)'
+			'rgba(44, 95, 184, 1)'
 		]);
 		// Snow to the valleys: the band starts at the ground, stops still rising.
 		const low = snowLineColors(0) as unknown as number[];

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from snowwatch.analysis.backcountry import BackcountryConfig
 from snowwatch.api.app import create_app
-from snowwatch.maps import cloudheights, layers, point
+from snowwatch.maps import cloudheights, layers, point, totaldata
 from snowwatch.maps.geomet import Grid, Net, iso_ts, ts_iso
 from snowwatch.maps.palette import (
     DEPTH,
@@ -319,6 +319,13 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     assert probe_at(out, sl[0]["file"], bottom, 5)[0] == 800
     # Beyond 48 h, RDPS's 1500 m in the north.
     assert probe_at(out, sl[-1]["file"], top, 5)[0] == 1500
+    # Drawn as rain, mix or snow at the ground, with the numbers for the map: the height
+    # above the snow level at sea level and at the top band (a straight line with height).
+    step = totaldata.decode((out / sl[0]["data"]).read_bytes())
+    assert step is not None and step.bands.shape[0] == 2
+    assert step.band_m == totaldata.TEMP_TOP_M
+    sea, high = (totaldata.code_level(step.bands[i][-1, 1]) for i in (0, 1))
+    assert sea == pytest.approx(-800, abs=25) and high == pytest.approx(4500 - 800, abs=25)
     g = lay["gust"]["frames"][0]
     assert probe_at(out, g["file"], top, 5)[0] == pytest.approx(36, abs=0.1)
     assert probe_at(out, g["file"], bottom, 5)[0] == pytest.approx(28.8, abs=0.1)
@@ -366,7 +373,6 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     assert probe_at(out, tt[-1]["file"], top, 5)[0] == pytest.approx(-5.5, abs=0.05)
     # Each frame also as numbers for the map: the temperature at the ground (half the
     # grid's size), and at sea level and 4,500 m (a quarter of it).
-    from snowwatch.maps import totaldata
 
     step = totaldata.decode((out / tt[0]["data"]).read_bytes())
     assert step is not None and step.band_m == 4500 and step.bands.shape[0] == 2
@@ -662,10 +668,26 @@ def test_snow_reaching_the_ground_takes_the_level_around_it() -> None:
 
 
 def test_temperature_codes_round_trip() -> None:
-    from snowwatch.maps import totaldata
 
     c = np.array([-80.0, -70.0, -8.25, 0.0, 12.3, 57.0, 70.0, np.nan], np.float32)
     codes = totaldata.temp_codes(c)
     assert codes[-1] == 0 and codes[0] == 1 and codes[-2] == 255  # none; clamped
     back = totaldata.code_temp(codes)
     assert np.allclose(back[1:6], c[1:6], atol=0.25) and np.isnan(back[-1])
+
+
+def test_snow_level_numbers_give_any_height_above_it() -> None:
+    # The mix band's edges fall between two codes, so a map colouring whole codes keeps
+    # them at ±150 m.
+    edge = (np.array([-150.0, 150.0]) - totaldata.LEVEL_MIN) / totaldata.LEVEL_STEP
+    assert np.allclose(edge % 1, 0.5)
+    level = np.full((8, 8), 1800.0, np.float32)
+    ground = np.full((8, 8), 1500.0, np.float32)
+    step = totaldata.decode(totaldata.encode_level(ground - level, level))
+    assert step is not None
+    assert totaldata.code_level(step.area)[0, 0] == pytest.approx(-300, abs=25)
+    sea, high = (float(totaldata.code_level(step.bands[i])[0, 0]) for i in (0, 1))
+    # Read off the line at 2,000 m: 200 m above the snow level.
+    at = sea + (high - sea) * 2000 / step.band_m
+    assert at == pytest.approx(200, abs=25)
+    assert totaldata.level_codes(np.array([np.nan]))[0] == 0

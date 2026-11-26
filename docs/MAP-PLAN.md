@@ -1545,6 +1545,28 @@ and blue alike flat, in 3D and after a hidden/visible round trip. All e2e tests 
 **Known limits.** Zoomed far in, a picture at ~1.5 km a pixel is soft, as before the GPU
 attempt; outlines aren't as crisp as Apple's.
 
+## Snow level as rain, mix or snow (26 Nov 2026)
+
+The Snow level layer coloured the snow level's *height* in 17 bands every 250 m, and from
+zoom 10 draped one level (the map's centre) on the terrain in white and pink over those
+bands. Both were hard to read: the bands changed colour with every few hundred metres of
+snow level, and the drape's white and pink were washed out by the bands beneath.
+
+- **What it shows now**: what falls at the ground, in three colours, the radar's hues light
+  to dark so they part without colour too: snow (blue) where the ground stands more than
+  150 m above the snow level, mix (pink) within 150 m of it, rain (light green, drawn
+  lighter) below. The pictures (`palette.SNOWLINE`) are drawn on the region's ground; the
+  probe still keeps the snow level itself for tap-for-numbers.
+- **Drawn from numbers like the temperature** (`totaldata.encode_level`): the height above
+  the snow level, an exact straight line with height, as the area plane (at the ground) and
+  two bands (sea level and 4,500 m). The map draws it with the temperature's program and
+  continuous slider (`LEVEL_SCALE`); zoomed in, each pixel gets its own elevation against
+  the snow level *there*, so the line follows every ridge and the level may vary across the
+  view. Codes are 50 m apart, offset half a step so the ±150 m edges fall between codes.
+- The drape stays only as a stand-in where a frame has no numbers (pictures drawn before
+  this change, or no WebGL 2), in the same three colours.
+- The key reads "Snow · Mix · Rain at the ground", and zoomed in "snow above X at the centre".
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

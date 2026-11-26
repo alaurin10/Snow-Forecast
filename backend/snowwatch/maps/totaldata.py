@@ -33,6 +33,11 @@ codes linear in °C (TEMP_MIN, every TEMP_STEP) and two bands: the temperature a
 and at TEMP_TOP_M, so the map gets it at any elevation by the same reading of the bands
 (the layer assumes a straight line with height). Its area plane is the temperature at the
 mean ground under each area pixel.
+
+The Snow level layer's frames (layers.py, `encode_level`) do the same with the height
+above the snow level (m, codes linear from LEVEL_MIN every LEVEL_STEP): an exact straight
+line with height, so each pixel gets its own elevation minus the snow level there, and the
+map colours that as rain, mix or snow (palette.SNOWLINE).
 """
 
 from __future__ import annotations
@@ -100,6 +105,47 @@ def encode_temp(here: np.ndarray, sea: np.ndarray, lapse_c_per_m: float) -> byte
     planes = [area, temp_codes(sea4), temp_codes(sea4 - lapse_c_per_m * TEMP_TOP_M)]
     ah, aw = area.shape
     bh, bw = sea4.shape
+    head = HEADER.pack(MAGIC, aw, ah, bw, bh, 2, TEMP_TOP_M // 50, 0)
+    body = head + b"".join(_filter(p) for p in planes)
+    return gzip.compress(body, 9, mtime=0)
+
+
+# Height above the snow level: codes 1..255 for LEVEL_MIN, LEVEL_MIN + LEVEL_STEP … (−8,225
+# to 4,475 m), 0 none. Offset by half a step so the mix band's edges (±150 m) fall between
+# two codes: the map colours each code whole, and the edges stay where they belong.
+LEVEL_MIN = -8225.0
+LEVEL_STEP = 50.0
+
+
+def _linear_codes(a: np.ndarray, lo: float, step: float) -> np.ndarray:
+    a = np.asarray(a, np.float32)
+    out = np.zeros(a.shape, np.uint8)
+    have = np.isfinite(a)
+    out[have] = np.clip(1 + np.rint((a[have] - lo) / step), 1, 1 + CODES).astype(np.uint8)
+    return out
+
+
+def level_codes(m: np.ndarray) -> np.ndarray:
+    """Metres above the snow level to codes (0 for no data), clamped to the codes' range."""
+    return _linear_codes(m, LEVEL_MIN, LEVEL_STEP)
+
+
+def code_level(codes: np.ndarray) -> np.ndarray:
+    """Codes back to metres above the snow level (NaN for none)."""
+    c = np.asarray(codes, np.float32)
+    out: np.ndarray = np.where(c >= 1, LEVEL_MIN + (c - 1) * LEVEL_STEP, np.nan)
+    return out.astype(np.float32)
+
+
+def encode_level(above: np.ndarray, level: np.ndarray) -> bytes:
+    """A snow level frame's file: the ground's height above the snow level (m, on the
+    region's grid) as the area plane, and the height above it of sea level and of
+    TEMP_TOP_M as two bands, so any elevation reads off the straight line between them."""
+    area = level_codes(_halve(above))
+    level4 = _halve(_halve(level))
+    planes = [area, level_codes(-level4), level_codes(TEMP_TOP_M - level4)]
+    ah, aw = area.shape
+    bh, bw = level4.shape
     head = HEADER.pack(MAGIC, aw, ah, bw, bh, 2, TEMP_TOP_M // 50, 0)
     body = head + b"".join(_filter(p) for p in planes)
     return gzip.compress(body, 9, mtime=0)

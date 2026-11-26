@@ -14,13 +14,13 @@
 		DEPTH,
 		depthTick,
 		hoursAt,
-		levelTick,
 		markTick,
 		posAt,
 		totalMarks,
 		totalUntil,
 		totalWords,
-		SNOWLEVEL,
+		MIX_BAND_M,
+		SNOWLINE_KINDS,
 		TEMP,
 		tempLabel,
 		tempTick,
@@ -57,17 +57,20 @@
 		loadError: string | null;
 		/** The snow level draped on the terrain (zoomed in), metres; null when it isn't. */
 		snowLine?: number | null;
+		/** Where the temperature layer reaches 32 °F at the map's centre (zoomed in), metres;
+		 *  null when it isn't shown. */
+		freezeLine?: number | null;
 		/** The snow total on screen is the terrain-adjusted one (zoomed in). */
 		adjusted?: boolean;
 		/** The snow total's slider is continuous (its steps are drawn as numbers). */
 		continuous?: boolean;
 		/** Where that slider is: hours from the totals' start. */
 		totalHours?: number;
-		/** The temperature's continuous slider (its frames are drawn as numbers): the first
+		/** The temperature or snow level's continuous slider (frames drawn as numbers): the first
 		 *  frame's time, the frames' and the marks' hours from it, and the marks' ticks. */
-		temp?: { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null;
+		field?: { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null;
 		/** Where that slider is: hours from the first frame. */
-		tempHours?: number;
+		fieldHours?: number;
 	}
 
 	let {
@@ -86,14 +89,15 @@
 		ready,
 		loadError,
 		snowLine = null,
+		freezeLine = null,
 		adjusted = false,
 		continuous = false,
 		totalHours = $bindable(24),
-		temp = null,
-		tempHours = $bindable(0)
+		field = null,
+		fieldHours = $bindable(0)
 	}: Props = $props();
 	/** The time on the temperature slider, in words. */
-	const tempWhen = $derived(temp ? tempLabel(temp.t0 + tempHours * 3600) : null);
+	const fieldWhen = $derived(field ? tempLabel(field.t0 + fieldHours * 3600) : null);
 	/** The continuous snow total slider's marks (hours), evenly spaced along it. */
 	const marks = $derived(view.steps ? totalMarks(view.steps.hours) : []);
 
@@ -165,8 +169,6 @@
 			return { steps: TOTAL, tick: (v) => totalTick(v, units), unit: imp ? 'in' : 'cm' };
 		if (weather === 'depth')
 			return { steps: DEPTH, tick: (v) => depthTick(v, units), unit: imp ? 'in' : 'cm' };
-		if (weather === 'snowlevel')
-			return { steps: SNOWLEVEL, tick: (v) => levelTick(v, units), unit: imp ? 'ft' : 'm' };
 		if (weather === 'wind')
 			return { steps: WIND, tick: (v) => windTick(v, units), unit: imp ? 'mph' : 'km/h' };
 		if (weather === 'temp')
@@ -305,9 +307,9 @@
 			{:else}
 				<p class="note">{empty}</p>
 			{/if}
-		{:else if temp && weather === 'temp' && tempWhen}
-			{@const last = temp.marks.length - 1}
-			{@const at = posAt(tempHours, temp.marks)}
+		{:else if field && (weather === 'temp' || weather === 'snowlevel') && fieldWhen}
+			{@const last = field.marks.length - 1}
+			{@const at = posAt(fieldHours, field.marks)}
 			<div class="player">
 				<button
 					class="play"
@@ -327,7 +329,7 @@
 						value={at}
 						oninput={(e) => {
 							playing = false;
-							tempHours = hoursAt(Number(e.currentTarget.value), temp.marks);
+							fieldHours = hoursAt(Number(e.currentTarget.value), field.marks);
 						}}
 						onkeydown={(e) => {
 							// The keys move from frame to frame, however finely the slider slides.
@@ -335,20 +337,20 @@
 							if (!d) return;
 							e.preventDefault();
 							playing = false;
-							const hs = temp.hours;
+							const hs = field.hours;
 							const next =
 								d > 0
-									? (hs.find((h) => h > tempHours + 1e-6) ?? hs[hs.length - 1])
-									: (hs.findLast((h) => h < tempHours - 1e-6) ?? hs[0]);
-							tempHours = next;
+									? (hs.find((h) => h > fieldHours + 1e-6) ?? hs[hs.length - 1])
+									: (hs.findLast((h) => h < fieldHours - 1e-6) ?? hs[0]);
+							fieldHours = next;
 						}}
 						aria-label="Time"
-						aria-valuetext={`${tempWhen.when}, ${tempWhen.rel}`}
+						aria-valuetext={`${fieldWhen.when}, ${fieldWhen.rel}`}
 					/>
 					<div class="ticks" aria-hidden="true">
-						{#each temp.marks as h, i (h)}
+						{#each field.marks as h, i (h)}
 							<span class:now={Math.abs(at - i) < 0.05} style:left="{(i / last) * 100}%"
-								>{temp.ticks[i]}</span
+								>{field.ticks[i]}</span
 							>
 						{/each}
 					</div>
@@ -358,9 +360,9 @@
 					aria-live="off"
 					title={adjusted ? 'Adjusted to the terrain: each spot at its own height' : undefined}
 				>
-					<strong class="num">{tempWhen.when}</strong>
+					<strong class="num">{fieldWhen.when}</strong>
 					<span class="fc"
-						>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{tempWhen.rel}</span
+						>{#if waiting}<i class="spin" aria-label="Loading"></i>{/if}{fieldWhen.rel}</span
 					>
 					{#if adjusted}<span class="adj">adjusted to terrain</span>{/if}
 				</div>
@@ -459,11 +461,22 @@
 				>
 			</div>
 		{/if}
-		{#if snowLine != null}
-			<span class="key line-key">
-				<i class="sw snowy" aria-hidden="true"></i>Snow above {elevation(snowLine + 150, units)}
-				<i class="sw mixy" aria-hidden="true"></i>mix ±{units === 'imperial' ? '500 ft' : '150 m'}
-				<span class="faint">at the map's centre</span>
+		{#if weather === 'snowlevel'}
+			<!-- What falls at the ground: three colours, the same as the radar's. Zoomed in, the
+			     height where snow starts at the map's centre. -->
+			<span class="key line-key" aria-label="Key">
+				{#each [...SNOWLINE_KINDS].reverse() as k (k.kind)}
+					<span class="kind"
+						><i class="sw" style:background={k.color} aria-hidden="true"></i>{`${k.label} `}</span
+					>
+				{/each}
+				{#if snowLine != null}
+					<span class="faint"
+						>snow above {elevation(snowLine + MIX_BAND_M, units)} at the centre</span
+					>
+				{:else}
+					<span class="faint">at the ground</span>
+				{/if}
 			</span>
 		{:else if cells}
 			<div class="key total-key" aria-label="Key, {cells.unit}">
@@ -473,7 +486,7 @@
 						<span
 							class="cell"
 							class:dark={darkCell(s.color)}
-							style:background={weather === 'temp' && temp ? tempCell(s.from) : s.color}
+							style:background={weather === 'temp' && field ? tempCell(s.from) : s.color}
 							>{cells.tick(s.from)}</span
 						>
 					{/each}
@@ -509,6 +522,20 @@
 			</div>
 		{/if}
 	</div>
+	{#if weather === 'temp' && freezeLine != null}
+		<!-- The colours' freezing line as a height, to read beside the snow level: the
+		     snow level is usually lower (see the layer's note). -->
+		<div class="foot">
+			<span class="key line-key">
+				{#if freezeLine > 0}
+					{units === 'imperial' ? '32°F' : '0°C'} near {elevation(freezeLine, units)}
+				{:else}
+					Below {units === 'imperial' ? '32°F' : '0°C'} down to sea level
+				{/if}
+				<span class="faint">at the map's centre</span>
+			</span>
+		</div>
+	{/if}
 </section>
 
 <style>
@@ -557,9 +584,6 @@
 		border-radius: 3px;
 		box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.2);
 	}
-	.sw.snowy {
-		background: rgb(240 247 255);
-	}
 	/* The map's hatching for what the forecast filled in where radar is blind. */
 	.sw.gapsw {
 		background: repeating-linear-gradient(
@@ -567,10 +591,6 @@
 			rgb(120 170 230 / 0.85) 0 2px,
 			rgb(120 170 230 / 0.4) 2px 4px
 		);
-	}
-	.sw.mixy {
-		background: rgb(244 166 198);
-		margin-left: 4px;
 	}
 	/* Two fixed rows under the mode switch, so the box never changes size: the player
 	   (or the total's window), then one line of key. */

@@ -1,9 +1,13 @@
 // The Temperature layer: its key, bringing a sea-level temperature to a height, its
 // continuous slider, and its smooth colours.
 import { describe, expect, it } from 'vitest';
-import { tempColor, tempLut } from './precip/totalgl';
+import { levelLut, tempColor, tempLut } from './precip/totalgl';
+import { LEVEL_MIN, LEVEL_STEP } from './precip/steps';
 import {
+	freezingHeightAt,
 	hoursAt,
+	snowlineKind,
+	valueAt,
 	layerName,
 	posAt,
 	tempLabel,
@@ -57,6 +61,21 @@ describe('temperature layer', () => {
 		expect(tempAt(5, 0)).toBe(5);
 		expect(tempAt(5, -50)).toBe(5); // below sea level: as the sea
 		expect(tempAt(5, 1000, 5)).toBeCloseTo(0);
+	});
+
+	it('finds where the colours cross 32 °F, between frames as the map blends them', () => {
+		const temps = [
+			{ t: 0, sea_c: 13 },
+			{ t: 3 * 3600, sea_c: 19.5 },
+			{ t: 6 * 3600, sea_c: null }
+		];
+		expect(freezingHeightAt(temps, 0)).toBeCloseTo(2000);
+		expect(freezingHeightAt(temps, 1.5 * 3600)).toBeCloseTo(2500); // halfway: 16.25 °C
+		expect(freezingHeightAt(temps, 9 * 3600)).toBeCloseTo(3000); // past the last number
+		expect(tempAt(16.25, freezingHeightAt(temps, 1.5 * 3600)!)).toBeCloseTo(0);
+		expect(freezingHeightAt([{ t: 0, sea_c: -2 }], 0)).toBe(0); // freezing to sea level
+		expect(freezingHeightAt([{ t: 0, sea_c: 10 }], 0, 5)).toBeCloseTo(2000);
+		expect(freezingHeightAt([{ t: 0, sea_c: null }], 0)).toBeNull();
 	});
 });
 
@@ -116,5 +135,39 @@ describe('temperature colours', () => {
 		// Code 141 is 0 °C (−70 + 140 × 0.5).
 		expect(Array.from(lut.slice(141 * 4, 141 * 4 + 3))).toEqual(color(0));
 		expect(lut[255 * 4 + 3]).toBe(255);
+	});
+});
+
+describe('the snow level as rain, mix or snow', () => {
+	it('reads a point between frames as the map blends them', () => {
+		const at = [
+			{ t: 0, value: 1000 },
+			{ t: 3 * 3600, value: 1600 },
+			{ t: 6 * 3600, value: null }
+		];
+		expect(valueAt(at, 3600)).toBeCloseTo(1200);
+		expect(valueAt(at, -5)).toBe(1000);
+		expect(valueAt(at, 9 * 3600)).toBe(1600);
+		expect(valueAt([], 0)).toBeNull();
+	});
+
+	it('mixes within 150 m of the snow level, snow above, rain below', () => {
+		expect(snowlineKind(-151).kind).toBe('rain');
+		expect(snowlineKind(-150).kind).toBe('mix');
+		expect(snowlineKind(149).kind).toBe('mix');
+		expect(snowlineKind(150).kind).toBe('snow');
+	});
+
+	it('colours whole codes with the mix band edges between two of them', () => {
+		const lut = levelLut();
+		const kindAt = (m: number) => {
+			const c = Math.round(1 + (m - LEVEL_MIN) / LEVEL_STEP);
+			return lut.slice(c * 4, c * 4 + 4).join(',');
+		};
+		const rain = '159,212,154,140';
+		const mix = '224,69,123,255';
+		const snow = '44,95,184,255';
+		expect([kindAt(-160), kindAt(-140), kindAt(140), kindAt(160)]).toEqual([rain, mix, mix, snow]);
+		expect(lut.slice(0, 4).join(',')).toBe('0,0,0,0'); // code 0: no data
 	});
 });
