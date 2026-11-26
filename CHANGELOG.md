@@ -7,6 +7,13 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Recent observations on the Backcountry tab.** What forecasters and people in the
+  mountains reported around the location in the last two weeks: near it first, then,
+  folded, the rest of its avalanche zone. Each shows who sent it, the day, the place and
+  distance, the signs of instability they reported (avalanches seen, triggered or someone
+  caught; collapsing; shooting cracks, with how widespread), their summary (first lines,
+  then More) and their notes on instability and avalanches, small photos that open the
+  full-screen viewer, and a link to the full report. The Webcams tab keeps to the photos.
 - **Field photos full screen.** A photo on the Webcams tab opens a full-screen viewer
   that flips through every photo (arrows, arrow keys or a swipe), each with the report's
   place, who sent it, the day, how far away, the zone and the caption, and a link to the
@@ -28,6 +35,8 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **The photo viewer keeps the photo the focus** and its short line of text (place, who,
+  day, distance, caption) well clear of the screen's rounded corners.
 - **The worker gives memory back between jobs.** It held ~2 GB while idle (memory freed
   by jobs on several threads, kept by the C library for reuse). The image now limits
   glibc to two memory pools (`MALLOC_ARENA_MAX=2`), and the worker releases freed memory

@@ -7,13 +7,15 @@
 -->
 <script lang="ts">
 	import type { LoadState } from '../load';
-	import type { AvalancheView, Snapshot } from '../types.gen';
+	import type { AvalancheView, NearbyOut, Snapshot } from '../types.gen';
+	import { centerObservations } from '../webcams';
 	import { compass } from '../conditions';
 	import { dateOf, dayHour } from '../time';
 	import { elevation, snow, speed, type UnitSystem } from '../units';
 	import DangerPyramid from './DangerPyramid.svelte';
 	import LoadingRose from './LoadingRose.svelte';
 	import Outlook from './Outlook.svelte';
+	import RecentObservations from './RecentObservations.svelte';
 	import TouringTable from './TouringTable.svelte';
 
 	interface Props {
@@ -23,9 +25,20 @@
 		units: UnitSystem;
 		/** Whether the app's own weather-stress grade is shown (the server's HAZARD_INDEX). */
 		graded?: boolean;
+		/** Field reports around the location, for its recent observations. */
+		nearby?: NearbyOut | null;
+		nearbyLoad?: LoadState;
 	}
 
-	let { snap, avy, units, avyLoad = 'ready', graded = true }: Props = $props();
+	let {
+		snap,
+		avy,
+		units,
+		avyLoad = 'ready',
+		graded = true,
+		nearby = null,
+		nearbyLoad = 'ready'
+	}: Props = $props();
 
 	const today = $derived(dateOf(snap.now));
 	const bc = $derived(snap.backcountry ?? null);
@@ -48,6 +61,15 @@
 	<section class="card">
 		<DangerPyramid view={avy} tz={snap.location.tz} {today} load={avyLoad} />
 	</section>
+
+	<RecentObservations
+		data={nearby}
+		load={nearbyLoad}
+		{units}
+		tz={snap.location.tz}
+		name={snap.location.name}
+		center={centerObservations(avy?.doc)}
+	/>
 
 	{#if bc}
 		<section class="card">

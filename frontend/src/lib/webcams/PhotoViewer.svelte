@@ -1,8 +1,12 @@
 <!--
-  Field photos full screen, one at a time: the photo as large as the screen allows, and
-  under it where it was taken, who sent it, when, how far away and its caption, with a
-  link to the full report. Arrows, the arrow keys or a swipe go to the previous or next
-  photo across every report; Escape, ✕ or the phone's Back button close it.
+  Field photos full screen, one at a time: the photo is the focus, as large as the screen
+  allows, with a short line under it: where it was taken, who sent it, when, how far away
+  and the photo's own caption, and a link to the full report. What the observer wrote
+  about the day is on the Backcountry tab, not here. The text keeps well clear of the
+  screen's edges, whose corners are rounded on most phones (the app doesn't extend under
+  them, so the system's safe-area insets are usually zero and fixed margins do the work).
+  Arrows, the arrow keys or a swipe go to the previous or next photo across every report;
+  Escape, ✕ or the phone's Back button close it.
 -->
 <script lang="ts">
 	import { modal } from '../modal';
@@ -118,19 +122,21 @@
 			{/if}
 		</div>
 		{#if cur}
-			<div class="info">
-				<p class="title">
-					<strong>{cur.report.title || 'Field report'}</strong>
-					{#if safeHref(cur.report.url)}
-						<!-- External site: resolve() is only for routes in this app. -->
-						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-						<a href={safeHref(cur.report.url)} target="_blank" rel="noopener noreferrer"
-							>Full report ↗</a
-						>
-					{/if}
-				</p>
-				<p class="meta">{meta}</p>
-				{#if cur.photo.caption}<p class="caption">{cur.photo.caption}</p>{/if}
+			<div class="foot">
+				<div class="info">
+					<p class="title">
+						<strong>{cur.report.title || 'Field report'}</strong>
+						{#if safeHref(cur.report.url)}
+							<!-- External site: resolve() is only for routes in this app. -->
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a href={safeHref(cur.report.url)} target="_blank" rel="noopener noreferrer"
+								>Full report ↗</a
+							>
+						{/if}
+					</p>
+					<p class="meta">{meta}</p>
+					{#if cur.photo.caption}<p class="caption">{cur.photo.caption}</p>{/if}
+				</div>
 			</div>
 		{/if}
 	</div>
@@ -148,15 +154,16 @@
 		grid-template-rows: auto minmax(0, 1fr) auto;
 		background: #06090f;
 		color: #f3f5f8;
-		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-			env(safe-area-inset-left);
 		outline: none;
 	}
 	header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 8px 12px 4px 16px;
+		/* Clear of rounded corners: the count and ✕ sit well in from the top corners. */
+		padding: max(14px, calc(env(safe-area-inset-top) + 8px))
+			max(20px, calc(env(safe-area-inset-right) + 12px)) 6px
+			max(24px, calc(env(safe-area-inset-left) + 16px));
 	}
 	.count {
 		font-size: 0.85rem;
@@ -223,13 +230,21 @@
 		outline: 2px solid #fff;
 		outline-offset: 2px;
 	}
+	/* The margin sits outside the scrolling text, so no line ever scrolls into a corner. */
+	.foot {
+		padding: 10px max(24px, calc(env(safe-area-inset-right) + 16px))
+			max(34px, calc(env(safe-area-inset-bottom) + 20px))
+			max(24px, calc(env(safe-area-inset-left) + 16px));
+		display: grid;
+	}
 	.info {
 		display: grid;
-		gap: 4px;
-		max-height: 34vh;
+		gap: 6px;
+		align-content: start;
+		max-height: 24vh;
 		overflow-y: auto;
-		padding: 10px 16px 14px;
-		max-width: 900px;
+		overscroll-behavior: contain;
+		max-width: 860px;
 		width: 100%;
 		justify-self: center;
 		box-sizing: border-box;

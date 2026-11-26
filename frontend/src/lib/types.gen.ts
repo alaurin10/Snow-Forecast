@@ -674,6 +674,7 @@ export interface MetaOut {
  * via the `definition` "NearbyOut".
  */
 export interface NearbyOut {
+	area_reports?: NearbyReport[];
 	location_id: string;
 	near_km?: number;
 	photo_reports?: NearbyReport[];
@@ -699,15 +700,19 @@ export interface NearbyReport {
  * via the `definition` "ObsProps".
  */
 export interface ObsProps {
+	avalanche_note?: string | null;
 	center?: string | null;
 	day?: string | null;
 	id: string;
 	images: number;
+	instability_note?: string | null;
 	kinds: string[];
 	observer?: string | null;
 	photos?: ObsPhoto[];
 	region: string;
+	signs?: ObsSign[];
 	source?: 'min' | 'nwac';
+	summary?: string | null;
 	time: string;
 	title: string;
 	url: string | null;
@@ -723,6 +728,21 @@ export interface ObsPhoto {
 	thumb: string;
 	url: string;
 	width?: number | null;
+}
+/**
+ * A sign of instability an observer reported (NWAC's form).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ObsSign".
+ */
+export interface ObsSign {
+	extent?: string | null;
+	kind:
+		| 'avalanches_caught'
+		| 'avalanches_triggered'
+		| 'avalanches_observed'
+		| 'collapsing'
+		| 'cracking';
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

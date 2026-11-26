@@ -249,6 +249,9 @@ class NearbyOut(BaseModel):
     # The reports with photos (the Webcams tab), newest first: those near the location,
     # then those elsewhere in its avalanche zone (`group`). Others aren't listed.
     photo_reports: list[NearbyReport] = []
+    # Every report near the location or in its avalanche zone, grouped the same way, with
+    # or without photos (the Backcountry tab's recent observations).
+    area_reports: list[NearbyReport] = []
     near_km: float = 20.0
     zone_name: str | None = None  # the location's avalanche zone, when known
 

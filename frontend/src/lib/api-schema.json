@@ -2645,6 +2645,13 @@
     "NearbyOut": {
       "description": "What was measured and reported around a location (the Observed tab): the\nclosest snow stations and recent field reports (Avalanche Canada's Mountain\nInformation Network and NWAC's observations), read from the files the map's layers\nuse.",
       "properties": {
+        "area_reports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NearbyReport"
+          },
+          "type": "array"
+        },
         "location_id": {
           "type": "string"
         },
@@ -2883,6 +2890,17 @@
     },
     "ObsProps": {
       "properties": {
+        "avalanche_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "center": {
           "anyOf": [
             {
@@ -2911,6 +2929,17 @@
         "images": {
           "type": "integer"
         },
+        "instability_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kinds": {
           "items": {
             "type": "string"
@@ -2937,6 +2966,12 @@
         "region": {
           "type": "string"
         },
+        "signs": {
+          "items": {
+            "$ref": "#/$defs/ObsSign"
+          },
+          "type": "array"
+        },
         "source": {
           "default": "min",
           "enum": [
@@ -2944,6 +2979,17 @@
             "nwac"
           ],
           "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "time": {
           "type": "string"
@@ -2983,6 +3029,37 @@
         "url"
       ],
       "title": "ObsProps",
+      "type": "object"
+    },
+    "ObsSign": {
+      "description": "A sign of instability an observer reported (NWAC's form).",
+      "properties": {
+        "extent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "enum": [
+            "avalanches_caught",
+            "avalanches_triggered",
+            "avalanches_observed",
+            "collapsing",
+            "cracking"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ObsSign",
       "type": "object"
     },
     "OutlookDay": {

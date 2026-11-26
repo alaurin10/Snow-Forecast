@@ -56,6 +56,15 @@ class ObsPhoto(BaseModel):
     height: int | None = None
 
 
+class ObsSign(BaseModel):
+    """A sign of instability an observer reported (NWAC's form)."""
+
+    kind: Literal[
+        "avalanches_caught", "avalanches_triggered", "avalanches_observed", "collapsing", "cracking"
+    ]
+    extent: str | None = None  # cracking and collapsing: "isolated", "specific", "widespread"
+
+
 class ObsProps(BaseModel):
     id: str
     title: str
@@ -74,6 +83,12 @@ class ObsProps(BaseModel):
     # The avalanche forecast zone it's in, as the map's zones name them ("nac:3023"), when
     # the source says; otherwise the API looks it up from the zones' outlines.
     zone: str | None = None
+    # What the observer wrote (NWAC): the summary, in paragraphs, and their signs of
+    # instability with any notes on them and on avalanches. Empty for Avalanche Canada's.
+    summary: str | None = None
+    signs: list[ObsSign] = Field(default_factory=list)
+    instability_note: str | None = None
+    avalanche_note: str | None = None
 
 
 class ObsFeature(BaseModel):
