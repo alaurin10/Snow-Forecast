@@ -53,6 +53,10 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **The backend tests no longer reach the network**: the worker's map test and the
+  healthcheck test stubbed only part of their jobs, so they drew every weather layer and
+  fetched avalanche forecasts for real. The suite takes about a minute and a half, down
+  from 8–15 minutes.
 - **Every factor in the avalanche weather is one line**, the same height, down to a
   360 px phone: "Snow" for the label, and shorter context for warming ("at the
   summit", "in 24 h") and light drifting ("little to drift").

@@ -529,23 +529,31 @@ def test_worker_runs_map_parts_and_survives_failures(
     def broken(self: Renderer, region: Any) -> dict[str, Any]:
         raise RuntimeError("GeoMet fell over")
 
+    def layers(self: Renderer, region: Any) -> dict[str, Any]:
+        # The real job draws every weather layer from the network (minutes): only that
+        # the worker runs it is tested here (test_layers.py tests the drawing).
+        calls.append(("layers", region.width))
+        return {"frames": [], "totals": [], "layers": {"snowlevel": {"frames": []}}}
+
     monkeypatch.setattr(Renderer, "radar", radar)
     monkeypatch.setattr(Renderer, "forecast", broken)
     monkeypatch.setattr(Renderer, "snow_totals", lambda self, region: {})
+    monkeypatch.setattr(Renderer, "layers", layers)
     w = Worker(settings, config())
-    w.precip()  # the forecast's failure is logged, not raised
-    assert calls == [("radar", 1700)]
+    w.precip()  # the forecast's failure is logged, not raised, and the rest still run
+    assert calls == [("radar", 1700), ("layers", 1700)]
     w.map_locks["radar"].acquire()
     w.radar()  # still running from last time: skip
-    assert len(calls) == 1
+    assert len(calls) == 2
     w.map_locks["radar"].release()
 
     ids = {j.id for j in build_scheduler(w).get_jobs()}
     assert {"radar", "forecast_frames", "totals_fields"} <= ids and "precip" not in ids
 
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
-    assert cli.main(["map", "radar"]) == 0 and len(calls) == 2
-    assert cli.main(["precip"]) == 0 and len(calls) == 3
+    assert cli.main(["map", "radar"]) == 0 and calls[-1] == ("radar", 1700)
+    assert cli.main(["precip"]) == 0
+    assert calls[-2:] == [("radar", 1700), ("layers", 1700)] and len(calls) == 5
 
 
 # ---- Frames as numbers (dataframe.py) and the timeline's order ----------------------------
