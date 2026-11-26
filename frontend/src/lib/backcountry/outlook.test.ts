@@ -66,7 +66,7 @@ describe('cell', () => {
 			detail: 'loads N'
 		});
 		expect(cell(day('x', { wind_from: 'W', wind_kmh: 50 }), 'wind', 'metric').detail).toBe(
-			'little snow to move'
+			'little to drift'
 		);
 		expect(cell(day('x'), 'wind', 'metric')).toMatchObject({ value: '10 km/h', detail: 'light' });
 	});
@@ -88,11 +88,11 @@ describe('cell', () => {
 		});
 		expect(cell(day('x', { thaw_h: 9 }), 'warm', 'metric')).toMatchObject({
 			value: '9 h thaw',
-			detail: 'freezing level 1,500 m'
+			detail: 'at the summit'
 		});
 		expect(cell(day('x', { temp_rise_c: 10 }), 'warm', 'imperial')).toMatchObject({
 			value: '18°F warmer',
-			detail: 'in 24 h, freezing level 4,900 ft'
+			detail: 'in 24 h'
 		});
 	});
 });

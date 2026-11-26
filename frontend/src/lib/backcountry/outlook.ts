@@ -9,7 +9,7 @@ import { cmToIn, elevation, kmhToMph, mmToIn, snow, speed, water, type UnitSyste
 export type Factor = 'snow' | 'wind' | 'rain' | 'warm';
 export const FACTORS: readonly Factor[] = ['snow', 'wind', 'rain', 'warm'] as const;
 export const FACTOR_NAMES: Record<Factor, string> = {
-	snow: 'New snow',
+	snow: 'Snow',
 	wind: 'Wind',
 	rain: 'Rain',
 	warm: 'Warming'
@@ -54,7 +54,7 @@ export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
 		const detail = d.loading?.length
 			? `loads ${d.loading.join('–')}`
 			: d.wind_from
-				? 'little snow to move'
+				? 'little to drift'
 				: 'light';
 		return { value: `${from}${speed(d.wind_kmh, units)}`, detail, level };
 	}
@@ -67,16 +67,11 @@ export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
 			level
 		};
 	}
-	// The warmth itself when there is some, else the freezing level.
+	// The warmth itself when there is some, else the freezing level. Kept short: each
+	// factor is one line on a phone.
 	const rise = d.temp_rise_c ?? 0;
-	const fl = d.fl_max_m === null ? '' : `freezing level ${elevation(d.fl_max_m, units)}`;
-	if (d.thaw_h > 0) return { value: `${d.thaw_h} h thaw`, detail: fl, level };
-	if (rise >= 5)
-		return {
-			value: `${degrees(rise, units)} warmer`,
-			detail: fl ? `in 24 h, ${fl}` : 'in 24 h',
-			level
-		};
+	if (d.thaw_h > 0) return { value: `${d.thaw_h} h thaw`, detail: 'at the summit', level };
+	if (rise >= 5) return { value: `${degrees(rise, units)} warmer`, detail: 'in 24 h', level };
 	return {
 		value: d.fl_max_m === null ? '–' : elevation(d.fl_max_m, units),
 		detail: 'freezing level',

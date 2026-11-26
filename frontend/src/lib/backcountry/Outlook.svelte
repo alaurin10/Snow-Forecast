@@ -88,7 +88,7 @@
 								<div class="fact">
 									<dt>{FACTOR_NAMES[f]}</dt>
 									<dd class="val">{cl.value}</dd>
-									<dd class="det">{cl.detail}</dd>
+									<dd class="det" title={cl.detail}>{cl.detail}</dd>
 									{#if graded}
 										<dd class="lv" aria-label="{FACTOR_NAMES[f]}: {stressWord(cl.level)}">
 											{@render meter(cl.level)}
@@ -225,17 +225,18 @@
 	.chip.s3 {
 		background: var(--stress-3);
 	}
-	/* One line per factor; the columns line up from day to day. */
+	/* One line per factor, every line the same height; the columns line up from day to
+	   day. Nothing wraps: the context gives way first, with an ellipsis. */
 	.facts {
 		display: grid;
-		grid-template-columns: 54px 98px minmax(0, 1fr) auto;
-		column-gap: 10px;
+		grid-template-columns: 52px minmax(88px, max-content) minmax(0, 1fr) auto;
+		column-gap: 6px;
 		row-gap: 3px;
 		align-items: baseline;
 		margin: 0;
 	}
 	.plain .facts {
-		grid-template-columns: 54px 98px minmax(0, 1fr);
+		grid-template-columns: 52px minmax(88px, max-content) minmax(0, 1fr);
 	}
 	.fact {
 		display: contents;
@@ -244,6 +245,7 @@
 		font-size: 0.72rem;
 		font-weight: 600;
 		color: var(--text-3);
+		white-space: nowrap;
 	}
 	dd {
 		margin: 0;
@@ -259,6 +261,9 @@
 	.det {
 		font-size: 0.76rem;
 		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.lv {
 		align-self: center;

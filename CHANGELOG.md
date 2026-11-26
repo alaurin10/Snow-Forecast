@@ -40,6 +40,9 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Every factor in the avalanche weather is one line**, the same height, down to a
+  360 px phone: "Snow" for the label, and shorter context for warming ("at the
+  summit", "in 24 h") and light drifting ("little to drift").
 - **The Backcountry tab's avalanche weather is easier to read, especially on a phone.**
   Each day is its own tile: the day, the avalanche center's rating when its bulletin
   covers the day, and a chip with the day's grade, now called **weather loading**. Under
