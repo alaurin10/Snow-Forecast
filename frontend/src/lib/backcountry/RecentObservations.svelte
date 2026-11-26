@@ -38,7 +38,10 @@
 	}: Props = $props();
 
 	const THUMBS = 4;
-	const reports = $derived(data?.area_reports ?? []);
+	// A copy of the data from before the server listed every report (the browser may keep
+	// one for an hour after an update) still has the photo reports: never show less than
+	// the Webcams tab does.
+	const reports = $derived(data?.area_reports ?? data?.photo_reports ?? []);
 	const near = $derived(reports.filter((r) => r.group !== 'zone'));
 	const zone = $derived(reports.filter((r) => r.group === 'zone'));
 	const zoneName = $derived(data?.zone_name || 'the avalanche zone');

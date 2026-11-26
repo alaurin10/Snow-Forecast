@@ -155,4 +155,30 @@ describe('recent observations', () => {
 		});
 		expect(container.querySelector('.recent')).toBeNull();
 	});
+
+	it('colours the signs as NWAC does: red for avalanches, orange for cracking', () => {
+		const { getByRole } = render(RecentObservations, {
+			data: data([
+				obs('Austin Pass', 'near', 0, {
+					signs: [{ kind: 'avalanches_triggered' }, { kind: 'collapsing', extent: 'isolated' }]
+				})
+			]),
+			units: 'imperial'
+		});
+		const [avy, crack] = getByRole('list', { name: 'Signs of instability reported' }).children;
+		expect(avy.className).toContain('avy');
+		expect(crack.className).toContain('crack');
+	});
+
+	it('still lists the photo reports from data cached before the full list existed', () => {
+		const stale = data([]);
+		delete stale.area_reports;
+		stale.photo_reports = [obs('Silver Basin', 'near', 2)];
+		const { getByText } = render(RecentObservations, {
+			data: stale,
+			units: 'imperial',
+			name: 'Crystal Mountain'
+		});
+		expect(getByText('Silver Basin')).toBeTruthy();
+	});
 });

@@ -1,6 +1,7 @@
 <!--
   What an observer wrote with a field report (NWAC's observations): the signs of
-  instability they ticked, as chips, then their summary in paragraphs and their notes on
+  instability they ticked, as chips coloured the way NWAC's site colours them (red for
+  avalanches, orange for collapsing and cracking), then their summary in paragraphs and their notes on
   instability and avalanches. `clamp` shows the first lines of the summary with "More" to
   read the rest. Nothing for a report without words. (The Backcountry tab; the photo
   viewer keeps to the photos.)
@@ -34,7 +35,7 @@
 		{#if signs.length}
 			<ul class="signs" aria-label="Signs of instability reported">
 				{#each signs as s (s.kind)}
-					<li class:grave={s.kind.startsWith('avalanches')}>{signLabel(s)}</li>
+					<li class={s.kind.startsWith('avalanches') ? 'avy' : 'crack'}>{signLabel(s)}</li>
 				{/each}
 			</ul>
 		{/if}
@@ -56,10 +57,6 @@
 	.words {
 		display: grid;
 		gap: 6px;
-		--chip: var(--surface-2);
-		--chip-text: var(--text);
-		--grave: var(--warn-ink);
-		--grave-bg: var(--warn-bg);
 	}
 	.signs {
 		list-style: none;
@@ -71,15 +68,18 @@
 	}
 	.signs li {
 		font-size: 0.78rem;
-		padding: 2px 8px;
-		border-radius: 999px;
-		background: var(--chip);
-		color: var(--chip-text);
-	}
-	.signs li.grave {
-		background: var(--grave-bg);
-		color: var(--grave);
 		font-weight: 600;
+		padding: 2px 9px;
+		border-radius: 999px;
+	}
+	/* As on NWAC's observations: red for avalanches, orange for collapsing and cracking. */
+	.signs li.avy {
+		background: light-dark(#fde8e8, rgb(239 68 68 / 0.2));
+		color: light-dark(#c81e1e, #fca5a5);
+	}
+	.signs li.crack {
+		background: light-dark(#fff1e0, rgb(249 115 22 / 0.2));
+		color: light-dark(#b8480b, #fdba74);
 	}
 	.text {
 		display: grid;
