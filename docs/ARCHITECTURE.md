@@ -171,8 +171,9 @@ older than `STALE_AFTER_H` (12 h).
   the caption
   "Experimental estimate from the bulletin and terrain shape. Not a forecast. Doesn't
   show runouts or slopes above you." The Inspector shows every factor for a spot.
-- **Exception two: the outlook's weather stress.** Each outlook day grades four factors
-  0–3 (new snow, drifting, rain onto snow, warming) on rule-of-thumb thresholds
+- **Exception two: the outlook's weather loading** (`stress` in the code). Each outlook
+  day grades four factors 0–3 (new snow, drifting, rain onto snow, warming) on
+  rule-of-thumb thresholds
   (`config/forecast.yaml` → `backcountry: outlook_*`, `analysis/backcountry.py`): new
   snow on the day's or the 72 h total, drifting only with recent snow to move, warming
   from a sharp 24 h rise or a summit thaw (held at 1 after a good refreeze, one more
@@ -181,8 +182,10 @@ older than `STALE_AFTER_H` (12 h).
   snowpack, and is never a danger rating: it uses its own words (Little, Some, Strong,
   Very strong) and the concern index's blue-to-magenta hues, never the danger scale's,
   shows the published danger beside it only for days the bulletin covers, and always
-  carries "An estimate from the forecast, not a danger rating … buried weak layers stay
-  dangerous through quiet weather." `HAZARD_INDEX=off` (`hazard_index` in `/api/meta`)
+  carries a key under the days: "estimated from the forecast. It isn't a danger rating,
+  and it can't see the snowpack itself: buried weak layers stay dangerous through quiet
+  weather." The thresholds travel in the snapshot (`backcountry.outlook_steps`) so the key
+  can show them in the viewer's units. `HAZARD_INDEX=off` (`hazard_index` in `/api/meta`)
   hides the grade and leaves the facts.
 - **Ski-day rating** for resorts: Powder, Great, Good, Fair or Poor, with the
   reasons, from new snow, snow quality, rain, summit gusts, cloud and temperature.
@@ -247,7 +250,7 @@ and recorded by name. Nightly (`store/retention.py`):
 - **The app's estimates** (`HAZARD_INDEX`): when it is off, `GET /api/map/concern`
   answers 404, so the map has nothing to work out the concern index with and doesn't
   offer it, and `/api/meta` says `hazard_index: false`, so the Backcountry tab shows the
-  outlook's facts without the weather-stress grade.
+  outlook's facts without the weather-loading grade.
 - **Privacy**: no analytics; the owner's contact email goes only to NWS, which
   asks for it; viewers' settings and positions stay in their browsers.
 

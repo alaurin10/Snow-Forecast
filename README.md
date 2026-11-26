@@ -85,7 +85,7 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
 | `TILES_MAX_MB` | `2000` | Disk cap for the map tile cache |
 | `PUSH_MAX_SUBSCRIPTIONS` | `500` | Most devices with alerts on |
-| `HAZARD_INDEX` | `on` | The app's own experimental estimates: the map's avalanche concern index (each browser accepts its warning once) and the Backcountry tab's weather-stress grade; `off` hides both for every visitor |
+| `HAZARD_INDEX` | `on` | The app's own experimental estimates: the map's avalanche concern index (each browser accepts its warning once) and the Backcountry tab's weather-loading grade; `off` hides both for every visitor |
 
 Forecast models, thresholds and the schedule are in
 [`config/forecast.yaml`](config/forecast.yaml); the approximate treeline bands the map's

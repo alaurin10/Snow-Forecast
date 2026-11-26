@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { AvalancheView, OutlookDay } from '../types.gen';
-import { cell, drivers, outlookSummary, publishedDanger, stressWord } from './outlook';
+import {
+	activeFactors,
+	cell,
+	drivers,
+	outlookSummary,
+	publishedDanger,
+	stressWord,
+	thresholds
+} from './outlook';
 
 const day = (date: string, over: Partial<OutlookDay> = {}): OutlookDay => ({
 	date,
@@ -47,7 +55,7 @@ describe('cell', () => {
 	it('words new snow with the 72 h total when that is more', () => {
 		expect(cell(storm('2026-11-06'), 'snow', 'imperial')).toEqual({
 			value: '11.8 in',
-			detail: '16.5 in in 72 h',
+			detail: '16.5 in / 3 days',
 			level: 2
 		});
 		expect(cell(day('x', { new_cm: 5, storm_cm: 5 }), 'snow', 'metric').detail).toBe('');
@@ -55,7 +63,7 @@ describe('cell', () => {
 	it('words the wind and where it loads', () => {
 		expect(cell(storm('x'), 'wind', 'imperial')).toMatchObject({
 			value: 'S 34 mph',
-			detail: 'loading N'
+			detail: 'loads N'
 		});
 		expect(cell(day('x', { wind_from: 'W', wind_kmh: 50 }), 'wind', 'metric').detail).toBe(
 			'little snow to move'
@@ -70,20 +78,57 @@ describe('cell', () => {
 		expect(cell(day('x', { rain_mm: 0 }), 'rain', 'metric').value).toBe('None');
 		expect(cell(day('x', { rain_mm: 12, rain_to_m: 1800 }), 'rain', 'metric')).toMatchObject({
 			value: '12.0 mm',
-			detail: 'up to 1,800 m'
+			detail: 'to 1,800 m'
 		});
 	});
-	it('shows the freezing level, and what the warmth amounts to', () => {
+	it('shows the warmth when there is some, else the freezing level', () => {
 		expect(cell(day('x'), 'warm', 'metric')).toMatchObject({
 			value: '1,500 m',
-			detail: 'frozen up top'
+			detail: 'freezing level'
 		});
-		expect(cell(day('x', { thaw_h: 9 }), 'warm', 'metric').detail).toBe(
-			'9 h above freezing up top'
-		);
-		expect(cell(day('x', { temp_rise_c: 10 }), 'warm', 'imperial').detail).toBe(
-			'18°F warmer in 24 h'
-		);
+		expect(cell(day('x', { thaw_h: 9 }), 'warm', 'metric')).toMatchObject({
+			value: '9 h thaw',
+			detail: 'freezing level 1,500 m'
+		});
+		expect(cell(day('x', { temp_rise_c: 10 }), 'warm', 'imperial')).toMatchObject({
+			value: '18°F warmer',
+			detail: 'in 24 h, freezing level 4,900 ft'
+		});
+	});
+});
+
+describe('activeFactors', () => {
+	it('keeps the factors that push, in their usual order', () => {
+		const d = day('x', { levels: { snow: 1, wind: 0, rain: 3, warm: 2 } });
+		expect(activeFactors(d)).toEqual(['snow', 'rain', 'warm']);
+		expect(activeFactors(day('x'))).toEqual([]);
+	});
+});
+
+describe('thresholds', () => {
+	const steps = {
+		snow_cm: [10, 25, 40],
+		storm_cm: [30, 50, 80],
+		wind_kmh: [25, 40, 60],
+		rain_mm: [1, 6, 20],
+		rise_c: [5, 8, 12],
+		thaw_h: [3, 8]
+	};
+	it('words each level in round numbers, in the viewer’s units', () => {
+		expect(thresholds(steps, 'imperial')).toEqual([
+			{
+				factor: 'snow',
+				steps: ['4 in in a day, or 12 in over 3 days', '10 in, or 20 in', '16 in, or 31 in']
+			},
+			{ factor: 'wind', steps: ['16 mph', '25 mph', '37 mph'] },
+			{ factor: 'rain', steps: ['0.04 in', '0.24 in', '0.79 in'] },
+			{ factor: 'warm', steps: ['9°F rise, or 3 h thaw', '14°F rise, or 8 h thaw', '22°F rise'] }
+		]);
+		const metric = thresholds(steps, 'metric');
+		expect(metric[0].steps[0]).toBe('10 cm in a day, or 30 cm over 3 days');
+		expect(metric[1].steps).toEqual(['25 km/h', '40 km/h', '60 km/h']);
+		expect(metric[2].steps[0]).toBe('1 mm');
+		expect(metric[3].steps[2]).toBe('12°C rise');
 	});
 });
 
@@ -129,7 +174,7 @@ describe('outlookSummary', () => {
 			'imperial'
 		);
 		expect(text).toBe(
-			'Very strong weather stress Thu: 11.8 in of new snow and S wind to 34 mph loading N slopes. Easing by Sat.'
+			'Very strong weather loading Thu: 11.8 in of new snow and S wind to 34 mph loading N slopes. Easing by Sat.'
 		);
 	});
 	it('joins runs of days', () => {
@@ -146,13 +191,13 @@ describe('outlookSummary', () => {
 			'metric'
 		);
 		expect(text).toMatch(
-			/^Very strong weather stress Fri to Sun and Tue\. Fri brings 30 cm of new snow/
+			/^Very strong weather loading Fri to Sun and Tue\. Fri brings 30 cm of new snow/
 		);
 		expect(text).not.toMatch(/Easing/);
 	});
 	it('says today', () => {
 		expect(outlookSummary([storm(T), day('2026-11-05')], T, 'metric')).toMatch(
-			/^Very strong weather stress today: .* Easing by Thu\.$/
+			/^Very strong weather loading today: .* Easing by Thu\.$/
 		);
 	});
 	it('has nothing to say without days', () => {

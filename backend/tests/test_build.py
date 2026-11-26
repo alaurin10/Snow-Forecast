@@ -76,6 +76,10 @@ def test_backcountry_ridge_and_days(loc_id: str) -> None:
     for a, b in zip(bc.outlook, bc.outlook[1:], strict=False):
         want = "rising" if b.stress > a.stress else "easing" if b.stress < a.stress else "steady"
         assert b.trend == want
+    # Its thresholds travel with it, so the page can say what the levels mean.
+    assert bc.outlook_steps is not None
+    assert bc.outlook_steps.snow_cm == list(config().backcountry.outlook_snow_cm)
+    assert len(bc.outlook_steps.thaw_h) == 2
     days = [p for p in snap.bands[1].periods if p.kind == "day"]
     assert [d.date for d in snap.days] == [p.date for p in days]
     resort = snap.location.kind == "resort"

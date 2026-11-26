@@ -169,27 +169,61 @@ describe('problem rose', () => {
 describe('outlook', () => {
 	const days = tour.backcountry!.outlook!;
 	const today = tour.now.slice(0, 10);
+	const steps = {
+		snow_cm: [10, 25, 40],
+		storm_cm: [30, 50, 80],
+		wind_kmh: [25, 40, 60],
+		rain_mm: [1, 6, 20],
+		rise_c: [5, 8, 12],
+		thaw_h: [3, 8]
+	};
 
-	it('gives every day its grade and four facts', () => {
+	it('gives every day a tile with its grade and a line per factor that pushes', () => {
 		const { container, getByText } = render(Outlook, { days, avy: null, today, units: 'imperial' });
-		const rows = container.querySelectorAll('.row:not(.head)');
-		expect(rows.length).toBe(days.length);
-		rows.forEach((row, i) => {
-			expect(row.querySelectorAll('.fact').length).toBe(4);
-			expect(row.querySelector('.stress')?.classList.contains(`s${days[i].stress}`)).toBe(true);
+		const tiles = container.querySelectorAll('li.day');
+		expect(tiles.length).toBe(days.length);
+		tiles.forEach((tile, i) => {
+			const d = days[i];
+			expect(tile.querySelector('.chip')?.classList.contains(`s${d.stress}`)).toBe(true);
+			const active = Object.values(d.levels).filter((v) => v > 0).length;
+			expect(tile.querySelectorAll('.fact').length).toBe(active);
+			if (!active) expect(tile.textContent).toMatch(/Calm/);
+			// Each factor's own level, as a meter.
+			tile.querySelectorAll('.fact').forEach((f) => {
+				expect(f.querySelectorAll('.meter i').length).toBe(3);
+			});
 		});
 		expect(getByText('Today')).toBeTruthy();
-		expect(container.textContent).toMatch(/An estimate from the forecast, not a danger rating/);
-		expect(container.textContent).toMatch(/can’t see the\s+snowpack itself/);
+	});
+
+	it('explains its levels in a key under the days', () => {
+		const { container } = render(Outlook, { days, avy: null, today, units: 'imperial', steps });
+		const key = container.querySelector('.key')!;
+		expect(key.compareDocumentPosition(container.querySelector('.days')!)).toBe(
+			Node.DOCUMENT_POSITION_PRECEDING
+		);
+		expect(key.textContent).toMatch(/It isn't a danger rating/);
+		expect(key.textContent).toMatch(/buried weak\s+layers/);
+		expect(key.querySelectorAll('.scale .word').length).toBe(4);
+		const rows = key.querySelectorAll('.thr tbody tr');
+		expect(rows.length).toBe(4);
+		expect(rows[0].textContent).toMatch(/4 in in a day, or 12 in over 3 days/);
+	});
+
+	it('leaves out the numbers when the snapshot has none', () => {
+		const { container } = render(Outlook, { days, avy: null, today, units: 'imperial' });
+		expect(container.querySelector('.thr')).toBeNull();
+		expect(container.querySelectorAll('.scale .word').length).toBe(4);
 	});
 
 	it('shows the published rating only on the days the bulletin covers', () => {
 		const v = view('current');
 		v.doc!.days = [{ date: today, alpine: 3, treeline: 2, below: 1 }];
 		const { container } = render(Outlook, { days, avy: v, today, units: 'imperial' });
-		const pubs = [...container.querySelectorAll('.row:not(.head) .pub')];
-		expect(pubs[0].textContent).toMatch(/3 · Considerable/);
-		for (const p of pubs.slice(1)) expect(p.textContent).toMatch(/Not rated/);
+		const tiles = [...container.querySelectorAll('li.day')];
+		expect(tiles[0].querySelector('.danger')?.textContent).toMatch(/3 · Considerable/);
+		for (const t of tiles.slice(1)) expect(t.querySelector('.danger')).toBeNull();
+		expect(container.querySelector('.key')?.textContent).toMatch(/own danger rating/);
 	});
 
 	it('never shows an expired rating', () => {
@@ -204,24 +238,26 @@ describe('outlook', () => {
 
 	it('never borrows the danger scale for its own grade', () => {
 		const { container } = render(Outlook, { days, avy: null, today, units: 'imperial' });
-		for (const el of container.querySelectorAll('.stress'))
+		for (const el of container.querySelectorAll('.chip'))
 			expect(el.textContent).not.toMatch(/Low|Moderate|Considerable|High|Extreme/);
-		expect(container.querySelectorAll('.stress .danger').length).toBe(0);
+		expect(container.querySelectorAll('.chip.danger').length).toBe(0);
 	});
 
-	it('shows only the facts when the server has its estimates off', () => {
+	it('shows only the facts, all four every day, when the server has its estimates off', () => {
 		const { container } = render(Outlook, {
 			days,
 			avy: null,
 			today,
 			units: 'imperial',
-			graded: false
+			graded: false,
+			steps
 		});
-		expect(container.querySelectorAll('.stress').length).toBe(0);
-		expect(container.querySelectorAll('.pips').length).toBe(0);
+		expect(container.querySelectorAll('.chip').length).toBe(0);
+		expect(container.querySelectorAll('.meter').length).toBe(0);
 		expect(container.querySelector('.lede')).toBeNull();
-		expect(container.textContent).not.toMatch(/Weather stress/i);
-		expect(container.querySelectorAll('.row:not(.head) .fact').length).toBe(days.length * 4);
+		expect(container.querySelector('.thr')).toBeNull();
+		expect(container.textContent).not.toMatch(/Weather loading/i);
+		expect(container.querySelectorAll('li.day .fact').length).toBe(days.length * 4);
 	});
 
 	it('waits for a run when the snapshot has no outlook yet', () => {

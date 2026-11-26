@@ -1115,6 +1115,7 @@ export interface Alert {
  */
 export interface BackcountryOut {
 	outlook?: OutlookDay[];
+	outlook_steps?: OutlookSteps | null;
 	refreeze: RefreezeNight[];
 	rose: RoseOut[];
 	sky: SkyDay[];
@@ -1184,6 +1185,21 @@ export interface SkyDay {
 	cloud_mid: number | null;
 	date: string;
 	vis_min_m: number | null;
+}
+/**
+ * The values where each outlook factor becomes some, strong and very strong
+ * (config `backcountry:`), so the page can say what its levels mean.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "OutlookSteps".
+ */
+export interface OutlookSteps {
+	rain_mm: number[];
+	rise_c: number[];
+	snow_cm: number[];
+	storm_cm: number[];
+	thaw_h: number[];
+	wind_kmh: number[];
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
