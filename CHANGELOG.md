@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
+  colours for the snow level's height, three colours (the radar's blue, pink and green)
+  show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.
+  It's drawn on the device like the temperature, so zoomed in it follows every ridge with
+  the snow level at each spot (not one level for the whole screen), and its slider moves
+  smoothly between the 3-hourly frames.
 - **The map's temperature says where it reaches 32 °F.** Zoomed in, a line under the key
   gives that height at the map's centre, so it can be read beside the snow level's
   "Snow above …". The snow level's note says why the two differ: snow usually reaches

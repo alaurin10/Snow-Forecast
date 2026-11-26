@@ -3,8 +3,9 @@ something to play: radar for the past two hours, a short nowcast and a day of ho
 forecast, at the real picture size over the real box, with bands of rain and snow that
 drift east; snow totals for a few windows, more snow over a wider area the longer
 the window; and clouds: a satellite picture, then forecast cloud cover with its heights
-(a deck over the Cascades, based at 1,500 m with its top at 2,500 m). Written fresh each
-run (no binaries in git).
+(a deck over the Cascades, based at 1,500 m with its top at 2,500 m); and the snow level
+every 3 hours as rain, mix or snow, on a made-up ground (the real one needs the network).
+Written fresh each run (no binaries in git).
 
     uv run --frozen python ../frontend/e2e/precip_fixture.py <data>/precip
 """
@@ -22,7 +23,17 @@ import numpy as np
 from PIL import Image
 
 from snowwatch.maps import bins, cloudheights, dataframe, totaldata
-from snowwatch.maps.palette import FINE_EXT, RAIN_T, SNOW_T, encode_fine, fine_index, paint_total
+from snowwatch.maps.palette import (
+    FINE_EXT,
+    RAIN_T,
+    SNOW_T,
+    SNOWLINE,
+    encode,
+    encode_fine,
+    fine_index,
+    index_ramp,
+    paint_total,
+)
 from snowwatch.maps.region import WEST, box_region, merc_x, merc_y
 from snowwatch.maps.render import Renderer
 
@@ -122,6 +133,40 @@ def clouds(out: Path, region, now: int) -> list[dict]:
     return frames
 
 
+def snow_level(out: Path, region, now: int) -> list[dict]:
+    """The snow level every 3 hours for a day, rising from 1,200 m to 1,800 m, over a
+    made-up ground of ridges up to 3,000 m: drawn as the server draws it (layers.py)."""
+    h, w = region.height, region.width
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    ground = (1500 + 1500 * np.sin(xs / 60.0) * np.cos(ys / 80.0)).astype(np.float32)
+    start = now // 10800 * 10800 + 10800
+    frames = []
+    for i in range(9):
+        t = start + i * 10800
+        level = np.full((h, w), 1200 + 75 * i, np.float32)
+        above = ground - level
+        png = encode(index_ramp(above, SNOWLINE))
+        name = f"sl{t}-{hashlib.sha1(png).hexdigest()[:12]}.png"
+        (out / name).write_bytes(png)
+        data = totaldata.encode_level(above, level)
+        numbers = f"sd{t}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+        (out / numbers).write_bytes(data)
+        frames.append(
+            {
+                "t": t,
+                "file": name,
+                "key": name,
+                "kind": "forecast",
+                "span_h": 0,
+                "hours": 0,
+                "src": {"north": "hrdps", "south": "nbm"},
+                "runs": {},
+                "data": numbers,
+            }
+        )
+    return frames
+
+
 def main(out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     region = box_region(*WEST, WIDTH)
@@ -206,7 +251,10 @@ def main(out: Path) -> None:
         "frames": frames,
         "totals": totals,
         "steps": {"start": start, "key": "e2e", "steps": steps},
-        "layers": {"clouds": {"frames": clouds(out, region, now)}},
+        "layers": {
+            "clouds": {"frames": clouds(out, region, now)},
+            "snowlevel": {"frames": snow_level(out, region, now)},
+        },
         "attribution": [],
     }
     (out / "index.json").write_text(json.dumps(index))

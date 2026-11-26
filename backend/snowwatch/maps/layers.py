@@ -2,7 +2,9 @@
 `layers` job into the same folder and index as the frames (render.py):
 
   snowlevel  snow level, every 3 h to ~84 h: HRDPS-WEonG then RDPS-WEonG in Canada,
-             NBM's SNOWLVL in the US, blended as numbers like the frames (blend.py)
+             NBM's SNOWLVL in the US, blended as numbers like the frames (blend.py);
+             drawn as rain, mix or snow at the ground, and kept as the height above it
+             (totaldata.encode_level) for the map to do the same at every elevation
   gust       wind gusts at 10 m, every 3 h to ~84 h: the same sources
   ridge      the free-air wind at 700 hPa (about 3,000 m), every 3 h to ~84 h: RDPS,
              which covers the whole box (with its direction kept for tap-for-numbers)
@@ -42,7 +44,7 @@ from snowwatch.maps.geomet import (
     ts_iso,
     wcs_grid,
 )
-from snowwatch.maps.palette import DEPTH, SNOWLEVEL, TEMP, TOTAL, WIND
+from snowwatch.maps.palette import DEPTH, SNOWLEVEL, SNOWLINE, TEMP, TOTAL, WIND
 from snowwatch.maps.region import Region, spread, stitch
 from snowwatch.maps.sources import gibs, nohrsc, snodas
 from snowwatch.maps.sources.nbm import Nbm
@@ -74,6 +76,7 @@ class Field:
     scale: float  # source units → the picture's (m → m, m/s → km/h)
     ramp: list[tuple[float, str]]
     codes_to: float | None = None  # what GeoMet's negative codes mean (snow level: 0 m)
+    drawing: int = DRAWING  # in each picture's key: change it to draw them again
 
 
 SNOW_LEVEL = Field(
@@ -87,6 +90,7 @@ SNOW_LEVEL = Field(
     1.0,
     SNOWLEVEL,
     codes_to=0.0,
+    drawing=3,  # 3: snow, mix or rain at the ground, with the numbers for the map
 )
 GUST = Field(
     "gust",
@@ -241,6 +245,10 @@ def model_field(
     us: Nbm | None = r._nbm(region)
     prev = _reuse(r, old)
     w_hrdps = r._hrdps_weight(region) if hr is not None else None
+    # The snow level is drawn as what falls on the ground: it needs the ground.
+    ground = r._ground(region, region_elevation) if spec is SNOW_LEVEL else None
+    if spec is SNOW_LEVEL and ground is None:
+        return None
 
     def job(t: int) -> Callable[[], LayerFrame | None]:
         def go() -> LayerFrame | None:
@@ -250,7 +258,7 @@ def model_field(
             use_n = us is not None and 1 <= lead <= 192
             key = "|".join(
                 [
-                    f"{spec.name}@{DRAWING}",
+                    f"{spec.name}@{spec.drawing}",
                     str(t),
                     f"h:{hr.ref}" if use_h and hr else "-",
                     f"r:{rd.ref}" if use_r and rd else "-",
@@ -289,8 +297,17 @@ def model_field(
             src["north"] = north
             src.setdefault("south", north)
             value = mosaic(layers).amount
-            name = r._save_ramp(value, spec.ramp, f"{spec.prefix}{t}")
-            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs)
+            if ground is None:
+                name = r._save_ramp(value, spec.ramp, f"{spec.prefix}{t}")
+                return LayerFrame(t, name, key, "forecast", 0, 0, src, runs)
+            # Snow, mix or rain at the ground; the probe keeps the snow level itself. The
+            # numbers let the map do the same at each pixel's own elevation.
+            above = ground - value
+            name = r._save_ramp(above, SNOWLINE, f"{spec.prefix}{t}", value)
+            data = totaldata.encode_level(above, value)
+            numbers = f"sd{t}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
+            r._store(numbers, data)
+            return LayerFrame(t, name, key, "forecast", 0, 0, src, runs, numbers)
 
         return go
 

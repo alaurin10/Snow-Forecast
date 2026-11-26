@@ -58,6 +58,15 @@ SNOWLEVEL: list[tuple[float, str]] = [
     (3750, "#cf4339"),
     (4000, "#a82f3a"),
 ]
+# The snow level as what falls where: the ground's height above the snow level (m). Rain
+# below the band where rain and snow mix, mix across it (±MIX_BAND_M), snow above. The
+# same hues as the radar's snow, mix and rain, light to dark so they part without colour.
+MIX_BAND_M = 150.0
+SNOWLINE: list[tuple[float, str]] = [
+    (-1e6, "#9fd49a"),  # rain
+    (-MIX_BAND_M, "#e0457b"),  # mix
+    (MIX_BAND_M, "#2c5fb8"),  # snow
+]
 # Wind (gusts at 10 m, or the free-air wind at ridge level): lower bound in km/h.
 WIND: list[tuple[float, str]] = [
     (20, "#d9f0d3"),
@@ -136,7 +145,9 @@ def ramp_color(ramp: list[tuple[float, str]], value: float) -> RGB | None:
 
 # Every colour a frame can hold: index 0 is transparent.
 PALETTE: list[RGB] = [(0, 0, 0)] + [
-    hex_rgb(c) for ramp in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP) for _, c in ramp
+    hex_rgb(c)
+    for ramp in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP, SNOWLINE)
+    for _, c in ramp
 ]
 
 # Precipitation type codes, as the compositing uses them.
@@ -226,7 +237,7 @@ def paint_ramp(values: np.ndarray, ramp: list[tuple[float, str]]) -> np.ndarray:
 def _ramp_offset(ramp: list[tuple[float, str]]) -> int:
     """Where a ramp's first colour sits in PALETTE (0 is transparent)."""
     at = 1
-    for r in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP):
+    for r in (SNOW, MIX, RAIN, TOTAL, SNOWLEVEL, WIND, DEPTH, TEMP, SNOWLINE):
         if r is ramp:
             return at
         at += len(r)

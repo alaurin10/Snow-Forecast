@@ -126,16 +126,25 @@ describe('Timeline (weather controls)', () => {
 		expect(screen.getByText(/^to /)).toBeTruthy();
 	});
 
-	it('plays the snow level forecast, with the drape key when zoomed in', () => {
+	it('plays the snow level as rain, mix or snow, with where snow starts when zoomed in', () => {
 		const view = weatherView(tl, 'snowlevel', 'gust');
 		const current = view.frames[0];
 		const label = { when: 'Fri 5 AM', rel: 'forecast · in 3 h' };
 		render(Timeline, { ...base, weather: 'snowlevel', view, current, label });
 		expect(screen.getByRole('slider', { name: 'Time' })).toBeTruthy();
-		expect(screen.getByLabelText('Key, m')).toBeTruthy();
+		const key = screen.getByLabelText('Key');
+		expect(key.textContent?.replace(/\s+/g, ' ').trim()).toBe('Snow Mix Rain at the ground');
 		cleanup();
 		render(Timeline, { ...base, weather: 'snowlevel', view, current, label, snowLine: 1200 });
-		expect(screen.getByText(/Snow above 1,350 m/)).toBeTruthy();
+		expect(screen.getByText(/snow above 1,350 m at the centre/)).toBeTruthy();
+	});
+
+	it('slides the snow level smoothly when it is drawn from numbers', () => {
+		const view = weatherView(tl, 'snowlevel', 'gust');
+		const field = { t0: T, hours: [0, 3, 6], marks: [0, 6], ticks: ['Now', '6h'] };
+		render(Timeline, { ...base, weather: 'snowlevel', view, field, fieldHours: 3 });
+		const slider = screen.getByRole('slider', { name: 'Time' }) as HTMLInputElement;
+		expect(slider.step).toBe('0.01');
 	});
 
 	it("gives the temperature's 32 °F height at the map's centre when zoomed in", () => {

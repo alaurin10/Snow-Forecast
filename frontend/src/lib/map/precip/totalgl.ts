@@ -13,9 +13,21 @@
 // The Temperature layer is drawn by the same program with its own scale (StepScale): its
 // codes are linear in °C, its two bands the temperature at sea level and high up (so the
 // bands give a straight line with height), and its colours run smoothly between the key's.
+// The Snow level layer too (LEVEL_SCALE): its codes are the height above the snow level,
+// exact along the same straight line, coloured as rain, mix or snow.
 import { TOTAL, type RampStep } from '../../radar';
-import { TEMP } from '../weather';
-import { CM_CODES, CM_MAX, CM_MIN, cmCode, codeCm, TEMP_MIN, TEMP_STEP } from './steps';
+import { snowlineKind, TEMP } from '../weather';
+import {
+	CM_CODES,
+	CM_MAX,
+	CM_MIN,
+	cmCode,
+	codeCm,
+	LEVEL_MIN,
+	LEVEL_STEP,
+	TEMP_MIN,
+	TEMP_STEP
+} from './steps';
 import type { StepPlanes } from './steps';
 
 // The codes' scales as GLSL float literals.
@@ -23,6 +35,8 @@ const CM_MIN_GLSL = CM_MIN.toFixed(6);
 const SPAN_GLSL = Math.log(CM_MAX / CM_MIN).toFixed(6);
 const T_MIN_GLSL = TEMP_MIN.toFixed(6);
 const T_STEP_GLSL = TEMP_STEP.toFixed(6);
+const L_MIN_GLSL = LEVEL_MIN.toFixed(6);
+const L_STEP_GLSL = LEVEL_STEP.toFixed(6);
 
 /** How a layer's codes read as amounts, and how amounts are coloured. */
 export interface StepScale {
@@ -115,8 +129,10 @@ void main() {
 	float e = max(fwidth(c) * 0.75, 0.05);
 	float alpha = smoothstep(u_first - e, u_first + e, c) * u_opacity;
 	if (alpha <= 0.0) discard;
-	vec3 rgb = texture(u_lut, vec2((max(c, u_first) + 0.5) / 256.0, 0.5)).rgb;
-	o_color = vec4(rgb * alpha, alpha);  // premultiplied, as the map blends
+	vec4 lc = texture(u_lut, vec2((max(c, u_first) + 0.5) / 256.0, 0.5));
+	alpha *= lc.a;  // a colour may be lighter than the layer (the snow level's rain)
+	if (alpha <= 0.0) discard;
+	o_color = vec4(lc.rgb * alpha, alpha);  // premultiplied, as the map blends
 }`;
 
 /** Each code's colour on the snow total's steps (from TOTAL; nothing below the first). */
@@ -184,6 +200,25 @@ export const TEMP_SCALE: StepScale = {
 	amount: `return ${T_MIN_GLSL} + (code - 1.0) * ${T_STEP_GLSL};`,
 	code: `return clamp(1.0 + (a - ${T_MIN_GLSL}) / ${T_STEP_GLSL}, 1.0, 255.0);`,
 	lut: tempLut,
+	first: 0.5
+};
+
+/** Each snow level code's colour: rain, mix or snow by the height above the snow level
+ *  at the code's middle (code 0: no data, clear). */
+export function levelLut(): Uint8Array {
+	const out = new Uint8Array(256 * 4);
+	for (let c = 1; c < 256; c++) {
+		const k = snowlineKind(LEVEL_MIN + (c - 1) * LEVEL_STEP);
+		out.set([...hexRgb(k.color), Math.round(k.alpha * 255)], c * 4);
+	}
+	return out;
+}
+
+/** The snow level: codes linear in metres above it, coloured rain, mix or snow. */
+export const LEVEL_SCALE: StepScale = {
+	amount: `return ${L_MIN_GLSL} + (code - 1.0) * ${L_STEP_GLSL};`,
+	code: `return clamp(1.0 + (a - ${L_MIN_GLSL}) / ${L_STEP_GLSL}, 1.0, 255.0);`,
+	lut: levelLut,
 	first: 0.5
 };
 
