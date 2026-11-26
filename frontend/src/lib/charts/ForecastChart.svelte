@@ -145,7 +145,7 @@
 	 * the same snow and rain as the bars; nothing while it's dry). Keyed by band label.
 	 */
 	const bandRuns = $derived.by(() => {
-		const out = new Map<string, { kind: string; left: string; width: string }[]>();
+		const out: Record<string, { kind: string; left: string; width: string }[]> = {};
 		if (metric !== 'fl') return out;
 		for (const b of bands) {
 			const runs: { kind: string; start: number; end: number }[] = [];
@@ -158,14 +158,11 @@
 					if (last && last.kind === kind && last.end === k) last.end = k + 1;
 					else runs.push({ kind, start: k, end: k + 1 });
 				});
-			out.set(
-				b.label,
-				runs.map((r) => ({
-					kind: r.kind,
-					left: `${((r.start / N) * 100).toFixed(3)}%`,
-					width: `${(((r.end - r.start) / N) * 100).toFixed(3)}%`
-				}))
-			);
+			out[b.label] = runs.map((r) => ({
+				kind: r.kind,
+				left: `${((r.start / N) * 100).toFixed(3)}%`,
+				width: `${(((r.end - r.start) / N) * 100).toFixed(3)}%`
+			}));
 		}
 		return out;
 	});
@@ -1140,7 +1137,7 @@
 			{/if}
 			{#each refs as r (r.key)}
 				<div class="ref" style:top={r.top}></div>
-				{#each bandRuns.get(r.key) ?? [] as run (run.left)}
+				{#each bandRuns[r.key] ?? [] as run (run.left)}
 					<i
 						class="refrun {run.kind}"
 						style:top={r.top}
