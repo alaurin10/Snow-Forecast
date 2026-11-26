@@ -54,6 +54,17 @@ const nearby = (photos: number): NearbyOut => ({
 		: []
 });
 
+/** A pointer drag across `el` from one point to another, as a swipe. */
+function drag(el: HTMLElement, from: [number, number], to: [number, number]) {
+	const ev = (type: string, [x, y]: [number, number]) =>
+		el.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }));
+	ev('pointerdown', from);
+	ev('pointermove', [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]);
+	ev('pointermove', to);
+	ev('pointerup', to);
+	flushSync();
+}
+
 afterEach(() => {
 	cleanup();
 	prefs.setCamsAutoplay(false);
@@ -155,8 +166,9 @@ describe('webcams tab', () => {
 			`${CLOUD}c_limit,w_480/p1.jpg`
 		]);
 		expect(imgs[0].closest('a')?.getAttribute('href')).toBe(`${CLOUD}c_limit,w_1600/p0.jpg`);
-		expect(getByText('Cracking at ridgetop')).toBeTruthy();
-		expect(getByText(/12 km away/)).toBeTruthy();
+		// One short line above the photos; captions wait for the full-screen viewer.
+		expect(getByText(/· 12 km$/)).toBeTruthy();
+		expect(container.querySelector('figcaption')).toBeNull();
 	});
 
 	it('shows only the photos where there are no cameras, and says when there are none', () => {
@@ -174,7 +186,7 @@ describe('webcams tab', () => {
 			nearby: null,
 			avy: { provider: 'nac', center_id: 'NWAC' }
 		});
-		const link = getByRole('link', { name: 'All NWAC observations ↗' });
+		const link = getByRole('link', { name: 'NWAC observations ↗' });
 		expect(link.getAttribute('href')).toBe('https://nwac.us/observations#/view/observations');
 		expect(queryByText(/can't be shown here/)).toBeNull(); // NWAC's photos are shown
 		expect(queryByText(/No photos in/)).toBeNull(); // not loaded yet
@@ -188,7 +200,7 @@ describe('webcams tab', () => {
 			nearby: null,
 			avy: { provider: 'nac', center_id: 'SAC' }
 		});
-		expect(sierra.getByRole('link', { name: 'Recent Sierra Avalanche Center observations ↗' }));
+		expect(sierra.getByRole('link', { name: 'Sierra Avalanche Center observations ↗' }));
 		expect(sierra.getByText(/can't be shown here/)).toBeTruthy();
 	});
 
@@ -224,12 +236,10 @@ describe('webcams tab', () => {
 			tz: 'America/Los_Angeles',
 			avy: { provider: 'nac', center_id: 'NWAC' }
 		});
-		expect(
-			getByText(/From NWAC observations \(forecasters and the public\), last 14/)
-		).toBeTruthy();
-		expect(queryByText(/Mountain Information Network/)).toBeNull();
-		// The day only: NWAC's observations have no time of day.
-		expect(getByText('NWAC forecaster · 2 km away · West Slopes South')).toBeTruthy();
+		expect(getByText(/^NWAC observations, last 14 days\./)).toBeTruthy();
+		expect(queryByText(/Avalanche Canada/)).toBeNull();
+		// One short line: the day only (NWAC's observations have no time of day) and how far.
+		expect(getByText('Tue Nov 24 · 2 km')).toBeTruthy();
 		expect(container.querySelector('.photos img')?.getAttribute('src')).toBe(
 			`${MEDIA}a-medium.jpg`
 		);
@@ -271,13 +281,12 @@ describe('webcams tab', () => {
 			name: 'Whistler'
 		});
 		// Near the location first; the rest of the zone folded below.
-		expect(getByRole('heading', { name: 'Near Whistler' })).toBeTruthy();
 		const more = container.querySelector('details.zone') as HTMLDetailsElement;
 		expect(more.open).toBe(false);
 		expect(more.textContent).toContain('More in Sea To Sky');
 
 		// A photo opens the viewer at that photo, not a new page.
-		const second = container.querySelectorAll('.photos figure a')[1] as HTMLAnchorElement;
+		const second = container.querySelectorAll('.photos .grid a')[1] as HTMLAnchorElement;
 		const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
 		second.dispatchEvent(click);
 		flushSync();
@@ -301,14 +310,45 @@ describe('webcams tab', () => {
 		await fireEvent.keyDown(window, { key: 'ArrowLeft' });
 		expect(getByText('3 of 3')).toBeTruthy();
 
+		// A swipe flips: the photo follows the finger, then the next one slides in.
+		const stage = dialog.querySelector('.stage') as HTMLElement;
+		drag(stage, [200, 300], [80, 310]);
+		expect(getByText('1 of 3')).toBeTruthy();
+		expect(dialog.querySelector('.photo')?.classList.contains('from-right')).toBe(true);
+		drag(stage, [100, 300], [220, 290]);
+		expect(getByText('3 of 3')).toBeTruthy();
+		expect(dialog.querySelector('.photo')?.classList.contains('from-left')).toBe(true);
+		// A small nudge doesn't.
+		drag(stage, [200, 300], [215, 302]);
+		expect(getByText('3 of 3')).toBeTruthy();
+		// (A click right after a drag is the drag's own; a moment later the arrows work.)
+		await new Promise((r) => setTimeout(r));
+		// The arrows are big targets: the outer part of each side.
+		const prev = getByRole('button', { name: 'Previous photo' });
+		expect(prev.classList.contains('nav')).toBe(true);
+		await fireEvent.click(prev);
+		expect(getByText('2 of 3')).toBeTruthy();
+
+		// Swiping down closes it.
+		nav.state = {};
+		drag(stage, [200, 200], [205, 360]);
+		expect(queryByRole('dialog')).toBeNull();
+
+		// Wide screens: Gallery shows every photo at once; one opens on its own.
+		await fireEvent.click(getByRole('button', { name: 'Gallery' }));
+		expect(getByText('3 photos')).toBeTruthy();
+		const tiles = getByRole('dialog').querySelectorAll('.gallery button');
+		expect(tiles).toHaveLength(3);
+		await fireEvent.click(tiles[2]);
+		expect(getByText('3 of 3')).toBeTruthy();
+		await fireEvent.click(getByRole('button', { name: 'All photos' }));
+		expect(getByText('3 photos')).toBeTruthy();
 		// ✕ closes it (with no history entry to go back to here).
 		nav.state = {};
 		await fireEvent.click(getByRole('button', { name: 'Close photos' }));
 		expect(queryByRole('dialog')).toBeNull();
-
-		// "View all" starts at the first photo.
-		await fireEvent.click(getByRole('button', { name: 'View all 3 full screen' }));
-		expect(getByText('1 of 3')).toBeTruthy();
+		// No "view all" button: a photo is enough.
+		expect(queryByRole('button', { name: /View all/ })).toBeNull();
 	});
 
 	it('opens the rest of the zone when nothing is near', () => {

@@ -7,6 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Photo gallery on wide screens.** Gallery (on the Webcams tab, or the grid button in
+  the viewer) shows every field photo at once, each with its place and day; one opens on
+  its own.
+- **Swiping in the photo viewer.** The photo follows your finger and the next one slides
+  in quickly (no motion with the app's motion setting off); swipe down to close.
 - **Recent observations on the Backcountry tab.** What forecasters and people in the
   mountains reported around the location in the last two weeks: near it first, then,
   folded, the rest of its avalanche zone. Each shows who sent it, the day, the place and
@@ -35,6 +40,19 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Signs of instability are coloured as on NWAC's site**: red for avalanches (seen,
+  triggered, someone caught), orange for collapsing and shooting cracks.
+- **The Webcams tab's field photos are quicker to scan**: a one-line heading, one short
+  line per report (place, day, distance), then its photos; the sources in a line at the
+  bottom. "View all full screen" is gone: a photo opens the viewer.
+- **The viewer's previous and next targets are the outer part of each side** of the
+  photo, not only the small arrows.
+
+### Fixed
+- **Backcountry's recent observations could be empty while Webcams showed photos** for
+  the same place, for up to an hour after an update (the browser reused the location's
+  field reports from before the full list existed). It now falls back to the photo
+  reports.
 - **The photo viewer keeps the photo the focus** and its short line of text (place, who,
   day, distance, caption) well clear of the screen's rounded corners.
 - **The worker gives memory back between jobs.** It held ~2 GB while idle (memory freed
