@@ -286,6 +286,18 @@ class OutlookDay(BaseModel):
     trend: str | None  # rising, steady or easing against the day before
 
 
+class OutlookSteps(BaseModel):
+    """The values where each outlook factor becomes some, strong and very strong
+    (config `backcountry:`), so the page can say what its levels mean."""
+
+    snow_cm: list[float]  # new snow in the day at the summit
+    storm_cm: list[float]  # or over 72 h
+    wind_kmh: list[float]  # ridge wind, the day's strongest 6 h
+    rain_mm: list[float]  # rain onto snow at mid
+    rise_c: list[float]  # warming within 24 h at mid
+    thaw_h: list[float]  # hours above freezing at the summit: some, strong
+
+
 class BackcountryOut(BaseModel):
     rose: list[RoseOut]
     warming: WarmingOut
@@ -294,6 +306,8 @@ class BackcountryOut(BaseModel):
     storm: StormOut
     # Today and the days after it; empty in snapshots built before this existed.
     outlook: list[OutlookDay] = []
+    # The outlook's thresholds; None in snapshots built before this existed.
+    outlook_steps: OutlookSteps | None = None
 
 
 class Reason(BaseModel):

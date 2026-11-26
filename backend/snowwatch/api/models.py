@@ -304,7 +304,7 @@ class MetaOut(BaseModel):
     storm_cm: float  # a storm alert: this much in 48 h
     snowfall_cm_per_mm: float  # Open-Meteo's fixed snow-to-water conversion
     # Whether the app's own experimental estimates are shown (HAZARD_INDEX): the map's
-    # concern index and the Backcountry tab's weather-stress grade.
+    # concern index and the Backcountry tab's weather-loading grade.
     hazard_index: bool = True
 
 

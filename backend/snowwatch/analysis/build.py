@@ -50,6 +50,7 @@ from snowwatch.doc import (
     LocationMeta,
     OutlookDay,
     OutlookLevels,
+    OutlookSteps,
     PeriodOut,
     Reason,
     RefreezeNight,
@@ -628,8 +629,22 @@ def _backcountry(
         depth=depth,
         periods=periods,
     )
+    steps = OutlookSteps(
+        snow_cm=list(bcfg.outlook_snow_cm),
+        storm_cm=list(bcfg.outlook_storm_cm),
+        wind_kmh=list(bcfg.outlook_wind_kmh),
+        rain_mm=list(bcfg.outlook_rain_mm),
+        rise_c=list(bcfg.outlook_rise_c),
+        thaw_h=list(bcfg.outlook_thaw_h),
+    )
     return BackcountryOut(
-        rose=roses, warming=warming, refreeze=refreeze, sky=sky, storm=storm, outlook=outlook
+        rose=roses,
+        warming=warming,
+        refreeze=refreeze,
+        sky=sky,
+        storm=storm,
+        outlook=outlook,
+        outlook_steps=steps,
     )
 
 

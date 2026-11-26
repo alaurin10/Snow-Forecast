@@ -2,9 +2,9 @@
 // weather (config `backcountry:`); this turns the grades and facts into text in the
 // viewer's units. Nothing here is a danger rating, and none of it uses the danger
 // scale's words or colours.
-import type { AvalancheView, OutlookDay } from '../types.gen';
+import type { AvalancheView, OutlookDay, OutlookSteps } from '../types.gen';
 import { weekday } from '../time';
-import { elevation, snow, speed, water, type UnitSystem } from '../units';
+import { cmToIn, elevation, kmhToMph, mmToIn, snow, speed, water, type UnitSystem } from '../units';
 
 export type Factor = 'snow' | 'wind' | 'rain' | 'warm';
 export const FACTORS: readonly Factor[] = ['snow', 'wind', 'rain', 'warm'] as const;
@@ -12,11 +12,18 @@ export const FACTOR_NAMES: Record<Factor, string> = {
 	snow: 'New snow',
 	wind: 'Wind',
 	rain: 'Rain',
-	warm: 'Freezing level'
+	warm: 'Warming'
 };
 
-/** Weather stress, 0–3. Deliberately not the danger scale's words. */
+/** Weather loading, 0–3. Deliberately not the danger scale's words. */
 export const STRESS_WORDS = ['Little', 'Some', 'Strong', 'Very strong'] as const;
+/** What each level means, for the key under the days. */
+export const STRESS_MEANINGS = [
+	'Not much stressing the snowpack',
+	'Small fresh drifts or a little wet snow',
+	'Enough to build fresh slabs or soak the surface',
+	'A big loading day, or two Strong factors at once'
+] as const;
 export const stressWord = (n: number): string =>
 	STRESS_WORDS[Math.max(0, Math.min(3, Math.round(n)))];
 
@@ -26,7 +33,7 @@ const degrees = (c: number, units: UnitSystem) =>
 export interface Cell {
 	/** The fact, e.g. "11.8 in" or "S 34 mph". */
 	value: string;
-	/** What goes with it, e.g. "16.7 in in 72 h" or "loading N". */
+	/** A few words that go with it, e.g. "16.7 in / 3 days" or "loads N". */
 	detail: string;
 	level: number;
 }
@@ -38,14 +45,14 @@ export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
 		const more = (d.storm_cm ?? 0) > (d.new_cm ?? 0) + 0.5;
 		return {
 			value: snow(d.new_cm, units),
-			detail: more ? `${snow(d.storm_cm, units)} in 72 h` : '',
+			detail: more ? `${snow(d.storm_cm, units)} / 3 days` : '',
 			level
 		};
 	}
 	if (f === 'wind') {
 		const from = d.wind_from ? `${d.wind_from} ` : '';
 		const detail = d.loading?.length
-			? `loading ${d.loading.join('–')}`
+			? `loads ${d.loading.join('–')}`
 			: d.wind_from
 				? 'little snow to move'
 				: 'light';
@@ -56,22 +63,62 @@ export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
 		const wet = d.rain_mm >= 0.1;
 		return {
 			value: wet ? water(d.rain_mm, units) : 'None',
-			detail: wet && d.rain_to_m !== null ? `up to ${elevation(d.rain_to_m, units)}` : '',
+			detail: wet && d.rain_to_m !== null ? `to ${elevation(d.rain_to_m, units)}` : '',
 			level
 		};
 	}
+	// The warmth itself when there is some, else the freezing level.
 	const rise = d.temp_rise_c ?? 0;
-	const detail =
-		d.thaw_h > 0
-			? `${d.thaw_h} h above freezing up top`
-			: rise >= 5
-				? `${degrees(rise, units)} warmer in 24 h`
-				: 'frozen up top';
+	const fl = d.fl_max_m === null ? '' : `freezing level ${elevation(d.fl_max_m, units)}`;
+	if (d.thaw_h > 0) return { value: `${d.thaw_h} h thaw`, detail: fl, level };
+	if (rise >= 5)
+		return {
+			value: `${degrees(rise, units)} warmer`,
+			detail: fl ? `in 24 h, ${fl}` : 'in 24 h',
+			level
+		};
 	return {
 		value: d.fl_max_m === null ? '–' : elevation(d.fl_max_m, units),
-		detail,
+		detail: 'freezing level',
 		level
 	};
+}
+
+/** The factors pushing on the snowpack that day, in their usual order. */
+export const activeFactors = (d: OutlookDay): Factor[] => FACTORS.filter((f) => d.levels[f] > 0);
+
+/**
+ * What each level takes, per factor, in the viewer's units: the key's table. Rounded
+ * to what a reader would say ("4 in", "16 mph"); the server grades on the exact values.
+ */
+export function thresholds(
+	st: OutlookSteps,
+	units: UnitSystem
+): { factor: Factor; steps: string[] }[] {
+	const imp = units === 'imperial';
+	const depth = (cm: number) => (imp ? `${Math.round(cmToIn(cm))} in` : `${Math.round(cm)} cm`);
+	const wind = (kmh: number) =>
+		imp ? `${Math.round(kmhToMph(kmh))} mph` : `${Math.round(kmh)} km/h`;
+	const rain = (mm: number) => (imp ? `${mmToIn(mm).toFixed(2)} in` : `${mm} mm`);
+	const rise = (c: number) => `${degrees(c, units)} rise`;
+	return [
+		{
+			factor: 'snow',
+			steps: st.snow_cm.map((v, i) =>
+				i === 0
+					? `${depth(v)} in a day, or ${depth(st.storm_cm[i])} over 3 days`
+					: `${depth(v)}, or ${depth(st.storm_cm[i])}`
+			)
+		},
+		{ factor: 'wind', steps: st.wind_kmh.map(wind) },
+		{ factor: 'rain', steps: st.rain_mm.map(rain) },
+		{
+			factor: 'warm',
+			steps: st.rise_c.map((v, i) =>
+				i < st.thaw_h.length ? `${rise(v)}, or ${st.thaw_h[i]} h thaw` : rise(v)
+			)
+		}
+	];
 }
 
 /** What is pushing on the snowpack that day, strongest first, as short phrases. */
@@ -137,7 +184,7 @@ export function outlookSummary(days: OutlookDay[], today: string, units: UnitSys
 	const first = days.find((d) => d.stress === peak)!;
 	const why = list(drivers(first, units).slice(0, 2));
 	const several = days.filter((d) => d.stress === peak).length > 1;
-	let out = `${stressWord(peak)} weather stress ${list(spans)}`;
+	let out = `${stressWord(peak)} weather loading ${list(spans)}`;
 	if (why) out += several ? `. ${capital(name(first))} brings ${why}` : `: ${why}`;
 	out += '.';
 	const after = days.slice(lastTop + 1).find((d) => d.stress <= 1);

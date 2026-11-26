@@ -448,6 +448,17 @@
           },
           "type": "array"
         },
+        "outlook_steps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutlookSteps"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "refreeze": {
           "items": {
             "$ref": "#/$defs/RefreezeNight"
@@ -3234,6 +3245,57 @@
         "warm"
       ],
       "title": "OutlookLevels",
+      "type": "object"
+    },
+    "OutlookSteps": {
+      "description": "The values where each outlook factor becomes some, strong and very strong\n(config `backcountry:`), so the page can say what its levels mean.",
+      "properties": {
+        "rain_mm": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "rise_c": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "snow_cm": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "storm_cm": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "thaw_h": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "wind_kmh": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "snow_cm",
+        "storm_cm",
+        "wind_kmh",
+        "rain_mm",
+        "rise_c",
+        "thaw_h"
+      ],
+      "title": "OutlookSteps",
       "type": "object"
     },
     "OverlayFile": {

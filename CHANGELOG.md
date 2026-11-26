@@ -40,6 +40,16 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **The Backcountry tab's avalanche weather is easier to read, especially on a phone.**
+  Each day is its own tile: the day, the avalanche center's rating when its bulletin
+  covers the day, and a chip with the day's grade, now called **weather loading**. Under
+  it, one line for each factor that is pushing on the snowpack (name, number, a few
+  words such as "loads NE" or "18.1 in / 3 days", and a small meter for that factor's
+  level), always in the order snow, wind, rain, warming; a quiet day says "Calm". A key
+  under the days says what Little, Some, Strong and Very strong mean, and "See the
+  numbers behind each level" shows the thresholds in your units. The snapshot now
+  carries those thresholds (`backcountry.outlook_steps`). With `HAZARD_INDEX` off each
+  day shows all four facts and no grade.
 - **Signs of instability are coloured as on NWAC's site**: red for avalanches (seen,
   triggered, someone caught), orange for collapsing and shooting cracks.
 - **The Webcams tab's field photos are quicker to scan**: a one-line heading, one short

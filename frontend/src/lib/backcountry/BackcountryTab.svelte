@@ -23,7 +23,7 @@
 		avy: AvalancheView | null;
 		avyLoad?: LoadState;
 		units: UnitSystem;
-		/** Whether the app's own weather-stress grade is shown (the server's HAZARD_INDEX). */
+		/** Whether the app's own weather-loading grade is shown (the server's HAZARD_INDEX). */
 		graded?: boolean;
 		/** Field reports around the location, for its recent observations. */
 		nearby?: NearbyOut | null;
@@ -73,7 +73,15 @@
 
 	{#if bc}
 		<section class="card">
-			<Outlook days={bc.outlook ?? []} {avy} {avyLoad} {today} {units} {graded} />
+			<Outlook
+				days={bc.outlook ?? []}
+				steps={bc.outlook_steps ?? null}
+				{avy}
+				{avyLoad}
+				{today}
+				{units}
+				{graded}
+			/>
 		</section>
 
 		<section class="card">
