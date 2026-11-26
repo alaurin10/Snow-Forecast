@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
+import anyio
+import pytest
 from fastapi.testclient import TestClient
 
 from snowwatch.api.app import create_app
@@ -105,3 +109,43 @@ def test_requests_get_an_id(settings: Settings) -> None:
     assert (
         client.get("/api/livez", headers={"X-Request-ID": "abc"}).headers["x-request-id"] == "abc"
     )
+
+
+def test_a_request_dropped_before_its_answer_is_not_an_error(
+    settings: Settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A browser that cancels a request (a page closed mid-load) is not a server failure.
+    A file answer then sends nothing at all; the access log notes it at DEBUG, and nothing
+    is raised or logged as an error."""
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>app</html>")
+    (static / "icon.svg").write_text("<svg/>")
+    app = create_app(settings.model_copy(update={"static_dir": static}))
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.disconnect"}  # the client is already gone
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/icon.svg",
+        "raw_path": b"/icon.svg",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", b"testserver")],
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+    }
+    with caplog.at_level(logging.DEBUG, logger="snowwatch.access"):
+        anyio.run(app, scope, receive, send)
+    assert sent == []
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("went away" in r.getMessage() for r in caplog.records)

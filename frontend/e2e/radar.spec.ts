@@ -98,8 +98,11 @@ test('the slider moves the radar freely, in steps of less than a frame', async (
 	expect(await differ(page, at2!, await canvas.screenshot())).toBeLessThan(0.002);
 });
 
-test('in 3D every frame change is drawn, and comes back the same', async ({ page }, info) => {
-	test.skip(info.project.name !== 'desktop', 'one run is enough (3D is slow in software)');
+// One run, at the desktop size, on its own (the solo project, playwright.config.ts): 3D is
+// slow in software and takes every core.
+const solo = { tag: '@solo' };
+
+test('in 3D every frame change is drawn, and comes back the same', solo, async ({ page }) => {
 	test.setTimeout(180_000);
 	await open(page);
 	await page.getByRole('button', { name: '3D terrain' }).click();
