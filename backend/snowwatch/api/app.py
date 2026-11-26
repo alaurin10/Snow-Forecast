@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.gzip import GZipMiddleware
 
-from snowwatch import __version__, overlays, webcams
+from snowwatch import __version__, observations, overlays, webcams
 from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.models import MetaOut
@@ -486,11 +486,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type="application/json",
         )
 
+    # The two report files as last merged: (their modification times, JSON, gzipped JSON).
+    reports_cache: dict[str, tuple[Any, bytes, bytes]] = {}
+
     @app.get("/api/avalanche/observations.geojson", response_model=ObsOut)
     def field_reports(request: Request) -> Response:
-        """Avalanche Canada's Mountain Information Network reports in the map's box, the
-        last two weeks (hourly, see snowwatch/observations.py)."""
-        return json_file(settings.obs_path, request, 600, "field reports not fetched yet")
+        """Field reports in the map's box, the last two weeks: Avalanche Canada's Mountain
+        Information Network (hourly, see snowwatch/observations.py) and NWAC's
+        observations page (every few hours, see snowwatch/nwac_obs.py), newest first."""
+        paths = (settings.obs_path, settings.nwac_obs_path)
+        stamps: list[float | None] = []
+        for path in paths:
+            try:
+                stamps.append(path.stat().st_mtime)
+            except OSError:
+                stamps.append(None)
+        if all(t is None for t in stamps):
+            raise HTTPException(503, "field reports not fetched yet")
+        hit = reports_cache.get("all")
+        if hit is None or hit[0] != stamps:
+            merged = observations.merge(*(observations.read(p) for p in paths))
+            if merged is None:
+                raise HTTPException(503, "field reports not fetched yet")
+            body = merged.model_dump_json().encode()
+            hit = (stamps, body, gzip.compress(body, 6))
+            reports_cache["all"] = hit
+        headers = {"Cache-Control": "public, max-age=600", "Vary": "Accept-Encoding"}
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(hit[2], media_type="application/geo+json", headers=headers)
+        return Response(hit[1], media_type="application/geo+json", headers=headers)
 
     # The owner's ATES files as last read: (file listing, JSON, gzipped JSON).
     ates_cache: dict[str, tuple[Any, bytes, bytes]] = {}

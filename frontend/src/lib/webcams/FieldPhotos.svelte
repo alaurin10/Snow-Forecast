@@ -1,27 +1,40 @@
 <!--
-  Recent photos from field reports near the location (Avalanche Canada's Mountain
-  Information Network), by day, newest first: each report's title, when and how far
-  away, then its photos. A photo opens large; the title opens the full report. What
-  people saw and chose to share, not checked by anyone.
+  Recent photos from field reports near the location, by day, newest first: NWAC's
+  observations (forecasters' and the public's, read from its observations page) and
+  Avalanche Canada's Mountain Information Network. Each report's title, who sent it, when
+  and how far away, then its photos. A photo opens large; the title opens the full
+  report on the center's site. Public reports are what people saw, not checked.
 -->
 <script lang="ts">
 	import { safeHref, safeImage } from '../links';
 	import type { NearbyOut } from '../types.gen';
 	import type { UnitSystem } from '../units';
-	import { byDay } from '../webcams';
+	import { byDay, reportFrom, type CenterObservations } from '../webcams';
 
 	interface Props {
 		/** Field reports around the location; null until they load (or if they fail). */
 		data: NearbyOut | null;
 		units: UnitSystem;
 		tz?: string | null;
-		/** The location's avalanche center's own observations page, linked (not shown). */
-		center?: { name: string; url: string } | null;
+		/** The location's avalanche center's own observations page, linked. */
+		center?: CenterObservations | null;
 	}
 
 	let { data, units, tz, center = null }: Props = $props();
 
-	const days = $derived(byDay(data?.photo_reports ?? [], (r) => r.report.time, tz));
+	const reports = $derived(data?.photo_reports ?? []);
+	const days = $derived(byDay(reports, (r) => r.report.time, tz));
+	// Whose reports these are, for the line under the heading.
+	const fromNwac = $derived(!!center?.shown || reports.some((r) => r.report.source === 'nwac'));
+	const fromMin = $derived(reports.some((r) => r.report.source !== 'nwac') || !fromNwac);
+	const sources = $derived(
+		[
+			fromNwac ? 'NWAC observations (forecasters and the public)' : '',
+			fromMin ? 'people’s reports to Avalanche Canada’s Mountain Information Network' : ''
+		]
+			.filter(Boolean)
+			.join(' and ')
+	);
 	const radius = $derived(data?.radius_km ?? 60);
 	const span = $derived(data?.reports_days ?? 14);
 	const away = (km: number) =>
@@ -38,18 +51,20 @@
 	<div class="head">
 		<h2>Recent field photos</h2>
 		<p class="faint small">
-			From people's reports to Avalanche Canada's Mountain Information Network within {away(
-				radius
-			)}, last {span} days. What they saw; not checked by anyone.
+			From {sources} within {away(radius)}, last {span} days. What people saw; public reports aren't checked
+			by anyone.
 		</p>
 		{#if center && safeHref(center.url)}
 			<p class="center">
 				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 				<a class="btn small" href={safeHref(center.url)} target="_blank" rel="noopener noreferrer"
-					>Recent {center.name} observations ↗</a
+					>{center.shown ? `All ${center.name} observations` : `Recent ${center.name} observations`}
+					↗</a
 				>
 				<span class="faint small"
-					>{center.name}'s photos and reports open on its own site; they can't be shown here.</span
+					>{center.shown
+						? `Each report opens in full on ${center.name}'s site.`
+						: `${center.name}'s photos and reports open on its own site; they can't be shown here.`}</span
 				>
 			</p>
 		{/if}
@@ -69,9 +84,9 @@
 							<strong>{r.report.title || 'Field report'}</strong>
 						{/if}
 						<span class="faint small"
-							>{clock(r.report.time)} · {away(r.distance_km)} away{r.report.region
-								? ` · ${r.report.region}`
-								: ''}</span
+							>{reportFrom(r.report)} · {r.report.day ? '' : `${clock(r.report.time)} · `}{away(
+								r.distance_km
+							)} away{r.report.region ? ` · ${r.report.region}` : ''}</span
 						>
 					</p>
 					<div class="grid">
@@ -97,7 +112,11 @@
 		{/each}
 	{:else if data}
 		<p class="muted small">
-			No photos in Avalanche Canada reports within {away(radius)} in the last {span} days.
+			No photos in {fromNwac && fromMin
+				? 'field reports'
+				: fromNwac
+					? 'NWAC observations'
+					: 'Avalanche Canada reports'} within {away(radius)} in the last {span} days.
 		</p>
 	{/if}
 </section>

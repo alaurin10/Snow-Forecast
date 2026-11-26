@@ -52,7 +52,8 @@ backend/snowwatch/
   pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
   stations.py (every snow station in the map's box) observations.py (Avalanche
-  Canada's field reports) overlays.py (the owner's ATES files)
+  Canada's field reports) nwac_obs.py (NWAC's observations page, read in headless
+  Chromium) overlays.py (the owner's ATES files)
   precip.py (re-exports maps/) tiles.py osm.py (runs, huts, glaciers, routes …)
   lookups.py push.py verify.py
 frontend/src/
@@ -199,9 +200,10 @@ older than `STALE_AFTER_H` (12 h).
   model data don't flatten it) and each source's track record, and the
   Observed tab charts the forecast made before each day against what the snow station
   measured, by calendar day.
-- **Nearby** (`/api/locations/{id}/nearby`): the stations within 60 km and Avalanche
-  Canada's field reports from the last two weeks, read from the files the map's layers
-  use (no upstream calls), for the Observed tab.
+- **Nearby** (`/api/locations/{id}/nearby`): the stations within 60 km and the field
+  reports from the last two weeks (Avalanche Canada's and NWAC's), read from the files
+  the map's layers use (no upstream calls), for the Observed tab and the Webcams tab's
+  photos.
 
 ## Storage and retention
 

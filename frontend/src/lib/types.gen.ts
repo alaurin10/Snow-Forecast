@@ -666,8 +666,9 @@ export interface MetaOut {
 }
 /**
  * What was measured and reported around a location (the Observed tab): the
- * closest snow stations and Avalanche Canada's recent field reports, both read from
- * the files the map's layers use.
+ * closest snow stations and recent field reports (Avalanche Canada's Mountain
+ * Information Network and NWAC's observations), read from the files the map's layers
+ * use.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "NearbyOut".
@@ -695,11 +696,15 @@ export interface NearbyReport {
  * via the `definition` "ObsProps".
  */
 export interface ObsProps {
+	center?: string | null;
+	day?: string | null;
 	id: string;
 	images: number;
 	kinds: string[];
+	observer?: string | null;
 	photos?: ObsPhoto[];
 	region: string;
+	source?: 'min' | 'nwac';
 	time: string;
 	title: string;
 	url: string | null;

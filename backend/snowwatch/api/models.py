@@ -232,8 +232,9 @@ class NearbyReport(BaseModel):
 
 class NearbyOut(BaseModel):
     """What was measured and reported around a location (the Observed tab): the
-    closest snow stations and Avalanche Canada's recent field reports, both read from
-    the files the map's layers use."""
+    closest snow stations and recent field reports (Avalanche Canada's Mountain
+    Information Network and NWAC's observations), read from the files the map's layers
+    use."""
 
     location_id: str
     radius_km: float

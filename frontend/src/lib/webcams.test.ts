@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { byDay, centerObservations, embedFor, freshImage, playSrc } from './webcams';
+import {
+	byDay,
+	centerObservations,
+	embedFor,
+	freshImage,
+	playSrc,
+	reportFrom,
+	reportWhen
+} from './webcams';
 
 const NOCOOKIE = 'https://www.youtube-nocookie.com/embed/vhO8nNqg9iw';
 
@@ -119,5 +127,30 @@ describe('centerObservations', () => {
 		expect(centerObservations({ provider: 'nac', center_id: 'XYZ' })).toBeNull();
 		expect(centerObservations({ provider: 'avcan', center_id: null })).toBeNull();
 		expect(centerObservations(null)).toBeNull();
+		// NWAC's photos are shown here; the others' are only linked.
+		expect(centerObservations({ provider: 'nac', center_id: 'NWAC' })?.shown).toBe(true);
+		expect(centerObservations({ provider: 'nac', center_id: 'SAC' })?.shown).toBe(false);
+	});
+});
+
+describe('reportFrom and reportWhen', () => {
+	it('names who sent a report', () => {
+		expect(reportFrom({ source: 'min' })).toBe('Avalanche Canada MIN');
+		expect(reportFrom({})).toBe('Avalanche Canada MIN');
+		expect(reportFrom({ source: 'nwac', center: 'NWAC', observer: 'forecaster' })).toBe(
+			'NWAC forecaster'
+		);
+		expect(reportFrom({ source: 'nwac', center: 'COAA', observer: 'public' })).toBe(
+			'COAA · public'
+		);
+		expect(reportFrom({ source: 'nwac', observer: 'professional' })).toBe('NWAC · professional');
+		expect(reportFrom({ source: 'nwac' })).toBe('NWAC · public');
+	});
+
+	it('gives the day alone when that is all a report has', () => {
+		expect(reportWhen({ time: '2026-11-24T20:00+00:00', day: '2026-11-24' })).toBe('Tue Nov 24');
+		expect(reportWhen({ time: '2026-11-24T18:30+00:00' }, 'America/Los_Angeles')).toBe(
+			'Tue, Nov 24, 10:30 AM'
+		);
 	});
 });

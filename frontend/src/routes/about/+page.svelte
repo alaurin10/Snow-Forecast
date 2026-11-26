@@ -55,6 +55,12 @@
 			terms: 'Each center’s own terms'
 		},
 		{
+			name: 'Northwest Avalanche Center (NWAC)',
+			href: 'https://nwac.us/observations/',
+			what: 'Recent observations and their photos, read from its observations page with NWAC’s agreement, on the Webcams and Observed tabs and the map; each links back to the full observation',
+			terms: 'Used with NWAC’s permission'
+		},
+		{
 			name: 'Avalanche Canada',
 			href: 'https://avalanche.ca/',
 			what: 'Canadian avalanche danger ratings, shown as published; field reports from the Mountain Information Network; ATES ratings the site’s owner adds from its trip planner',

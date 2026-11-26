@@ -158,12 +158,65 @@ describe('webcams tab', () => {
 			nearby: null,
 			avy: { provider: 'nac', center_id: 'NWAC' }
 		});
-		const link = getByRole('link', { name: 'Recent NWAC observations ↗' });
+		const link = getByRole('link', { name: 'All NWAC observations ↗' });
 		expect(link.getAttribute('href')).toBe('https://nwac.us/observations#/view/observations');
-		expect(queryByText(/No photos in Avalanche Canada reports/)).toBeNull(); // not loaded yet
+		expect(queryByText(/can't be shown here/)).toBeNull(); // NWAC's photos are shown
+		expect(queryByText(/No photos in/)).toBeNull(); // not loaded yet
 		cleanup();
 		const bc = render(WebcamsTab, { cams: [], nearby: nearby(1), avy: { provider: 'avcan' } });
 		expect(bc.queryByRole('link', { name: /NWAC observations/ })).toBeNull();
+		cleanup();
+		// Centers whose photos can't be read are still only linked.
+		const sierra = render(WebcamsTab, {
+			cams: [],
+			nearby: null,
+			avy: { provider: 'nac', center_id: 'SAC' }
+		});
+		expect(sierra.getByRole('link', { name: 'Recent Sierra Avalanche Center observations ↗' }));
+		expect(sierra.getByText(/can't be shown here/)).toBeTruthy();
+	});
+
+	it('shows NWAC observations’ photos by the day observed, with who sent them', () => {
+		const MEDIA = 'https://avalanche-org-media.s3.us-west-2.amazonaws.com/';
+		const data: NearbyOut = {
+			...nearby(0),
+			location_id: 'crystal',
+			photo_reports: [
+				{
+					distance_km: 2.1,
+					report: {
+						id: 'nwac-1',
+						title: 'Silver Basin',
+						time: '2026-11-24T20:00+00:00',
+						day: '2026-11-24',
+						region: 'West Slopes South',
+						kinds: ['snowpack'],
+						images: 1,
+						url: 'https://nwac.us/observations/#/view/observations/1',
+						source: 'nwac',
+						center: 'NWAC',
+						observer: 'forecaster',
+						photos: [{ url: `${MEDIA}a-large.jpg`, thumb: `${MEDIA}a-medium.jpg`, caption: '' }]
+					}
+				}
+			]
+		};
+		const { container, getByText, queryByText } = render(WebcamsTab, {
+			cams: [],
+			nearby: data,
+			units: 'metric',
+			tz: 'America/Los_Angeles',
+			avy: { provider: 'nac', center_id: 'NWAC' }
+		});
+		expect(getByText(/From NWAC observations \(forecasters and the public\) within/)).toBeTruthy();
+		expect(queryByText(/Mountain Information Network/)).toBeNull();
+		// The day only: NWAC's observations have no time of day.
+		expect(getByText('NWAC forecaster · 2 km away · West Slopes South')).toBeTruthy();
+		expect(container.querySelector('.photos img')?.getAttribute('src')).toBe(
+			`${MEDIA}a-medium.jpg`
+		);
+		const title = getByText('Silver Basin') as HTMLAnchorElement;
+		expect(title.href).toBe('https://nwac.us/observations/#/view/observations/1');
 	});
 
 	it('never frames a player from another host', () => {

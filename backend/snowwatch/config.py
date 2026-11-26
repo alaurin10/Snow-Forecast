@@ -87,6 +87,10 @@ class MapConfig(BaseModel):
     stations_minutes: int = Field(60, ge=15)
     obs_minutes: int = Field(60, ge=15)
     obs_days: int = Field(14, ge=1, le=30)
+    # Observations and their photos from NWAC's observations page (snowwatch/nwac_obs.py),
+    # read in a headless browser this often while a location is in NWAC's area.
+    nwac_obs: bool = True
+    nwac_obs_minutes: int = Field(180, ge=60)
 
     @field_validator("region")
     @classmethod

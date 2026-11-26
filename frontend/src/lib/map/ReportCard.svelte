@@ -1,33 +1,31 @@
 <!--
-  One field report from Avalanche Canada's Mountain Information Network, tapped on the
-  map (the map panel's content; its title is the panel's): when, where, what kinds of
-  observation it has, and a link to read it in full on avalanche.ca. What someone saw,
-  not checked by anyone.
+  One field report tapped on the map (the map panel's content; its title is the panel's),
+  from Avalanche Canada's Mountain Information Network or NWAC's observations: when,
+  where, who sent it, what kinds of observation it has, and a link to read it in full on
+  avalanche.ca or nwac.us. Public reports are what someone saw, not checked by anyone.
 -->
 <script lang="ts">
 	import type { ObsProps } from '../types.gen';
 	import { ago, REPORT_KINDS } from './features';
 	import { safeHref } from '../links';
+	import { reportFrom, reportWhen } from '../webcams';
 
 	interface Props {
 		report: ObsProps;
 	}
 
 	let { report }: Props = $props();
-	const when = $derived(
-		new Date(report.time).toLocaleString('en-US', {
-			weekday: 'short',
-			month: 'short',
-			day: 'numeric',
-			hour: 'numeric',
-			minute: '2-digit'
-		})
+	const nwac = $derived(report.source === 'nwac');
+	// NWAC's observations give the day, not the time: no "hours ago" for them.
+	const when = $derived(reportWhen(report) + (report.day ? '' : ` · ${ago(report.time)}`));
+	const photos = $derived(
+		report.images ? ` ${report.images} photo${report.images > 1 ? 's' : ''}.` : ''
 	);
 </script>
 
 <div class="content">
 	<span class="faint where"
-		>{when} · {ago(report.time)}{report.region ? ` · ${report.region}` : ''}</span
+		>{when} · {reportFrom(report)}{report.region ? ` · ${report.region}` : ''}</span
 	>
 	{#if report.kinds.length}
 		<ul class="kinds" aria-label="What it reports">
@@ -40,15 +38,21 @@
 		</ul>
 	{/if}
 	<p class="faint small">
-		From Avalanche Canada’s Mountain Information Network: what someone in the mountains saw and
-		chose to share, not checked.{report.images
-			? ` ${report.images} photo${report.images > 1 ? 's' : ''}.`
-			: ''}
+		{#if nwac}
+			From NWAC’s observations page: what {report.observer === 'forecaster'
+				? 'a forecaster'
+				: 'someone in the mountains'} saw and shared{report.observer === 'forecaster'
+				? ''
+				: ', not checked'}.{photos}
+		{:else}
+			From Avalanche Canada’s Mountain Information Network: what someone in the mountains saw and
+			chose to share, not checked.{photos}
+		{/if}
 	</p>
 	{#if safeHref(report.url)}
 		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 		<a href={safeHref(report.url)} target="_blank" rel="noopener noreferrer"
-			>Read it on avalanche.ca →</a
+			>Read it on {nwac ? 'nwac.us' : 'avalanche.ca'} →</a
 		>
 	{/if}
 </div>

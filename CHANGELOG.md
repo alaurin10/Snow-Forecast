@@ -7,6 +7,13 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **NWAC observation photos on the Webcams tab.** Locations in Washington and northern
+  Oregon show recent photos from NWAC's observations (forecasters' and the
+  public's) within 60 km, by the day observed, each with who sent it, the zone and a link
+  to the full observation on nwac.us. The worker reads NWAC's observations page (with
+  NWAC's agreement) in headless Chromium every 3 hours; the image now includes Chromium.
+  The same observations show on the Observed tab's field reports and the map's field
+  reports layer. Off with `map.nwac_obs: false`; read now with `snowwatch map nwac`.
 - **Compare from a location**: a Compare button beside Map on every location page opens
   Compare with that location in it and the Add list open, to pick the others.
 - **Compare's Add list ranks every location** by the metric being compared, over the days

@@ -169,3 +169,37 @@ def test_avalanche_alerts_join_the_runs_digest(
     (found,) = calls  # one send for the run, both kinds together
     assert [a.flag.type for a in found["crystal"][1]] == ["powder_day", "avalanche_danger"]
     assert list(found) == ["crystal", "rainy"]
+
+
+def test_nwac_observations_job(
+    env: Settings, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    from snowwatch import nwac_obs
+
+    calls: list[Path] = []
+
+    def fake_refresh(path: Path, box: object) -> object:
+        calls.append(path)
+        raise RuntimeError("boom")  # only logged
+
+    monkeypatch.setattr(nwac_obs, "refresh", fake_refresh)
+    cfg = config()
+    w = Worker(env, cfg)
+    cli.main(["init"])  # the seed has Crystal and Snoqualmie, in NWAC's area
+    monkeypatch.setattr(nwac_obs, "available", lambda: False)
+    w.nwac_observations()
+    w.nwac_observations()
+    assert calls == [] and capfd.readouterr().err.count("need Playwright") == 1
+    monkeypatch.setattr(nwac_obs, "available", lambda: True)
+    assert cli.main(["map", "nwac"]) == 0
+    assert calls == [env.nwac_obs_path] and "NWAC observations failed" in capfd.readouterr().err
+    # Not while a forecast run holds the worker's lock.
+    with w.lock:
+        w.nwac_observations()
+    assert len(calls) == 1 and "wait for the forecast run" in capfd.readouterr().err
+    off = cfg.model_copy(update={"map": cfg.map.model_copy(update={"nwac_obs": False})})
+    Worker(env, off).nwac_observations()
+    monkeypatch.setattr(nwac_obs, "in_area", lambda lat, lon: False)
+    w.nwac_observations()
+    assert len(calls) == 1
+    assert "nwac_observations" in {j.id for j in build_scheduler(w).get_jobs()}

@@ -3102,8 +3102,9 @@
 					Huts, trailheads, passes, glaciers, cliffs and ski routes from OpenStreetMap, as mapped by
 					volunteers. Snow stations: NRCS SNOTEL and BC River Forecast Centre snow pillows, depth
 					now and its change over 24 hours (the dot's colour is the depth; a label is new snow).
-					Field reports: Avalanche Canada's Mountain Information Network, the last two weeks, as
-					people sent them (US centers' observations need a key: see each center's site).
+					Field reports: Avalanche Canada's Mountain Information Network and NWAC's observations
+					(read from its observations page), the last two weeks, as people sent them (other US
+					centers' observations need a key: see each center's site).
 					{#if atesData}ATES ratings: from files this site's owner downloaded from Avalanche
 						Canada's trip planner, as published there.{/if}
 					Measure: tap out a line, tap a run or route and choose Profile, or open a GPX track (it stays

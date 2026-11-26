@@ -52,6 +52,7 @@ class Worker:
             name: threading.Lock() for name in ("radar", "forecast", "totals", "layers", "wide")
         }
         self.sat_lock = threading.Lock()
+        self._nwac_warned = False
         self._ping = ping
         self._webcams_notes: tuple[tuple[str, ...], tuple[tuple[str, str], ...]] = ((), ())
         conn = connect(settings.database)
@@ -396,6 +397,36 @@ class Worker:
         except Exception:
             log.exception("field reports failed")
 
+    def nwac_observations(self) -> None:
+        """Observations from NWAC's observations page, while a location is in its area.
+        Failures are only logged."""
+        from snowwatch import nwac_obs
+
+        if not self.cfg.map.nwac_obs:
+            return
+        locs = list_locations(connect(self.settings.database))
+        if not any(nwac_obs.in_area(b.lat, b.lon) for loc in locs for b in loc.bands[:1]):
+            return
+        if not nwac_obs.available():
+            if not self._nwac_warned:
+                log.info("NWAC observations need Playwright (the scrape extra); skipped")
+                self._nwac_warned = True
+            return
+        # Chromium needs ~600 MB for a few seconds: not while a forecast run needs its own.
+        if not self.lock.acquire(blocking=False):
+            log.info("NWAC observations wait for the forecast run")
+            return
+        try:
+            out = nwac_obs.refresh(self.settings.nwac_obs_path, self._map_box())
+            photos = sum(len(f.properties.photos) for f in out.features)
+            log.info(
+                "NWAC observations: %d, %d photos, errors %s", len(out.features), photos, out.errors
+            )
+        except Exception:
+            log.exception("NWAC observations failed")
+        finally:
+            self.lock.release()
+
     def satellite(self) -> None:
         """The newest clear Sentinel-2 scenes near each location, for the map's recent
         satellite base. Failures are only logged."""
@@ -522,15 +553,17 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             next_run_time=datetime.now(UTC) + timedelta(minutes=delay),
             **opts,
         )
-    for job, minutes, name in (
-        (worker.snow_stations, mc.stations_minutes, "snow_stations"),
-        (worker.observations, mc.obs_minutes, "observations"),
+    # NWAC's page starts a few minutes in, after the map's first (heaviest) builds.
+    for job, minutes, name, delay in (
+        (worker.snow_stations, mc.stations_minutes, "snow_stations", 0),
+        (worker.observations, mc.obs_minutes, "observations", 0),
+        (worker.nwac_observations, mc.nwac_obs_minutes, "nwac_observations", 8),
     ):
         sched.add_job(
             job,
             IntervalTrigger(minutes=minutes),
             id=name,
-            next_run_time=datetime.now(UTC),
+            next_run_time=datetime.now(UTC) + timedelta(minutes=delay),
             **opts,
         )
     sched.add_job(

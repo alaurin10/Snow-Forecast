@@ -138,6 +138,10 @@ map:
   stations_minutes: 60   # depth and 24-hour change at every station in the box
   obs_minutes: 60        # Mountain Information Network reports
   obs_days: 14           # how far back reports go (at most 30)
+  # NWAC's observations page (photos for the Webcams tab, reports on the map), read in a
+  # headless browser while a location is in the Pacific Northwest. false: off.
+  nwac_obs: true
+  nwac_obs_minutes: 180  # at least 60
 
 # The map's avalanche terrain layers (see docs/MAP-PLAN.md, B7). Treeline bands are in
 # config/treeline.yaml.
