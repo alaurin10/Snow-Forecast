@@ -17,8 +17,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
+# libatomic1: Playwright's bundled Node needs it (it installs Chromium below).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && apt-get install -y --no-install-recommends tzdata libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv==0.11.32
 
