@@ -203,7 +203,9 @@ older than `STALE_AFTER_H` (12 h).
 - **Nearby** (`/api/locations/{id}/nearby`): the stations within 60 km and the field
   reports from the last two weeks (Avalanche Canada's and NWAC's), read from the files
   the map's layers use (no upstream calls), for the Observed tab and the Webcams tab's
-  photos.
+  photos. The photos are grouped: *near* (within 20 km and closer to this location than
+  to any other) and *zone* (farther, in the location's avalanche zone: NWAC's zone id, or
+  the zone outline from `zones.geojson` that holds the report).
 
 ## Storage and retention
 

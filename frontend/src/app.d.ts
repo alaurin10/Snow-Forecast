@@ -8,7 +8,10 @@ declare global {
 		// interface Error {}
 		// interface Locals {}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/** The Webcams tab's photo viewer is open (Back closes it). */
+			photo?: boolean;
+		}
 		// interface Platform {}
 	}
 }

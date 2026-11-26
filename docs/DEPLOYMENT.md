@@ -186,8 +186,13 @@ docker compose run --rm worker snowwatch locations webcams [path]
 That one checks every entry first; one bad link or unknown id and nothing is saved.
 
 **Field photos on the Webcams tab:** below the cameras, a location shows recent photos
-from field reports within 60 km: Avalanche Canada's Mountain Information Network, and,
-in Washington and northern Oregon, NWAC's observations (forecasters' and the public's).
+from field reports: Avalanche Canada's Mountain Information Network, and, in Washington
+and northern Oregon, NWAC's observations (forecasters' and the public's). First those
+*near* it: within 20 km, and closer to it than to any of your other locations (so a
+photo from Paradise goes to a Paradise location, not to Crystal 24 km away). Then,
+folded, the rest from its avalanche forecast zone within 60 km; photos from other zones
+aren't shown. A photo opens a full-screen viewer that flips through them all (arrows,
+arrow keys or a swipe), each with where, who, when and its caption; Back closes it.
 NWAC agreed to its observations page being read; the worker opens nwac.us/observations
 in headless Chromium every 3 hours (installed in the image, which grows by about 400 MB;
 each visit takes ~10 seconds and ~600 MB of memory, and waits while a forecast run is
@@ -200,6 +205,19 @@ show on the Observed tab and the map. Turn it off with `nwac_obs: false` under `
 ```bash
 docker compose run --rm worker snowwatch map nwac
 ```
+
+To see how much memory the containers really use (on a VM, the hypervisor's gauge
+counts the guest's file cache as used, and the image builds fill that cache):
+
+```bash
+docker stats --no-stream
+```
+```bash
+free -m
+```
+
+`free`'s *available* column is what is actually left. The worker runs under a small init
+(`init: true` in `docker-compose.yml`) that cleans up Chromium's exited processes.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1

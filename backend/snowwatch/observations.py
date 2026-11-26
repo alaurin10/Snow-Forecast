@@ -71,6 +71,9 @@ class ObsProps(BaseModel):
     day: str | None = None  # the local date observed, when there's no time of day
     center: str | None = None  # the avalanche center it was sent to ("NWAC")
     observer: str | None = None  # "forecaster", "professional", "public"…
+    # The avalanche forecast zone it's in, as the map's zones name them ("nac:3023"), when
+    # the source says; otherwise the API looks it up from the zones' outlines.
+    zone: str | None = None
 
 
 class ObsFeature(BaseModel):

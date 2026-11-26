@@ -216,11 +216,82 @@ def test_api_serves_nwac_observations_with_avalanche_canadas(
     )
     again = client.get("/api/avalanche/observations.geojson").json()
     assert len(again["features"]) == len(r.json()["features"]) == 7
-    # Silver Basin (by Crystal) shows its photos on Crystal's Webcams tab.
+    # Crystal's Webcams tab: Silver Basin (3 km) is near; Paradise (24 km) is farther but in
+    # Crystal's zone, West Slopes South. Nothing from other zones.
     body = client.get("/api/locations/crystal/nearby").json()
-    titles = [x["report"]["title"] for x in body["photo_reports"]]
-    assert "Silver Basin" in titles
-    assert all(x["report"]["source"] == "nwac" for x in body["photo_reports"])
+    groups = [(x["report"]["title"], x["group"]) for x in body["photo_reports"]]
+    assert groups == [("Silver Basin", "near"), ("Paradise - Mt Rainier NP", "zone")]
+    assert body["zone_name"] == "West Slopes South" and body["near_km"] == 20
+    assert all(x["report"]["zone"] == "nac:3023" for x in body["photo_reports"])
+    # The Observed tab still lists every report within 60 km.
+    assert {x["report"]["title"] for x in body["reports"]} >= {"Silver Basin", "Pan Point"}
+    # Snoqualmie (zone 3028) has neither near.
+    assert client.get("/api/locations/snoqualmie/nearby").json()["photo_reports"] == []
+
+
+def test_photos_go_to_the_closest_location_and_zones_come_from_outlines(tmp_path: Path) -> None:
+    from snowwatch.api import public
+    from snowwatch.api.models import NearbyReport
+
+    def rep(rid: str, km: float, zone: str | None = None) -> NearbyReport:
+        props = observations.ObsProps(
+            id=rid,
+            title=rid,
+            time="2026-11-24T20:00+00:00",
+            region="",
+            kinds=[],
+            images=1,
+            url=None,
+            zone=zone,
+            photos=[observations.ObsPhoto(url=f"{MEDIA}a.jpg", thumb=f"{MEDIA}b.jpg")],
+        )
+        return NearbyReport(report=props, distance_km=km)
+
+    square = {
+        "type": "Polygon",
+        "coordinates": [[[-122, 46], [-121, 46], [-121, 47], [-122, 47], [-122, 46]]],
+    }
+    zfile = tmp_path / "zones.geojson"
+    zfile.write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "id": "nac:3023",
+                        "geometry": square,
+                        "properties": {"doc": {"zone": "West Slopes South"}},
+                    },
+                    {"id": "nac:bad", "geometry": None},
+                ]
+            }
+        )
+    )
+    index = public.read_zone_index(zfile)
+    assert index is not None and [z[0] for z in index] == ["nac:3023"]
+    assert public.zone_at(index, 46.5, -121.5) == "nac:3023"
+    assert public.zone_at(index, 48.0, -121.5) is None
+    assert public.read_zone_index(tmp_path / "none.geojson") is None
+
+    crystal, paradise = ("crystal", 46.935, -121.475), ("paradise", 46.786, -121.735)
+    reports = [
+        (rep("muir", 26.0), 46.83, -121.73),  # by Paradise: in the zone (by its outline)
+        (rep("silver", 2.0), 46.91, -121.49),  # by Crystal
+        (rep("paradise-near", 18.0), 46.80, -121.72),  # within 20 km, but Paradise's
+        (rep("east", 30.0, zone="nac:3027"), 46.9, -121.1),  # another zone
+        (rep("nopics", 1.0), 46.93, -121.47),
+    ]
+    reports[-1][0].report.photos = []
+    got = public.photo_groups("crystal", "nac:3023", reports, [crystal, paradise], index)
+    assert [(r.report.id, r.group) for r in got] == [
+        ("silver", "near"),
+        ("muir", "zone"),
+        ("paradise-near", "zone"),
+    ]
+    at_paradise = public.photo_groups("paradise", "nac:3023", reports, [crystal, paradise], index)
+    assert (at_paradise[0].report.id, at_paradise[0].group) == ("paradise-near", "near")
+    # A location with no known zone shows only what's near it.
+    alone = public.photo_groups("crystal", None, reports, [crystal], index)
+    assert [r.report.id for r in alone] == ["silver", "paradise-near"]
 
 
 def test_area_and_availability() -> None:

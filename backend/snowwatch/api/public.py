@@ -7,7 +7,7 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -47,7 +47,7 @@ from snowwatch.api.models import (
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import BandOut, Snapshot
-from snowwatch.geo import haversine_km
+from snowwatch.geo import bbox, contains, haversine_km
 from snowwatch.locations import service
 from snowwatch.settings import Settings
 from snowwatch.store import repo
@@ -108,6 +108,9 @@ NEARBY_KM = 60.0
 NEARBY_STATIONS = 8
 NEARBY_REPORTS = 8
 NEARBY_PHOTO_REPORTS = 24
+# The Webcams tab's photos: "near" a location within this distance and closer to it than to
+# any other location; farther ones only if in the same avalanche zone (and NEARBY_KM).
+NEAR_KM = 20.0
 # The map's station and report files as last read: path → (file time, parsed).
 _stations_cache: dict[str, tuple[float, stations.StationsOut | None]] = {}
 _obs_cache: dict[str, tuple[float, observations.ObsOut | None]] = {}
@@ -149,6 +152,59 @@ def _cached[T](
         hit = (mtime, read(path))
         cache[str(path)] = hit
     return hit[1]
+
+
+# Each avalanche zone's id, name, outline and its box, from the map's zones file.
+ZoneIndex = list[tuple[str, str, dict[str, Any], tuple[float, float, float, float]]]
+_zone_index_cache: dict[str, tuple[float, ZoneIndex | None]] = {}
+
+
+def read_zone_index(path: Path) -> ZoneIndex | None:
+    data = zones.read_zones(path)
+    if data is None:
+        return None
+    out: ZoneIndex = []
+    for f in data.get("features") or []:
+        geom = f.get("geometry") if isinstance(f, dict) else None
+        box = bbox(geom) if isinstance(geom, dict) else None
+        if geom is None or box is None:
+            continue
+        doc = (f.get("properties") or {}).get("doc") or {}
+        out.append((str(f.get("id")), str(doc.get("zone") or ""), geom, box))
+    return out
+
+
+def zone_at(index: ZoneIndex, lat: float, lon: float) -> str | None:
+    """The id of the avalanche zone the point is in ("nac:3023"), or None."""
+    for zid, _, geom, (w, s, e, n) in index:
+        if w <= lon <= e and s <= lat <= n and contains(geom, lat, lon):
+            return zid
+    return None
+
+
+def photo_groups(
+    loc_id: str,
+    loc_zone: str | None,
+    reports: list[tuple[NearbyReport, float, float]],
+    others: list[tuple[str, float, float]],
+    index: ZoneIndex,
+) -> list[NearbyReport]:
+    """The reports with photos for a location's Webcams tab, each marked "near" or "zone".
+    `reports` come with their (lat, lon); `others` is every location's (id, lat, lon), to
+    give a report to the closest one."""
+    out = []
+    for r, lat, lon in reports:
+        if not r.report.photos:
+            continue
+        nearest = min(others, key=lambda o: haversine_km(o[1], o[2], lat, lon), default=None)
+        if r.distance_km <= NEAR_KM and (nearest is None or nearest[0] == loc_id):
+            out.append(r.model_copy(update={"group": "near"}))
+            continue
+        zone = r.report.zone or zone_at(index, lat, lon)
+        if loc_zone and zone == loc_zone:
+            out.append(r.model_copy(update={"group": "zone"}))
+    # Near ones first (each group stays newest first), so a cap never drops them for others.
+    return sorted(out, key=lambda r: r.group != "near")
 
 
 def danger_for(v: AvalancheView | None, day: str | None) -> DangerChip:
@@ -547,12 +603,27 @@ def make_router() -> APIRouter:
             _cached(_obs_cache, settings.obs_path, observations.read),
             _cached(_obs_cache, settings.nwac_obs_path, observations.read),
         )
-        reports = []
+        located = []
         for f in obs.features if obs else []:
             xy = f.geometry.get("coordinates") or []
             if len(xy) >= 2 and (d := km(float(xy[1]), float(xy[0]))) <= NEARBY_KM:
-                reports.append(NearbyReport(report=f.properties, distance_km=d))
-        reports.sort(key=lambda x: x.report.time, reverse=True)
+                rep = NearbyReport(report=f.properties, distance_km=d)
+                located.append((rep, float(xy[1]), float(xy[0])))
+        located.sort(key=lambda x: x[0].report.time, reverse=True)
+        reports = [r for r, _, _ in located]
+        # The Webcams tab: near this location, or elsewhere in its avalanche zone.
+        index = _cached(_zone_index_cache, settings.zones_path, read_zone_index) or []
+        if loc.avy and loc.avy.provider == "nac" and loc.avy.zone_id:
+            loc_zone: str | None = f"nac:{loc.avy.zone_id}"
+        else:
+            loc_zone = zone_at(index, mid.lat, mid.lon)
+        zone_name = next((name for zid, name, _, _ in index if zid == loc_zone and name), None)
+        others = [
+            (o.id, o.band("mid").lat, o.band("mid").lon) for o in service.list_locations(conn)
+        ]
+        photos = photo_groups(loc.id, loc_zone, located, others, index)
+        if zone_name is None:
+            zone_name = next((r.report.region for r in photos if r.group == "zone"), None)
         response.headers["Cache-Control"] = CACHE
         return NearbyOut(
             location_id=loc.id,
@@ -562,7 +633,9 @@ def make_router() -> APIRouter:
             reports_at=obs.generated_at if obs else None,
             reports_days=obs.days if obs else None,
             reports=reports[:NEARBY_REPORTS],
-            photo_reports=[r for r in reports if r.report.photos][:NEARBY_PHOTO_REPORTS],
+            photo_reports=photos[:NEARBY_PHOTO_REPORTS],
+            near_km=NEAR_KM,
+            zone_name=zone_name or None,
         )
 
     @router.get("/status", response_model=StatusOut)

@@ -148,6 +148,7 @@ def parse(blob: Any, box: Box) -> list[ObsFeature]:
             continue
         photos = parse_photos(item)
         center = str(item.get("center_id") or "").upper()[:8] or None
+        zone_id = str(item.get("zone_id") or "")
         observer = str(item.get("observer_type") or "").lower()
         out.append(
             ObsFeature(
@@ -165,6 +166,7 @@ def parse(blob: Any, box: Box) -> list[ObsFeature]:
                     day=day,
                     center=center if center and center.isalpha() else None,
                     observer=observer if _WORD.match(observer) else None,
+                    zone=f"nac:{zone_id}" if zone_id.isdigit() and len(zone_id) < 9 else None,
                 ),
             )
         )
