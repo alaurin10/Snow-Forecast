@@ -138,6 +138,18 @@ describe('Timeline (weather controls)', () => {
 		expect(screen.getByText(/Snow above 1,350 m/)).toBeTruthy();
 	});
 
+	it("gives the temperature's 32 °F height at the map's centre when zoomed in", () => {
+		const view = weatherView(tl, 'temp', 'gust');
+		render(Timeline, { ...base, weather: 'temp', view });
+		expect(screen.queryByText(/near/)).toBeNull();
+		cleanup();
+		render(Timeline, { ...base, weather: 'temp', view, freezeLine: 2700, units: 'imperial' });
+		expect(screen.getByText(/32°F near 8,850 ft/)).toBeTruthy();
+		cleanup();
+		render(Timeline, { ...base, weather: 'temp', view, freezeLine: 0 });
+		expect(screen.getByText(/Below 0°C down to sea level/)).toBeTruthy();
+	});
+
 	it('switches the wind between gusts and ridge level', async () => {
 		render(Timeline, { ...base, weather: 'wind', view: weatherView(tl, 'wind', 'gust') });
 		expect(screen.getByText("This layer isn't drawn yet.")).toBeTruthy();

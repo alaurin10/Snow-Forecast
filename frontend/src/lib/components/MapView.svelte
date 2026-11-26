@@ -51,6 +51,7 @@
 	import { prefs, type MapBase, type MapOverlay, type MapWeather } from '../prefs.svelte';
 	import { tick, untrack } from 'svelte';
 	import {
+		freezingHeightAt,
 		hoursAt,
 		layerLabel,
 		posAt as markPosAt,
@@ -2324,12 +2325,16 @@
 	});
 
 	// ---- The rain/snow line draped on the terrain (Snow level, zoomed in) --------------
-	/** The map's forecast at the centre, for the snow level the drape uses. */
+	/** The map's forecast at the centre, for the snow level the drape uses (and the
+	 *  temperature's 32 °F height, so the two can be read side by side). */
 	let levelPoint = $state.raw<PointOut | null>(null);
 	const lineOn = $derived(weather === 'snowlevel' && zoom >= SNOWLINE_ZOOM - 0.5 && !offline);
+	const freezeOn = $derived(
+		weather === 'temp' && !!tempScale && zoom >= SNOWLINE_ZOOM - 0.5 && !offline
+	);
 	$effect(() => {
 		const c = centre;
-		if (!lineOn) return;
+		if (!lineOn && !freezeOn) return;
 		const have = untrack(() => levelPoint);
 		if (have && distanceKm(have.lat, have.lon, c.lat, c.lon) < 3) return;
 		let gone = false;
@@ -2343,6 +2348,14 @@
 		if (!lineOn || !levelPoint || !current) return null;
 		const t = current.t;
 		return levelPoint.snow_level.find((x) => x.t === t)?.value ?? null;
+	});
+	/** Where the temperature layer reaches 32 °F at the map's centre, for the time on the
+	 *  slider: the line the colours cross, as a height. */
+	const centreFreeze = $derived.by(() => {
+		const sc = tempScale;
+		if (!freezeOn || !levelPoint || !sc) return null;
+		const t = sc.t0 + tempHours * 3600;
+		return freezingHeightAt(levelPoint.temp ?? [], t, levelPoint.temp_lapse_c_per_km ?? undefined);
 	});
 	$effect(() => {
 		const level = centreLevel;
@@ -3258,6 +3271,7 @@
 						{label}
 						{waiting}
 						snowLine={centreLevel}
+						freezeLine={centreFreeze}
 						{adjusted}
 						continuous={glTotals}
 						bind:totalHours

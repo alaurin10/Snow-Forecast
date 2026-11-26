@@ -7,6 +7,10 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The map's temperature says where it reaches 32 °F.** Zoomed in, a line under the key
+  gives that height at the map's centre, so it can be read beside the snow level's
+  "Snow above …". The snow level's note says why the two differ: snow usually reaches
+  about 1,000 ft (300 m) below the 32 °F level, and sometimes much further.
 - **Field reports on the map show what was reported**: a tapped report now has the
   observer's signs of instability (coloured as on NWAC's site), their summary (first
   lines, then More) and notes, and their photos, which open the full-screen viewer.
@@ -65,6 +69,13 @@ Notable changes to Snow Watch. The format follows
   photo, not only the small arrows.
 
 ### Fixed
+- **The freezing level (and the snow level from it) is one height for the location.** It
+  was found again at every band, and for models without a freezing level of their own
+  (ECMWF, GEM) the column started at that band's temperature: at a band above the
+  freezing level it skipped the air below the band, so the same model and hour read
+  lower at the summit than at the base, often by several hundred metres (up to 1,700 m
+  in the test captures). Every band now shows the same freezing level, worked out at the
+  lowest band.
 - **Backcountry's recent observations could be empty while Webcams showed photos** for
   the same place, for up to an hour after an update (the browser reused the location's
   field reports from before the full list existed). It now falls back to the photo

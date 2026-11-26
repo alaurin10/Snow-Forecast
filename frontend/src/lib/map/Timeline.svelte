@@ -57,6 +57,9 @@
 		loadError: string | null;
 		/** The snow level draped on the terrain (zoomed in), metres; null when it isn't. */
 		snowLine?: number | null;
+		/** Where the temperature layer reaches 32 °F at the map's centre (zoomed in), metres;
+		 *  null when it isn't shown. */
+		freezeLine?: number | null;
 		/** The snow total on screen is the terrain-adjusted one (zoomed in). */
 		adjusted?: boolean;
 		/** The snow total's slider is continuous (its steps are drawn as numbers). */
@@ -86,6 +89,7 @@
 		ready,
 		loadError,
 		snowLine = null,
+		freezeLine = null,
 		adjusted = false,
 		continuous = false,
 		totalHours = $bindable(24),
@@ -509,6 +513,20 @@
 			</div>
 		{/if}
 	</div>
+	{#if weather === 'temp' && freezeLine != null}
+		<!-- The colours' freezing line as a height, to read beside the snow level: the
+		     snow level is usually lower (see the layer's note). -->
+		<div class="foot">
+			<span class="key line-key">
+				{#if freezeLine > 0}
+					{units === 'imperial' ? '32°F' : '0°C'} near {elevation(freezeLine, units)}
+				{:else}
+					Below {units === 'imperial' ? '32°F' : '0°C'} down to sea level
+				{/if}
+				<span class="faint">at the map's centre</span>
+			</span>
+		</div>
+	{/if}
 </section>
 
 <style>

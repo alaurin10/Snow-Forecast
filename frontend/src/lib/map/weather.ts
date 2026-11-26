@@ -132,6 +132,30 @@ export function tempAt(seaC: number, m: number, lapsePerKm = LAPSE_C_PER_M * 100
 	return seaC - (lapsePerKm * Math.max(0, m)) / 1000;
 }
 
+/**
+ * The height (m) where the temperature layer reaches 0 °C (32 °F) at a point, at time `t`:
+ * the inverse of `tempAt`, between the two frames either side (the map blends them the
+ * same way). 0 when it's below freezing down to sea level; null without the numbers.
+ */
+export function freezingHeightAt(
+	temps: { t: number; sea_c: number | null }[],
+	t: number,
+	lapsePerKm = LAPSE_C_PER_M * 1000
+): number | null {
+	const at = temps.filter((x) => x.sea_c != null) as { t: number; sea_c: number }[];
+	if (!at.length || lapsePerKm <= 0) return null;
+	let sea: number;
+	const j = at.findIndex((x) => x.t >= t);
+	if (j === 0) sea = at[0].sea_c;
+	else if (j < 0) sea = at[at.length - 1].sea_c;
+	else {
+		const a = at[j - 1];
+		const b = at[j];
+		sea = a.sea_c + ((b.sea_c - a.sea_c) * (t - a.t)) / (b.t - a.t);
+	}
+	return Math.max(0, (sea / lapsePerKm) * 1000);
+}
+
 /** Wind key: "20" (km/h) or "12" (mph). */
 export const windTick = (kmh: number, units: UnitSystem) =>
 	String(Math.round(units === 'imperial' ? kmhToMph(kmh) : kmh));
@@ -365,7 +389,7 @@ export function layerSource(weather: MapWeather, wind: MapWind, f: Frame | undef
 	}
 	if (weather === 'wind') return `Wind gusts near the ground (10 m): ${models}.`;
 	if (weather === 'snowlevel') {
-		return `Snow level: the height above sea level where falling snow turns to rain, from ${models}. The darkest band also means snow reaching the ground everywhere.`;
+		return `Snow level: the height above sea level where falling snow turns to rain, from ${models}. The darkest band also means snow reaching the ground everywhere. It sits below where the air is 32 °F (the temperature layer's line), usually by about 300 m (1,000 ft) and sometimes much more: snow takes a while to melt as it falls into warmer air.`;
 	}
 	if (weather === 'temp') {
 		return `Temperature 2 m above the ground, from ${models}, moved from each model's smoothed ground to the real terrain at 6.5 °C a kilometre: colder on the ridges, warmer in the valleys. Zoomed in, each spot gets the temperature at its own height. An estimate: cold air pooled in valleys (an inversion) isn't in it.`;

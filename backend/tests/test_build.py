@@ -277,3 +277,17 @@ def test_station_records_take_the_models_median_per_day() -> None:
     assert [(x.target_date, x.source, x.snow_cm, x.water_mm) for x in out] == [
         ("2026-11-15", "stn_cons", 7.2, 9.6)
     ]
+
+
+@pytest.mark.parametrize("loc_id", LOCS)
+def test_freezing_level_is_one_height_for_the_location(loc_id: str) -> None:
+    # It's a property of the air over the location, not of the band being read: a model
+    # without its own freezing level used to start its column at each band's temperature,
+    # which put the summit's freezing level hundreds of metres below the base's.
+    bands = fixture_snapshot(loc_id).bands
+    assert any(v is not None for v in bands[0].hourly.fl_m)
+    for b in bands[1:]:
+        assert b.hourly.fl_m == bands[0].hourly.fl_m
+        assert b.hourly.fl_lo == bands[0].hourly.fl_lo
+        assert b.hourly.fl_hi == bands[0].hourly.fl_hi
+        assert b.hourly.snow_level_m == bands[0].hourly.snow_level_m

@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { tempColor, tempLut } from './precip/totalgl';
 import {
+	freezingHeightAt,
 	hoursAt,
 	layerName,
 	posAt,
@@ -57,6 +58,21 @@ describe('temperature layer', () => {
 		expect(tempAt(5, 0)).toBe(5);
 		expect(tempAt(5, -50)).toBe(5); // below sea level: as the sea
 		expect(tempAt(5, 1000, 5)).toBeCloseTo(0);
+	});
+
+	it('finds where the colours cross 32 °F, between frames as the map blends them', () => {
+		const temps = [
+			{ t: 0, sea_c: 13 },
+			{ t: 3 * 3600, sea_c: 19.5 },
+			{ t: 6 * 3600, sea_c: null }
+		];
+		expect(freezingHeightAt(temps, 0)).toBeCloseTo(2000);
+		expect(freezingHeightAt(temps, 1.5 * 3600)).toBeCloseTo(2500); // halfway: 16.25 °C
+		expect(freezingHeightAt(temps, 9 * 3600)).toBeCloseTo(3000); // past the last number
+		expect(tempAt(16.25, freezingHeightAt(temps, 1.5 * 3600)!)).toBeCloseTo(0);
+		expect(freezingHeightAt([{ t: 0, sea_c: -2 }], 0)).toBe(0); // freezing to sea level
+		expect(freezingHeightAt([{ t: 0, sea_c: 10 }], 0, 5)).toBeCloseTo(2000);
+		expect(freezingHeightAt([{ t: 0, sea_c: null }], 0)).toBeNull();
 	});
 });
 

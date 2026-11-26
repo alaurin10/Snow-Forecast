@@ -162,6 +162,8 @@ def _var(group: Mapping[str, Mapping[str, Hourly]], name: str) -> dict[str, Hour
 def _freezing(
     model_vars: Mapping[str, Hourly], upper: Mapping[str, Hourly] | None, elev_m: float
 ) -> Hourly:
+    """One model's freezing level: its own where it has one, else found from its pressure
+    levels with `model_vars`' 2 m temperature at `elev_m` as the bottom of the column."""
     native = model_vars.get("freezing_level_height")
     if native and any(v is not None for v in native.values()):
         return dict(native)
@@ -287,9 +289,31 @@ def build_snapshot(
     period_members = [ens.member_totals(members, p.hours) for p in periods]
     mid_ens_mean = [mean(t) if t else None for t in period_members]
 
+    # The freezing level is one height for the whole location, found once at the lowest
+    # band and shared by every band. Found at each band, it depended on the band: a model
+    # without a freezing level of its own (ECMWF, GEM) started its column at the band's
+    # 2 m temperature, and at a band above the 0 °C level that ignored the free air below
+    # and extrapolated down from the band, so the summit read hundreds of metres lower
+    # than the base for the same model and hour.
+    low = min(range(len(loc.bands)), key=lambda j: loc.bands[j].elev_m)
+    low_md = split_models(inputs.multi[low], [*global_models, *short_models])
+    low_m = loc.bands[low].elev_m
+    fl_g = {
+        m: f
+        for m in global_models
+        if m in low_md and (f := _freezing(low_md[m], upper.get(m), low_m))
+    }
+    fl_s = {
+        m: f
+        for m in short_models
+        if m in low_md and (f := _freezing(low_md[m], upper.get(m), low_m))
+    }
+    fl = consensus_line(
+        all_hours, fl_g, fl_s, short_until, inputs.blend[low].get("freezing_level_height")
+    )
+
     work: dict[int, _BandWork] = {}
     for i in (1, 0, 2):  # mid first: the other bands scale from it
-        band = loc.bands[i]
         md = split_models(inputs.multi[i], [*global_models, *short_models])
         g = {m: md[m] for m in global_models if m in md}
         s = {m: md[m] for m in short_models if m in md}
@@ -308,11 +332,6 @@ def build_snapshot(
             short_until,
             blend.get("temperature_2m"),
         )
-        fl_g = {m: _freezing(v, upper.get(m), band.elev_m) for m, v in g.items()}
-        fl_s = {m: _freezing(v, upper.get(m), band.elev_m) for m, v in s.items()}
-        fl_g = {m: v for m, v in fl_g.items() if v}
-        fl_s = {m: v for m, v in fl_s.items() if v}
-        fl = consensus_line(all_hours, fl_g, fl_s, short_until, blend.get("freezing_level_height"))
         wind = consensus_line(
             all_hours,
             _var(g, "wind_speed_10m"),

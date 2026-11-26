@@ -144,7 +144,11 @@ older than `STALE_AFTER_H` (12 h).
   its daily depth, snow water and gauge total by the day they close; the parser moves
   them to the day they open (`snotel.start_of_day`), as the BC stations are read.
 - **Bands**: everything is computed at base, mid and summit at each band's own
-  coordinates; freezing level comes from the model or from the upper-air levels.
+  coordinates, except the freezing level: one height for the location, found at the
+  lowest band (from the model, or from its upper-air levels with the lowest band's
+  temperature as the bottom of the column) and shared by every band. The snow level is
+  305 m below it. The map's snow level is a different product (NBM's in the US, Canada's
+  models' WEonG), so the two can differ.
 - **Backcountry** (no safety judgement, with two bounded exceptions below): avalanche
   danger exactly as published and hidden once expired (each listed problem's aspects
   and elevations redrawn as a small rose), ridge-height wind, a snow-loading rose,
