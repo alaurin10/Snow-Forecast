@@ -30,9 +30,8 @@ Notable changes to Snow Watch. The format follows
 ### Changed
 - **The worker gives memory back between jobs.** It held ~2 GB while idle (memory freed
   by jobs on several threads, kept by the C library for reuse). The image now limits
-  glibc to two memory pools and returns large blocks straight to the system
-  (`MALLOC_ARENA_MAX=2`, `MALLOC_MMAP_THRESHOLD_=1048576`), and the worker releases
-  freed memory after every scheduled job.
+  glibc to two memory pools (`MALLOC_ARENA_MAX=2`), and the worker releases freed memory
+  after every scheduled job.
 - **Field photos follow the location more closely.** The Webcams tab shows the photos
   *near* the location first (within 20 km, and closer to it than to any other location,
   so Crystal gets Silver Basin and a Paradise location gets Paradise), then, folded, the

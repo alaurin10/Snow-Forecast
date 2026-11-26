@@ -506,8 +506,8 @@ _LIBC = _libc()
 def trim_memory(event: JobEvent | None = None) -> None:
     """Give memory freed by a finished job back to the system. The C library keeps freed
     memory to reuse it, and with jobs on several threads the worker held ~2 GB while idle
-    (Nov 2026); the image also sets MALLOC_ARENA_MAX and MALLOC_MMAP_THRESHOLD_ (see
-    docker/Dockerfile). Cheap: a few milliseconds."""
+    (Nov 2026); the image also sets MALLOC_ARENA_MAX=2 (see docker/Dockerfile). Cheap: a
+    few milliseconds."""
     if _LIBC is not None:
         _LIBC.malloc_trim(0)
 

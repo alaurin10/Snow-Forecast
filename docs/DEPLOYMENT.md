@@ -226,8 +226,8 @@ docker compose exec worker sh -c 'grep -E "^(anon|file) " /sys/fs/cgroup/memory.
 The worker runs under a small init (`init: true` in `docker-compose.yml`) that cleans up
 Chromium's exited processes. It used to hold ~2 GB of program memory while idle: the C
 library kept memory freed by jobs on several threads. The image now sets
-`MALLOC_ARENA_MAX=2` and `MALLOC_MMAP_THRESHOLD_=1048576`, and the worker hands freed
-memory back after every job, so it should drop back to a few hundred MB between jobs.
+`MALLOC_ARENA_MAX=2` and the worker hands freed memory back after every job, so it
+should drop back to a few hundred MB between jobs.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1
