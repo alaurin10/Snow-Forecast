@@ -10,6 +10,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { modal } from '../modal';
+	import { portal } from '../portal';
 	import ForecastChart from './ForecastChart.svelte';
 	import type { BandOut } from '../types.gen';
 	import { converters, elevation, speed, type UnitSystem } from '../units';
@@ -880,12 +881,6 @@
 		document.addEventListener('fullscreenchange', off);
 		return () => document.removeEventListener('fullscreenchange', off);
 	});
-	/** Moves the full screen view to the end of <body>, out of the card: a card's blur
-	 *  makes it the box that position: fixed is measured from, which trapped the view. */
-	function portal(node: HTMLElement) {
-		document.body.appendChild(node);
-		return { destroy: () => node.remove() };
-	}
 
 	/** Show the window starting on day `k` (today = now). */
 	function showDay(k: number) {

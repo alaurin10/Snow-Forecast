@@ -2955,7 +2955,7 @@
 				{#if target.kind === 'station'}
 					<StationCard station={target.station} {units} />
 				{:else if target.kind === 'report'}
-					<ReportCard report={target.report} />
+					<ReportCard report={target.report} {units} />
 				{:else if target.kind === 'feature'}
 					{@const item = target.item}
 					<FeatureCard

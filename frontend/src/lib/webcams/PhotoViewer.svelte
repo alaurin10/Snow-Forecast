@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
 	import { modal } from '../modal';
+	import { portal } from '../portal';
 	import { safeHref, safeImage } from '../links';
 	import type { UnitSystem } from '../units';
 	import { reportFrom, reportWhen, type ViewerPhoto } from '../webcams';
@@ -38,7 +39,13 @@
 	const away = (km: number) =>
 		units === 'imperial' ? `${(km * 0.621371).toFixed(0)} mi` : `${km.toFixed(0)} km`;
 	const meta = (p: ViewerPhoto) =>
-		[reportFrom(p.report), reportWhen(p.report, tz), `${away(p.distance_km)} away`, p.report.region]
+		[
+			reportFrom(p.report),
+			reportWhen(p.report, tz),
+			// From the map there is no location to measure from.
+			Number.isFinite(p.distance_km) ? `${away(p.distance_km)} away` : '',
+			p.report.region
+		]
 			.filter(Boolean)
 			.join(' · ');
 
@@ -140,7 +147,7 @@
 
 <svelte:window onkeydown={onkey} />
 
-<div class="modal" use:modal={{ onclose }}>
+<div class="modal" use:portal use:modal={{ onclose }}>
 	<div
 		class="viewer"
 		class:grid-mode={mode === 'grid'}

@@ -14,6 +14,7 @@
 	import type { NearbyOut, NearbyReport } from '../types.gen';
 	import type { UnitSystem } from '../units';
 	import { reportFrom, reportWhen, type CenterObservations, type ViewerPhoto } from '../webcams';
+	import ObsThumbs from '../webcams/ObsThumbs.svelte';
 	import ObsWords from '../webcams/ObsWords.svelte';
 	import PhotoViewer from '../webcams/PhotoViewer.svelte';
 	import { photoViewer } from '../webcams/viewer.svelte';
@@ -37,7 +38,6 @@
 		center = null
 	}: Props = $props();
 
-	const THUMBS = 4;
 	// A copy of the data from before the server listed every report (the browser may keep
 	// one for an hour after an update) still has the photo reports: never show less than
 	// the Webcams tab does.
@@ -63,7 +63,6 @@
 </script>
 
 {#snippet item(r: NearbyReport)}
-	{@const pics = (r.report.photos ?? []).filter((ph) => safeImage(ph.thumb) && safeImage(ph.url))}
 	<li class="obs">
 		<p class="title">
 			{#if safeHref(r.report.url)}
@@ -83,32 +82,15 @@
 				: ''}
 		</p>
 		<ObsWords report={r.report} clamp />
-		{#if pics.length}
-			<div class="thumbs">
-				{#each pics.slice(0, THUMBS) as ph, i (i)}
-					{@const at = first.get(ph.url + '\n' + r.report.id)}
-					{#if at !== undefined}
-						<!-- eslint-disable svelte/no-navigation-without-resolve -->
-						<a
-							href={safeHref(ph.url)}
-							target="_blank"
-							rel="noopener noreferrer"
-							aria-haspopup="dialog"
-							aria-label={i === THUMBS - 1 && pics.length > THUMBS
-								? `${pics.length} photos from “${r.report.title || 'this report'}”, full screen`
-								: `Photo ${i + 1} from “${r.report.title || 'this report'}”, full screen`}
-							onclick={(e) => viewer.open(at, e)}
-						>
-							<!-- eslint-enable svelte/no-navigation-without-resolve -->
-							<img src={safeImage(ph.thumb)} alt="" loading="lazy" referrerpolicy="no-referrer" />
-							{#if i === THUMBS - 1 && pics.length > THUMBS}
-								<span class="more-pics">+{pics.length - THUMBS + 1}</span>
-							{/if}
-						</a>
-					{/if}
-				{/each}
-			</div>
-		{/if}
+		<ObsThumbs
+			photos={r.report.photos ?? []}
+			title={r.report.title}
+			onopen={(i, e) => {
+				const ph = (r.report.photos ?? [])[i];
+				const at = ph && first.get(ph.url + '\n' + r.report.id);
+				if (at !== undefined) viewer.open(at, e);
+			}}
+		/>
 	</li>
 {/snippet}
 
@@ -200,34 +182,6 @@
 	}
 	.meta {
 		font-size: 0.8rem;
-	}
-	.thumbs {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 96px));
-		gap: 6px;
-	}
-	.thumbs a {
-		position: relative;
-		display: block;
-		cursor: zoom-in;
-	}
-	.thumbs img {
-		display: block;
-		width: 100%;
-		aspect-ratio: 1;
-		object-fit: cover;
-		border-radius: 6px;
-		background: var(--surface-2);
-	}
-	.more-pics {
-		position: absolute;
-		inset: 0;
-		display: grid;
-		place-items: center;
-		border-radius: 6px;
-		background: rgb(8 14 28 / 0.55);
-		color: #fff;
-		font-weight: 700;
 	}
 	.zone {
 		margin-top: 10px;
