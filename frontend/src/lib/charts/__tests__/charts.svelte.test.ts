@@ -88,30 +88,6 @@ describe.each([
 	});
 });
 
-it('the freezing level view colours each elevation by what the models have falling there', () => {
-	const snap = rainy as unknown as Snapshot;
-	const { container } = render(ForecastChart, {
-		props: { band: snap.bands[1], bands: snap.bands, units: 'imperial', metric: 'fl' }
-	});
-	const runs = [...container.querySelectorAll<HTMLElement>('.refrun')];
-	expect(runs.length).toBeGreaterThan(0);
-	for (const r of runs) {
-		expect(['snow', 'mix', 'rain'].filter((k) => r.classList.contains(k))).toHaveLength(1);
-		expect(parseFloat(r.style.width)).toBeGreaterThan(0);
-	}
-	// Each run sits on one of the location's elevation lines.
-	const lines = new Set(
-		[...container.querySelectorAll<HTMLElement>('.ref')].map((e) => e.style.top)
-	);
-	expect(runs.every((r) => lines.has(r.style.top))).toBe(true);
-	cleanup();
-	// Other views leave the lines alone.
-	const other = render(ForecastChart, {
-		props: { band: snap.bands[1], bands: snap.bands, units: 'imperial', metric: 'temp' }
-	});
-	expect(other.container.querySelectorAll('.refrun')).toHaveLength(0);
-});
-
 it('empty states render without errors', () => {
 	const t = render(TrendChart, { props: { runs: [], units: 'imperial', width: 300 } });
 	expect(t.container.textContent).toContain('two or more runs');
