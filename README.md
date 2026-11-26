@@ -24,7 +24,8 @@ snow stations measured, and the official avalanche rating.
   radar and forecast precipitation map with ski runs and 3D terrain, and forecast
   snow level, wind and temperature (adjusted to the height of the terrain) layers.
 - **Backcountry**: avalanche danger exactly as published (hidden once expired), with
-  each problem's aspects and elevations drawn; a week of "avalanche weather" day by day
+  each problem's aspects and elevations drawn; recent observations nearby (NWAC's: what
+  people reported, signs of instability and photos); a week of "avalanche weather" day by day
   (new snow, drifting, rain, warming, and how hard the weather pushes on the snowpack,
   labelled as an estimate); where the wind is loading snow; and touring weather (sky,
   ridge wind, refreeze, daylight) in one table. Snow Watch never says whether terrain

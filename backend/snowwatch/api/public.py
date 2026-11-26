@@ -108,6 +108,7 @@ NEARBY_KM = 60.0
 NEARBY_STATIONS = 8
 NEARBY_REPORTS = 8
 NEARBY_PHOTO_REPORTS = 24
+NEARBY_AREA_REPORTS = 16  # the Backcountry tab's recent observations
 # The Webcams tab's photos: "near" a location within this distance and closer to it than to
 # any other location; farther ones only if in the same avalanche zone (and NEARBY_KM).
 NEAR_KM = 20.0
@@ -182,19 +183,22 @@ def zone_at(index: ZoneIndex, lat: float, lon: float) -> str | None:
     return None
 
 
-def photo_groups(
+def area_groups(
     loc_id: str,
     loc_zone: str | None,
     reports: list[tuple[NearbyReport, float, float]],
     others: list[tuple[str, float, float]],
     index: ZoneIndex,
+    *,
+    photos_only: bool = False,
 ) -> list[NearbyReport]:
-    """The reports with photos for a location's Webcams tab, each marked "near" or "zone".
-    `reports` come with their (lat, lon); `others` is every location's (id, lat, lon), to
-    give a report to the closest one."""
+    """The reports that belong to a location, each marked "near" or "zone", near first:
+    for the Backcountry tab's recent observations and (`photos_only`) the Webcams tab's
+    photos. `reports` come with their (lat, lon); `others` is every location's
+    (id, lat, lon), to give a report to the closest one."""
     out = []
     for r, lat, lon in reports:
-        if not r.report.photos:
+        if photos_only and not r.report.photos:
             continue
         nearest = min(others, key=lambda o: haversine_km(o[1], o[2], lat, lon), default=None)
         if r.distance_km <= NEAR_KM and (nearest is None or nearest[0] == loc_id):
@@ -621,9 +625,10 @@ def make_router() -> APIRouter:
         others = [
             (o.id, o.band("mid").lat, o.band("mid").lon) for o in service.list_locations(conn)
         ]
-        photos = photo_groups(loc.id, loc_zone, located, others, index)
+        area = area_groups(loc.id, loc_zone, located, others, index)
+        photos = [r for r in area if r.report.photos]
         if zone_name is None:
-            zone_name = next((r.report.region for r in photos if r.group == "zone"), None)
+            zone_name = next((r.report.region for r in area if r.group == "zone"), None)
         response.headers["Cache-Control"] = CACHE
         return NearbyOut(
             location_id=loc.id,
@@ -634,6 +639,7 @@ def make_router() -> APIRouter:
             reports_days=obs.days if obs else None,
             reports=reports[:NEARBY_REPORTS],
             photo_reports=photos[:NEARBY_PHOTO_REPORTS],
+            area_reports=area[:NEARBY_AREA_REPORTS],
             near_km=NEAR_KM,
             zone_name=zone_name or None,
         )

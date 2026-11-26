@@ -234,3 +234,16 @@ export interface ViewerPhoto {
 	report: ObsProps;
 	distance_km: number;
 }
+
+/** A reported sign of instability in a few words: "Shooting cracks · widespread". */
+export function signLabel(s: { kind: string; extent?: string | null }): string {
+	const base: Record<string, string> = {
+		avalanches_caught: 'Someone caught in an avalanche',
+		avalanches_triggered: 'Avalanches triggered',
+		avalanches_observed: 'Avalanches seen',
+		collapsing: 'Collapsing (whumpfs)',
+		cracking: 'Shooting cracks'
+	};
+	const label = base[s.kind] ?? s.kind.replaceAll('_', ' ');
+	return s.extent ? `${label} · ${s.extent}` : label;
+}

@@ -87,7 +87,59 @@ def test_parse_reads_what_the_page_shows_without_names() -> None:
     assert by_title["Mt Bachelor"].center == "COAA"
     # Nothing of the observer is kept.
     text = json.dumps([f.model_dump() for f in feats])
-    assert "Someone" not in text and "Notes left out" not in text
+    assert "Someone" not in text
+    # What they wrote is kept: the summary and the signs of instability.
+    austin = by_title["Austin Pass"]
+    assert austin.summary == "Notes left out of the fixture."
+    assert [(g.kind, g.extent) for g in austin.signs] == [
+        ("avalanches_observed", None),
+        ("collapsing", "widespread"),
+        ("cracking", "specific"),
+    ]
+    assert by_title["Pan Point"].signs == []
+
+
+def test_parse_keeps_the_observers_words_in_paragraphs() -> None:
+    long = "<p>" + "word " * 600 + "</p>"
+    feats = nwac_obs.parse(
+        {
+            "results": [
+                item(
+                    observation_summary=(
+                        "<p>Thin cover&nbsp;below 5,000'.</p>\n<p>Better up high.<br>Cold.</p>"
+                    ),
+                    instability_summary="<p>Shooting cracks on test slopes.</p>",
+                    avalanches_summary="One small natural slab.",
+                    instability={
+                        "cracking": True,
+                        "cracking_description": "Widespread",
+                        "collapsing": True,
+                        "collapsing_description": "everywhere!",
+                        "avalanches_caught": True,
+                    },
+                ),
+                item(id="0b6c2f6e-3333-4222-8333-944455556666", observation_summary=long),
+                item(
+                    id="0b6c2f6e-4444-4222-8333-944455556666",
+                    observation_summary=None,
+                    instability="x",
+                ),
+            ]
+        },
+        BOX,
+    )
+    a, b, c = (f.properties for f in feats)
+    assert a.summary == "Thin cover below 5,000'.\n\nBetter up high.\n\nCold."
+    assert a.instability_note == "Shooting cracks on test slopes."
+    assert a.avalanche_note == "One small natural slab."
+    assert [(g.kind, g.extent) for g in a.signs] == [
+        ("avalanches_caught", None),
+        ("collapsing", None),  # not one of the form's words: left out
+        ("cracking", "widespread"),
+    ]
+    assert b.summary is not None and len(b.summary) <= nwac_obs.SUMMARY_MAX + 1
+    assert b.summary.endswith("word…")
+    assert c.summary is None and c.signs == [] and c.instability_note is None
 
 
 def test_parse_skips_bad_and_outside_items() -> None:
@@ -223,6 +275,12 @@ def test_api_serves_nwac_observations_with_avalanche_canadas(
     assert groups == [("Silver Basin", "near"), ("Paradise - Mt Rainier NP", "zone")]
     assert body["zone_name"] == "West Slopes South" and body["near_km"] == 20
     assert all(x["report"]["zone"] == "nac:3023" for x in body["photo_reports"])
+    # The Backcountry tab: the same groups, photos or not (Pan Point has none).
+    area = [(x["report"]["title"], x["group"]) for x in body["area_reports"]]
+    assert ("Pan Point", "zone") in area and area[0] == ("Silver Basin", "near")
+    assert body["area_reports"][0]["report"]["signs"] == [
+        {"kind": "cracking", "extent": "specific"}
+    ]
     # The Observed tab still lists every report within 60 km.
     assert {x["report"]["title"] for x in body["reports"]} >= {"Silver Basin", "Pan Point"}
     # Snoqualmie (zone 3028) has neither near.
@@ -281,16 +339,20 @@ def test_photos_go_to_the_closest_location_and_zones_come_from_outlines(tmp_path
         (rep("nopics", 1.0), 46.93, -121.47),
     ]
     reports[-1][0].report.photos = []
-    got = public.photo_groups("crystal", "nac:3023", reports, [crystal, paradise], index)
+    got = public.area_groups(
+        "crystal", "nac:3023", reports, [crystal, paradise], index, photos_only=True
+    )
     assert [(r.report.id, r.group) for r in got] == [
         ("silver", "near"),
         ("muir", "zone"),
         ("paradise-near", "zone"),
     ]
-    at_paradise = public.photo_groups("paradise", "nac:3023", reports, [crystal, paradise], index)
+    at_paradise = public.area_groups(
+        "paradise", "nac:3023", reports, [crystal, paradise], index, photos_only=True
+    )
     assert (at_paradise[0].report.id, at_paradise[0].group) == ("paradise-near", "near")
     # A location with no known zone shows only what's near it.
-    alone = public.photo_groups("crystal", None, reports, [crystal], index)
+    alone = public.area_groups("crystal", None, reports, [crystal], index, photos_only=True)
     assert [r.report.id for r in alone] == ["silver", "paradise-near"]
 
 

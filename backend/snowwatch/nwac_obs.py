@@ -6,8 +6,9 @@ NWAC agreed to Snow Watch reading its observations page (nwac.us/observations, N
 opens it in headless Chromium (Playwright, the `scrape` extra), keeps the observation
 list the page loads to show, and steps through the page's own pager. It reads what a
 visitor sees: where and when, the zone, who observed (forecaster or public), what kinds
-of observation it has, the photos and their captions, and a link back to the
-observation on nwac.us. The observer's name, contact and written notes aren't kept.
+of observation it has, the observer's summary, signs of instability and notes on them
+and on avalanches, the photos and their captions, and a link back to the observation on
+nwac.us. The observer's name and contact details aren't kept.
 
 The page shows the last two weeks of observations in its map's area (NWAC's, plus the
 Central Oregon center's it lists alongside); only those in Snow Watch's map box are
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from snowwatch.observations import Box, ObsFeature, ObsOut, ObsPhoto, ObsProps, read
+from snowwatch.observations import Box, ObsFeature, ObsOut, ObsPhoto, ObsProps, ObsSign, read
 from snowwatch.urls import clean_url
 
 log = logging.getLogger("snowwatch.nwac_obs")
@@ -62,6 +63,41 @@ def _text(value: Any, limit: int) -> str:
         return ""
     s = html.unescape(_TAG.sub(" ", value))
     return " ".join(s.split())[:limit]
+
+
+_BREAK = re.compile(r"<\s*(br|/p|/li|/div|/h\d)\s*/?\s*>", re.I)
+SUMMARY_MAX = 2000
+NOTE_MAX = 600
+_EXTENTS = {"isolated", "specific", "widespread"}
+
+
+def _paras(value: Any, limit: int) -> str | None:
+    """Plain text in paragraphs from the page's HTML: breaks kept, tags dropped, entities
+    read, at most `limit` characters (cut at a word, with "…")."""
+    if not isinstance(value, str):
+        return None
+    text = html.unescape(_TAG.sub(" ", _BREAK.sub("\n", value)))
+    paras = [" ".join(line.split()) for line in text.split("\n")]
+    out = "\n\n".join(p for p in paras if p)
+    if len(out) > limit:
+        out = out[:limit].rsplit(" ", 1)[0].rstrip(" ,;.") + "…"
+    return out or None
+
+
+def parse_signs(item: dict[str, Any]) -> list[ObsSign]:
+    """The signs of instability ticked on the form, most serious first."""
+    inst = item.get("instability")
+    if not isinstance(inst, dict):
+        return []
+    out = []
+    for kind in ("avalanches_caught", "avalanches_triggered", "avalanches_observed"):
+        if inst.get(kind) is True:
+            out.append(ObsSign(kind=kind))
+    for kind in ("collapsing", "cracking"):
+        if inst.get(kind) is True:
+            extent = str(inst.get(f"{kind}_description") or "").lower()
+            out.append(ObsSign(kind=kind, extent=extent if extent in _EXTENTS else None))
+    return out
 
 
 def _photo(m: Any) -> ObsPhoto | None:
@@ -167,6 +203,10 @@ def parse(blob: Any, box: Box) -> list[ObsFeature]:
                     center=center if center and center.isalpha() else None,
                     observer=observer if _WORD.match(observer) else None,
                     zone=f"nac:{zone_id}" if zone_id.isdigit() and len(zone_id) < 9 else None,
+                    summary=_paras(item.get("observation_summary"), SUMMARY_MAX),
+                    signs=parse_signs(item),
+                    instability_note=_paras(item.get("instability_summary"), NOTE_MAX),
+                    avalanche_note=_paras(item.get("avalanches_summary"), NOTE_MAX),
                 ),
             )
         )

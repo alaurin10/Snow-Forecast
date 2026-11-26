@@ -8,13 +8,12 @@
   opens the full report on the center's site. Public reports aren't checked by anyone.
 -->
 <script lang="ts">
-	import { pushState } from '$app/navigation';
-	import { page } from '$app/state';
 	import { safeHref, safeImage } from '../links';
 	import type { NearbyOut, NearbyReport } from '../types.gen';
 	import type { UnitSystem } from '../units';
 	import { byDay, reportFrom, type CenterObservations, type ViewerPhoto } from '../webcams';
 	import PhotoViewer from './PhotoViewer.svelte';
+	import { photoViewer } from './viewer.svelte';
 
 	interface Props {
 		/** Field reports around the location; null until they load (or if they fail). */
@@ -72,23 +71,7 @@
 			minute: '2-digit'
 		});
 
-	// The viewer: a history entry of its own, so the phone's Back button closes it rather
-	// than leaving the page.
-	let viewing = $state<number | null>(null);
-	function view(i: number, e?: MouseEvent) {
-		// Ctrl/⌘-click and middle-click still open the photo in a new tab.
-		if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0)) return;
-		e?.preventDefault();
-		viewing = i;
-		if (!page.state.photo) pushState('', { photo: true });
-	}
-	function close() {
-		if (page.state.photo) history.back();
-		else viewing = null;
-	}
-	$effect(() => {
-		if (!page.state.photo) viewing = null;
-	});
+	const viewer = photoViewer();
 </script>
 
 {#snippet days(list: Days)}
@@ -123,7 +106,7 @@
 									target="_blank"
 									rel="noopener noreferrer"
 									aria-haspopup="dialog"
-									onclick={(e) => view(at, e)}
+									onclick={(e) => viewer.open(at, e)}
 								>
 									<img
 										src={safeImage(ph.thumb)}
@@ -148,8 +131,11 @@
 		<div class="top">
 			<h2>Recent field photos</h2>
 			{#if flat.length}
-				<button type="button" class="btn small" aria-haspopup="dialog" onclick={() => view(0)}
-					>View all {flat.length} full screen</button
+				<button
+					type="button"
+					class="btn small"
+					aria-haspopup="dialog"
+					onclick={() => viewer.open(0)}>View all {flat.length} full screen</button
 				>
 			{/if}
 		</div>
@@ -194,8 +180,8 @@
 	{/if}
 </section>
 
-{#if viewing !== null && flat.length}
-	<PhotoViewer photos={flat} bind:index={viewing} {units} {tz} onclose={close} />
+{#if viewer.index !== null && flat.length}
+	<PhotoViewer photos={flat} bind:index={viewer.index} {units} {tz} onclose={viewer.close} />
 {/if}
 
 <style>

@@ -6,7 +6,8 @@ import {
 	freshImage,
 	playSrc,
 	reportFrom,
-	reportWhen
+	reportWhen,
+	signLabel
 } from './webcams';
 
 const NOCOOKIE = 'https://www.youtube-nocookie.com/embed/vhO8nNqg9iw';
@@ -152,5 +153,15 @@ describe('reportFrom and reportWhen', () => {
 		expect(reportWhen({ time: '2026-11-24T18:30+00:00' }, 'America/Los_Angeles')).toBe(
 			'Tue, Nov 24, 10:30 AM'
 		);
+	});
+});
+
+describe('signLabel', () => {
+	it('says what was reported, and how widespread', () => {
+		expect(signLabel({ kind: 'cracking', extent: 'widespread' })).toBe(
+			'Shooting cracks · widespread'
+		);
+		expect(signLabel({ kind: 'avalanches_caught' })).toBe('Someone caught in an avalanche');
+		expect(signLabel({ kind: 'new_kind' })).toBe('new kind');
 	});
 });

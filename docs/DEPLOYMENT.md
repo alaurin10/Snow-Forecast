@@ -198,7 +198,9 @@ in headless Chromium every 3 hours (installed in the image, which grows by about
 each visit takes ~10 seconds and ~600 MB of memory, and waits while a forecast run is
 going) and keeps where,
 when, the zone, who observed (forecaster or public), the photos and their captions, and
-a link back. Names, contact details and written notes aren't kept. The same observations
+a link back, with the observer's summary and signs of instability (cracking, collapsing,
+avalanches), which the Backcountry tab shows as recent observations. Names and contact
+details aren't kept. The same observations
 show on the Observed tab and the map. Turn it off with `nwac_obs: false` under `map:` in
 `config/forecast.yaml`; read the page now with:
 

@@ -785,7 +785,7 @@
 	{:else if tab === 'confidence'}
 		<ConfidenceTab {snap} {band} {trend} {scores} {scoresLoad} {units} />
 	{:else if tab === 'backcountry'}
-		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} />
+		<BackcountryTab {snap} {avy} {units} {avyLoad} {graded} {nearby} {nearbyLoad} />
 	{:else if tab === 'webcams'}
 		<WebcamsTab
 			cams={snap.location.webcams ?? []}
