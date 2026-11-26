@@ -100,8 +100,11 @@ async function drag(page: Page, dx: number, dy: number) {
 	await page.mouse.up();
 }
 
-test('the map stays within its memory budget on a phone', async ({ baseURL }, info) => {
-	test.skip(info.project.name !== 'phone', 'measured on the phone profile');
+// Run on its own (the solo project, playwright.config.ts): 3D in software takes every core,
+// and what's measured is this page alone. The phone profile is set on its context below.
+const solo = { tag: '@solo' };
+
+test('the map stays within its memory budget on a phone', solo, async ({ baseURL }, info) => {
 	test.skip(process.platform !== 'linux', 'reads /proc');
 	test.setTimeout(180_000);
 
@@ -198,7 +201,7 @@ test('the map stays within its memory budget on a phone', async ({ baseURL }, in
 			gpu: round(u.byType['gpu-process'] ?? 0)
 		});
 		const result = {
-			project: info.project.name,
+			project: 'phone',
 			renderer_aim_mb: RENDERER_AIM_MB,
 			renderer_max_mb: RENDERER_MAX_MB,
 			peak_mb: Object.fromEntries(Object.entries(peak).map(([k, v]) => [k, round(v)])),

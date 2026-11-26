@@ -11,14 +11,15 @@ import re
 import secrets
 import sqlite3
 import time
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from snowwatch import __version__, observations, overlays, webcams
 from snowwatch.api.admin import make_admin_router
@@ -102,6 +103,53 @@ def content_security_policy(script_hashes: list[str]) -> str:
     )
 
 
+class AccessLog:
+    """Each answer's request id and security headers, and the access log line.
+
+    Plain ASGI, not ``@app.middleware("http")``: Starlette's BaseHTTPMiddleware raises
+    "No response returned." when a browser drops a request before the answer starts (a
+    file answer then sends nothing), so every image or script cancelled by a page closing
+    mid-load was logged as a server error with a traceback."""
+
+    def __init__(self, app: ASGIApp, headers: dict[str, str]) -> None:
+        self.app = app
+        self.headers = headers
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        method, path = scope["method"], scope["path"]
+        request_id = Headers(scope=scope).get("x-request-id", "")[:64] or secrets.token_hex(6)
+        answered = False
+
+        async def send_with_headers(message: Message) -> None:
+            nonlocal answered
+            if message["type"] == "http.response.start":
+                answered = True
+                status = message["status"]
+                ms = (time.perf_counter() - started) * 1000
+                # Errors, writes and slow requests at INFO; the steady stream of reads at DEBUG.
+                level = (
+                    logging.INFO if status >= 400 or method != "GET" or ms > 2000 else logging.DEBUG
+                )
+                access.log(level, "%s %s %d %.0f ms [%s]", method, path, status, ms, request_id)
+                headers = MutableHeaders(scope=message)
+                headers["X-Request-ID"] = request_id
+                for name, value in self.headers.items():
+                    headers.setdefault(name, value)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_headers)
+        except Exception:
+            access.exception("%s %s failed [%s]", method, path, request_id)
+            raise
+        if not answered:
+            access.debug("%s %s client went away [%s]", method, path, request_id)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     prod = settings.env == "prod"
@@ -130,42 +178,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # app's own scripts and styles. Behind a tunnel the edge compresses for visitors, but
     # the bytes leave this machine as sent, over the home connection's upload. Pictures
     # and answers already compressed (json_file) pass through as they are. Level 6: most
-    # of the gain for a fraction of level 9's time. Added before the middleware below, so
-    # it sits inside it and sees each response whole (that one streams every body, and
-    # a streamed body is compressed however small).
+    # of the gain for a fraction of level 9's time. Added before AccessLog, so it sits
+    # inside it and sees each response whole.
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
-    @app.middleware("http")
-    async def add_security_headers(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        started = time.perf_counter()
-        request_id = request.headers.get("x-request-id", "")[:64] or secrets.token_hex(6)
-        try:
-            response = await call_next(request)
-        except Exception:
-            access.exception("%s %s failed [%s]", request.method, request.url.path, request_id)
-            raise
-        ms = (time.perf_counter() - started) * 1000
-        # Errors, writes and slow requests at INFO; the steady stream of reads at DEBUG.
-        level = (
-            logging.INFO
-            if response.status_code >= 400 or request.method != "GET" or ms > 2000
-            else logging.DEBUG
-        )
-        access.log(
-            level,
-            "%s %s %d %.0f ms [%s]",
-            request.method,
-            request.url.path,
-            response.status_code,
-            ms,
-            request_id,
-        )
-        response.headers["X-Request-ID"] = request_id
-        for name, value in security_headers.items():
-            response.headers.setdefault(name, value)
-        return response
+    app.add_middleware(AccessLog, headers=security_headers)
 
     @app.get("/api/livez")
     def livez() -> dict[str, bool]:
