@@ -7,6 +7,11 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Field photos full screen.** A photo on the Webcams tab opens a full-screen viewer
+  that flips through every photo (arrows, arrow keys or a swipe), each with the report's
+  place, who sent it, the day, how far away, the zone and the caption, and a link to the
+  full report. **View all** starts from the first; Escape, ✕ or the phone's Back button
+  close it and leave you where you were.
 - **NWAC observation photos on the Webcams tab.** Locations in Washington and northern
   Oregon show recent photos from NWAC's observations (forecasters' and the
   public's) within 60 km, by the day observed, each with who sent it, the zone and a link
@@ -23,6 +28,13 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Field photos follow the location more closely.** The Webcams tab shows the photos
+  *near* the location first (within 20 km, and closer to it than to any other location,
+  so Crystal gets Silver Basin and a Paradise location gets Paradise), then, folded, the
+  others from the same avalanche zone within 60 km. Photos from other zones are no longer
+  shown there (the Observed tab still lists every report within 60 km).
+- **The worker runs under an init process** (`init: true`), which cleans up the
+  processes headless Chromium leaves when it exits.
 - **Compare's Locations button and snow total switch sit under the chart's card**, so the
   card holds just the chart, its timeline and its range.
 - **Compare reads times on your own clock.** When the locations span time zones, the one

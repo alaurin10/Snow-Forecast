@@ -675,6 +675,7 @@ export interface MetaOut {
  */
 export interface NearbyOut {
 	location_id: string;
+	near_km?: number;
 	photo_reports?: NearbyReport[];
 	radius_km: number;
 	reports: NearbyReport[];
@@ -682,6 +683,7 @@ export interface NearbyOut {
 	reports_days: number | null;
 	stations: NearbyStation[];
 	stations_at: string | null;
+	zone_name?: string | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -689,6 +691,7 @@ export interface NearbyOut {
  */
 export interface NearbyReport {
 	distance_km: number;
+	group?: ('near' | 'zone') | null;
 	report: ObsProps;
 }
 /**
@@ -708,6 +711,7 @@ export interface ObsProps {
 	time: string;
 	title: string;
 	url: string | null;
+	zone?: string | null;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

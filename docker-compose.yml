@@ -39,6 +39,9 @@ services:
     image: snowwatch:local
     pull_policy: never
     command: ["snowwatch", "worker"]
+    # A tiny init as PID 1 reaps the processes headless Chromium leaves when it exits
+    # (it reads NWAC's observations page); without one they stay as zombies.
+    init: true
     env_file:
       - path: .env
         required: false

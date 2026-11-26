@@ -1,10 +1,26 @@
 // The Webcams tab: pictures first, a camera's live video only after "Live", one at a time.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import WebcamsTab from './WebcamsTab.svelte';
 import { prefs } from '../prefs.svelte';
 import type { NearbyOut } from '../types.gen';
+
+// The viewer gets a history entry of its own; outside the app's router, a stand-in.
+const nav = vi.hoisted(() => ({ state: {} as { photo?: boolean }, pushes: 0 }));
+vi.mock('$app/navigation', () => ({
+	pushState: (_url: string, state: { photo?: boolean }) => {
+		nav.pushes++;
+		nav.state = state;
+	}
+}));
+vi.mock('$app/state', () => ({
+	page: {
+		get state() {
+			return nav.state;
+		}
+	}
+}));
 
 const CLOUD = 'https://res.cloudinary.com/avcan-min/image/upload/';
 const nearby = (photos: number): NearbyOut => ({
@@ -149,7 +165,7 @@ describe('webcams tab', () => {
 		expect(photos.container.querySelectorAll('.photos img')).toHaveLength(1);
 		cleanup();
 		const none = render(WebcamsTab, { cams: cams.slice(0, 1), nearby: nearby(0) });
-		expect(none.getByText(/No photos in Avalanche Canada reports within/)).toBeTruthy();
+		expect(none.getByText(/No photos within 12 mi of this location/)).toBeTruthy();
 	});
 
 	it('links NWAC’s observations for its locations, even with no cameras or photos', () => {
@@ -208,7 +224,9 @@ describe('webcams tab', () => {
 			tz: 'America/Los_Angeles',
 			avy: { provider: 'nac', center_id: 'NWAC' }
 		});
-		expect(getByText(/From NWAC observations \(forecasters and the public\) within/)).toBeTruthy();
+		expect(
+			getByText(/From NWAC observations \(forecasters and the public\), last 14/)
+		).toBeTruthy();
 		expect(queryByText(/Mountain Information Network/)).toBeNull();
 		// The day only: NWAC's observations have no time of day.
 		expect(getByText('NWAC forecaster · 2 km away · West Slopes South')).toBeTruthy();
@@ -224,5 +242,87 @@ describe('webcams tab', () => {
 			cams: [{ name: 'Odd', url: 'https://x.example', video_url: 'https://x.example/player' }]
 		});
 		expect(queryByRole('button', { name: /live$/i })).toBeNull();
+	});
+
+	it('flips through every photo full screen, with where, who and the caption', async () => {
+		const data: NearbyOut = {
+			...nearby(2),
+			zone_name: 'Sea To Sky',
+			photo_reports: [
+				{ ...nearby(2).photo_reports![0], group: 'near' },
+				{
+					distance_km: 30,
+					group: 'zone',
+					report: {
+						...nearby(1).photo_reports![0].report,
+						id: 'r2',
+						title: 'Cornices on Cayoosh',
+						photos: [{ url: `${CLOUD}z.jpg`, thumb: `${CLOUD}zt.jpg`, caption: 'Big cornice' }]
+					}
+				}
+			]
+		};
+		nav.state = {};
+		const { container, getByRole, getByText, queryByRole } = render(WebcamsTab, {
+			cams: [],
+			nearby: data,
+			units: 'metric',
+			tz: 'America/Vancouver',
+			name: 'Whistler'
+		});
+		// Near the location first; the rest of the zone folded below.
+		expect(getByRole('heading', { name: 'Near Whistler' })).toBeTruthy();
+		const more = container.querySelector('details.zone') as HTMLDetailsElement;
+		expect(more.open).toBe(false);
+		expect(more.textContent).toContain('More in Sea To Sky');
+
+		// A photo opens the viewer at that photo, not a new page.
+		const second = container.querySelectorAll('.photos figure a')[1] as HTMLAnchorElement;
+		const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+		second.dispatchEvent(click);
+		flushSync();
+		expect(click.defaultPrevented).toBe(true);
+		expect(nav.pushes).toBe(1);
+		const dialog = getByRole('dialog', { name: 'Field photos' });
+		expect(getByText('2 of 3')).toBeTruthy();
+		expect(dialog.querySelector('img')?.getAttribute('src')).toBe(`${CLOUD}c_limit,w_1600/p1.jpg`);
+		expect(dialog.textContent).toContain('Wind slab on Blackcomb');
+		expect(dialog.textContent).toContain('Avalanche Canada MIN');
+		expect(dialog.textContent).toContain('12 km away · Sea To Sky');
+
+		// Next goes on into the zone's photos, with their own caption; it wraps around.
+		await fireEvent.click(getByRole('button', { name: 'Next photo' }));
+		expect(getByText('3 of 3')).toBeTruthy();
+		expect(getByText('Big cornice', { selector: '.caption' })).toBeTruthy();
+		expect(dialog.textContent).toContain('Cornices on Cayoosh');
+		await fireEvent.keyDown(window, { key: 'ArrowRight' });
+		expect(getByText('1 of 3')).toBeTruthy();
+		expect(getByText('Cracking at ridgetop', { selector: '.caption' })).toBeTruthy();
+		await fireEvent.keyDown(window, { key: 'ArrowLeft' });
+		expect(getByText('3 of 3')).toBeTruthy();
+
+		// ✕ closes it (with no history entry to go back to here).
+		nav.state = {};
+		await fireEvent.click(getByRole('button', { name: 'Close photos' }));
+		expect(queryByRole('dialog')).toBeNull();
+
+		// "View all" starts at the first photo.
+		await fireEvent.click(getByRole('button', { name: 'View all 3 full screen' }));
+		expect(getByText('1 of 3')).toBeTruthy();
+	});
+
+	it('opens the rest of the zone when nothing is near', () => {
+		const data: NearbyOut = {
+			...nearby(1),
+			zone_name: 'West Slopes South',
+			photo_reports: [{ ...nearby(1).photo_reports![0], group: 'zone' }]
+		};
+		const { container, getByText } = render(WebcamsTab, {
+			cams: [],
+			nearby: data,
+			name: 'Crystal Mountain'
+		});
+		expect(getByText(/No photos within 12 mi of Crystal Mountain/)).toBeTruthy();
+		expect((container.querySelector('details.zone') as HTMLDetailsElement).open).toBe(true);
 	});
 });

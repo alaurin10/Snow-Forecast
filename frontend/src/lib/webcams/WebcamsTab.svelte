@@ -23,9 +23,18 @@
 		tz?: string | null;
 		/** The location's avalanche forecast, for a link to its center's observations. */
 		avy?: { provider: string; center_id?: string | null } | null;
+		/** The location's name, for the photos near it. */
+		name?: string;
 	}
 
-	let { cams, nearby = null, units = 'imperial', tz = null, avy = null }: Props = $props();
+	let {
+		cams,
+		nearby = null,
+		units = 'imperial',
+		tz = null,
+		avy = null,
+		name = 'this location'
+	}: Props = $props();
 	const center = $derived(centerObservations(avy));
 
 	const REFRESH_MS = 5 * 60_000;
@@ -171,7 +180,7 @@
 	</p>
 {/if}
 {#if nearby || center}
-	<FieldPhotos data={nearby} {units} {tz} {center} />
+	<FieldPhotos data={nearby} {units} {tz} {center} {name} />
 {/if}
 
 <style>

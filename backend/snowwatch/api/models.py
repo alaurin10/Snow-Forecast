@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -228,6 +228,9 @@ class NearbyStation(BaseModel):
 class NearbyReport(BaseModel):
     report: ObsProps
     distance_km: float
+    # For the Webcams tab's photos: "near" (within `near_km` and closer to this location
+    # than to any other) or "zone" (farther, but in the location's avalanche zone).
+    group: Literal["near", "zone"] | None = None
 
 
 class NearbyOut(BaseModel):
@@ -243,8 +246,11 @@ class NearbyOut(BaseModel):
     reports_at: str | None
     reports_days: int | None  # how far back the reports go
     reports: list[NearbyReport]  # newest first
-    # The reports in the same radius with photos (the Webcams tab), newest first.
+    # The reports with photos (the Webcams tab), newest first: those near the location,
+    # then those elsewhere in its avalanche zone (`group`). Others aren't listed.
     photo_reports: list[NearbyReport] = []
+    near_km: float = 20.0
+    zone_name: str | None = None  # the location's avalanche zone, when known
 
 
 class RunOut(BaseModel):

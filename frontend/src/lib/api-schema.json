@@ -2648,6 +2648,10 @@
         "location_id": {
           "type": "string"
         },
+        "near_km": {
+          "default": 20.0,
+          "type": "number"
+        },
         "photo_reports": {
           "default": [],
           "items": {
@@ -2699,6 +2703,17 @@
               "type": "null"
             }
           ]
+        },
+        "zone_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2717,6 +2732,21 @@
       "properties": {
         "distance_km": {
           "type": "number"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "enum": [
+                "near",
+                "zone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "report": {
           "$ref": "#/$defs/ObsProps"
@@ -2930,6 +2960,17 @@
               "type": "null"
             }
           ]
+        },
+        "zone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

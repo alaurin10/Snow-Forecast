@@ -793,6 +793,7 @@
 			{units}
 			tz={snap.location.tz}
 			avy={avy?.doc ?? null}
+			name={snap.location.name}
 		/>
 	{:else}
 		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} />

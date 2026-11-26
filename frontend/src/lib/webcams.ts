@@ -4,6 +4,7 @@
 // embed address; reading it again here keeps anything else out of an <iframe>.
 import { safeHref, safeImage } from './links';
 import { monthDay, weekday } from './time';
+import type { ObsPhoto, ObsProps } from './types.gen';
 
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_CHANNEL = /^UC[A-Za-z0-9_-]{22}$/;
@@ -225,4 +226,11 @@ export function reportWhen(r: { time: string; day?: string | null }, tz?: string
 		hour: 'numeric',
 		minute: '2-digit'
 	});
+}
+
+/** One photo in the full-screen viewer, with the report it belongs to. */
+export interface ViewerPhoto {
+	photo: ObsPhoto;
+	report: ObsProps;
+	distance_km: number;
 }
