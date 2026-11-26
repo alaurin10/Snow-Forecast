@@ -139,6 +139,36 @@
 	};
 
 	const elevs = $derived(bands.map((b) => ({ label: b.label, m: b.elev_m })));
+	/**
+	 * The freezing-level view: what the models have falling at each of the location's
+	 * elevations, step by step, as coloured runs along its line (snow, mixed or rain, from
+	 * the same snow and rain as the bars; nothing while it's dry). Keyed by band label.
+	 */
+	const bandRuns = $derived.by(() => {
+		const out = new Map<string, { kind: string; left: string; width: string }[]>();
+		if (metric !== 'fl') return out;
+		for (const b of bands) {
+			const runs: { kind: string; start: number; end: number }[] = [];
+			buildSteps(b.hourly, R, true)
+				.slice(off, off + nWin)
+				.forEach((st, k) => {
+					const kind = st.kind === 'heavy' ? 'snow' : st.kind;
+					if (kind === 'none') return;
+					const last = runs[runs.length - 1];
+					if (last && last.kind === kind && last.end === k) last.end = k + 1;
+					else runs.push({ kind, start: k, end: k + 1 });
+				});
+			out.set(
+				b.label,
+				runs.map((r) => ({
+					kind: r.kind,
+					left: `${((r.start / N) * 100).toFixed(3)}%`,
+					width: `${(((r.end - r.start) / N) * 100).toFixed(3)}%`
+				}))
+			);
+		}
+		return out;
+	});
 	const toPct = (yy: number) => `${((yy / H) * 100).toFixed(2)}%`;
 
 	// Precipitation: snow owns the scale (inches of snow). Rain is never put on it: it shows
@@ -1110,6 +1140,15 @@
 			{/if}
 			{#each refs as r (r.key)}
 				<div class="ref" style:top={r.top}></div>
+				{#each bandRuns.get(r.key) ?? [] as run (run.left)}
+					<i
+						class="refrun {run.kind}"
+						style:top={r.top}
+						style:left={run.left}
+						style:width={run.width}
+						aria-hidden="true"
+					></i>
+				{/each}
 				<span class="reflbl" style:top={r.labelTop} style:left={r.labelLeft}
 					>{r.name}{#if r.elev}<b class="num">{r.elev}</b>{/if}</span
 				>
@@ -1254,7 +1293,10 @@
 		{:else if metric === 'cloud'}
 			<span>Thicker band: more of the sky covered</span>
 		{:else}
-			<span>Dashed lines: this location's elevations</span>
+			<span>Dashed lines: this location's elevations, coloured by what falls there:</span>
+			<span><i class="sw" style:background="var(--snow)"></i>Snow</span>
+			<span><i class="sw" style:background="var(--mix)"></i>Mixed</span>
+			<span><i class="sw" style:background="var(--rain)"></i>Rain</span>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
 				><i class="sw band-sw b-{metric}"></i>Model range</span
@@ -2089,6 +2131,23 @@
 		right: 0;
 		border-top: 1px dashed color-mix(in srgb, var(--text-2) 55%, transparent);
 		pointer-events: none;
+	}
+	/* What falls at an elevation: a solid run over its dashed line. */
+	.refrun {
+		position: absolute;
+		height: 3px;
+		margin-top: -1px;
+		border-radius: 2px;
+		pointer-events: none;
+	}
+	.refrun.snow {
+		background: var(--snow);
+	}
+	.refrun.mix {
+		background: var(--mix);
+	}
+	.refrun.rain {
+		background: var(--rain);
 	}
 	.reflbl {
 		position: absolute;

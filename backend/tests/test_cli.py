@@ -112,6 +112,9 @@ def test_healthcheck_pings(env: Settings, monkeypatch: pytest.MonkeyPatch) -> No
         def __init__(self, ok: bool) -> None:
             self.ok = ok
 
+    # After the forecasts, a run fetches the avalanche forecasts: not what's tested here,
+    # and from the network (minutes of retries without one).
+    monkeypatch.setattr(Worker, "_avalanche", lambda self, conn, fetcher: {})
     monkeypatch.setattr(scheduler, "run_all", lambda *a, **k: (1, [Res(False)]))
     w.full_run(ensembles=False)
     assert pings == []  # nothing succeeded

@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The freezing level chart shows what falls at each elevation.** Each of the location's
+  elevation lines is coloured, hour by hour, by what the models have falling there: snow,
+  mixed or rain (the same snow and rain as the bars), and stays plain while it's dry. It
+  doesn't draw a snow level line: that is the freezing level less 1,000 ft, and it
+  disagreed with the models' own snow and rain at the elevations in a third or more of
+  wet hours at most locations.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.
@@ -53,6 +59,10 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **The backend tests no longer reach the network**: the worker's map test and the
+  healthcheck test stubbed only part of their jobs, so they drew every weather layer and
+  fetched avalanche forecasts for real. The suite takes about a minute and a half, down
+  from 8–15 minutes.
 - **Every factor in the avalanche weather is one line**, the same height, down to a
   360 px phone: "Snow" for the label, and shorter context for warming ("at the
   summit", "in 24 h") and light drifting ("little to drift").
