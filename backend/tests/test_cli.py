@@ -203,3 +203,25 @@ def test_nwac_observations_job(
     w.nwac_observations()
     assert len(calls) == 1
     assert "nwac_observations" in {j.id for j in build_scheduler(w).get_jobs()}
+
+
+def test_memory_is_trimmed_after_every_job(env: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from snowwatch import scheduler
+
+    calls: list[int] = []
+
+    class FakeLibc:
+        def malloc_trim(self, pad: int) -> int:
+            calls.append(pad)
+            return 1
+
+    sched = build_scheduler(Worker(env, config()))
+    listeners = [cb for cb, _mask in sched._listeners]
+    assert scheduler.trim_memory in listeners
+    monkeypatch.setattr(scheduler, "_LIBC", FakeLibc())
+    scheduler.trim_memory()
+    assert calls == [0]
+    monkeypatch.setattr(scheduler, "_LIBC", None)
+    scheduler.trim_memory()  # not glibc: nothing to do
+    assert calls == [0]
+    assert scheduler._libc() is not None  # this test runs on Linux

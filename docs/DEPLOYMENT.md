@@ -216,8 +216,18 @@ docker stats --no-stream
 free -m
 ```
 
-`free`'s *available* column is what is actually left. The worker runs under a small init
-(`init: true` in `docker-compose.yml`) that cleans up Chromium's exited processes.
+`free`'s *available* column is what is actually left. To split a container's figure into
+program memory (`anon`) and file cache (`file`, which is given back when needed):
+
+```bash
+docker compose exec worker sh -c 'grep -E "^(anon|file) " /sys/fs/cgroup/memory.stat'
+```
+
+The worker runs under a small init (`init: true` in `docker-compose.yml`) that cleans up
+Chromium's exited processes. It used to hold ~2 GB of program memory while idle: the C
+library kept memory freed by jobs on several threads. The image now sets
+`MALLOC_ARENA_MAX=2` and the worker hands freed memory back after every job, so it
+should drop back to a few hundred MB between jobs.
 
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1

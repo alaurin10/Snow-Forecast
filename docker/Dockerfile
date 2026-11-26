@@ -12,7 +12,11 @@ RUN npm run build
 
 # 2. Runtime: Python 3.12 with the backend, the config and the built frontend.
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# MALLOC_ARENA_MAX: with jobs on several threads, glibc kept a memory pool per thread,
+# so the worker held ~2 GB while idle. Two pools, plus the worker's malloc_trim after
+# each job (scheduler.py), brought a test of the same pattern from 243 MB idle to 33 MB.
+ENV MALLOC_ARENA_MAX=2 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

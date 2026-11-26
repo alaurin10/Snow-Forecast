@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import sqlite3
 import threading
@@ -10,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, JobEvent
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -491,6 +493,25 @@ def _hm(text: str) -> tuple[int, int]:
     return int(h), int(m)
 
 
+def _libc() -> ctypes.CDLL | None:
+    try:
+        return ctypes.CDLL("libc.so.6")
+    except OSError:  # not glibc (macOS in development): nothing to trim
+        return None
+
+
+_LIBC = _libc()
+
+
+def trim_memory(event: JobEvent | None = None) -> None:
+    """Give memory freed by a finished job back to the system. The C library keeps freed
+    memory to reuse it, and with jobs on several threads the worker held ~2 GB while idle
+    (Nov 2026); the image also sets MALLOC_ARENA_MAX=2 (see docker/Dockerfile). Cheap: a
+    few milliseconds."""
+    if _LIBC is not None:
+        _LIBC.malloc_trim(0)
+
+
 def build_scheduler(worker: Worker) -> BlockingScheduler:
     cfg = worker.cfg.schedule
     sched = BlockingScheduler(timezone=UTC)
@@ -581,4 +602,5 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         id="weekly",
         **opts,
     )
+    sched.add_listener(trim_memory, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     return sched
