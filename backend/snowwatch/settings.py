@@ -122,6 +122,11 @@ class Settings(BaseSettings):
         return self.data_dir / "avalanche" / "observations.geojson"
 
     @property
+    def nwac_obs_path(self) -> Path:
+        """Recent observations from NWAC's observations page (see snowwatch/nwac_obs.py)."""
+        return self.data_dir / "avalanche" / "nwac-observations.geojson"
+
+    @property
     def stations_path(self) -> Path:
         """Every snow station in the map's box (see snowwatch/stations.py)."""
         return self.data_dir / "stations" / "stations.json"

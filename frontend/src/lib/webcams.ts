@@ -161,26 +161,68 @@ export function byDay<T>(
 		}));
 }
 
-/** Avalanche centers whose observations (and their photos) can't be shown here, only
- *  linked. avalanche.org's observation API (NWAC, Sierra, Central Oregon) answers only
- *  the centers' own sites; the Utah Avalanche Center's site turns automated visitors away. */
-const CENTER_OBSERVATIONS: Record<string, { name: string; url: string }> = {
-	NWAC: { name: 'NWAC', url: 'https://nwac.us/observations#/view/observations' },
+/** Avalanche centers' observations pages, linked from the Webcams tab. NWAC's photos are
+ *  shown here (the worker reads its observations page, with NWAC's agreement:
+ *  backend/snowwatch/nwac_obs.py); the others' can only be linked. avalanche.org's
+ *  observation API (Sierra, Central Oregon) answers only the centers' own sites; the Utah
+ *  Avalanche Center's site turns automated visitors away. */
+const CENTER_OBSERVATIONS: Record<string, CenterObservations> = {
+	NWAC: { name: 'NWAC', url: 'https://nwac.us/observations#/view/observations', shown: true },
 	SAC: {
 		name: 'Sierra Avalanche Center',
-		url: 'https://www.sierraavalanchecenter.org/observations#/view/observations'
+		url: 'https://www.sierraavalanchecenter.org/observations#/view/observations',
+		shown: false
 	},
 	COAA: {
 		name: 'Central Oregon Avalanche Center',
-		url: 'https://coavalanche.org/pages/observations#/view/observations'
+		url: 'https://coavalanche.org/pages/observations#/view/observations',
+		shown: false
 	},
-	UAC: { name: 'Utah Avalanche Center', url: 'https://utahavalanchecenter.org/observations' }
+	UAC: {
+		name: 'Utah Avalanche Center',
+		url: 'https://utahavalanchecenter.org/observations',
+		shown: false
+	}
 };
+
+export interface CenterObservations {
+	name: string;
+	url: string;
+	/** Its observations' photos are shown here, not only linked. */
+	shown: boolean;
+}
 
 /** The observations page of the location's avalanche center, when it has one we link. */
 export function centerObservations(
 	avy: { provider: string; center_id?: string | null } | null | undefined
-): { name: string; url: string } | null {
+): CenterObservations | null {
 	if (avy?.provider !== 'nac' || !avy.center_id) return null;
 	return CENTER_OBSERVATIONS[avy.center_id.toUpperCase()] ?? null;
+}
+
+/** Who a field report is from, in a few words: "NWAC forecaster", "NWAC · public",
+ *  "Avalanche Canada MIN". */
+export function reportFrom(r: {
+	source?: string | null;
+	center?: string | null;
+	observer?: string | null;
+}): string {
+	if (r.source !== 'nwac') return 'Avalanche Canada MIN';
+	const center = r.center || 'NWAC';
+	if (r.observer === 'forecaster') return `${center} forecaster`;
+	if (r.observer === 'public' || !r.observer) return `${center} · public`;
+	return `${center} · professional`;
+}
+
+/** "Tue Nov 24" for a report known only by its day, else its local date and time. */
+export function reportWhen(r: { time: string; day?: string | null }, tz?: string | null): string {
+	if (r.day && /^\d{4}-\d{2}-\d{2}$/.test(r.day)) return `${weekday(r.day)} ${monthDay(r.day)}`;
+	return new Date(r.time).toLocaleString('en-US', {
+		timeZone: tz ?? undefined,
+		weekday: 'short',
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	});
 }

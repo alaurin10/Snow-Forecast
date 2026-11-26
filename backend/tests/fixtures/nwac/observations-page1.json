@@ -1,0 +1,752 @@
+{
+ "status": "success",
+ "total": 27,
+ "pages": 2,
+ "current_page": 1,
+ "avalanche_total_number": null,
+ "next_url": "https://api.avalanche.org/obs/v1/public/observation/list/?start_date[gte]=2026-11-11&start_date[lte]=2026-11-25&page=2&page_size=25&sort_by=start_date&sort_order=desc&bbox=-125.2944317756569,41.65429560405872,-118.82256822434242,51.9875595583664",
+ "prev_url": null,
+ "results": [
+  {
+   "id": "2ddd0733-ee7f-47f0-a12b-03df105983e6",
+   "center_id": "nwac",
+   "obs_source": "widget",
+   "created_at": "2026-11-24T21:48:26.402279Z",
+   "status": "published",
+   "observer_type": "public",
+   "organization": null,
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-24",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 48.868200893605064,
+    "lng": -121.66011048094488
+   },
+   "location_name": "Mt baker ski area, Artist point ",
+   "route": "",
+   "instability": {
+    "cracking": false,
+    "collapsing": false,
+    "avalanches_caught": false,
+    "avalanches_observed": true,
+    "avalanches_triggered": false,
+    "cracking_description": "",
+    "collapsing_description": ""
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [
+    {
+     "id": "bfc9d556-e850-11f1-9906-bbbb1846e0d5",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_3003_6b0606192b65b-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_3003_6b0606192b65b-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_3003_6b0606192b65b.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_3003_6b0606192b65b-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "c72b7f8e-e850-11f1-96a9-4f2c91d357fa",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2998_6b060623dc30d-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2998_6b060623dc30d-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2998_6b060623dc30d.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2998_6b060623dc30d-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    }
+   ],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": null,
+    "snowpack_summary": null
+   },
+   "avalanches": [
+    {
+     "id": "e65774b0-da77-4ea6-a4f0-d30ddc2be69e",
+     "observation_id": "2ddd0733-ee7f-47f0-a12b-03df105983e6",
+     "name": "",
+     "media": [
+      {
+       "id": "c6faf4c2-e850-11f1-acdf-b3dd3713f88e",
+       "url": {
+        "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2996_6b0606237f7fd-large.jpeg",
+        "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2996_6b0606237f7fd-medium.jpeg",
+        "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2996_6b0606237f7fd.jpeg",
+        "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2996_6b0606237f7fd-thumbnail.jpeg"
+       },
+       "type": "image",
+       "title": null,
+       "caption": null,
+       "favorite": false
+      },
+      {
+       "id": "c0b4c070-e850-11f1-8a24-474e35b9e3d7",
+       "url": {
+        "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2997_6b06061a8ffb8-large.jpeg",
+        "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2997_6b06061a8ffb8-medium.jpeg",
+        "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2997_6b06061a8ffb8.jpeg",
+        "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_2997_6b06061a8ffb8-thumbnail.jpeg"
+       },
+       "type": "image",
+       "title": null,
+       "caption": null,
+       "favorite": false
+      }
+     ]
+    }
+   ],
+   "zone_id": "3021",
+   "zone_name": "West Slopes North",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  },
+  {
+   "id": "8aff7b4f-e8af-4b3e-85ac-9a3880bb1788",
+   "center_id": "nwac",
+   "obs_source": "dashboard",
+   "created_at": "2026-11-25T02:28:07.684622Z",
+   "status": "published",
+   "observer_type": "forecaster",
+   "organization": "Northwest Avalanche Center",
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-24",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 46.800379,
+    "lng": -121.732455
+   },
+   "location_name": "Paradise - Mt Rainier NP",
+   "route": "",
+   "instability": {
+    "cracking": false,
+    "collapsing": false,
+    "avalanches_caught": false,
+    "avalanches_observed": false,
+    "avalanches_triggered": false,
+    "cracking_description": "",
+    "collapsing_description": ""
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [
+    {
+     "id": 1,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1543_6b0648e95999d-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1543_6b0648e95999d-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1543_6b0648e95999d.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1543_6b0648e95999d-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Snow depth at 6,000' on a SE aspect.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 2,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1530_6b0648e6b8c31-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1530_6b0648e6b8c31-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1530_6b0648e6b8c31.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1530_6b0648e6b8c31-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Snow being blown off the rocks and knolls below Panorama Point.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 3,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1553_6b0648f9a003b-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1553_6b0648f9a003b-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1553_6b0648f9a003b.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1553_6b0648f9a003b-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Edith Creek bridge crossing.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 4,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1546_6b0648ef2850c-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1546_6b0648ef2850c-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1546_6b0648ef2850c.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1546_6b0648ef2850c-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>I found some small turns in between the rocks near Edith Creek</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 5,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1523_6b0648f68df4a-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1523_6b0648f68df4a-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1523_6b0648f68df4a.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1523_6b0648f68df4a-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Snow coverage leaving the parking lot.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 6,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1551_6b0648f4e7702-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1551_6b0648f4e7702-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1551_6b0648f4e7702.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1551_6b0648f4e7702-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>East face of Alta Vista.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 7,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1550_6b0648f4a4353-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1550_6b0648f4a4353-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1550_6b0648f4a4353.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1550_6b0648f4a4353-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>View of the Mazama Ridge area.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 8,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1547_6b0648f40c82f-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1547_6b0648f40c82f-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1547_6b0648f40c82f.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1547_6b0648f40c82f-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Creek crossing</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 9,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1538_6b0648e95a03f-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1538_6b0648e95a03f-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1538_6b0648e95a03f.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1538_6b0648e95a03f-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Thick clouds around Mt Rainier</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 10,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1537_6b0648e7cd062-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1537_6b0648e7cd062-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1537_6b0648e7cd062.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1537_6b0648e7cd062-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>View into the Tatoosh Range.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 11,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1524_6b0648e7443b8-large.JPG",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1524_6b0648e7443b8-medium.JPG",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1524_6b0648e7443b8.JPG",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1524_6b0648e7443b8-thumbnail.JPG"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Snow coverage in Dead Horse Creek, around 5,700'.</p> Photo: observer",
+     "favorite": false
+    }
+   ],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": "x",
+    "snowpack_summary": "<p>x</p>"
+   },
+   "avalanches": [],
+   "zone_id": "3023",
+   "zone_name": "West Slopes South",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  },
+  {
+   "id": "c28757f8-4f16-42c3-b5d8-b7853fc1658b",
+   "center_id": "nwac",
+   "obs_source": "widget",
+   "created_at": "2026-11-25T04:03:51.466731Z",
+   "status": "published",
+   "observer_type": "public",
+   "organization": null,
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-24",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 46.911908418366124,
+    "lng": -121.49062625603403
+   },
+   "location_name": "Silver Basin",
+   "route": "",
+   "instability": {
+    "cracking": true,
+    "collapsing": false,
+    "avalanches_caught": false,
+    "avalanches_observed": false,
+    "avalanches_triggered": false,
+    "cracking_description": "specific",
+    "collapsing_description": ""
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [
+    {
+     "id": "3678700c-e885-11f1-a55a-af8331866909",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1164_6b065e19293b7-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1164_6b065e19293b7-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1164_6b065e19293b7.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1164_6b065e19293b7-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "379a5bee-e885-11f1-b39a-1f5bfeb0352e",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1161_6b065e1a5c74a-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1161_6b065e1a5c74a-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1161_6b065e1a5c74a.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1161_6b065e1a5c74a-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "310ca1c4-e885-11f1-b07d-f3bc5b690a86",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1171_6b065e16de2af-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1171_6b065e16de2af-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1171_6b065e16de2af.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1171_6b065e16de2af-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "37205d62-e885-11f1-9024-972ceeeb7c9b",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1153_6b065e18ccb7f-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1153_6b065e18ccb7f-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1153_6b065e18ccb7f.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1153_6b065e18ccb7f-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "387f398a-e885-11f1-b371-ef3b15864d34",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1157_6b065e1b842f5-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1157_6b065e1b842f5-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1157_6b065e1b842f5.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1157_6b065e1b842f5-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    },
+    {
+     "id": "391938dc-e885-11f1-93cd-535cc6b04657",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1160_6b065e1f2c140-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1160_6b065e1f2c140-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1160_6b065e1f2c140.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_1160_6b065e1f2c140-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": null,
+     "favorite": false
+    }
+   ],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": null,
+    "snowpack_summary": null
+   },
+   "avalanches": [],
+   "zone_id": "3023",
+   "zone_name": "West Slopes South",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  },
+  {
+   "id": "cf056261-5b18-4d78-b752-25e2fb89b615",
+   "center_id": "nwac",
+   "obs_source": "avy_app",
+   "created_at": "2026-11-25T02:36:00.420871Z",
+   "status": "published",
+   "observer_type": "public",
+   "organization": null,
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-24",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 45.34912652656942,
+    "lng": -121.68239723802395
+   },
+   "location_name": "southeast ridge at  top of Cascade lift",
+   "route": "",
+   "instability": {
+    "cracking": true,
+    "collapsing": true,
+    "avalanches_caught": false,
+    "avalanches_observed": true,
+    "avalanches_triggered": true,
+    "cracking_description": "isolated",
+    "collapsing_description": "isolated"
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": null,
+    "snowpack_summary": null
+   },
+   "avalanches": [
+    {
+     "id": "b4d622c1-48f5-41cb-9e4e-e48bd57606ff",
+     "observation_id": "cf056261-5b18-4d78-b752-25e2fb89b615",
+     "name": "",
+     "media": [
+      {
+       "id": "f1facdb4-e878-11f1-adc6-b70ebc5f08d5",
+       "url": {
+        "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/D7FC1E7C-BB07-4DF0-8F08-FB1734F6C683_6b06498c85395-large.heic",
+        "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/D7FC1E7C-BB07-4DF0-8F08-FB1734F6C683_6b06498c85395-medium.heic",
+        "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/D7FC1E7C-BB07-4DF0-8F08-FB1734F6C683_6b06498c85395.heic",
+        "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/D7FC1E7C-BB07-4DF0-8F08-FB1734F6C683_6b06498c85395-thumbnail.heic"
+       },
+       "type": "image",
+       "title": null,
+       "caption": null,
+       "favorite": false
+      },
+      {
+       "id": "f366746e-e878-11f1-b4fd-e3908f06ec89",
+       "url": {
+        "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/B189FD4D-C477-42BF-A3A7-07AA28863D14_6b06498eaef59-large.heic",
+        "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/B189FD4D-C477-42BF-A3A7-07AA28863D14_6b06498eaef59-medium.heic",
+        "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/B189FD4D-C477-42BF-A3A7-07AA28863D14_6b06498eaef59.heic",
+        "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/B189FD4D-C477-42BF-A3A7-07AA28863D14_6b06498eaef59-thumbnail.heic"
+       },
+       "type": "image",
+       "title": null,
+       "caption": null,
+       "favorite": false
+      }
+     ]
+    }
+   ],
+   "zone_id": "3032",
+   "zone_name": "Mt Hood",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  },
+  {
+   "id": "a28a497e-40a4-45ef-90dc-4053f760ecdd",
+   "center_id": "nwac",
+   "obs_source": "dashboard",
+   "created_at": "2026-11-25T01:40:49.983537Z",
+   "status": "published",
+   "observer_type": "forecaster",
+   "organization": "Northwest Avalanche Center",
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-24",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 48.850624,
+    "lng": -121.685465
+   },
+   "location_name": "Austin Pass",
+   "route": "",
+   "instability": {
+    "cracking": true,
+    "collapsing": true,
+    "avalanches_caught": false,
+    "avalanches_observed": true,
+    "avalanches_triggered": false,
+    "cracking_description": "specific",
+    "collapsing_description": "widespread"
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [
+    {
+     "id": 1,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Rollers%20Nov%2024_6b062c86381d8-large.jpg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Rollers%20Nov%2024_6b062c86381d8-medium.jpg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Rollers%20Nov%2024_6b062c86381d8.jpg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Rollers%20Nov%2024_6b062c86381d8-thumbnail.jpg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Rising temperatures and a bit of rain made for a transition from wet to dry avalanche problems on Tuesday.</p> Photo: observer",
+     "favorite": false
+    },
+    {
+     "id": 2,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Double%20Nav%2024_6b062c5fc05e0-large.jpg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Double%20Nav%2024_6b062c5fc05e0-medium.jpg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Double%20Nav%2024_6b062c5fc05e0.jpg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Double%20Nav%2024_6b062c5fc05e0-thumbnail.jpg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "<p>(11/24/2026)</p>\n<p>While few slopes had enough snow to produce avalanches, those that did frequently showed signs of instability. This test slope produced a long shooting crack and also pinwheels when provoked from above.</p>\n<p>Photo: observer</p>",
+     "favorite": false
+    },
+    {
+     "id": 3,
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Tracks%20Nov%2024_6b062c8643694-large.jpg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Tracks%20Nov%2024_6b062c8643694-medium.jpg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Tracks%20Nov%2024_6b062c8643694.jpg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Tracks%20Nov%2024_6b062c8643694-thumbnail.jpg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "(11/24/2026) <p>Untracked - but definitely not powder.</p> Photo: observer",
+     "favorite": false
+    }
+   ],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": "x",
+    "snowpack_summary": "<p>x</p>"
+   },
+   "avalanches": [
+    {
+     "id": "28053b07-ab51-4129-9e8c-4413a760dca0",
+     "observation_id": "a28a497e-40a4-45ef-90dc-4053f760ecdd",
+     "name": "",
+     "media": [
+      {
+       "id": 1,
+       "url": {
+        "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Crown%201%20Nov%2024_6b062c5f69926-large.jpg",
+        "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Crown%201%20Nov%2024_6b062c5f69926-medium.jpg",
+        "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Crown%201%20Nov%2024_6b062c5f69926.jpg",
+        "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/Crown%201%20Nov%2024_6b062c5f69926-thumbnail.jpg"
+       },
+       "type": "image",
+       "title": null,
+       "caption": "<p>(11/24/2026)</p>\n<p>The crown of a&nbsp; natural slab avalanche is barely visible in the middle of this photo. North aspect of Table Mountain at 5000'.</p>\n<p>(SS-N-D2-S)</p>\n<p>Photo: observer</p>",
+       "favorite": false
+      }
+     ]
+    }
+   ],
+   "zone_id": "3021",
+   "zone_name": "West Slopes North",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  },
+  {
+   "id": "002496c4-afd0-48e4-8726-756dd622bf81",
+   "center_id": "coaa",
+   "obs_source": "widget",
+   "created_at": "2026-11-23T21:40:09.844750Z",
+   "status": "published",
+   "observer_type": "public",
+   "organization": null,
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-23",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 43.9904920521644,
+    "lng": -121.67355667065718
+   },
+   "location_name": "Mt Bachelor",
+   "route": "",
+   "instability": {
+    "cracking": true,
+    "collapsing": true,
+    "avalanches_caught": false,
+    "avalanches_observed": false,
+    "avalanches_triggered": false,
+    "cracking_description": "isolated",
+    "collapsing_description": "isolated"
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [
+    {
+     "id": "727ece48-e786-11f1-b4c9-4b42e4217866",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6487_6b04b2af3c850-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6487_6b04b2af3c850-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6487_6b04b2af3c850.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6487_6b04b2af3c850-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "Intentionally triggered wind slab on test slope",
+     "favorite": false
+    },
+    {
+     "id": "73a07196-e786-11f1-a18d-fff302b85078",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6485_6b04b2b018569-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6485_6b04b2b018569-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6485_6b04b2b018569.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6485_6b04b2b018569-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "Overnight small natural cornice/wind slab",
+     "favorite": false
+    },
+    {
+     "id": "74c69ae6-e786-11f1-8647-a331113ab65a",
+     "url": {
+      "large": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6475_6b04b2b1afce5-large.jpeg",
+      "medium": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6475_6b04b2b1afce5-medium.jpeg",
+      "original": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6475_6b04b2b1afce5.jpeg",
+      "thumbnail": "https://avalanche-org-media.s3.us-west-2.amazonaws.com/IMG_6475_6b04b2b1afce5-thumbnail.jpeg"
+     },
+     "type": "image",
+     "title": null,
+     "caption": "Today's theme: moving snow.",
+     "favorite": false
+    }
+   ],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": null,
+    "snowpack_summary": null
+   },
+   "avalanches": [],
+   "zone_id": "2470",
+   "zone_name": "Central Cascades",
+   "zone_center_id": [
+    "COAA"
+   ]
+  },
+  {
+   "id": "168624a5-ee70-4680-9002-c8d3bd479402",
+   "center_id": "nwac",
+   "obs_source": "widget",
+   "created_at": "2026-11-23T03:58:02.919927Z",
+   "status": "published",
+   "observer_type": "public",
+   "organization": null,
+   "name": "",
+   "show_name": false,
+   "start_date": "2026-11-22",
+   "end_date": null,
+   "activity": [
+    "skiing_snowboarding"
+   ],
+   "location_point": {
+    "lat": 46.80367417985465,
+    "lng": -121.72966129925013
+   },
+   "location_name": "Pan Point",
+   "route": "",
+   "instability": {
+    "cracking": false,
+    "collapsing": false,
+    "avalanches_caught": false,
+    "avalanches_observed": false,
+    "avalanches_triggered": false,
+    "cracking_description": "",
+    "collapsing_description": ""
+   },
+   "instability_summary": "",
+   "observation_summary": "<p>Notes left out of the fixture.</p>",
+   "media": [],
+   "urls": [],
+   "avalanches_summary": "",
+   "advanced_fields": {
+    "weather_summary": null,
+    "snowpack_summary": null
+   },
+   "avalanches": [],
+   "zone_id": "3023",
+   "zone_name": "West Slopes South",
+   "zone_center_id": [
+    "NWAC"
+   ]
+  }
+ ]
+}

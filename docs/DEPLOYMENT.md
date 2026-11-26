@@ -185,6 +185,22 @@ docker compose run --rm worker snowwatch locations webcams [path]
 
 That one checks every entry first; one bad link or unknown id and nothing is saved.
 
+**Field photos on the Webcams tab:** below the cameras, a location shows recent photos
+from field reports within 60 km: Avalanche Canada's Mountain Information Network, and,
+in Washington and northern Oregon, NWAC's observations (forecasters' and the public's).
+NWAC agreed to its observations page being read; the worker opens nwac.us/observations
+in headless Chromium every 3 hours (installed in the image, which grows by about 400 MB;
+each visit takes ~10 seconds and ~600 MB of memory, and waits while a forecast run is
+going) and keeps where,
+when, the zone, who observed (forecaster or public), the photos and their captions, and
+a link back. Names, contact details and written notes aren't kept. The same observations
+show on the Observed tab and the map. Turn it off with `nwac_obs: false` under `map:` in
+`config/forecast.yaml`; read the page now with:
+
+```bash
+docker compose run --rm worker snowwatch map nwac
+```
+
 **Snow depth method:** snow totals use the temperature-based snow ratio
 (`depth_method: slr` in `config/forecast.yaml`). To go back to the models' own 7:1
 snowfall, set `depth_method: raw` and restart the worker; the next forecast run (or

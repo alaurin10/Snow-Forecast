@@ -1,12 +1,13 @@
 <!--
-  Recent field reports near the location from Avalanche Canada's Mountain Information
-  Network: what people in the mountains saw and chose to share, newest first, each
-  linking to the full report. Not checked by anyone.
+  Recent field reports near the location from NWAC's observations and Avalanche Canada's
+  Mountain Information Network: what forecasters and people in the mountains saw and
+  shared, newest first, each linking to the full report. Public reports aren't checked.
 -->
 <script lang="ts">
 	import { safeHref } from '../links';
 	import type { NearbyOut } from '../types.gen';
 	import { REPORT_KINDS } from '../map/features';
+	import { reportFrom, reportWhen } from '../webcams';
 	import { ago } from '../time';
 	import type { UnitSystem } from '../units';
 
@@ -16,6 +17,8 @@
 	}
 
 	let { data, units }: Props = $props();
+	const nwac = $derived(data.reports.some((r) => r.report.source === 'nwac'));
+	const min = $derived(data.reports.some((r) => r.report.source !== 'nwac'));
 	const away = (km: number) =>
 		units === 'imperial' ? `${(km * 0.621371).toFixed(0)} mi` : `${km.toFixed(0)} km`;
 </script>
@@ -36,9 +39,9 @@
 							<strong>{r.report.title || 'Field report'}</strong>
 						{/if}
 						<span class="faint meta"
-							>{ago(r.report.time)} · {away(r.distance_km)} away{r.report.region
-								? ` · ${r.report.region}`
-								: ''}{r.report.images
+							>{r.report.day ? reportWhen(r.report) : ago(r.report.time)} · {reportFrom(r.report)} · {away(
+								r.distance_km
+							)} away{r.report.region ? ` · ${r.report.region}` : ''}{r.report.images
 								? ` · ${r.report.images} photo${r.report.images > 1 ? 's' : ''}`
 								: ''}</span
 						>
@@ -60,8 +63,16 @@
 		</p>
 	{/if}
 	<p class="faint small">
-		From Avalanche Canada’s Mountain Information Network: what someone saw and chose to share, not
-		checked.
+		{#if nwac && min}
+			From NWAC’s observations and Avalanche Canada’s Mountain Information Network: what forecasters
+			and people in the mountains saw and shared. Public reports aren’t checked.
+		{:else if nwac}
+			From NWAC’s observations: what forecasters and people in the mountains saw and shared. Public
+			reports aren’t checked.
+		{:else}
+			From Avalanche Canada’s Mountain Information Network: what someone saw and chose to share, not
+			checked.
+		{/if}
 	</p>
 </section>
 

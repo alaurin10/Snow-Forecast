@@ -543,7 +543,10 @@ def make_router() -> APIRouter:
             ),
             key=lambda x: x.distance_km,
         )
-        obs = _cached(_obs_cache, settings.obs_path, observations.read)
+        obs = observations.merge(
+            _cached(_obs_cache, settings.obs_path, observations.read),
+            _cached(_obs_cache, settings.nwac_obs_path, observations.read),
+        )
         reports = []
         for f in obs.features if obs else []:
             xy = f.geometry.get("coordinates") or []

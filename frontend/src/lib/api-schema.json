@@ -2643,7 +2643,7 @@
       "type": "object"
     },
     "NearbyOut": {
-      "description": "What was measured and reported around a location (the Observed tab): the\nclosest snow stations and Avalanche Canada's recent field reports, both read from\nthe files the map's layers use.",
+      "description": "What was measured and reported around a location (the Observed tab): the\nclosest snow stations and recent field reports (Avalanche Canada's Mountain\nInformation Network and NWAC's observations), read from the files the map's layers\nuse.",
       "properties": {
         "location_id": {
           "type": "string"
@@ -2853,6 +2853,28 @@
     },
     "ObsProps": {
       "properties": {
+        "center": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "day": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "type": "string"
         },
@@ -2865,6 +2887,17 @@
           },
           "type": "array"
         },
+        "observer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "photos": {
           "items": {
             "$ref": "#/$defs/ObsPhoto"
@@ -2872,6 +2905,14 @@
           "type": "array"
         },
         "region": {
+          "type": "string"
+        },
+        "source": {
+          "default": "min",
+          "enum": [
+            "min",
+            "nwac"
+          ],
           "type": "string"
         },
         "time": {

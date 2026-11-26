@@ -21,6 +21,11 @@ dependencies = [
 [project.scripts]
 snowwatch = "snowwatch.cli:main"
 
+[project.optional-dependencies]
+scrape = [
+    "playwright>=1.55",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.11",
@@ -51,7 +56,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["apscheduler.*", "pywebpush.*", "py_vapid.*"]
+module = ["apscheduler.*", "pywebpush.*", "py_vapid.*", "playwright.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

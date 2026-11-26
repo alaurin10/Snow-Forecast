@@ -12,7 +12,9 @@ Photos are listed only in each report's own record, so a report with photos cost
 more request, once: the next refresh takes them from the file it wrote.
 
 US centers' observations need an API key (avalanche.org's observation API answers only
-the centers' own sites), so the map links to each center instead.
+the centers' own sites). NWAC agreed to its observations page being read, so
+`nwac_obs.py` loads that page in a headless browser and writes its own file; `merge`
+puts the two together for the map and the location pages.
 """
 
 from __future__ import annotations
@@ -57,12 +59,18 @@ class ObsPhoto(BaseModel):
 class ObsProps(BaseModel):
     id: str
     title: str
-    time: str  # UTC, ISO: when it was observed
+    time: str  # UTC, ISO: when it was observed (noon Pacific when only the day is known)
     region: str
     kinds: list[str]  # which observation forms it has, most telling first
     images: int
     url: str | None
     photos: list[ObsPhoto] = Field(default_factory=list)  # empty until fetched
+    # Where it came from: "min" (Avalanche Canada's Mountain Information Network) or
+    # "nwac" (the observations page of the Northwest Avalanche Center, nwac_obs.py).
+    source: Literal["min", "nwac"] = "min"
+    day: str | None = None  # the local date observed, when there's no time of day
+    center: str | None = None  # the avalanche center it was sent to ("NWAC")
+    observer: str | None = None  # "forecaster", "professional", "public"…
 
 
 class ObsFeature(BaseModel):
@@ -185,6 +193,24 @@ def read(path: Path) -> ObsOut | None:
         return ObsOut.model_validate_json(path.read_bytes())
     except (OSError, ValueError):
         return None
+
+
+def merge(*files: ObsOut | None) -> ObsOut | None:
+    """Several report files as one, newest first: the map and the location pages show
+    Avalanche Canada's reports and NWAC's observations together. None if none is there."""
+    have = [f for f in files if f is not None]
+    if not have:
+        return None
+    feats = sorted(
+        (f for out in have for f in out.features), key=lambda f: f.properties.time, reverse=True
+    )
+    stamps = [f.generated_at for f in have if f.generated_at]
+    return ObsOut(
+        generated_at=max(stamps) if stamps else None,
+        days=max(f.days for f in have),
+        features=feats,
+        errors=[e for f in have for e in f.errors],
+    )
 
 
 def refresh(

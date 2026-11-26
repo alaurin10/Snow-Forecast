@@ -36,7 +36,8 @@ snow stations measured, and the official avalanche rating.
 - **Resort days**: a Powder / Great / Good / Fair / Poor rating with its reasons.
 - **Observed**: the location's snow station (depth, new snow each day, snow water),
   measured snow against the forecast, the stations around it by elevation, and recent
-  field reports (Avalanche Canada's Mountain Information Network).
+  field reports (NWAC's observations and Avalanche Canada's Mountain Information Network),
+  whose photos also show on the Webcams tab.
 - **Works like an app**: installs to the home screen, works offline with the last
   forecast and saved map areas, optional push alerts for powder days and storms.
 - **Accessible**: keyboard and screen-reader friendly, light and dark themes,
