@@ -7,6 +7,9 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Field reports on the map show what was reported**: a tapped report now has the
+  observer's signs of instability (coloured as on NWAC's site), their summary (first
+  lines, then More) and notes, and their photos, which open the full-screen viewer.
 - **Photo gallery on wide screens.** Gallery (on the Webcams tab, or the grid button in
   the viewer) shows every field photo at once, each with its place and day; one opens on
   its own.
