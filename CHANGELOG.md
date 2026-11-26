@@ -65,6 +65,14 @@ Notable changes to Snow Watch. The format follows
   photo, not only the small arrows.
 
 ### Fixed
+- **The map could go white in 3D on a phone** and stay that way until the app was
+  closed. 3D terrain with overlays used more graphics memory than a phone allows (each
+  terrain tile drew the map into a 2048 px texture, about 21 MB), so the browser dropped
+  the map's graphics. Phones now draw those at 1024 px, a quarter of the memory (the
+  base map and overlays have no more detail than that to give). When the graphics did
+  come back, 3D terrain was drawn through the lost ones as grey and red smears; it is
+  now rebuilt properly. If they don't come back, the map says so and offers **Reload
+  map**, since an app on the home screen has no reload button.
 - **Backcountry's recent observations could be empty while Webcams showed photos** for
   the same place, for up to an hour after an update (the browser reused the location's
   field reports from before the full list existed). It now falls back to the photo

@@ -184,6 +184,7 @@
 	import { setSnowLine, SNOWLINE_ZOOM } from '../map/layers/snowline';
 	import SatControls from '../map/SatControls.svelte';
 	import { matchQuery } from '../map/terrain/client';
+	import { setDrapeQuality } from '../map/drape';
 	import { concernAt, type ConcernFactors } from '../map/terrain/concern';
 	import Measure from '../map/Measure.svelte';
 	import DockItem from '../map/DockItem.svelte';
@@ -1288,6 +1289,8 @@
 		if (!ready || !map) return;
 		if (want) {
 			map.setTerrain({ source: 'dem', exaggeration: EXAGGERATION });
+			// A quarter of the graphics memory per terrain tile on a phone (map/drape.ts).
+			if (phone) setDrapeQuality(map);
 			// Unless a fly-to is already tilting the view.
 			if (map.getPitch() < 20 && !map.isMoving()) map.easeTo({ pitch: 60, duration: 900 });
 		} else {
@@ -2367,9 +2370,48 @@
 	$effect(() => {
 		if (!ready || !map) return;
 		const m = map;
-		m.on('webglcontextrestored', redrawWeather);
-		return () => void m.off('webglcontextrestored', redrawWeather);
+		let wait: ReturnType<typeof setTimeout> | undefined;
+		const lost = () => {
+			clearTimeout(wait);
+			wait = setTimeout(() => (glLost = true), GL_LOST_MS);
+		};
+		const restored = () => {
+			clearTimeout(wait);
+			glLost = false;
+			reviveTerrain(m);
+			redrawWeather();
+		};
+		m.on('webglcontextlost', lost);
+		m.on('webglcontextrestored', restored);
+		return () => {
+			clearTimeout(wait);
+			glLost = false;
+			m.off('webglcontextlost', lost);
+			m.off('webglcontextrestored', restored);
+		};
 	});
+	/** The browser took the map's graphics away (the device ran short of memory, most
+	 *  often in 3D) and hasn't given them back: the map is blank until the page reloads.
+	 *  Phones often never give them back, and an app on the home screen has no reload
+	 *  button, so the map offers one. */
+	let glLost = $state(false);
+	/** How long the graphics may be gone before the map says so (a restore is quick). */
+	const GL_LOST_MS = 3000;
+
+	/** MapLibre rebuilds the 3D terrain from its style before it has a new painter for the
+	 *  restored context, so the terrain draws through the lost one: grey and red smears where
+	 *  the map should be. Setting it again builds it on the new painter. */
+	function reviveTerrain(m: MlMap) {
+		const again = () => {
+			const t = m.getTerrain();
+			if (!t) return;
+			m.setTerrain(null);
+			m.setTerrain(t);
+			if (phone) setDrapeQuality(m);
+		};
+		if (m.isStyleLoaded()) again();
+		else m.once('style.load', again);
+	}
 	function redrawWeather() {
 		radarLayer?.revive();
 		if (!overlay) return;
@@ -3013,6 +3055,12 @@
 		<Legend overlay={overlayMode} {units} {zoom} />
 
 		<div class="top">
+			{#if glLost}
+				<p class="note glass gl-lost" role="alert">
+					The map ran out of graphics memory and stopped drawing.
+					<button class="reload" onclick={() => location.reload()}>Reload map</button>
+				</p>
+			{/if}
 			{#if locState === 'locating' || locState === 'denied' || locState === 'unavailable' || offline || (on && tooClose)}
 				<p class="note glass" role="status">
 					{#if on && tooClose && !offline && locState !== 'locating' && locState !== 'denied' && locState !== 'unavailable'}
@@ -3641,6 +3689,23 @@
 		text-align: center;
 		color: var(--text);
 		pointer-events: auto;
+	}
+	.gl-lost {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		text-align: left;
+	}
+	.reload {
+		flex: none;
+		padding: 6px 12px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--accent);
+		color: var(--on-accent);
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
 	}
 	/* The spot's coordinates in the map panel's header: a tap copies them. */
 	.coords {
