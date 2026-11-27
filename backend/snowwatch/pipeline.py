@@ -39,6 +39,10 @@ from snowwatch.store import repo
 
 log = logging.getLogger("snowwatch.pipeline")
 
+# The pause between locations while their forecasts fall back to the public API (the
+# self-hosted server is down): the public API's per-minute limit needs it.
+FALLBACK_SPACING_S = 20.0
+
 
 @dataclass
 class LocationResult:
@@ -235,13 +239,17 @@ def run_all(
         locs = [loc for loc in locs if loc.id in wanted]
     run_id = repo.start_run(conn, kind)
     weight_before = fetcher.total_weight
+    fallbacks_before = fetcher.fallbacks
     results: list[LocationResult] = []
     crash: list[str] = []
     try:
         bc = fetch_bc(fetcher, [loc.snotel for loc in locs if bc_asws.is_bc(loc.snotel)])
+        fell_back = fetcher.fallbacks
         for i, loc in enumerate(locs):
             if i:
-                sleep(spacing_s)
+                public = fetcher.fallbacks > fell_back
+                sleep(max(spacing_s, FALLBACK_SPACING_S) if public else spacing_s)
+                fell_back = fetcher.fallbacks
             t0 = time.monotonic()
             res = run_location(
                 conn,
@@ -272,8 +280,13 @@ def run_all(
         else:
             status = "partial" if n_ok else "failed"
         repo.finish_run(conn, run_id, status, errors, fetcher.total_weight - weight_before)
+        repo.record_usage(conn, fetcher)
         repo.save_source_status(conn, fetcher.sources)
         fetcher.sources.clear()
+        if fallbacks := fetcher.fallbacks - fallbacks_before:
+            log.warning(
+                "run %d: %d Open-Meteo requests fell back to the public API", run_id, fallbacks
+            )
     return run_id, results
 
 

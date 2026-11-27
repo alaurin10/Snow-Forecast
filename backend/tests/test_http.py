@@ -31,7 +31,8 @@ def test_429_waits_65s_then_succeeds() -> None:
         return httpx.Response(code, json={"ok": code == 200})
 
     f, sleeps = make(handler)
-    assert f.get_json("https://x.test/a", source="t", weight=2.5) == {"ok": True}
+    url = "https://api.open-meteo.com/v1/forecast"
+    assert f.get_json(url, source="t", weight=2.5) == {"ok": True}
     assert sleeps == [65.0]
     assert f.calls[0].tries == 2 and f.total_weight == 2.5
     assert f.rate_limited == 1

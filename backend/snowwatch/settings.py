@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from snowwatch import __version__
@@ -28,8 +28,17 @@ class Settings(BaseSettings):
     # Sent in the User-Agent; NWS asks for contact details.
     nws_contact: str = "snowwatch (self-hosted)"
 
-    max_locations: int = 25
+    # The public Open-Meteo API's free daily limit (weighted calls, UTC day).
     open_meteo_daily_budget: int = 10_000
+    # A self-hosted Open-Meteo server (docker-compose.yml's `openmeteo` service, e.g.
+    # http://openmeteo:8080). Set, it answers every forecast and elevation request and
+    # only ensembles use the public API. Empty = everything uses the public API.
+    open_meteo_url: str = ""
+    # When the self-hosted server fails, retry a saved location's requests once on the
+    # public API (while today's public budget has room).
+    open_meteo_fallback: bool = True
+    # Both default from OPEN_METEO_URL (see _local_defaults); an explicit value wins.
+    max_locations: int = 25
     site_spacing_s: float = 20.0
     stale_after_h: float = 12.0
 
@@ -75,6 +84,28 @@ class Settings(BaseSettings):
             if w in ("off", "false", "0", "no"):
                 return "off"
         return v
+
+    @field_validator("open_meteo_url", mode="after")
+    @classmethod
+    def _no_trailing_slash(cls, v: str) -> str:
+        return v.strip().rstrip("/")
+
+    @model_validator(mode="after")
+    def _local_defaults(self) -> Settings:
+        """With a self-hosted server, forecasts cost nothing: no pause between locations
+        and up to 50 of them (public ensembles stay within the daily limit), unless
+        SITE_SPACING_S or MAX_LOCATIONS says otherwise."""
+        if self.local_open_meteo:
+            if "site_spacing_s" not in self.model_fields_set:
+                self.site_spacing_s = 0.0
+            if "max_locations" not in self.model_fields_set:
+                self.max_locations = 50
+        return self
+
+    @property
+    def local_open_meteo(self) -> bool:
+        """Whether a self-hosted Open-Meteo server is configured (OPEN_METEO_URL)."""
+        return bool(self.open_meteo_url)
 
     @property
     def static_root(self) -> Path | None:

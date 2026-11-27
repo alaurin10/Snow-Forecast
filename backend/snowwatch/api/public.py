@@ -24,6 +24,7 @@ from snowwatch.api.models import (
     CompareRow,
     ConcernOut,
     DangerChip,
+    LocalServerOut,
     LocationAge,
     LocationSummary,
     MapCloudsLocation,
@@ -48,8 +49,10 @@ from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.doc import BandOut, Snapshot
 from snowwatch.geo import bbox, contains, haversine_km
+from snowwatch.http import LOCAL_SUFFIX
 from snowwatch.locations import service
 from snowwatch.settings import Settings
+from snowwatch.sources.openmeteo import SOURCE
 from snowwatch.store import repo
 from snowwatch.store.db import connect
 from snowwatch.verify import VerificationOut, headline_source, verification
@@ -659,9 +662,26 @@ def make_router() -> APIRouter:
             for r in conn.execute("SELECT * FROM source_status ORDER BY source")
         ]
         runs = [RunOut.model_validate(r) for r in repo.recent_runs(conn, 20)]
-        weight = conn.execute(
-            "SELECT COALESCE(SUM(api_weight), 0) FROM runs WHERE started_at >= ?", (_today(),)
-        ).fetchone()[0]
+        try:
+            usage = repo.usage_today(conn)
+        except sqlite3.OperationalError:  # the worker hasn't migrated yet
+            usage = repo.Usage()
+        local = None
+        if settings.local_open_meteo:
+            row = conn.execute(
+                "SELECT * FROM source_status WHERE source = ?", (f"{SOURCE}{LOCAL_SUFFIX}",)
+            ).fetchone()
+            ok_at, err_at = (row["last_ok_at"], row["last_error_at"]) if row else (None, None)
+            latency = usage.local_latency_s
+            local = LocalServerOut(
+                ok=ok_at is not None and (err_at is None or ok_at >= err_at),
+                last_ok_at=ok_at,
+                last_error_at=err_at,
+                last_error=row["last_error"] if row else None,
+                latency_s=None if latency is None else round(latency, 2),
+                requests_today=usage.local_requests,
+                fallbacks_today=usage.fallbacks,
+            )
         snaps = latest_snapshots(conn)
         ages = []
         for loc in service.list_locations(conn):
@@ -679,9 +699,10 @@ def make_router() -> APIRouter:
         return StatusOut(
             sources=sources,
             runs=runs,
-            weight_today=round(float(weight), 1),
+            weight_today=round(usage.public_weight, 1),
             budget=settings.open_meteo_daily_budget,
             locations=ages,
+            local=local,
         )
 
     @router.get("/runs", response_model=list[RunOut])

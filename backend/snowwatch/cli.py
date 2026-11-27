@@ -9,24 +9,23 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from snowwatch.config import get_forecast_config
-from snowwatch.http import Fetcher
+from snowwatch.http import Fetcher, fetcher_for
 from snowwatch.inputs import load_responses
 from snowwatch.locations import service
 from snowwatch.settings import REPO_ROOT, Settings, get_settings
-from snowwatch.sources.openmeteo import daily_weight
+from snowwatch.sources.openmeteo import daily_weight, local_daily_weight, public_daily_weight
 from snowwatch.store import repo
 from snowwatch.store.db import connect, migrate
 
 DEFAULT_SEED = REPO_ROOT / "config" / "seed-locations.yaml"
 FIXTURES_DIR = REPO_ROOT / "backend" / "tests" / "fixtures"
+# Public answers saved on 4 Nov 2026, for `check-sources --local` when the public API
+# won't answer (it often refuses shared addresses with 429).
+LIVE_FIXTURES = FIXTURES_DIR / "live-20261104"
 
 
 def _fetcher(settings: Settings, *, cache: bool = False) -> Fetcher:
-    return Fetcher(
-        user_agent=settings.user_agent,
-        contact_user_agent=settings.contact_user_agent,
-        raw_dir=settings.raw_dir if cache else None,
-    )
+    return fetcher_for(settings, raw_dir=settings.raw_dir if cache else None)
 
 
 def cmd_init(args: argparse.Namespace, settings: Settings) -> int:
@@ -107,11 +106,30 @@ def cmd_budget(args: argparse.Namespace, settings: Settings) -> int:
     migrate(conn)
     cfg = get_forecast_config()
     locs = service.list_locations(conn)
-    total = sum(daily_weight(loc, cfg) for loc in locs)
+    ens = sum(public_daily_weight(loc, cfg) for loc in locs)
+    fc = sum(local_daily_weight(loc, cfg) for loc in locs)
     budget = settings.open_meteo_daily_budget
+    used = repo.usage_today(conn)
+    n = len(locs)
+    if settings.local_open_meteo:
+        print(
+            f"{n} of {settings.max_locations} active locations, about {ens:.0f} of {budget} "
+            f"daily public Open-Meteo calls ({100 * ens / budget:.0f}%), "
+            f"~{ens / n if n else 0:.0f} per location"
+        )
+        print(f"  public API (ensembles): ~{ens:.0f} a day")
+        print(f"  self-hosted server ({settings.open_meteo_url}): ~{fc:.0f} a day, free")
+    else:
+        total = ens + fc
+        print(
+            f"{n} active locations, about {total:.0f} of {budget} daily Open-Meteo calls "
+            f"({100 * total / budget:.0f}%)"
+        )
+        print(f"  forecasts: ~{fc:.0f} a day; ensembles: ~{ens:.0f} a day")
     print(
-        f"{len(locs)} active locations, about {total:.0f} of {budget} daily Open-Meteo calls "
-        f"({100 * total / budget:.0f}%)"
+        f"used today (UTC): {used.public_weight:.0f} public calls"
+        + (f", {used.fallbacks} fallbacks" if used.fallbacks else "")
+        + (f", {used.local_requests} self-hosted requests" if used.local_requests else "")
     )
     return 0
 
@@ -130,17 +148,55 @@ def cmd_capture(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_check_sources(args: argparse.Namespace, settings: Settings) -> int:
-    from snowwatch.checks import build_report
+    from snowwatch.checks import build_local_report, build_report, keep_section, merge_section
 
     locs = service.load_yaml(Path(args.seed))
-    with _fetcher(settings) as fetcher:
-        report = build_report(fetcher, locs, get_forecast_config())
+    cfg = get_forecast_config()
+    if args.local:
+        if not settings.local_open_meteo:
+            print("set OPEN_METEO_URL to the self-hosted server first", file=sys.stderr)
+            return 2
+        # The server with no fallback (a failure must show), and the public API plainly.
+        with (
+            fetcher_for(settings, fallback=False, public_used=None, local_retry_after_s=0) as local,
+            Fetcher(user_agent=settings.user_agent, tries=1) as public,
+        ):
+            report = build_local_report(local, public, locs, cfg, fixtures=LIVE_FIXTURES)
+    else:
+        with Fetcher(
+            user_agent=settings.user_agent, contact_user_agent=settings.contact_user_agent
+        ) as fetcher:
+            report = build_report(fetcher, locs, cfg)
     if args.write:
-        Path(args.write).write_text(report)
+        path = Path(args.write)
+        old = path.read_text() if path.exists() else ""
+        # Each check rewrites only its own part of the file.
+        path.write_text(merge_section(old, report) if args.local else keep_section(old, report))
         print(f"wrote {args.write}")
     else:
         sys.stdout.write(report)
     return 0
+
+
+def cmd_openmeteo(args: argparse.Namespace, settings: Settings) -> int:
+    """`openmeteo status`: is the self-hosted server usable, and how has today gone."""
+    from snowwatch.checks import openmeteo_status
+
+    usage = repo.Usage()
+    if settings.database.exists():
+        conn = connect(settings.database)
+        migrate(conn)
+        usage = repo.usage_today(conn)
+    with fetcher_for(settings, tries=1, fallback=False) as fetcher:
+        ok, lines = openmeteo_status(
+            settings.open_meteo_url,
+            settings.open_meteo_fallback,
+            settings.open_meteo_daily_budget,
+            usage,
+            fetcher,
+        )
+    print("\n".join(lines))
+    return 0 if ok else 1
 
 
 def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
@@ -437,7 +493,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("check-sources", help="probe every upstream source and report")
     s.add_argument("--seed", default=str(DEFAULT_SEED))
     s.add_argument("--write", help="write the report here (e.g. docs/SOURCES.md)")
+    s.add_argument(
+        "--local",
+        action="store_true",
+        help="check the self-hosted Open-Meteo server (OPEN_METEO_URL) against the public API",
+    )
     s.set_defaults(func=cmd_check_sources)
+
+    s = sub.add_parser("openmeteo", help="the self-hosted Open-Meteo server: `openmeteo status`")
+    s.add_argument("action", choices=["status"])
+    s.set_defaults(func=cmd_openmeteo)
 
     s = sub.add_parser("pull", help="fetch, analyse and store forecasts now")
     s.add_argument("--only", nargs="*", help="location ids")

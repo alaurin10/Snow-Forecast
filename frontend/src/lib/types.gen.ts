@@ -262,16 +262,24 @@ export interface TreelineSpot {
 	name: string;
 }
 /**
+ * Estimated daily Open-Meteo use. `per_location` and `total` count against the public
+ * daily limit (`budget`): everything without a self-hosted server, only ensembles with
+ * one (`local_forecasts`).
+ *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
  * via the `definition` "BudgetOut".
  */
 export interface BudgetOut {
 	active: number;
 	budget: number;
+	ensembles_total: number;
+	forecasts_total: number;
+	local_forecasts: boolean;
 	max_locations: number;
 	per_location: {
 		[k: string]: number;
 	};
+	public_used_today: number;
 	total: number;
 }
 /**
@@ -658,6 +666,7 @@ export interface Me {
 export interface MetaOut {
 	commit: string | null;
 	hazard_index?: boolean;
+	local_forecasts?: boolean;
 	open_meteo_daily_budget: number;
 	powder_cm: number;
 	snowfall_cm_per_mm: number;
@@ -1452,10 +1461,26 @@ export interface SunDay {
  */
 export interface StatusOut {
 	budget: number;
+	local?: LocalServerOut | null;
 	locations: LocationAge[];
 	runs: RunOut[];
 	sources: SourceRow[];
 	weight_today: number;
+}
+/**
+ * The self-hosted Open-Meteo server (OPEN_METEO_URL), from today's requests.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "LocalServerOut".
+ */
+export interface LocalServerOut {
+	fallbacks_today: number;
+	last_error: string | null;
+	last_error_at: string | null;
+	last_ok_at: string | null;
+	latency_s: number | null;
+	ok: boolean;
+	requests_today: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

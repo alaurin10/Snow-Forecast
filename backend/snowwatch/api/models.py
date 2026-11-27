@@ -284,14 +284,29 @@ class LocationAge(BaseModel):
     flags: int
 
 
+class LocalServerOut(BaseModel):
+    """The self-hosted Open-Meteo server (OPEN_METEO_URL), from today's requests."""
+
+    ok: bool  # its last request succeeded
+    last_ok_at: str | None
+    last_error_at: str | None
+    last_error: str | None
+    latency_s: float | None  # mean seconds per request today (UTC)
+    requests_today: int
+    fallbacks_today: int  # requests retried on the public API after it failed
+
+
 class StatusOut(BaseModel):
     """The Status page: per-source health, runs, usage and data age."""
 
     sources: list[SourceRow]
     runs: list[RunOut]
-    weight_today: float
+    weight_today: float  # public Open-Meteo calls today (UTC), from the usage ledger
     budget: float
     locations: list[LocationAge]
+    # Set when forecasts come from a self-hosted server: the public calls are then
+    # ensembles (and any fallbacks) only.
+    local: LocalServerOut | None = None
 
 
 class MetaOut(BaseModel):
@@ -306,6 +321,9 @@ class MetaOut(BaseModel):
     # Whether the app's own experimental estimates are shown (HAZARD_INDEX): the map's
     # concern index and the Backcountry tab's weather-loading grade.
     hazard_index: bool = True
+    # Whether forecasts come from a self-hosted Open-Meteo server (OPEN_METEO_URL), which
+    # makes a forecast for any point affordable (docs/OPEN-METEO-PLAN.md, milestone 2).
+    local_forecasts: bool = False
 
 
 class ApiTypes(BaseModel):
