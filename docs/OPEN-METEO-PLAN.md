@@ -69,7 +69,7 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
 |---|---|
 | Self-host? | **Yes**: forecasts and elevation (M1), then ensembles too (M1b), with the public API as the fallback for both |
 | Ensembles | **Downloaded by our own server** (M1b): GEFS, ECMWF ENS and GEPS, every run, 16 days, snowfall only. Opt-in like M1, and one setting returns to public ensembles |
-| Where | **The mini PC** (`docs/deploy-notes-home.md`): Debian Docker VM, 4 cores, AVX2 enabled (CPU type `host`), 10 GB RAM, disk grown from 60 GB to ~100 GB before M1b |
+| Where | **The mini PC** (`docs/deploy-notes-home.md`): Debian Docker VM, 4 cores, AVX2 enabled (CPU type `host`), 10 GB RAM, 60 GB disk (it can't grow: Home Assistant OS holds the rest of the 128 GB, and its disk can't shrink) |
 | If the local server is down | Saved locations fall back to the public API within the daily budget; spots return 503 |
 | Which upgrades | All six: forecast anywhere, model bias learning, more variables, faster refresh, more locations, richer ensembles; plus no delay between locations |
 | Saved locations | **~50** (ensembles at all three bands, 4×/day) |
@@ -80,10 +80,16 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
 ## Hosting: the mini PC
 
 - The Docker VM exposes AVX2 and has 4 cores and 10 GB RAM. Its 60 GB disk was **full** on
-  27 Nov 2026 (293 MB free) after M1's server reserved its then-default 30 GB cache file:
-  the cache is reserved in full when the server starts. The default is now 10 GB (~27 MB
-  per location was measured, so plenty for 50). Before M1b, grow the disk to ~100 GB
-  (`deploy-notes-home.md` has the steps) and keep at least 15 GB free.
+  27 Nov 2026 (293 MB free): M1's server had reserved its then-default 30 GB cache (the
+  cache is reserved in full when the server starts), and Docker's build cache had grown
+  to 16.8 GB because `deploy/deploy.sh` never cleared it. The cache default is now 10 GB
+  (~27 MB per location was measured, so plenty for 50) and the deploy prunes build cache
+  older than a week. After recreating the server with a 10 GB cache, 14 GB was used and
+  44 GB free.
+- **Disk budget with M1b (60 GB, can't grow):** ~14 GB today (images 3.7, `data/` 5.9,
+  some build cache), up to 10 GB of server cache, 5–10 GB of downloaded ensembles: about
+  30–35 GB used, 25–30 GB free. Keep at least 15 GB free; M1b's `openmeteo status` warns
+  under 10 GB.
 - **Bandwidth:** ~300–450 GB/month for M1's forecasts, plus ~250–470 GB/month for M1b's
   ensembles. The owner confirmed the data cap isn't a concern.
 - The `openmeteo` compose service is **opt-in**, behind the compose profile `openmeteo`. A
@@ -322,7 +328,8 @@ affected. Milestone 4's ensembles at all three bands use the same variable. The 
 below compare whole snapshots, so nothing is missed by this list.
 
 ### PR 1: the downloader
-- [ ] Prerequisite (owner): grow the Docker VM's disk to ~100 GB; at least 15 GB free.
+- [ ] Prerequisite (owner): at least 15 GB free on the Docker VM (`df -h /`); the 60 GB
+  disk is enough (Hosting, "Disk budget").
 - [ ] `docker-compose.yml`: a service `openmeteo-ensembles`, compose profile `ensembles`:
   - the same pinned image as `openmeteo` (one digest, bumped together), `x-hardening`
   - the `openmeteo-data` volume, shared with the server, which serves what it writes
@@ -836,8 +843,10 @@ End to end, per milestone:
   and the cache bound the CPU; the spot allowance bounds public ensemble use.
 - **Bandwidth** on the home connection (~300–450 GB/month, plus ~250–470 GB/month with
   M1b; the owner says the cap is fine).
-- **Disk:** the 60 GB VM disk filled on 27 Nov 2026 (the 30 GB cache). Grow it before M1b;
-  `openmeteo status` warns under 10 GB free (M1b).
+- **Disk:** the 60 GB VM disk filled on 27 Nov 2026 (the 30 GB cache and 16.8 GB of
+  build cache) and can't grow. Fixed with a 10 GB cache and the deploy's build-cache
+  prune; M1b fits with 25–30 GB to spare, and its `openmeteo status` warns under 10 GB
+  free. If the ensemble folders grow more than expected, prune them (M1b PR 1).
 - **Downloads depend on three upstreams** (NOAA on AWS, ECMWF, Environment Canada), which
   change file names (the GEPS land file) and throttle (ECMWF's AWS mirror). Each system
   falls back to the public API on its own, and the freshness check catches a downloader
@@ -937,7 +946,7 @@ Start each in a fresh session on an up-to-date `main`. Prompt:
 | Milestone | Needs first | Owner action after it deploys |
 |---|---|---|
 | 1 Hybrid foundation | nothing | Add `COMPOSE_PROFILES=openmeteo` and `OPEN_METEO_URL=http://openmeteo:8080` to `.env`, run `docker compose up -d`, check `snowwatch openmeteo status` |
-| 1b Self-hosted ensembles | M1, the disk grown to ~100 GB | after PR 1: add `ensembles` to `COMPOSE_PROFILES` and watch a few days; after PR 2: `OPEN_METEO_ENSEMBLES=shadow` for a week, then `local` |
+| 1b Self-hosted ensembles | M1, 15 GB free on the VM | after PR 1: add `ensembles` to `COMPOSE_PROFILES` and watch a few days; after PR 2: `OPEN_METEO_ENSEMBLES=shadow` for a week, then `local` |
 | 2 Forecast anywhere | M1 (M1b helpful: spot ensembles without an allowance) | none |
 | 3 Richer variables | M1 (M2 helpful: spots get the new fields too) | after a few weeks, compare `cons_col` on the scorecard and choose the headline method |
 | 4 Fresher and wider | M1 | add locations up to ~50 (Manage → Add from catalog) |

@@ -371,7 +371,7 @@ the update as well (see above).
 | Map: no precipitation | The worker draws the frames every 10 minutes; `docker compose run --rm worker snowwatch precip` builds them now |
 | Map: no ski runs | `docker compose run --rm worker snowwatch ski-map` |
 | Observed: "No snow station is set" | `docker compose run --rm worker snowwatch locations stations` (after `lookups refresh`) |
-| Disk filling up | `docker image prune -f`; lower `TILES_MAX_MB` |
+| Disk filling up | `docker system df` shows what. `docker builder prune -f` (build cache; the automatic deploy clears what's older than a week) and `docker image prune -f`; lower `TILES_MAX_MB` or `OPEN_METEO_CACHE_SIZE` (then recreate the `openmeteo` container and its volume) |
 | `openmeteo` keeps restarting, `Illegal instruction` in `docker compose logs openmeteo` | The CPU has no AVX2. On a VM, set the CPU type to `host`; otherwise remove `COMPOSE_PROFILES` and `OPEN_METEO_URL` from `.env` |
 | Status: "Self-hosted forecasts: Not answering" | `docker compose run --rm worker snowwatch openmeteo status`, then `docker compose logs openmeteo`. Runs fall back to the public API meanwhile |
 | `cannotCreateFile ... cache.bin, errno 13` | The server's data folder isn't writable: keep the named volume from `docker-compose.yml` rather than a bind mount |
