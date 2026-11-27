@@ -1462,6 +1462,7 @@ export interface SpotInfo {
 	lon: number;
 	method: 'top' | 'bottom' | 'slope' | 'flat';
 	nearest?: SpotNearest | null;
+	peak?: SpotPeak | null;
 }
 /**
  * The saved location nearest a spot.
@@ -1471,6 +1472,18 @@ export interface SpotInfo {
  */
 export interface SpotNearest {
 	id: string;
+	km: number;
+	name: string;
+}
+/**
+ * The named peak a spot is named after: on it (`bearing` None, within 0.5 km), or
+ * `km` away with the spot to its `bearing` (N, NE …). The app words the distance.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SpotPeak".
+ */
+export interface SpotPeak {
+	bearing?: string | null;
 	km: number;
 	name: string;
 }

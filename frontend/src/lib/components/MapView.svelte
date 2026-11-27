@@ -2544,9 +2544,7 @@
 					worker: terrain.worker,
 					contourTiles: ctiles
 				}),
-				center: [-120.8, 47.3],
-				zoom: radar ? 6 : 5,
-				pitch: 0,
+				...startCamera(),
 				maxZoom: 18,
 				maxPitch: 80,
 				// Phones draw at 2x, not 3x: less than half the pixels, and it still looks sharp.
@@ -2771,6 +2769,39 @@
 	});
 
 	/** A location with a place on the map, by id. */
+	/**
+	 * Where the full map opens, given to MapLibre when it's made so the first frame is
+	 * already there (moving it afterwards showed the default view for a moment): from a
+	 * location's Map button, on that location, flat; else the view this tab last left the
+	 * map at (Back from a spot, or a spot's Map button when the spot is in it); else a
+	 * spot's point; else flat over Washington, home for this site.
+	 */
+	/** The map opened on the default view, fitted to Washington once its pins are drawn. */
+	let home = false;
+	function startCamera(): {
+		center?: [number, number];
+		zoom?: number;
+		pitch?: number;
+		bearing?: number;
+	} {
+		if (!radar) return { center: [-120.8, 47.3], zoom: 5, pitch: 0 };
+		const f = focus ? placedRow(focus) : null;
+		if (f) return { center: [f.lon, f.lat], zoom: 11.5, pitch: 0, bearing: 0 };
+		const kept = lastView();
+		if (kept && (!focusPoint || near(kept, focusPoint)))
+			return {
+				center: [kept.lng, kept.lat],
+				zoom: kept.zoom,
+				pitch: kept.pitch,
+				bearing: kept.bearing
+			};
+		if (focusPoint)
+			return { center: [focusPoint.lon, focusPoint.lat], zoom: 12, pitch: 0, bearing: 0 };
+		// Fitted to Washington once laid out (draw), as before: nothing to flash from.
+		home = true;
+		return { center: [-120.8, 47.3], zoom: 6, pitch: 0 };
+	}
+
 	function placedRow(id: string) {
 		const r = rows.find((x) => x.id === id);
 		return r && r.lat != null && r.lon != null
@@ -2854,33 +2885,13 @@
 					.addTo(map)
 			);
 		}
-		// The full map opens flat over Washington, home for this site, whatever else is saved;
-		// or, from a location's Map button, on that location with its popup open (flat: the
-		// 3D view button is in the popup).
+		// The full map opened where startCamera put it; a location's popup opens now that
+		// its pin exists.
 		if (radar && !fitted) {
 			fitted = true;
 			const f = focus ? placedRow(focus) : null;
-			// The view this tab last left the map at (from a spot's page, by Back or by its
-			// Map button when the spot is in it).
-			const kept = f ? null : lastView();
-			if (f) {
-				map.jumpTo({ center: [f.lon, f.lat], zoom: 11.5, pitch: 0, bearing: 0 });
-				popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
-			} else if (kept && (!focusPoint || near(kept, focusPoint)))
-				map.jumpTo({
-					center: [kept.lng, kept.lat],
-					zoom: kept.zoom,
-					bearing: kept.bearing,
-					pitch: kept.pitch
-				});
-			else if (focusPoint)
-				map.jumpTo({
-					center: [focusPoint.lon, focusPoint.lat],
-					zoom: 12,
-					pitch: 0,
-					bearing: 0
-				});
-			else map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
+			if (f) popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
+			else if (home) map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
 		}
 		// The small overview map frames the locations once; after that the view is the viewer's.
 		if (placed.length && !fitted) {

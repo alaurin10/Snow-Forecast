@@ -812,6 +812,31 @@ at the owner's choice):
   ensembles come from the public API, a share of the spots' daily ensemble allowance
   even if the button is never pressed.
 
+**After a second look on the mini PC** (cold spots ~7–8 s, nearby ~3 s), a fourth PR:
+- The phone header's back arrow on a spot goes to the map (the view it was left at),
+  not the Overview.
+- The map is made at its starting view (a location, the view it was left at, a spot's
+  point, or Washington), instead of moving there once the pins are drawn, which showed
+  the zoomed-out map first (~0.5 s in 2D, ~2 s in 3D). Keeping the map alive in the
+  background across pages would avoid reloading it at all, but holds a WebGL context and
+  its tiles while other pages are open (heavy on phones); not done.
+- A spot's elevation is shown where a location's elevation picker is ("This spot ·
+  4,900 ft").
+- Spots are named after the terrain: the nearest named peak within 0.5 km, else "1.2 km
+  NE of" the nearest within 6 km, from the label tiles' `mountain_peak` layer (every peak,
+  `snowwatch/peaks.py`, a small vector-tile reader with no new dependency) as well as the
+  saved areas' file. `Snapshot.spot.peak` carries the peak, distance and direction so the
+  app words the distance in miles or kilometres. The lookup runs beside the forecast and
+  is waited for 3 s at most (the tiles are cached on disk, so once per area).
+- "Save as location" (owner only: shown only after `/api/me` says owner, and the Manage
+  endpoints it uses require the owner's session) now opens Manage's "Add a backcountry
+  zone" form, named after the spot, its map zoomed in with the spot as the mid pin, for
+  the owner to place the low (trailhead) and high points; auto-detect then looks up each
+  pin's elevation, so it's saved as a full three-point location.
+- With `OPEN_METEO_ENSEMBLES=local` (the owner's setting), spot ensembles come from the
+  server while its runs are fresh and the spots' public allowance isn't used; it only
+  applies to a system that has fallen back to the public API.
+
 **Keeping the server's cache warm over the mountains: not done**, from a sandbox test
 against the pinned server (each line of spots in a fresh range, after the server's
 one-time setup of 30 s):

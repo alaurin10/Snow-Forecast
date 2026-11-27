@@ -1,20 +1,18 @@
-// "Save as location" on a spot's page opens Manage at /admin?spot=lat,lon&name=…&elev=b,m,s:
-// a backcountry location with the spot's point and its three bands' elevations, ready for
-// the usual auto-detect and review.
-import type { ResolveIn } from '../types.gen';
+// "Save as location" on a spot's page opens Manage at /admin?spot=lat,lon&name=…: the
+// "Add a backcountry zone" form, named after the spot, its map zoomed in on the point
+// with the point as the mid pin, for the owner to place the low (trailhead) and high
+// points; auto-detect then fills in each pin's elevation and the rest.
 
-export function spotToResolve(params: URLSearchParams): ResolveIn | null {
+export interface SpotDraft {
+	name: string;
+	lat: number;
+	lon: number;
+}
+
+export function spotDraft(params: URLSearchParams): SpotDraft | null {
 	const at = (params.get('spot') ?? '').split(',').map(Number);
-	const elev = (params.get('elev') ?? '').split(',').map(Number);
-	if (at.length !== 2 || elev.length !== 3) return null;
+	if (at.length !== 2 || !at.every(Number.isFinite)) return null;
 	const [lat, lon] = at;
-	if (![lat, lon, ...elev].every(Number.isFinite)) return null;
 	if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-	if (!(elev[0] < elev[1] && elev[1] < elev[2])) return null;
-	const bands = ['base', 'mid', 'summit'] as const;
-	return {
-		kind: 'backcountry',
-		name: (params.get('name') ?? '').slice(0, 80),
-		pins: bands.map((band, i) => ({ band, lat, lon, elev_m: elev[i] })) as ResolveIn['pins']
-	};
+	return { name: (params.get('name') ?? '').slice(0, 80), lat, lon };
 }

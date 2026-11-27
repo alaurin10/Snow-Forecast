@@ -66,7 +66,14 @@ Notable changes to Snow Watch. The format follows
   on a point for a moment, its full forecast starts making, so "Full forecast here" is
   often instant. It has an allowance of its own and never makes others wait.
 - **A spot shows just its own elevation**: the forecast for where you clicked, without the
-  bands above and below. Signed in as the owner, every spot panel you open starts its
+  bands above and below, with that elevation where the picker would be.
+- **Spots are named after the terrain**: the peak you tapped, or how far and which way
+  from the nearest one ("0.8 mi S of Mount Stuart"), anywhere, not only near saved
+  locations.
+- **Saving a spot as a location** (owner only) opens the zone form with the spot as the
+  mid pin, to place the low and high points, so it's saved as a full location.
+- **Back from a spot goes to the map**, and the map opens straight at the view you left
+  (no zoomed-out flash first). Signed in as the owner, every spot panel you open starts its
   forecast early, with no allowance.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)

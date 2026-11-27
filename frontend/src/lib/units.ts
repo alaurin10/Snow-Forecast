@@ -54,6 +54,17 @@ export function elevation(m: number | null | undefined, units: UnitSystem): stri
 		: `${roundTo(m, 10).toLocaleString('en-US')} m`;
 }
 
+/** A short distance on the ground: "600 m", "1.2 km", or "0.4 mi", "2.5 mi". */
+export function distance(km: number | null | undefined, units: UnitSystem): string {
+	if (km === null || km === undefined) return '–';
+	if (units === 'imperial') {
+		const mi = km * 0.621371;
+		return mi < 10 ? `${Math.max(0.1, roundTo(mi, 0.1)).toFixed(1)} mi` : `${Math.round(mi)} mi`;
+	}
+	if (km < 1) return `${Math.max(100, roundTo(km * 1000, 100))} m`;
+	return km < 10 ? `${roundTo(km, 0.1).toFixed(1)} km` : `${Math.round(km)} km`;
+}
+
 export function speed(kmh: number | null | undefined, units: UnitSystem): string {
 	if (kmh === null || kmh === undefined) return '–';
 	return units === 'imperial' ? `${Math.round(kmhToMph(kmh))} mph` : `${Math.round(kmh)} km/h`;

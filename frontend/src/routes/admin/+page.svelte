@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import { spotToResolve } from '../../lib/manage/fromSpot';
+	import { spotDraft } from '../../lib/manage/fromSpot';
 	import {
 		adminLocations,
 		adminLookups,
@@ -64,6 +64,9 @@
 	let zoneName = $state('');
 	let pins = $state<Pins>({});
 	let activePin = $state<PinBand>('base');
+	// Where the zone's map opens (a saved spot's point), and whether to say why.
+	let zoneCenter = $state<[number, number] | null>(null);
+	let fromSpotNote = $state(false);
 
 	async function load() {
 		error = null;
@@ -71,11 +74,17 @@
 			me = await getMe();
 			if (!me.is_owner) return;
 			[locs, budget, lookups] = await Promise.all([adminLocations(), getBudget(), adminLookups()]);
-			// From a spot's "Save as location": straight to the review of its details.
-			const fromSpot = spotToResolve(new URLSearchParams(page.url.search));
-			if (fromSpot && mode === 'list') {
+			// From a spot's "Save as location": the zone form, named after it, with the spot as
+			// the mid pin and the map on it, for the low and high points to be placed.
+			const draft = spotDraft(new URLSearchParams(page.url.search));
+			if (draft && mode === 'list') {
 				replaceState(resolve('/admin'), {});
-				void detect(fromSpot);
+				zoneName = draft.name;
+				pins = { mid: { lat: draft.lat, lon: draft.lon } };
+				activePin = 'base';
+				zoneCenter = [draft.lat, draft.lon];
+				fromSpotNote = true;
+				mode = 'zone';
 			}
 		} catch (e) {
 			if (!signedOut(e)) error = friendlyError(e);
@@ -220,6 +229,8 @@
 			detected = null;
 			pins = {};
 			zoneName = '';
+			zoneCenter = null;
+			fromSpotNote = false;
 			query = '';
 			results = [];
 			await load();
@@ -419,10 +430,18 @@
 				>Mid (optional){pins.mid ? ' ✓' : ''}</button
 			>
 		</div>
+		{#if fromSpotNote}
+			<p class="small">
+				The spot is the mid pin. Place the trailhead (the low point) and the high point; each pin's
+				elevation is looked up from the terrain, and you can adjust them before saving.
+			</p>
+		{/if}
 		<p class="faint small">Tap the map to place the selected pin; drag a pin to move it.</p>
 		<MapPicker
 			{pins}
 			active={activePin}
+			center={zoneCenter ?? undefined}
+			zoom={zoneCenter ? 13 : undefined}
 			onpick={(band, lat, lon) => {
 				pins = { ...pins, [band]: { lat, lon } };
 				if (band === 'base' && !pins.summit) activePin = 'summit';

@@ -5949,6 +5949,17 @@
             }
           ],
           "default": null
+        },
+        "peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpotPeak"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -5981,6 +5992,34 @@
         "km"
       ],
       "title": "SpotNearest",
+      "type": "object"
+    },
+    "SpotPeak": {
+      "description": "The named peak a spot is named after: on it (`bearing` None, within 0.5 km), or\n`km` away with the spot to its `bearing` (N, NE \u2026). The app words the distance.",
+      "properties": {
+        "bearing": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "km": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "km"
+      ],
+      "title": "SpotPeak",
       "type": "object"
     },
     "StationDay": {

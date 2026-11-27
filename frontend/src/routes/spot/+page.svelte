@@ -11,6 +11,8 @@
 	import ErrorNote from '../../lib/components/ErrorNote.svelte';
 	import { friendlyError } from '../../lib/errors';
 	import { rememberSpot } from '../../lib/recentSpots';
+	import { spotTitle } from '../../lib/spotname';
+	import { prefs } from '../../lib/prefs.svelte';
 
 	const num = (v: string | null) => (v === null || v.trim() === '' ? NaN : Number(v));
 	const lat = $derived(num(page.url.searchParams.get('lat')));
@@ -64,7 +66,7 @@
 					rememberSpot({
 						lat: s.spot.lat,
 						lon: s.spot.lon,
-						name: s.location.name,
+						name: spotTitle(s, prefs.units),
 						elev_m: s.spot.elev_m
 					});
 			})
@@ -97,21 +99,22 @@
 	const mapHref = $derived(
 		snap?.spot ? `${resolve('/map')}?lat=${snap.spot.lat}&lon=${snap.spot.lon}` : resolve('/map')
 	);
-	// The owner can keep a spot as a location: Manage, with its three bands filled in.
+	// The owner can keep a spot as a location: Manage's zone form, with the spot as its mid
+	// pin, to place the low and high points.
 	const saveHref = $derived.by(() => {
 		const s = snap;
 		if (!s?.spot) return '';
 		const q = new URLSearchParams({
 			spot: `${s.spot.lat},${s.spot.lon}`,
-			name: s.location.name,
-			elev: s.bands.map((b) => Math.round(b.elev_m)).join(',')
+			name: spotTitle(s, prefs.units)
 		});
 		return `${resolve('/admin')}?${q}`;
 	});
 </script>
 
 <svelte:head
-	><title>{snap ? `${snap.location.name} · Snow Watch` : 'A spot · Snow Watch'}</title></svelte:head
+	><title>{snap ? `${spotTitle(snap, prefs.units)} · Snow Watch` : 'A spot · Snow Watch'}</title
+	></svelte:head
 >
 
 {#snippet saveAction()}
@@ -168,6 +171,8 @@
 			loadNearby={nearby}
 			loadAvalanche={() => nearby().then((n) => n.avalanche ?? null)}
 			{mapHref}
+			backHref={mapHref}
+			backLabel="Back to the map"
 			actions={owner ? saveAction : undefined}
 		/>
 	{/key}

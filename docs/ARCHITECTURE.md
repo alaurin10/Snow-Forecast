@@ -163,8 +163,13 @@ but its ensembles:
    lowest, mid 60 % up); near the lowest it's the base; otherwise it's mid. Bands stay
    150 m apart; flat ground gets 300 m below and above. All three share the point.
 3. **A transient `Location`** (`spot-<geohash>`, backcountry, time zone from the
-   forecast) named after a peak within 2 km in the map's OpenStreetMap file, else "6 km
-   NE of" a saved location within 40 km, else its coordinates.
+   forecast) named after the terrain: the nearest named peak within 0.5 km ("Mount
+   Stuart"), else where it is from one within 6 km ("1.2 km NE of Mount Stuart"; the app
+   words the distance in the viewer's units from `Snapshot.spot.peak`), else "6 km NE
+   of" a saved location within 40 km, else its coordinates. Peaks come from the map's
+   OpenStreetMap file and from the label tiles the map draws peak names from
+   (`snowwatch/peaks.py` reads their `mountain_peak` layer, zoom 12, the point's tile
+   and the eight round it, through the server's tile cache), waited for 3 s at most.
 4. **Fetch** with the saved locations' request builders, from the server only: no
    public fallback, so a stopped server means 503. No snow station, SNOTEL or BC data.
    US spots get NWS alerts, kept 10 minutes per 0.1° cell. Every request runs at once
@@ -373,7 +378,8 @@ a section with no loader is left out, so a spot shows no trend, scorecard or web
 and only its own elevation (its other two bands still feed the Backcountry outlook).
 With `/api/meta`'s `local_forecasts`, the map's spot panel offers "Full forecast here"
 and a right-click or long press opens one (`/spot?lat=…&lon=…`); the owner can save a
-spot as a location from its page (Manage, with its three bands filled in).
+spot as a location from its page (Manage's zone form, with the spot as the mid pin, to
+place the low and high points).
 
 Rules the charts keep: one y-axis per chart, marks never outside the plot (tested),
 units converted in the browser (the API is metric only), and every chart works at
