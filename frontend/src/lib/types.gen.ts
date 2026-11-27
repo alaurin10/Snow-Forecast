@@ -685,6 +685,7 @@ export interface MetaOut {
  */
 export interface NearbyOut {
 	area_reports?: NearbyReport[];
+	avalanche?: AvalancheView | null;
 	location_id: string;
 	near_km?: number;
 	photo_reports?: NearbyReport[];
@@ -694,6 +695,7 @@ export interface NearbyOut {
 	reports_days: number | null;
 	stations: NearbyStation[];
 	stations_at: string | null;
+	zone_id?: string | null;
 	zone_name?: string | null;
 }
 /**
@@ -1103,6 +1105,7 @@ export interface Snapshot {
 	ridge?: RidgeOut | null;
 	run_id: number | null;
 	snotel?: Snotel | null;
+	spot?: SpotInfo | null;
 	sun: SunDay[];
 	version?: number;
 	warnings?: string[];
@@ -1443,6 +1446,33 @@ export interface SnotelDay {
 	temp_c: number | null;
 	tmax_c?: number | null;
 	tmin_c?: number | null;
+}
+/**
+ * A forecast for a point tapped on the map (a spot), made on request
+ * (snowwatch/spots.py). Its three bands share the point and differ in elevation.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SpotInfo".
+ */
+export interface SpotInfo {
+	band: 'base' | 'mid' | 'summit';
+	elev_m: number;
+	ensembles: 'fresh' | 'cached' | 'allowance_spent' | 'unavailable';
+	lat: number;
+	lon: number;
+	method: 'top' | 'bottom' | 'slope' | 'flat';
+	nearest?: SpotNearest | null;
+}
+/**
+ * The saved location nearest a spot.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SpotNearest".
+ */
+export interface SpotNearest {
+	id: string;
+	km: number;
+	name: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

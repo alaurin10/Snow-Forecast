@@ -21,7 +21,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from snowwatch import __version__, observations, overlays, webcams
+from snowwatch import __version__, observations, overlays, spots, webcams
 from snowwatch.api.admin import make_admin_router
 from snowwatch.api.auth import MIN_PASSWORD, make_auth_router
 from snowwatch.api.models import MetaOut
@@ -214,6 +214,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # configured, like the worker.
     app.state.make_fetcher = lambda: fetcher_for(
         settings, tries=2, timeout_s=20, local_timeout_s=30
+    )
+    # Forecasts anywhere (spots, milestone 2): the API's first forecasts of its own, from
+    # the self-hosted server, cached and rate-limited (snowwatch/spots.py). One try at the
+    # public hosts (ensembles, NWS alerts): a visitor is waiting, and a 429 would hold the
+    # build for a minute.
+    app.state.spots = spots.make_service(
+        settings,
+        app.state.forecast_config,
+        lambda: fetcher_for(settings, tries=1, timeout_s=20, local_timeout_s=spots.LOCAL_TIMEOUT_S),
     )
 
     @app.get("/api/meta", response_model=MetaOut)

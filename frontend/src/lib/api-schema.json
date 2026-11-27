@@ -2848,6 +2848,17 @@
           },
           "type": "array"
         },
+        "avalanche": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvalancheView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "location_id": {
           "type": "string"
         },
@@ -2906,6 +2917,17 @@
               "type": "null"
             }
           ]
+        },
+        "zone_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "zone_name": {
           "anyOf": [
@@ -5561,6 +5583,17 @@
           ],
           "default": null
         },
+        "spot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpotInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "sun": {
           "items": {
             "$ref": "#/$defs/SunDay"
@@ -5866,6 +5899,88 @@
         "errors_today"
       ],
       "title": "SourceRow",
+      "type": "object"
+    },
+    "SpotInfo": {
+      "description": "A forecast for a point tapped on the map (a spot), made on request\n(snowwatch/spots.py). Its three bands share the point and differ in elevation.",
+      "properties": {
+        "band": {
+          "enum": [
+            "base",
+            "mid",
+            "summit"
+          ],
+          "type": "string"
+        },
+        "elev_m": {
+          "type": "number"
+        },
+        "ensembles": {
+          "enum": [
+            "fresh",
+            "cached",
+            "allowance_spent",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lon": {
+          "type": "number"
+        },
+        "method": {
+          "enum": [
+            "top",
+            "bottom",
+            "slope",
+            "flat"
+          ],
+          "type": "string"
+        },
+        "nearest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpotNearest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "lat",
+        "lon",
+        "elev_m",
+        "band",
+        "method",
+        "ensembles"
+      ],
+      "title": "SpotInfo",
+      "type": "object"
+    },
+    "SpotNearest": {
+      "description": "The saved location nearest a spot.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "km": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "km"
+      ],
+      "title": "SpotNearest",
       "type": "object"
     },
     "StationDay": {

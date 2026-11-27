@@ -7,7 +7,9 @@ the public fallback, the usage ledger and budget split, `snowwatch openmeteo sta
 `OPEN_METEO_ENSEMBLES` (`public` by default, `shadow`, `local`), per-system freshness,
 fallback and shadow comparisons, `check-ensembles`. Both tested end to end in a sandbox;
 the owner's rollout on the mini PC (a few days of downloads, a week of shadow, then
-local) is next. Milestones 2–5 are planned. Each milestone's PRs tick its
+local) is next. **Milestone 2, backend built** (27 Nov 2026): `GET /api/spot` and
+`/api/spot/nearby` (`snowwatch/spots.py`), checked against the real server in a sandbox;
+the frontend PR is next. Milestones 3–5 are planned. Each milestone's PRs tick its
 checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -570,7 +572,7 @@ run still succeeding.
 saved location has, built on demand. **Two PRs: backend, then frontend.**
 
 ### Backend: `backend/snowwatch/spots.py` (new)
-- [ ] **Bands from the terrain:** one request to the local `/v1/elevation` gets the point
+- [x] **Bands from the terrain:** one request to the local `/v1/elevation` gets the point
   plus 24 samples on rings at 1 km and 2.5 km (12 bearings each). With h = the point's
   elevation and lo/hi = the ring's lowest and highest:
   - near the top (h ≥ hi − 100 m): summit = h, base = lo, mid = base + 60 % of the vertical
@@ -580,12 +582,12 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
   - Keep bands at least 150 m apart; on flat ground use h − 300, h, h + 300.
   - The band holding the click is "this spot" and opens by default. All three bands share
     the clicked lat/lon; only elevation differs, as a resort's single pin does today.
-- [ ] **Country:** point-in-polygon against a bundled, simplified US/Canada border
+- [x] **Country:** point-in-polygon against a bundled, simplified US/Canada border
   (`config/borders.geojson`, from Natural Earth admin-0 at 1:50m, public domain, a few
   hundred KB at most), using `geo.contains`. Outside both: 422 "Forecasts anywhere cover
   the US and Canada". `Location.country` stays `Literal["US", "CA"]`, and it picks the
   short-range models (`cfg.models_for`).
-- [ ] **Transient `Location`:**
+- [x] **Transient `Location`:**
   - `id = "spot-" + geohash(7)` (fits the id pattern), `kind = "backcountry"`, `tz = None`
     (the build takes the time zone from the response, as it does for a new location)
   - Name, first that applies:
@@ -593,12 +595,12 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
        areas around saved locations
     2. "6 km NE of Crystal Mountain" from the nearest saved location within 40 km
     3. the coordinates
-- [ ] **Fetch:** factor the Open-Meteo part of `pipeline.fetch_responses` into a helper.
+- [x] **Fetch:** factor the Open-Meteo part of `pipeline.fetch_responses` into a helper.
   Spots reuse `blend_request`, `multimodel_request`, `upper_air_request` and
   `clouds_request` against the local server (no fallback), and skip the station request,
   SNOTEL, BC data and the ensemble cache table. US spots get NWS alerts
   (`nws.alerts_request`), cached 10 min per 0.1° cell.
-- [ ] **Ensembles:**
+- [x] **Ensembles:**
   - With milestone 1b in `local` mode and a system fresh: from the server, at all three
     bands, with no allowance.
   - Otherwise mid band only, from the public API (`ensemble_request` for each of
@@ -610,20 +612,20 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
     server's CPU.
   - When the allowance is spent, build without ensembles (they are already optional) and
     say so in `Snapshot.spot`.
-- [ ] **Build:** `inputs_from_responses` then `build_snapshot`, unchanged; neither touches
+- [x] **Build:** `inputs_from_responses` then `build_snapshot`, unchanged; neither touches
   the database.
-- [ ] `backend/snowwatch/doc.py`: a new optional `Snapshot.spot` (`SpotInfo`) with:
+- [x] `backend/snowwatch/doc.py`: a new optional `Snapshot.spot` (`SpotInfo`) with:
   - the clicked lat/lon/elevation and `band` (which band is "this spot")
   - how the bands were chosen (`top` / `bottom` / `slope` / `flat`)
   - `ensembles`: `fresh` / `cached` / `allowance_spent`
   - the nearest saved location (id, name, km)
-- [ ] **Endpoints** (`api/public.py`):
+- [x] **Endpoints** (`api/public.py`):
   - `GET /api/spot?lat=&lon=`: the snapshot, gzipped like `/locations/{id}`, with an ETag;
     422 outside the US/Canada; 503 when the local server isn't configured or is down
   - `GET /api/spot/nearby?lat=&lon=`: refactor the body of `nearby(location_id)` into
     `nearby_at(lat, lon, elev_m)`, shared by both routes; add the avalanche zone and its
     current rating via `zone_at` + `avalanche_views`
-- [ ] **Limits and cache** (patterns from `api/ratelimit.py` and `api/app.py`):
+- [x] **Limits and cache** (patterns from `api/ratelimit.py` and `api/app.py`):
   - an in-process LRU (~300 entries) of gzipped documents keyed by lat/lon rounded to 3
     decimal places (~100 m), valid until the next model update (milestone 4's watcher
     stamp; 60 min until then)
@@ -661,11 +663,11 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
   Overview (`frontend/src/routes/+page.svelte`) and in `LocationPalette.svelte`.
 - [ ] Service worker (`frontend/src/service-worker.ts`, `frontend/src/lib/swRoute.ts`):
   network-first for `/api/spot`, keeping the last 10 for offline use.
-- [ ] Regenerate types: `uv run snowwatch schema --out ../frontend/src/lib/api-schema.json`,
+- [x] Regenerate types: `uv run snowwatch schema --out ../frontend/src/lib/api-schema.json`,
   then `npm run types`.
 
 ### Tests
-- [ ] Band rule (top, bottom, slope, flat), border lookup (inside, outside, near the
+- [x] Band rule (top, bottom, slope, flat), border lookup (inside, outside, near the
   border), naming fallbacks, cache keys, rate limits, allowance spent, and a spot built
   from the saved fixtures (`tests/helpers.py`).
 - [ ] Playwright (`frontend/e2e/`): map tap → "Full forecast here" → spot page at 380 px
@@ -673,6 +675,53 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
 
 **Done when:** on the mini PC, tapping any point in the US or Canada opens a full forecast
 in ≤ 3 s warm (≤ 10 s in a cold area), and repeat taps nearby are instant.
+
+### What the backend PR built and found (27 Nov 2026)
+
+Run against the pinned server in a cloud sandbox ([Appendix A](#appendix-a-running-the-server-in-a-cloud-sandbox),
+empty cache to start, `OPEN_METEO_ENSEMBLES=public`), with `curl` on `/api/spot`:
+- **Snoqualmie Pass** (47.42, −121.41): "Near Snoqualmie Pass", slope, bands 766 / 916 /
+  1,429 m, all three ensembles. **Mount Rainier** (46.85, −121.76): "24 km SW of Crystal
+  Mountain", top, summit 4,366 m (the peak is 4,392 m), bands 2,871 / 3,768 / 4,366 m.
+  Sonora (31, −110): 422 in 50 ms.
+- **Cold:** the server's very first requests (empty cache, every model and variable to
+  set up) took 133 s, 159 s for the next area and 325 s for Rogers Pass (Canada's models
+  for the first time); one cold `upper` passed 60 s and was dropped as optional. That is
+  the one-time setup measured in "What the test found"; on the mini PC the saved
+  locations keep the models warm, and only a new area's ~27 MB is cold.
+- **Warm areas, new points:** 1.3–5.9 s here (Rogers Pass again 1.3 s, Snoqualmie
+  neighbours 2.4–4.9 s, Rainier's west flank 5.9 s); this sandbox is far from the data in
+  us-west-2. **Repeat taps** within ~100 m: 2 ms, from the cache.
+- **The public ensemble API answered 429** to this sandbox's shared address after a few
+  calls. With 2 tries a 429 held a build for over a minute, so spots try public hosts
+  once (`tries=1`): the spot then builds without them ("unavailable"), as it should.
+- The document is 25–33 KB gzipped, like a saved location's.
+
+Choices made while building, beyond the checklist:
+- **Ensembles at the mid band only**, from the server too: `build_snapshot` reads one
+  ensemble point per system and scales it to the other bands. Milestone 4 makes each
+  band use its own ensembles; spots should ask for all three bands then.
+- A spot is built at the point rounded to 3 decimals (~100 m), which is also its cache
+  key, so the coordinates it reports are those. Ensembles are asked for at the 0.25°
+  cell's centre and the 100 m step of the mid band, so the cached answer is the same for
+  every spot that shares it. `spot_ensembles` drops rows past 6 h whenever it writes.
+- `SpotInfo.ensembles` has a fourth value, `unavailable` (none could be had, e.g.
+  the public API failed), beside
+  `fresh`, `cached` and `allowance_spent`; `nearest` is the nearest saved location
+  within 100 km.
+- Band labels: "Lower", "Middle", "Upper", with the point's band labelled "This spot".
+  Within 1 km of a saved location the name is "Near Crystal Mountain".
+- The US/Canada outline counts points within 3 km of it as inside (its coastline is
+  simplified); `backend/scripts/make_borders.py` remakes `config/borders.geojson` (278 KB).
+- Spots' public calls go in `api_usage` as the host `spots`: counted in the public
+  total like any host, and read on their own for the allowance.
+- The server gets one try per request with a 60 s timeout (a cold summit request took
+  52 s); after a failure the service answers 503 at once for 30 s.
+- `NearbyOut` gains `zone_id` and `avalanche` (the zone's forecast with expiry applied
+  now, from the map's zones file), filled for spots only; `location_id` is the spot's id.
+- Limits as planned: per visitor 8 new spots then one every 15 s, cached ones 60 then 2 a
+  second, 2 builds at once (others wait up to 20 s, then 503), ~600 an hour site-wide
+  (bursts of 100), one build per point at a time.
 
 ## Milestone 3: Richer weather variables and better physics
 

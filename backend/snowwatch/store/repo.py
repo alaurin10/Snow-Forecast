@@ -250,6 +250,9 @@ def save_source_status(conn: sqlite3.Connection, stats: Mapping[str, Any]) -> No
 
 
 LOCAL_HOST = "local"  # the self-hosted Open-Meteo server's row (http.LOCAL_HOST)
+# Public Open-Meteo calls made for spots (forecasts anywhere, milestone 2): their own row,
+# so the spots' daily allowance can be checked. Counted in the public total like any host.
+SPOT_HOST = "spots"
 
 
 def utc_day(now: datetime | None = None) -> str:
@@ -310,11 +313,56 @@ def usage_today(conn: sqlite3.Connection, now: datetime | None = None) -> Usage:
     return out
 
 
-def record_usage(conn: sqlite3.Connection, fetcher: Any, now: datetime | None = None) -> None:
-    """Add a fetcher's Open-Meteo requests since it last recorded (`Fetcher.take_usage`)."""
+def record_usage(
+    conn: sqlite3.Connection,
+    fetcher: Any,
+    now: datetime | None = None,
+    *,
+    public_as: str | None = None,
+) -> None:
+    """Add a fetcher's Open-Meteo requests since it last recorded (`Fetcher.take_usage`).
+    `public_as`: record every public host's requests under this name instead (SPOT_HOST)."""
     day = utc_day(now)
     for host, u in fetcher.take_usage().items():
+        if public_as and host != LOCAL_HOST:
+            host = public_as
         add_usage(conn, day, host, u.weight, u.requests, fallbacks=u.fallbacks, seconds=u.seconds)
+
+
+# --- Spots (milestone 2) ----------------------------------------------------------------
+
+
+def spot_ensembles(
+    conn: sqlite3.Connection, cell: str, *, now: datetime, max_age_h: float
+) -> dict[str, Any]:
+    """A spot cell's cached ensemble answers no older than max_age_h, by system."""
+    cutoff = (now - timedelta(hours=max_age_h)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT system, doc_gz FROM spot_ensembles WHERE cell = ? AND fetched_at >= ?",
+        (cell, cutoff),
+    )
+    return {r["system"]: _ungz(r["doc_gz"]) for r in rows}
+
+
+def put_spot_ensemble(
+    conn: sqlite3.Connection,
+    cell: str,
+    system: str,
+    data: Any,
+    source: str,
+    *,
+    now: datetime,
+    max_age_h: float,
+) -> None:
+    """Keep one answer for a cell, and drop every answer past max_age_h."""
+    cutoff = (now - timedelta(hours=max_age_h)).isoformat(timespec="seconds")
+    with conn:
+        conn.execute("DELETE FROM spot_ensembles WHERE fetched_at < ?", (cutoff,))
+        conn.execute(
+            "INSERT OR REPLACE INTO spot_ensembles (cell, system, fetched_at, source, doc_gz) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (cell, system, now.isoformat(timespec="seconds"), source, _gz(data)),
+        )
 
 
 # --- Self-hosted ensembles (milestone 1b) -----------------------------------------------

@@ -163,3 +163,13 @@ terrain:
   concern_sun: 0.5             # E to W slopes in the sun, on a day with a wet-snow problem or warming
   concern_sun_hours: 3         # hours of direct sun that counts
   concern_classes: [1.5, 2.5, 3.5]  # elevated, high, very high
+
+# Forecasts for any point on the map (spots), offered only with a self-hosted Open-Meteo
+# server (OPEN_METEO_URL; docs/OPEN-METEO-PLAN.md, milestone 2). Forecasts come from the
+# server; ensembles too while it has a fresh run of them (OPEN_METEO_ENSEMBLES=local),
+# otherwise from the public API, within this many weighted calls a day (~11.8 a point).
+spots:
+  ensemble_allowance: 2000
+  ensemble_cache_h: 6     # a point's ensembles, per 0.25° cell and 100 m of elevation
+  cache_minutes: 60       # a built spot, until the models update
+  cache_entries: 300

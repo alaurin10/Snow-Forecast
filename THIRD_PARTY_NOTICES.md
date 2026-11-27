@@ -26,6 +26,7 @@ running a public or commercial installation.
 | [Mapterhorn](https://mapterhorn.com/attribution/) | Elevation: 3D terrain, hill shading, slope, aspect, contours (from USGS 3DEP, NRCan HRDEM, Copernicus GLO-30 and others) | Open data; each source under its own licence, listed by Mapterhorn |
 | [Mapzen terrain tiles on AWS](https://registry.opendata.aws/terrain-tiles/) | Backup elevation | Various open licences, see the registry |
 | [MapLibre demo tiles](https://demotiles.maplibre.org/) | Map label fonts (cached by the server) | See the MapLibre project |
+| [Natural Earth](https://www.naturalearthdata.com/) | The US and Canada outlines for forecasts anywhere (`config/borders.geojson`, simplified) | Public domain |
 
 ## Software
 

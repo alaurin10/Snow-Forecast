@@ -15,6 +15,7 @@ EXPECTED = {
     "ensemble_cache",
     "ensemble_shadow",
     "ensemble_state",
+    "spot_ensembles",
     "forecast_daily",
     "obs_daily",
     "owner_sessions",
@@ -45,6 +46,7 @@ def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
         "008_webcams_applied",
         "009_api_usage",
         "010_ensemble_shadow",
+        "011_spot_ensembles",
     ]
     assert table_names(conn) >= EXPECTED
     assert not table_names(conn) & {"alerts", "obs_hourly"}
