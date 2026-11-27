@@ -2,7 +2,8 @@
 
 Status: **milestone 1 built** (27 Nov 2026): the opt-in `openmeteo` service, routing with
 the public fallback, the usage ledger and budget split, `snowwatch openmeteo status` and
-`check-sources --local`. Milestones 2–5 are planned. Each milestone's PRs tick its
+`check-sources --local`. **Milestone 1b** (self-hosted ensembles) is planned and tested in
+a sandbox; milestones 2–5 are planned. Each milestone's PRs tick its
 checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -66,8 +67,9 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
 
 | Question | Decision |
 |---|---|
-| Self-host? | **Yes, hybrid**: self-hosted for forecasts and elevation, public API for ensembles only |
-| Where | **The mini PC** (`docs/deploy-notes-home.md`): Debian Docker VM, AVX2 enabled (CPU type `host`), 10 GB RAM, 60 GB disk |
+| Self-host? | **Yes**: forecasts and elevation (M1), then ensembles too (M1b), with the public API as the fallback for both |
+| Ensembles | **Downloaded by our own server** (M1b): GEFS, ECMWF ENS and GEPS, every run, 16 days, snowfall only. Opt-in like M1, and one setting returns to public ensembles |
+| Where | **The mini PC** (`docs/deploy-notes-home.md`): Debian Docker VM, 4 cores, AVX2 enabled (CPU type `host`), 10 GB RAM, 60 GB disk (it can't grow: Home Assistant OS holds the rest of the 128 GB, and its disk can't shrink) |
 | If the local server is down | Saved locations fall back to the public API within the daily budget; spots return 503 |
 | Which upgrades | All six: forecast anywhere, model bias learning, more variables, faster refresh, more locations, richer ensembles; plus no delay between locations |
 | Saved locations | **~50** (ensembles at all three bands, 4×/day) |
@@ -77,10 +79,19 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
 
 ## Hosting: the mini PC
 
-- The Docker VM now exposes AVX2 and has 10 GB RAM and 60 GB disk. That covers the server
-  (0.2–0.5 GB RAM plus file cache), a 30 GB cache file, database growth and milestone-5
-  history.
-- **Bandwidth:** expect ~300–450 GB/month of downloads; check the ISP's data cap.
+- The Docker VM exposes AVX2 and has 4 cores and 10 GB RAM. Its 60 GB disk was **full** on
+  27 Nov 2026 (293 MB free): M1's server had reserved its then-default 30 GB cache (the
+  cache is reserved in full when the server starts), and Docker's build cache had grown
+  to 16.8 GB because `deploy/deploy.sh` never cleared it. The cache default is now 10 GB
+  (~27 MB per location was measured, so plenty for 50) and the deploy prunes build cache
+  older than a week. After recreating the server with a 10 GB cache, 14 GB was used and
+  44 GB free.
+- **Disk budget with M1b (60 GB, can't grow):** ~14 GB today (images 3.7, `data/` 5.9,
+  some build cache), up to 10 GB of server cache, 5–10 GB of downloaded ensembles: about
+  30–35 GB used, 25–30 GB free. Keep at least 15 GB free; M1b's `openmeteo status` warns
+  under 10 GB.
+- **Bandwidth:** ~300–450 GB/month for M1's forecasts, plus ~250–470 GB/month for M1b's
+  ensembles. The owner confirmed the data cap isn't a concern.
 - The `openmeteo` compose service is **opt-in**, behind the compose profile `openmeteo`. A
   machine without AVX2 never starts it (it would crash-loop with "Illegal instruction"),
   and merging milestone 1 changes nothing until it's turned on.
@@ -248,6 +259,199 @@ Choices made while building, beyond the checklist:
 - `.env.example` no longer sets `MAX_LOCATIONS=25`; an `.env` copied from the old one keeps
   25 until that line is removed (DEPLOYMENT.md says so).
 
+## Milestone 1b: Self-hosted ensembles
+
+**Goal:** ensembles come from our own server too, so neither saved locations nor spots
+(milestone 2) depend on the public API's daily limit. The public API stays as the
+fallback, and one setting returns to milestone 1's setup. **Two PRs: the downloader, then
+the app.** Between them the owner runs the downloader alone for a few days on the mini
+PC, then the app in shadow mode for about a week, before switching (see "Rollout").
+
+### What the test found (27 Nov 2026)
+
+Tested in a cloud sandbox with the pinned image ([Appendix D](#appendix-d-how-the-ensembles-were-tested)):
+- **The public data can't do it, but the server can download ensembles itself.** Every
+  ensemble folder in `openmeteo.s3.amazonaws.com/data/` holds only
+  `precipitation_probability` (checked: GEFS, ECMWF ENS, GEPS, ICON-EPS, UKMO, BOM, AIFS,
+  WeatherNext). The image's `download-gfs`, `download-ecmwf` and `download-gem` fetch a run
+  straight from NOAA (AWS), ECMWF and Environment Canada and write per-member files
+  (`rolling.om`), which the same server then serves at `/v1/ensemble`.
+- **Same numbers as the public API.** For Crystal's mid band (46.935, −121.475, 1,800 m),
+  every member's 16-day snowfall total against the public API for the same run: GEFS
+  (`gfs_seamless`, 31 members, 384 h) max difference 1.5 cm, mean 0.5 cm; GEPS
+  (`gem_global`, 21 members, 384 h) max 1.8 cm, mean 0.9 cm. Most of the difference is one
+  missing first hour locally (383 h vs 384 h).
+- **One server does both:** with `REMOTE_DATA_DIRECTORY` set it kept reading forecasts from
+  the public data while serving the downloaded ensembles.
+- **Only snowfall's inputs are needed**, which halves GEFS and cuts GEPS by 80 %:
+  GEFS `precipitation,frozen_precipitation_percent` (the server works out
+  `snowfall_water_equivalent`), ECMWF `snowfall_water_equivalent`, GEPS
+  `snowfall_water_equivalent`. Results were identical without temperature.
+
+| System (domain) | Download per run | Time | Peak memory | Source |
+|---|---|---|---|---|
+| GEFS 0.25° to 240 h (`gfs025_ens`) | 2.19 GB | 290 s | 586 MiB | measured |
+| GEFS 0.5° to 384 h (`gfs05_ens`) | 1.06 GB | 219 s | 178 MiB | measured |
+| ECMWF ENS 00z/12z to 360 h (`ifs025_ensemble`) | ~0.6 GB | ? | ? | from ECMWF's index files (6.9 MB of `sf` per step, 85 steps) |
+| ECMWF ENS 06z/18z to 144 h | ~0.35 GB | ? | ? | same |
+| GEPS to 384 h (`gem_global_ensemble`) | 0.26 GB | 115 s | ≤ 330 MiB | measured |
+
+- **Disk:** 3.0 GB for one run of GEFS and GEPS, including ensemble-mean files the
+  downloader also writes. Whether the folders grow from run to run wasn't measurable in
+  one session.
+- **CPU:** GEFS kept ~1.6 cores busy (of 4 in the sandbox) for its 8.5 minutes.
+- **Two problems found:**
+  - **ECMWF couldn't be downloaded from the sandbox.** `data.ecmwf.int` wasn't reachable,
+    and the AWS mirror (`--source aws`) answered `SlowDown: Please reduce your request
+    rate` even at one connection, probably because the sandbox shares its address. It
+    must be tried from the mini PC before relying on it.
+  - **GEPS needed a workaround.** Environment Canada no longer publishes the
+    `CMC_geps-raw_LAND_SFC_…` file this image expects, so the downloader retried forever.
+    Copying `data/cmc_gem_geps/static/HSURF.om` from the public bucket into the volume
+    first fixed it.
+
+### What the app reads from ensembles (all of it must still come through)
+
+`ensemble_request` asks each system for `hourly=snowfall` at the mid band's lat/lon/
+elevation for 16 days, and that's all the app uses (`analysis/series.py:ensemble_members`
+reads `snowfall` and `snowfall_memberNN`; `parse_point` reads `time`, `timezone` and
+`utc_offset_seconds`). From those come: the ensemble range per period and running totals,
+the pooled 10–90 % band, exceedance chances, the consensus after 48 h (ensemble mean),
+`_scaled_ens_mean`, member totals, the Calendar's and Confidence tab's ensemble figures,
+member counts shown in the app (GEFS 31, ECMWF 51, GEPS 21; `ensemble_min_members: 10`),
+and `forecast_daily`'s `ens_p10`, `ens_p50` and `ens_p90` rows (the scorecard scores
+`ens_p50`, so its record carries straight on across the switch). `snowfall` must stay
+Open-Meteo's 7:1 conversion of snow water, since `build._swe` divides by
+`snowfall_cm_per_mm`. `precipitation_probability` in the blend comes from the forecast
+API (milestone 1, from the public data's folders), not from ensembles, so it isn't
+affected. Milestone 4's ensembles at all three bands use the same variable. The checks
+below compare whole snapshots, so nothing is missed by this list.
+
+### PR 1: the downloader
+- [ ] Prerequisite (owner): at least 15 GB free on the Docker VM (`df -h /`); the 60 GB
+  disk is enough (Hosting, "Disk budget").
+- [ ] `docker-compose.yml`: a service `openmeteo-ensembles`, compose profile `ensembles`:
+  - the same pinned image as `openmeteo` (one digest, bumped together), `x-hardening`
+  - the `openmeteo-data` volume, shared with the server, which serves what it writes
+  - `mem_limit: 1g`, `cpus: 2` (half the mini PC, so forecast runs and the map's jobs
+    keep their share), `restart: unless-stopped`
+  - entrypoint: `docker/ensembles.sh`, mounted read-only
+- [ ] `docker/ensembles.sh` (the image has `sh` and `curl`, no Python):
+  - every 10 minutes, for each system, find the newest **complete** upstream run (GEFS:
+    the last 0.5° file's `.idx` on `noaa-gefs-pds`; ECMWF: the last step's index; GEPS:
+    hour 384 on `hpfx.collab.science.gc.ca`) and download it if it's newer than the last
+    one done, one system at a time, with `--run`, `--concurrent 2` and the variables
+    above
+  - schedule: GEFS 4×/day (00/06/12/18z, both resolutions to 384 h), ECMWF ENS 4×/day
+    (00/12z to 360 h, 06/18z to 144 h), GEPS 2×/day (00/12z: it only runs then)
+  - ECMWF from `data.ecmwf.int` by default, `--source aws` if that fails; low
+    concurrency, and back off for an hour after `SlowDown` or 503s
+  - before the first GEPS download, copy `HSURF.om` from the public bucket if missing
+  - a status file in the volume (`ensembles/status.json`): per system, the last run done,
+    when, how long, ok or the last error
+  - prune what grows (ensemble-mean and chunk files older than a few days; never the
+    `rolling.om` files being served), once that growth is measured
+- [ ] Verify on the mini PC (this sandbox couldn't):
+  - the **running** `openmeteo` server picks up a new run written while it runs, with no
+    restart (tested here only by starting the server after a download)
+  - ECMWF ENS downloads cleanly, with all 51 members (50 perturbed plus the control)
+  - a week's disk growth (`du` of the volume daily) and bandwidth (the router's counter)
+  - memory and CPU next to a forecast run and the map's jobs (`docker stats`)
+- [ ] `snowwatch openmeteo status`: each system's last downloaded run and its age (from the
+  volume's `<domain>/static/meta.json` and `status.json`, read through a read-only mount
+  of the volume at `/openmeteo` in `worker` and `api`), the downloader's last error, and
+  free disk with a warning under 10 GB.
+- [ ] Docs: DEPLOYMENT (the profile, the disk, the bandwidth, turning it off),
+  deploy-notes-home, ARCHITECTURE, THIRD_PARTY_NOTICES (NOAA, ECMWF open data under CC BY
+  4.0, ECCC), CHANGELOG.
+
+### PR 2: the app uses them
+- [ ] `settings.py`: `OPEN_METEO_ENSEMBLES` = `public` (default: milestone 1, unchanged) |
+  `shadow` | `local`, used only when `OPEN_METEO_URL` is set.
+- [ ] **Freshness per system**, so a stalled downloader can't serve old runs as new:
+  - a system is *fresh* when its local run is no older than two of its cycles (GEFS
+    14 h, ECMWF ENS 14 h for any run and 26 h for a 00z/12z run, GEPS 26 h), read from
+    the volume's `meta.json`
+  - and its response reaches at least as far ahead as expected (GEFS and GEPS ≥ 360 h,
+    ECMWF ≥ 336 h from now); a shorter reach counts as a failure
+- [ ] **Routing** (`http.py`): in `local` mode, `ensemble-api.open-meteo.com/v1/ensemble`
+  is rewritten to the server only for fresh systems (the system is the request's
+  `models`); otherwise, or on a failure, the public URL, under the ledger, as in
+  milestone 1. Each system falls back on its own.
+- [ ] **What happens when ensembles fall back** (written down, and tested):
+  1. the cached ensembles (`ensemble_cache`, up to `ensemble_max_age_h`, 13 h) cover a
+     short outage at no cost
+  2. then the public API, on the public schedule (`ensemble_runs_utc`, mid band only):
+     50 saved locations × ~24 = ~1,200 calls a day, well within the limit on its own.
+     If the whole server is down, forecasts fall back too (~316 per location a day,
+     ~15,800 at 50 locations), which is more than the limit allows, so the ledger
+     **reserves** for the required forecasts (blend and multi-model) first: ensembles are
+     asked for only while today's public use is under the limit minus what the remaining
+     runs' forecasts need (~35 per location per run). Past that, runs use the cached
+     ensembles or none, and a run's optional requests (upper air, clouds, station) are
+     skipped before the required ones. The budget planner (milestone 4) does the same
+     sums when it exists.
+  3. spots (milestone 2) get public ensembles only within the spot allowance (2,000 a day,
+     ≈ 170 new points, each cached 6 h per cell), then build without them and say so
+  4. a forecast without ensembles still builds (they're optional today)
+
+  The Status page and `openmeteo status` say which systems are falling back and since
+  when, and the worker logs it once per run.
+- [ ] **Schedule:** while a system is fresh, every run reads it (free); `ensemble_runs_utc`
+  applies only to public ensembles.
+- [ ] **Budget:** systems served locally cost 0 in `public_daily_weight`, `snowwatch
+  budget`, Manage and `/api/status` ("Ensembles: self-hosted").
+- [ ] **Shadow mode** (`shadow`): the app keeps using public ensembles as today, and each
+  run also asks the server and records the comparison per location and system in a new
+  table `ensemble_shadow` (migration `010_ensemble_shadow.sql`; milestone 2's
+  `spot_ensembles` becomes 011): members (local / public), reach, and the mean and largest
+  difference of member 16-day totals. The Status page summarises the last 7 days.
+- [ ] **Whole-snapshot check:** `snowwatch check-ensembles` builds each location's snapshot
+  twice from one run's responses, once with local ensembles and once with public ones,
+  and lists every ensemble-derived field that differs (ranges, bands, exceedance, member
+  totals, the consensus after 48 h, Calendar and Confidence figures), with how much.
+- [ ] `snowwatch check-sources --local` gains the ensemble comparison (members, reach,
+  differences against the public API or saved fixtures) in its SOURCES.md section.
+- [ ] Tests: routing only for fresh systems; one stale system falls back alone; a short
+  reach counts as a failure; the fallback order above, including the reserve when the
+  whole server is down; the budget with local ensembles;
+  shadow records; `public` mode is exactly milestone 1 (the existing tests pass
+  unchanged).
+
+### Switching on, and when to switch
+- **Accurate means**, from a week of shadow mode on the mini PC: the same member count
+  for every system; reach no shorter than the public API's by more than 6 h; member
+  16-day totals within 1 cm on average and 3 cm at most (the test gave 0.5–0.9 and 1.8);
+  `check-ensembles` shows no ensemble field in a snapshot moving by more than 1 cm or 2
+  percentage points. If ECMWF fails these, switch the other two and keep ECMWF public
+  (about half of today's ensemble calls) until it passes.
+- **Rollout:**
+  1. PR 1 deploys; owner adds `ensembles` to `COMPOSE_PROFILES`; a few days of downloads
+     only; check disk, bandwidth, memory, ECMWF and the running server picking up runs
+  2. PR 2 deploys; `OPEN_METEO_ENSEMBLES=shadow` for about a week
+  3. if the numbers above hold, `OPEN_METEO_ENSEMBLES=local`
+- **Turning it back** (any time, nothing lost): `OPEN_METEO_ENSEMBLES=public` and take
+  `ensembles` out of `COMPOSE_PROFILES`, then `docker compose up -d --remove-orphans`.
+  That is milestone 1 exactly: public ensembles on their schedule, under the ledger.
+  Nothing in this milestone removes or changes the public-ensemble code: the request
+  builders, `ensemble_cache`, the ledger, the schedule and their tests stay, `public`
+  stays the default, and the new tables are only added to. The downloaded runs can be
+  deleted from the volume, or left.
+
+### Extended forecasts and more runs
+- Keep 16 days: GEFS 0.25° to 240 h plus 0.5° to 384 h, ECMWF ENS to 360 h, GEPS to
+  384 h, as the public API gives today.
+- Download every run each system makes (above). At that schedule ensembles cost ~15 GB a
+  day (GEFS 13, ECMWF 1.9, GEPS 0.5), ~470 GB a month, fixed however many locations or
+  spots there are.
+- To revisit once it runs: whether days 11–16 are used anywhere (milestone 4's question;
+  GEFS 0.5° is a third of the download), and GEFS 4× vs 2× a day.
+
+**Done when:** a week in `local` mode on the mini PC with ensembles from the server for
+every system that passed, `snowwatch budget` showing ~0 public ensemble calls, disk steady,
+and a stopped downloader making the stale systems fall back to the public API with every
+run still succeeding.
+
 ## Milestone 2: Forecast anywhere
 
 **Goal:** tap any point in the US or Canada on the map and get the same forecast page a
@@ -283,11 +487,15 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
   SNOTEL, BC data and the ensemble cache table. US spots get NWS alerts
   (`nws.alerts_request`), cached 10 min per 0.1° cell.
 - [ ] **Ensembles:**
-  - Mid band only, from the public API (`ensemble_request` for each of `cfg.ensembles`),
-    under a daily **spot allowance** checked against the ledger (default 2,000 weighted
-    calls/day ≈ 170 new point ensembles, set in `config/forecast.yaml`).
+  - With milestone 1b in `local` mode and a system fresh: from the server, at all three
+    bands, with no allowance.
+  - Otherwise mid band only, from the public API (`ensemble_request` for each of
+    `cfg.ensembles`), under a daily **spot allowance** checked against the ledger
+    (default 2,000 weighted calls/day ≈ 170 new point ensembles, set in
+    `config/forecast.yaml`).
   - Cached 6 h per 0.25° cell and 100 m elevation step in a new table `spot_ensembles`
-    (migration `010_spot_ensembles.sql`).
+    (migration `011_spot_ensembles.sql`, after milestone 1b's 010), which also bounds the
+    server's CPU.
   - When the allowance is spent, build without ensembles (they are already optional) and
     say so in `Snapshot.spot`.
 - [ ] **Build:** `inputs_from_responses` then `build_snapshot`, unchanged; neither touches
@@ -473,6 +681,8 @@ every band. **Three PRs: refresh + retention; ensembles + budget planner; locati
   non-urgent digests if repeats show up.
 
 ### Richer ensembles
+With milestone 1b in `local` mode these cost nothing; the budget planner below applies
+only to systems on the public API (milestone 1b off, or falling back).
 - [ ] `sources/openmeteo.py:ensemble_request` takes all three bands as one request with
   three coordinates (weight × 3).
 - [ ] `analysis/build.py`: each band uses its own ensemble statistics; `_scaled_ens_mean`
@@ -484,8 +694,9 @@ every band. **Three PRs: refresh + retention; ensembles + budget planner; locati
   request 11 days instead of 16 (−12 % weight).
 
 ### Budget planner
-- [ ] New `backend/snowwatch/budget.py`. It picks the richest ensemble tier that fits 90 %
-  of 10,000 minus the spot allowance:
+- [ ] New `backend/snowwatch/budget.py`. For the systems on the public API (all of them
+  without milestone 1b), it picks the richest ensemble tier that fits 90 % of 10,000 minus
+  the spot allowance:
   1. 3 bands, runs 4/4/2 (GEFS/ECMWF/GEPS)
   2. 3 bands, 2 runs each
   3. mid only, 4 runs
@@ -567,7 +778,8 @@ new location shows historical skill immediately.
 | Milestone | New | Changed |
 |---|---|---|
 | 1 | `store/migrations/009_api_usage.sql`, `tests/test_openmeteo_local.py` | `docker-compose.yml`, `settings.py`, `http.py`, `cli.py`, `scheduler.py`, `pipeline.py`, `store/repo.py`, `store/retention.py`, `sources/openmeteo.py` (budget only), `checks.py`, `api/admin.py`, `api/app.py`, `api/public.py`, `api/models.py`, Manage budget panel (`routes/admin/+page.svelte`), status page, `.env.example`, README, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
-| 2 | `spots.py`, `config/borders.geojson`, `store/migrations/010_spot_ensembles.sql`, `frontend/src/lib/components/LocationView.svelte`, `frontend/src/routes/spot/+page.svelte` | `pipeline.py` (shared fetch helper), `doc.py`, `api/public.py`, `api/app.py`, `config/forecast.yaml`, `routes/location/[id]/+page.svelte`, `map/Inspector.svelte`, `components/MapView.svelte`, `api.ts`, `LocationPalette.svelte`, `routes/+page.svelte`, `service-worker.ts`, `swRoute.ts`, ARCHITECTURE, SECURITY |
+| 1b | `docker/ensembles.sh`, `store/migrations/010_ensemble_shadow.sql` | `docker-compose.yml`, `settings.py`, `http.py`, `pipeline.py`, `scheduler.py`, `checks.py`, `cli.py`, `sources/openmeteo.py` (budget), `store/repo.py`, `api/public.py`, `api/models.py`, status page, Manage budget, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
+| 2 | `spots.py`, `config/borders.geojson`, `store/migrations/011_spot_ensembles.sql`, `frontend/src/lib/components/LocationView.svelte`, `frontend/src/routes/spot/+page.svelte` | `pipeline.py` (shared fetch helper), `doc.py`, `api/public.py`, `api/app.py`, `config/forecast.yaml`, `routes/location/[id]/+page.svelte`, `map/Inspector.svelte`, `components/MapView.svelte`, `api.ts`, `LocationPalette.svelte`, `routes/+page.svelte`, `service-worker.ts`, `swRoute.ts`, ARCHITECTURE, SECURITY |
 | 3 | `analysis/snowlevel.py`, new fixtures folder | `sources/openmeteo.py`, `analysis/slr.py`, `freezing.py`, `ridge.py`, `backcountry.py`, `flags.py`, `build.py`, `verify.py`, `push.py`, `doc.py`, `config/forecast.yaml`, BandTable, PeriodSheet, DaySheet, ForecastChart, backcountry and observed components, SOURCES |
 | 4 | `modelwatch.py`, `budget.py` | `scheduler.py`, `pipeline.py`, `store/retention.py`, `store/repo.py`, `http.py`, `sources/openmeteo.py`, `analysis/build.py`, `config/forecast.yaml`, `push.py`, Manage (catalog add, budget), Overview, Calendar, Confidence tab, status page |
 | 5 | `calibrate.py`, migrations for `obs_history` and `model_skill` | `analysis/consensus.py`, `verify.py`, `store/retention.py`, `sources/snotel.py`, `sources/bc_asws.py`, `scheduler.py`, `cli.py`, Confidence tab |
@@ -598,6 +810,12 @@ End to end, per milestone:
   - `snowwatch pull` for the seed locations, then `snowwatch check-sources --local`
   - stop the container → the next run falls back
   - with `OPEN_METEO_URL` empty, nothing changes; `snowwatch budget` shows the split
+- **M1b:**
+  - PR 1, on the mini PC: a week of downloads; the running server serves each new run;
+    ECMWF with 51 members; disk and bandwidth logged daily
+  - PR 2: a week of `shadow`, against the thresholds in "Switching on"; `check-ensembles`
+    on every location; stop `openmeteo-ensembles` → stale systems fall back, runs succeed;
+    `OPEN_METEO_ENSEMBLES=public` → milestone 1's behaviour and `budget` output
 - **M2:**
   - `curl 'http://localhost:8000/api/spot?lat=47.42&lon=-121.41'` returns a snapshot;
     a point in Mexico gives 422; a burst of requests gives 429
@@ -623,7 +841,16 @@ End to end, per milestone:
   in data-driven refresh and the 120 s local timeout cover it.
 - **Public point forecasts**: per-visitor limits, the site-wide cap, the concurrency limit
   and the cache bound the CPU; the spot allowance bounds public ensemble use.
-- **Bandwidth** on the home connection (~300–450 GB/month).
+- **Bandwidth** on the home connection (~300–450 GB/month, plus ~250–470 GB/month with
+  M1b; the owner says the cap is fine).
+- **Disk:** the 60 GB VM disk filled on 27 Nov 2026 (the 30 GB cache and 16.8 GB of
+  build cache) and can't grow. Fixed with a 10 GB cache and the deploy's build-cache
+  prune; M1b fits with 25–30 GB to spare, and its `openmeteo status` warns under 10 GB
+  free. If the ensemble folders grow more than expected, prune them (M1b PR 1).
+- **Downloads depend on three upstreams** (NOAA on AWS, ECMWF, Environment Canada), which
+  change file names (the GEPS land file) and throttle (ECMWF's AWS mirror). Each system
+  falls back to the public API on its own, and the freshness check catches a downloader
+  that stalls quietly.
 - **Bias learning is research.** It ships in `score` mode and is applied only when the live
   scorecard shows it helps.
 - Open questions, to settle while building:
@@ -631,6 +858,9 @@ End to end, per milestone:
     against the scorecard.
   - Are ensemble days 11–16 used anywhere? (M4)
   - Do `*_previous_day1` variables work self-hosted? (M5)
+  - Does ECMWF ENS download cleanly from the mini PC, and does the running server pick up
+    new runs without a restart? (M1b)
+  - How much do the ensemble folders grow per week, and what can be pruned? (M1b)
   - ~~Does the image tolerate `read_only` and cap-drop? (M1)~~ Yes, with `/tmp` as tmpfs.
 
 ---
@@ -709,14 +939,45 @@ Milestone 1 turns the first check into `snowwatch check-sources --local`.
 
 Start each in a fresh session on an up-to-date `main`. Prompt:
 
-> Implement milestone N of `docs/OPEN-METEO-PLAN.md`. Read the whole plan first,
+> Implement milestone N of `docs/OPEN-METEO-PLAN.md` (N can be 1b). Read the whole plan first,
 > including the appendices. Work through that milestone's checklist, split into the PRs it
 > names. When done, tick the items in the plan and update its status line in the same PR.
 
 | Milestone | Needs first | Owner action after it deploys |
 |---|---|---|
 | 1 Hybrid foundation | nothing | Add `COMPOSE_PROFILES=openmeteo` and `OPEN_METEO_URL=http://openmeteo:8080` to `.env`, run `docker compose up -d`, check `snowwatch openmeteo status` |
-| 2 Forecast anywhere | M1 | none |
+| 1b Self-hosted ensembles | M1, 15 GB free on the VM | after PR 1: add `ensembles` to `COMPOSE_PROFILES` and watch a few days; after PR 2: `OPEN_METEO_ENSEMBLES=shadow` for a week, then `local` |
+| 2 Forecast anywhere | M1 (M1b helpful: spot ensembles without an allowance) | none |
 | 3 Richer variables | M1 (M2 helpful: spots get the new fields too) | after a few weeks, compare `cons_col` on the scorecard and choose the headline method |
 | 4 Fresher and wider | M1 | add locations up to ~50 (Manage → Add from catalog) |
 | 5 Learning from history | M1 (M4 helpful: more locations to learn from) | switch `calibration` to `apply` when the scorecard shows it helps |
+
+## Appendix D: how the ensembles were tested
+
+27 Nov 2026, in the same sandbox as [Appendix A](#appendix-a-running-the-server-in-a-cloud-sandbox)
+(4 cores, the pinned image, the proxy and CA lines as there). A named volume, and one
+download at a time, each in its own container, as the downloader service would:
+
+```bash
+docker run --rm -v ens:/app/data <proxy and CA lines> $IMG download-gfs gfs025_ens --only-variables precipitation,frozen_precipitation_percent --download-from-aws --concurrent 4
+```
+```bash
+docker run --rm -v ens:/app/data <proxy and CA lines> $IMG download-gfs gfs05_ens --only-variables precipitation,frozen_precipitation_percent --download-from-aws --concurrent 4
+```
+```bash
+docker run --rm -v ens:/app/data <proxy and CA lines> $IMG download-gem gem_global_ensemble --only-variables snowfall_water_equivalent --concurrent 4
+```
+```bash
+docker run --rm -v ens:/app/data <proxy and CA lines> $IMG download-ecmwf --domain ifs025_ensemble --only-variables snowfall_water_equivalent --source aws --concurrent 1 --download-concurrent 1
+```
+
+GEPS first needs `HSURF.om` from `https://openmeteo.s3.amazonaws.com/data/cmc_gem_geps/static/`
+copied to `/app/data/cmc_gem_geps/static/`. Without `--run`, each downloader took the
+newest run it could find (the 00z run, at about 07:40 UTC). Time and peak memory came from
+`docker stats`, downloads from the `eth0` counter in `/proc/net/dev`, disk from `du` in the
+volume. Then the server ran on the volume (`$IMG`, its default command, with and without
+`REMOTE_DATA_DIRECTORY`) and each system was compared with the public API: the same
+`/v1/ensemble` query to both (Crystal's mid band, `hourly=snowfall`, 16 days, GMT), every
+member's total. ECMWF's size came from one `…-24h-enfo-ef.index` file: the sum of
+`_length` for `param` `sf` over the members, times 85 steps.
+

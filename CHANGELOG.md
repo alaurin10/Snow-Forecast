@@ -67,6 +67,11 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **The self-hosted server's cache defaults to 10 GB (was 30 GB).** It's reserved on disk
+  in full when the server starts, and 30 GB filled a 60 GB disk; ~27 MB per location was
+  measured, so 10 GB is plenty for 50. DEPLOYMENT.md now says to check free space first.
+- **The automatic deploy clears Docker's build cache older than a week.** It grew with every
+  rebuild and reached 16.8 GB on the home VM.
 - `snowwatch budget` prints the public and self-hosted estimates separately, plus today's
   actual public calls. The api container's memory limit is 768 MB (was 384 MB), ahead of
   forecasts built on demand. NWS, SNOTEL and the BC snow-pillow server get at least half a

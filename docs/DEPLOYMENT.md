@@ -130,8 +130,11 @@ an older or virtual machine may not offer. Without it, nothing changes.
   `host` (VM → Hardware → Processors → Type); the default type hides AVX2. Check with
   `grep -c avx2 /proc/cpuinfo` (more than 0).
 - **Memory:** about 0.2–0.5 GB (the container is capped at 1 GB), plus file cache.
-- **Disk:** the cache file, 30 GB by default, reserved on disk at once
-  (`OPEN_METEO_CACHE_SIZE` in `.env` changes it, e.g. `20GB`).
+- **Disk:** the cache file, 10 GB by default, reserved on disk **in full as soon as the
+  server starts** (`OPEN_METEO_CACHE_SIZE` in `.env` changes it). Check `df -h /` first:
+  you need the cache size free plus at least 10 GB to spare for the database, backups,
+  map files and image builds. A full disk stops forecast runs from saving. Each location
+  needed ~27 MB of cache in testing, so 10 GB is plenty for 50 locations.
 - **Bandwidth:** each location's first run reads ~27 MB; after that the server keeps
   its cache fresh. Expect roughly 300–450 GB a month of downloads; check your
   internet plan's data cap.
@@ -368,7 +371,7 @@ the update as well (see above).
 | Map: no precipitation | The worker draws the frames every 10 minutes; `docker compose run --rm worker snowwatch precip` builds them now |
 | Map: no ski runs | `docker compose run --rm worker snowwatch ski-map` |
 | Observed: "No snow station is set" | `docker compose run --rm worker snowwatch locations stations` (after `lookups refresh`) |
-| Disk filling up | `docker image prune -f`; lower `TILES_MAX_MB` |
+| Disk filling up | `docker system df` shows what. `docker builder prune -f` (build cache; the automatic deploy clears what's older than a week) and `docker image prune -f`; lower `TILES_MAX_MB` or `OPEN_METEO_CACHE_SIZE` (then recreate the `openmeteo` container and its volume) |
 | `openmeteo` keeps restarting, `Illegal instruction` in `docker compose logs openmeteo` | The CPU has no AVX2. On a VM, set the CPU type to `host`; otherwise remove `COMPOSE_PROFILES` and `OPEN_METEO_URL` from `.env` |
 | Status: "Self-hosted forecasts: Not answering" | `docker compose run --rm worker snowwatch openmeteo status`, then `docker compose logs openmeteo`. Runs fall back to the public API meanwhile |
 | `cannotCreateFile ... cache.bin, errno 13` | The server's data folder isn't writable: keep the named volume from `docker-compose.yml` rather than a bind mount |

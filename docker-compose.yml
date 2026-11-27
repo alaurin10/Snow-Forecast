@@ -73,7 +73,9 @@ services:
     image: ghcr.io/open-meteo/open-meteo@sha256:bf94e8b39761b59a91bd04bb926b3834cad00eaf71f1aa64b2fd17fbe987846a
     environment:
       REMOTE_DATA_DIRECTORY: https://openmeteo.s3.amazonaws.com/data/
-      CACHE_SIZE: ${OPEN_METEO_CACHE_SIZE:-30GB}
+      # Reserved on disk in full as soon as the server starts: keep this much free, plus
+      # room to spare. ~27 MB per location was measured, so 10 GB is plenty for 50.
+      CACHE_SIZE: ${OPEN_METEO_CACHE_SIZE:-10GB}
     volumes:
       # A named volume: the image runs as a non-root user, and a root-owned bind mount
       # fails with "cannotCreateFile ... cache.bin, errno 13".
