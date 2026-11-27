@@ -20,6 +20,8 @@ export type Route =
 	| 'network-then-saved'
 	/** The network first, the last good answer when offline. */
 	| 'api'
+	/** A spot's forecast (a point on the map): like 'api', keeping only the last few. */
+	| 'spot'
 	| 'page'
 	| 'shell';
 
@@ -41,6 +43,7 @@ export function route(
 		return opts.saved === false ? 'network' : 'saved';
 	if (p.startsWith('/api/osm/')) return 'network-then-saved';
 	if ([...PRIVATE, ...UNCACHED].some((x) => p.startsWith(x))) return 'network';
+	if (p === '/api/spot' || p === '/api/spot/nearby') return 'spot';
 	if (p.startsWith('/api/')) return 'api';
 	if (opts.navigate) return 'page';
 	if (opts.shell) return 'shell';
@@ -68,5 +71,27 @@ export function precipFiles(index: unknown): Set<string> {
 	add(ix?.totals);
 	for (const layer of Object.values(ix?.layers ?? {})) add(layer?.frames);
 	add(ix?.steps?.steps);
+	return out;
+}
+
+/** Spots kept for offline use: the newest few of each kind (the forecast, what's nearby). */
+export const SPOTS_KEPT = 10;
+
+/** The saved spot answers to drop: all but the newest `keep` per path. */
+export function spotsToDrop(entries: { url: string; at: number }[], keep = SPOTS_KEPT): string[] {
+	const byPath = new Map<string, { url: string; at: number }[]>();
+	for (const e of entries) {
+		const path = new URL(e.url).pathname;
+		if (path !== '/api/spot' && path !== '/api/spot/nearby') continue;
+		byPath.set(path, [...(byPath.get(path) ?? []), e]);
+	}
+	const out: string[] = [];
+	for (const list of byPath.values())
+		out.push(
+			...list
+				.sort((a, b) => b.at - a.at)
+				.slice(keep)
+				.map((e) => e.url)
+		);
 	return out;
 }

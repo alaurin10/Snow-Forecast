@@ -25,6 +25,8 @@
 		nearby: NearbyOut | null;
 		nearbyLoad?: LoadState;
 		units: UnitSystem;
+		/** A spot (a point tapped on the map): it never has a snow station of its own. */
+		spot?: boolean;
 		width?: number;
 	}
 
@@ -35,6 +37,7 @@
 		nearby,
 		nearbyLoad = 'ready',
 		units,
+		spot = false,
 		width
 	}: Props = $props();
 	const station = $derived(snap.snotel ?? null);
@@ -78,10 +81,17 @@
 	{:else}
 		<section class="card">
 			<h2>No snow station here</h2>
-			<p class="muted small">
-				No snow station is set for this location, so there’s nothing measured right here. The owner
-				can pick one on the Manage page. Meanwhile, the stations nearby:
-			</p>
+			{#if spot}
+				<p class="muted small">
+					A forecast made for a point on the map has no snow station of its own. The stations
+					nearby:
+				</p>
+			{:else}
+				<p class="muted small">
+					No snow station is set for this location, so there’s nothing measured right here. The
+					owner can pick one on the Manage page. Meanwhile, the stations nearby:
+				</p>
+			{/if}
 		</section>
 		{@render near()}
 	{/if}

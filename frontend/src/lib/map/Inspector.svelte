@@ -58,6 +58,8 @@
 		onglacier?: () => void;
 		/** The ATES rating mapped here. */
 		ates?: { name: string; color?: string } | null;
+		/** The full forecast for this spot (the spot page), when the server makes one. */
+		forecastHref?: string | null;
 	}
 
 	let {
@@ -76,7 +78,8 @@
 		onzone,
 		glacier = null,
 		onglacier,
-		ates = null
+		ates = null,
+		forecastHref = null
 	}: Props = $props();
 	const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 
@@ -316,6 +319,15 @@
 
 	<section aria-label="Snow and weather">
 		<h3 class="eyebrow">Forecast snow</h3>
+		{#if forecastHref && land}
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved by the map -->
+			<a class="btn primary fullfc" href={forecastHref}>
+				Full forecast here
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+					><path d="M9 6l6 6-6 6" /></svg
+				>
+			</a>
+		{/if}
 		{#if pointState === 'loading'}
 			<dl class="mp-stats" aria-busy="true" aria-label="Loading the weather here">
 				{#each ['Next 24 h', '3 days', '7 days'] as k (k)}
@@ -717,5 +729,19 @@
 		gap: 6px;
 		margin-top: 6px;
 		font-size: 0.74rem;
+	}
+	.fullfc {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		text-decoration: none;
+	}
+	.fullfc svg {
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 </style>

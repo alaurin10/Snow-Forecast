@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { precipFiles, route } from './swRoute';
+import { precipFiles, route, spotsToDrop } from './swRoute';
 
 const O = 'https://snow.example';
 const at = (path: string, opts: Partial<Parameters<typeof route>[2]> = {}) =>
@@ -33,6 +33,22 @@ describe('route', () => {
 		expect(at('/_app/immutable/x.js', { shell: true })).toBe('shell');
 		expect(at('/other.js')).toBe('network');
 		expect(at('https://elsewhere.example/a.png')).toBe('network');
+	});
+});
+
+describe('spots', () => {
+	it('are network-first and only the newest ten of each are kept', () => {
+		expect(at('/api/spot?lat=47.000&lon=-121.000')).toBe('spot');
+		expect(at('/api/spot/nearby?lat=47.000&lon=-121.000')).toBe('spot');
+		const entries = [
+			...Array.from({ length: 12 }, (_, i) => ({ url: `${O}/api/spot?lat=${i}&lon=0`, at: i })),
+			{ url: `${O}/api/spot/nearby?lat=0&lon=0`, at: 0 },
+			{ url: `${O}/api/precip`, at: 0 }
+		];
+		expect(spotsToDrop(entries).sort()).toEqual([
+			`${O}/api/spot?lat=0&lon=0`,
+			`${O}/api/spot?lat=1&lon=0`
+		]);
 	});
 });
 

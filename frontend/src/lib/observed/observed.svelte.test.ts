@@ -510,3 +510,19 @@ describe('observed tab', () => {
 		expect(near.getByRole('heading', { name: 'Field reports nearby' })).toBeTruthy();
 	});
 });
+
+describe('observed tab for a spot', () => {
+	it('says a spot has no station of its own, then lists the nearby ones', () => {
+		const { container } = render(ObservedTab, {
+			snap: { ...us, snotel: null },
+			scores: null,
+			nearby: null,
+			nearbyLoad: 'ready',
+			units: 'metric',
+			spot: true,
+			width: 380
+		});
+		expect(container.textContent).toContain('has no snow station of its own');
+		expect(container.textContent).not.toContain('Manage page');
+	});
+});

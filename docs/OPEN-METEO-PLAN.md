@@ -7,9 +7,12 @@ the public fallback, the usage ledger and budget split, `snowwatch openmeteo sta
 `OPEN_METEO_ENSEMBLES` (`public` by default, `shadow`, `local`), per-system freshness,
 fallback and shadow comparisons, `check-ensembles`. Both tested end to end in a sandbox;
 the owner's rollout on the mini PC (a few days of downloads, a week of shadow, then
-local) is next. **Milestone 2, backend built** (27 Nov 2026): `GET /api/spot` and
+local) is next. **Milestone 2 built** (27 Nov 2026): backend PR, `GET /api/spot` and
 `/api/spot/nearby` (`snowwatch/spots.py`), checked against the real server in a sandbox;
-the frontend PR is next. Milestones 3–5 are planned. Each milestone's PRs tick its
+frontend PR, the spot page (`/spot`, sharing `LocationView` with locations), "Full
+forecast here" on the map, recent spots, "Save as location", offline copies, and e2e
+tests. On the mini PC it switches on with `OPEN_METEO_URL`; timing it there (≤ 3 s warm)
+is the owner's check. Milestones 3–5 are planned. Each milestone's PRs tick its
 checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -637,12 +640,12 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
     bounded") and `SECURITY.md`.
 
 ### Frontend (SvelteKit)
-- [ ] Extract `frontend/src/lib/components/LocationView.svelte` from
+- [x] Extract `frontend/src/lib/components/LocationView.svelte` from
   `frontend/src/routes/location/[id]/+page.svelte` (1,420 lines):
   - props: `snap`, plus optional loaders for trend, verification, nearby and avalanche
   - sections a spot can't have (trend, scorecard, webcams) are hidden
   - the location route becomes a thin wrapper
-- [ ] New route `frontend/src/routes/spot/+page.svelte` at `/spot?lat=..&lon=..`
+- [x] New route `frontend/src/routes/spot/+page.svelte` at `/spot?lat=..&lon=..`
   (shareable):
   - header with name, coordinates and elevation; a "This spot" badge on the matching band
     (default band = the spot's)
@@ -652,16 +655,16 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
     inside one); Observed (nearest stations from `/api/spot/nearby`; model snowpack after
     milestone 3)
   - loading skeletons while a cold area takes up to ~10 s
-- [ ] Map: a **"Full forecast here"** button in `frontend/src/lib/map/Inspector.svelte`
+- [x] Map: a **"Full forecast here"** button in `frontend/src/lib/map/Inspector.svelte`
   (the "This spot" panel), and a long-press / right-click action in
   `frontend/src/lib/components/MapView.svelte`. Hidden unless `/api/meta` says
   `local_forecasts`.
-- [ ] `frontend/src/lib/api.ts`: `getSpot(lat, lon)`, `getSpotNearby(lat, lon)`.
-- [ ] Owner only: **"Save as location"** opens Manage with a pin prefilled (the existing
+- [x] `frontend/src/lib/api.ts`: `getSpot(lat, lon)`, `getSpotNearby(lat, lon)`.
+- [x] Owner only: **"Save as location"** opens Manage with a pin prefilled (the existing
   `resolveLocation` flow in `frontend/src/lib/manage/`).
-- [ ] **Recent spots:** the last 10 in localStorage (wrapped in try/catch), on the
+- [x] **Recent spots:** the last 10 in localStorage (wrapped in try/catch), on the
   Overview (`frontend/src/routes/+page.svelte`) and in `LocationPalette.svelte`.
-- [ ] Service worker (`frontend/src/service-worker.ts`, `frontend/src/lib/swRoute.ts`):
+- [x] Service worker (`frontend/src/service-worker.ts`, `frontend/src/lib/swRoute.ts`):
   network-first for `/api/spot`, keeping the last 10 for offline use.
 - [x] Regenerate types: `uv run snowwatch schema --out ../frontend/src/lib/api-schema.json`,
   then `npm run types`.
@@ -670,7 +673,7 @@ saved location has, built on demand. **Two PRs: backend, then frontend.**
 - [x] Band rule (top, bottom, slope, flat), border lookup (inside, outside, near the
   border), naming fallbacks, cache keys, rate limits, allowance spent, and a spot built
   from the saved fixtures (`tests/helpers.py`).
-- [ ] Playwright (`frontend/e2e/`): map tap → "Full forecast here" → spot page at 380 px
+- [x] Playwright (`frontend/e2e/`): map tap → "Full forecast here" → spot page at 380 px
   and desktop, in light and dark themes. The e2e API serves `/api/spot` from fixtures.
 
 **Done when:** on the mini PC, tapping any point in the US or Canada opens a full forecast
@@ -722,6 +725,35 @@ Choices made while building, beyond the checklist:
 - Limits as planned: per visitor 8 new spots then one every 15 s, cached ones 60 then 2 a
   second, 2 builds at once (others wait up to 20 s, then 503), ~600 an hour site-wide
   (bursts of 100), one build per point at a time.
+
+### What the frontend PR built and found (27 Nov 2026)
+
+- `LocationView` is the old location page, with the route's loading moved out: it takes
+  the snapshot and optional loaders (trend, verification, nearby, avalanche), and the
+  route mounts one per place (keyed), so nothing from the last place lingers. The
+  location route is ~90 lines. Sections without a loader are left out or say there's
+  none: `ConfidenceTab` takes `history={false}` (no trend or track record), and
+  `ObservedTab` takes `spot` (no station of its own, then the stations nearby).
+- The spot page opens at the spot's band without changing the band chosen for saved
+  locations; that band has a dot in every elevation picker, and the header says
+  "This spot is the middle band" under the name, with the note. Its Map button opens
+  the map on the point (`/map?lat=&lon=`); there's no Compare button (Compare is for
+  saved locations). Errors: outside the US and Canada "No forecast here" with the
+  coverage message; 503 and 429 in plain words with Try again.
+- Long press: 600 ms with one finger and no movement (a pan or a second finger cancels
+  it); right-click on a mouse. Both only with `local_forecasts`.
+- "Save as location" links to `/admin?spot=lat,lon&name=…&elev=b,m,s`; Manage then runs
+  its usual auto-detect with three pins at the point carrying the bands' elevations
+  (so the terrain lookup keeps the spot's bands), and opens the review.
+- The service worker keeps the newest 10 of `/api/spot` and of `/api/spot/nearby`;
+  the app asks for both at 3 decimals, as the server keys them, so a nearby tap finds
+  the saved copy offline.
+- e2e: `serve.sh` starts a stand-in Open-Meteo (`e2e/openmeteo_fixture.py`) answering
+  any point from Crystal's fixtures, moved on by whole days to reach from now (a spot is
+  built for the present), with ensembles "self-hosted" and fresh, so spots need no
+  network. The spot tests tap near Whistler (Canada), so no NWS alerts are asked for.
+  Setting `OPEN_METEO_URL` there changes nothing else the other tests see (locations
+  keep their rebuilt forecasts).
 
 ## Milestone 3: Richer weather variables and better physics
 

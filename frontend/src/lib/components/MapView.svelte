@@ -33,10 +33,14 @@
 		getMapPoint,
 		getMapClouds,
 		getMapWind,
+		getMeta,
 		getReports,
 		getSat,
 		getStations
 	} from '../api';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { spotSearch } from '../recentSpots';
 	import type {
 		AtesOut,
 		ConcernOut,
@@ -222,6 +226,8 @@
 	} from '../map/here';
 	import { glacierGrid, glacierStats, type GlacierInfo } from '../map/glacier';
 	import { TAP_WAIT_MS, TapGate } from '../map/taps';
+	/** A press this long on a touch screen opens the full forecast there. */
+	const LONG_PRESS_MS = 600;
 
 	interface Props {
 		rows: OverviewRow[];
@@ -232,9 +238,26 @@
 		/** A location to open on (its id), from its page's Map button: centred, close in,
 		 *  flat, with its popup open. Otherwise the full map opens over Washington. */
 		focus?: string | null;
+		/** A point to open on (from a spot's Map button), close in. */
+		focusPoint?: { lat: number; lon: number } | null;
 	}
 
-	let { rows, units, href, radar = false, focus = null }: Props = $props();
+	let { rows, units, href, radar = false, focus = null, focusPoint = null }: Props = $props();
+	/** Whether this server makes a forecast for any point (a self-hosted forecast server):
+	 *  then the spot panel offers "Full forecast here", and a long press or right-click
+	 *  opens one. */
+	let anywhere = $state(false);
+	$effect(() => {
+		if (!radar) return;
+		getMeta()
+			.then((m) => (anywhere = !!m.local_forecasts))
+			.catch(() => {});
+	});
+	/** The full forecast for a point (the spot page). */
+	function openSpot(lat: number, lon: number) {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved, plus a query
+		void goto(`${resolve('/spot')}${spotSearch(lat, lon)}`);
+	}
 	let el = $state<HTMLDivElement>();
 	let wrap = $state<HTMLDivElement>();
 	let map: MlMap | null = null;
@@ -2606,6 +2629,43 @@
 			map.on('touchend', (e) => taps.end(fingers(e)));
 			map.on('touchcancel', (e) => taps.end(fingers(e)));
 			map.on('dblclick', dropTap);
+			// Forecasts anywhere: a right-click, or a long press on a touch screen, opens the
+			// full forecast for that point (when the server makes them).
+			let pressTimer: ReturnType<typeof setTimeout> | undefined;
+			let pressAt: { x: number; y: number } | null = null;
+			let pressedAt = 0;
+			const cancelPress = () => {
+				clearTimeout(pressTimer);
+				pressTimer = undefined;
+				pressAt = null;
+			};
+			const pressed = (lat: number, lon: number) => {
+				if (!anywhere || Date.now() - pressedAt < 1500) return;
+				pressedAt = Date.now();
+				cancelPress();
+				openSpot(lat, lon);
+			};
+			if (radar) {
+				map.on('contextmenu', (e) => {
+					e.preventDefault();
+					pressed(e.lngLat.lat, e.lngLat.lng);
+				});
+				map.on('touchstart', (e) => {
+					cancelPress();
+					if (!anywhere || fingers(e) !== 1) return;
+					pressAt = { x: e.point.x, y: e.point.y };
+					const ll = e.lngLat;
+					pressTimer = setTimeout(() => pressed(ll.lat, ll.lng), LONG_PRESS_MS);
+				});
+				map.on('touchmove', (e) => {
+					if (!pressAt) return;
+					const moved = Math.hypot(e.point.x - pressAt.x, e.point.y - pressAt.y);
+					if (moved > 10 || fingers(e) !== 1) cancelPress();
+				});
+				map.on('touchend', cancelPress);
+				map.on('touchcancel', cancelPress);
+				map.on('movestart', cancelPress);
+			}
 			map.on('click', (e) => {
 				const verdict = taps.click();
 				if (verdict === 'now') return onTap(e);
@@ -2780,7 +2840,14 @@
 			if (f) {
 				map.jumpTo({ center: [f.lon, f.lat], zoom: 11.5, pitch: 0, bearing: 0 });
 				popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
-			} else map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
+			} else if (focusPoint)
+				map.jumpTo({
+					center: [focusPoint.lon, focusPoint.lat],
+					zoom: 12,
+					pitch: 0,
+					bearing: 0
+				});
+			else map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
 		}
 		// The small overview map frames the locations once; after that the view is the viewer's.
 		if (placed.length && !fitted) {
@@ -3048,6 +3115,9 @@
 				{:else}
 					<Inspector
 						lat={tapAt?.lat ?? 0}
+						forecastHref={anywhere && tapAt
+							? resolve('/spot') + spotSearch(tapAt.lat, tapAt.lon)
+							: null}
 						facts={probe ? facts : null}
 						error={probe ? factsError : null}
 						{units}

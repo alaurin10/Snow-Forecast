@@ -28,11 +28,23 @@
 		scores: VerificationOut | null;
 		scoresLoad?: LoadState;
 		units: UnitSystem;
+		/** Whether this place has a history (a saved location): the trend and the scorecard.
+		 *  A spot, made on request, has neither. */
+		history?: boolean;
 		/** Fixed chart width (tests); otherwise each chart measures its container. */
 		width?: number;
 	}
 
-	let { snap, band, trend, scores, scoresLoad = 'ready', units, width }: Props = $props();
+	let {
+		snap,
+		band,
+		trend,
+		scores,
+		scoresLoad = 'ready',
+		units,
+		history = true,
+		width
+	}: Props = $props();
 	const c = $derived(converters(units));
 	const mid = $derived(snap.bands[1]);
 	const reads = $derived<WindowRead[]>([windowRead(band, 'next5'), windowRead(band, 'd6_10')]);
@@ -139,17 +151,21 @@
 				estimated={band.band !== 'mid'}
 			/>
 		</section>
-		<section class="card">
-			<h2>How the forecast has changed</h2>
-			{#if movedText}<p class="lede">{movedText}</p>{/if}
-			<TrendChart runs={trend?.runs ?? []} {units} {width} />
-			<TrendDays runs={trend?.runs ?? []} {units} />
-		</section>
+		{#if history}
+			<section class="card">
+				<h2>How the forecast has changed</h2>
+				{#if movedText}<p class="lede">{movedText}</p>{/if}
+				<TrendChart runs={trend?.runs ?? []} {units} {width} />
+				<TrendDays runs={trend?.runs ?? []} {units} />
+			</section>
+		{/if}
 	</div>
 
-	<section class="card">
-		<TrackRecord data={scores} {units} load={scoresLoad} />
-	</section>
+	{#if history}
+		<section class="card">
+			<TrackRecord data={scores} {units} load={scoresLoad} />
+		</section>
+	{/if}
 </div>
 
 <style>

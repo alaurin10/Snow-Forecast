@@ -66,8 +66,11 @@ backend/snowwatch/
   precip.py (re-exports maps/) tiles.py osm.py (runs, huts, glaciers, routes …)
   lookups.py push.py verify.py
 frontend/src/
-  routes/     overview, location/[id], map, compare, calendar, more, status, about, admin
+  routes/     overview, location/[id], spot (a point's forecast), map, compare, calendar,
+              more, status, about, admin
   lib/        api.ts (the client) types.gen.ts (generated) charts/ components/
+              (LocationView: the forecast page a location and a spot share)
+              recentSpots.ts (the last 10 spots, in the browser)
               backcountry/ confidence/ observed/ manage/ share/ + small helpers
               railui.svelte.ts (the desktop rail folded or open over the full-window map)
               compare.ts (Compare: lining up several locations' steps on one timeline, day
@@ -355,8 +358,15 @@ See [`../SECURITY.md`](../SECURITY.md) for reporting a problem.
 
 A SvelteKit single-page app (`adapter-static`), hand-built SVG charts on d3
 scales, MapLibre for the map. A service worker caches the app and the last API
-answers for offline use, saves map areas on request, shows push notifications,
-and waits for the page's "Reload" before switching to a new version.
+answers for offline use (only the last 10 spots), saves map areas on request, shows push
+notifications, and waits for the page's "Reload" before switching to a new version.
+
+A location's page and a spot's page are one component, `LocationView`: the route loads
+the forecast and passes loaders for the rest (trend, scorecard, nearby, avalanche), and
+a section with no loader is left out, so a spot shows no trend, scorecard or webcams.
+With `/api/meta`'s `local_forecasts`, the map's spot panel offers "Full forecast here"
+and a right-click or long press opens one (`/spot?lat=…&lon=…`); the owner can save a
+spot as a location from its page (Manage, with its three bands filled in).
 
 Rules the charts keep: one y-axis per chart, marks never outside the plot (tested),
 units converted in the browser (the API is metric only), and every chart works at
