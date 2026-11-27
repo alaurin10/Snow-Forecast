@@ -2,8 +2,10 @@
 
 Status: **milestone 1 built** (27 Nov 2026): the opt-in `openmeteo` service, routing with
 the public fallback, the usage ledger and budget split, `snowwatch openmeteo status` and
-`check-sources --local`. **Milestone 1b** (self-hosted ensembles) is planned and tested in
-a sandbox; milestones 2–5 are planned. Each milestone's PRs tick its
+`check-sources --local`. **Milestone 1b PR 1 built** (27 Nov 2026): the opt-in
+`openmeteo-ensembles` downloader (compose profile `ensembles`) and its status, tested end
+to end in a sandbox; the week on the mini PC and PR 2 (the app using them) are next.
+Milestones 2–5 are planned. Each milestone's PRs tick its
 checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -87,9 +89,10 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
   older than a week. After recreating the server with a 10 GB cache, 14 GB was used and
   44 GB free.
 - **Disk budget with M1b (60 GB, can't grow):** ~14 GB today (images 3.7, `data/` 5.9,
-  some build cache), up to 10 GB of server cache, 5–10 GB of downloaded ensembles: about
-  30–35 GB used, 25–30 GB free. Keep at least 15 GB free; M1b's `openmeteo status` warns
-  under 10 GB.
+  some build cache), up to 10 GB of server cache, ~1.5–2 GB of downloaded ensembles
+  (measured in PR 1: 1.3 GB after one run of each, once the downloader deletes what the
+  server doesn't read): about 26 GB used, ~34 GB free. Keep at least 15 GB free; M1b's
+  `openmeteo status` warns under 10 GB and the downloader pauses under 5 GB.
 - **Bandwidth:** ~300–450 GB/month for M1's forecasts, plus ~250–470 GB/month for M1b's
   ensembles. The owner confirmed the data cap isn't a concern.
 - The `openmeteo` compose service is **opt-in**, behind the compose profile `openmeteo`. A
@@ -304,7 +307,8 @@ Tested in a cloud sandbox with the pinned image ([Appendix D](#appendix-d-how-th
   - **ECMWF couldn't be downloaded from the sandbox.** `data.ecmwf.int` wasn't reachable,
     and the AWS mirror (`--source aws`) answered `SlowDown: Please reduce your request
     rate` even at one connection, probably because the sandbox shares its address. It
-    must be tried from the mini PC before relying on it.
+    must be tried from the mini PC before relying on it. (PR 1's sandbox downloaded it
+    from `data.ecmwf.int` without trouble.)
   - **GEPS needed a workaround.** Environment Canada no longer publishes the
     `CMC_geps-raw_LAND_SFC_…` file this image expects, so the downloader retried forever.
     Copying `data/cmc_gem_geps/static/HSURF.om` from the public bucket into the volume
@@ -328,15 +332,16 @@ affected. Milestone 4's ensembles at all three bands use the same variable. The 
 below compare whole snapshots, so nothing is missed by this list.
 
 ### PR 1: the downloader
-- [ ] Prerequisite (owner): at least 15 GB free on the Docker VM (`df -h /`); the 60 GB
+- [ ] Prerequisite (owner, before adding the profile): at least 15 GB free on the Docker VM (`df -h /`); the 60 GB
   disk is enough (Hosting, "Disk budget").
-- [ ] `docker-compose.yml`: a service `openmeteo-ensembles`, compose profile `ensembles`:
+- [x] `docker-compose.yml`: a service `openmeteo-ensembles`, compose profile `ensembles`:
   - the same pinned image as `openmeteo` (one digest, bumped together), `x-hardening`
   - the `openmeteo-data` volume, shared with the server, which serves what it writes
   - `mem_limit: 1g`, `cpus: 2` (half the mini PC, so forecast runs and the map's jobs
-    keep their share), `restart: unless-stopped`
+    keep their share), `restart: unless-stopped`. Built with 1536m: GEFS 0.25° peaked
+    at 722 MiB with 2 CPUs.
   - entrypoint: `docker/ensembles.sh`, mounted read-only
-- [ ] `docker/ensembles.sh` (the image has `sh` and `curl`, no Python):
+- [x] `docker/ensembles.sh` (the image has `sh` and `curl`, no Python):
   - every 10 minutes, for each system, find the newest **complete** upstream run (GEFS:
     the last 0.5° file's `.idx` on `noaa-gefs-pds`; ECMWF: the last step's index; GEPS:
     hour 384 on `hpfx.collab.science.gc.ca`) and download it if it's newer than the last
@@ -351,19 +356,77 @@ below compare whole snapshots, so nothing is missed by this list.
     when, how long, ok or the last error
   - prune what grows (ensemble-mean and chunk files older than a few days; never the
     `rolling.om` files being served), once that growth is measured
-- [ ] Verify on the mini PC (this sandbox couldn't):
-  - the **running** `openmeteo` server picks up a new run written while it runs, with no
-    restart (tested here only by starting the server after a download)
-  - ECMWF ENS downloads cleanly, with all 51 members (50 perturbed plus the control)
-  - a week's disk growth (`du` of the volume daily) and bandwidth (the router's counter)
-  - memory and CPU next to a forecast run and the map's jobs (`docker stats`)
-- [ ] `snowwatch openmeteo status`: each system's last downloaded run and its age (from the
+- [ ] Verify on the mini PC (the owner, during the first few days; see "What PR 1 built
+  and found" for what the sandbox already showed):
+  - [x] the **running** `openmeteo` server picks up a new run written while it runs, with
+    no restart (shown in the PR 1 sandbox)
+  - [x] ECMWF ENS downloads cleanly, with all 51 members (50 perturbed plus the control)
+    (shown in the PR 1 sandbox, from `data.ecmwf.int`; confirm from the mini PC)
+  - [ ] a week's disk growth (`ensembles/disk.log` in the volume, a line a day) and
+    bandwidth (the router's counter)
+  - [ ] memory and CPU next to a forecast run and the map's jobs (`docker stats`)
+- [x] `snowwatch openmeteo status`: each system's last downloaded run and its age (from the
   volume's `<domain>/static/meta.json` and `status.json`, read through a read-only mount
   of the volume at `/openmeteo` in `worker` and `api`), the downloader's last error, and
   free disk with a warning under 10 GB.
-- [ ] Docs: DEPLOYMENT (the profile, the disk, the bandwidth, turning it off),
+- [x] Docs: DEPLOYMENT (the profile, the disk, the bandwidth, turning it off),
   deploy-notes-home, ARCHITECTURE, THIRD_PARTY_NOTICES (NOAA, ECMWF open data under CC BY
   4.0, ECCC), CHANGELOG.
+
+### What PR 1 built and found (27 Nov 2026)
+
+Run end to end in a cloud sandbox (4 cores, the pinned image, `docker/ensembles.sh` in a
+container hardened like the compose service: `read_only`, `cap_drop: [ALL]`,
+`no-new-privileges`, 2 CPUs), next to the server with `REMOTE_DATA_DIRECTORY` set:
+- **One pass, all four downloads** of the 00z runs, one at a time, in 20 minutes:
+
+  | Download | Time | Downloaded | On disk as written | On disk kept |
+  |---|---|---|---|---|
+  | GEFS 0.25° (`gfs025_ens`) | 205 s | ~2.2 GB | 1.5 GB | 0.34 GB |
+  | GEFS 0.5° (`gfs05_ens`) | 187 s | ~1.1 GB | 0.54 GB | 0.12 GB |
+  | ECMWF ENS (`ifs025_ensemble`, `data.ecmwf.int`) | 689 s | 0.92 GB | 0.79 GB | 0.77 GB |
+  | GEPS (`gem_global_ensemble`) | 77 s | 0.25 GB | 0.08 GB | 0.07 GB |
+
+  Peak memory 722 MiB (GEFS 0.25°, both CPUs busy while converting).
+- **ECMWF works from `data.ecmwf.int`** this time (no `SlowDown`), with all 51 members,
+  reaching 351 h ahead at 09:30 UTC.
+- **The running server picks up each new run**: it answered GEPS with empty members, then
+  with the 12z run as soon as that download finished, then with the 00z run, without a
+  restart. It rereads its folders every few seconds (`OmFileSystemLocal`, by inode).
+- **Same numbers as the public API again** for Crystal's mid band, same runs: GEFS mean
+  0.50 cm, max 1.50 cm; GEPS mean 0.83 cm, max 1.82 cm (member 16-day totals).
+- **What grows, and what's kept.** Members go into one `rolling.om` per variable, which
+  each run rewrites keeping 3 past days (`useRollingDays`): GEPS grew 1 MB from the 12z to
+  the 00z run. But the downloaders also write files the server never reads for
+  `snowfall` (which is `snowfall_water_equivalent` × 0.7 alone): GEFS's `precipitation`
+  input (1.3 GB for both resolutions), GEFS `precipitation_probability` chunks, and
+  every `*_ensemble_mean` folder, whose time chunks (18–60 days each) would pile up. The
+  script deletes those after each run; the server's answers for all three systems were
+  byte-for-byte the same before and after. That keeps 1.3 GB instead of 2.9.
+- **The forecast API's `precipitation_probability`** reads the GEFS folders' probability
+  files; a local copy (from our first run on, no past days) would hide the public one.
+  Deleting it keeps milestone 1's blend exactly as it was (checked: 3 past days, no gaps).
+- **GEPS** still needs `HSURF.om` copied from the public data first; the script does it.
+
+Choices made while building, beyond the checklist:
+- ECMWF uses `--concurrent 1 --download-concurrent 2`; it alternates between ECMWF's own
+  server and the AWS mirror after each failure.
+- A download is stopped after 2 hours (`timeout`; the GEPS land-file problem made the
+  downloader retry forever). A failure is retried after 30 minutes, after an hour when
+  the output says `SlowDown`, 429 or 503.
+- `GENERATE_PREVIOUS_DAY=false`: no "previous day" copies of time chunks.
+- Below `ENSEMBLES_MIN_FREE_GB` (5) free, runs are skipped and the status file says so;
+  `openmeteo status` says NOT OK under 10 GB free (only for disk: a stalled downloader
+  costs nothing while the app uses public ensembles).
+- The downloaders' verbose output goes to `ensembles/<system>.log` in the volume (the
+  last run's only), with one line per download in `docker logs`, which is also capped
+  (`json-file`, 2 × 5 MB). `ensembles/disk.log` keeps a line a day for 90 days.
+- `deploy/deploy.sh` restarts the downloader when `docker/ensembles.sh` changes (it's a
+  bind mount, so `up -d` doesn't see a new script).
+- `snowwatch/ensembles.py` reads the volume (`OPEN_METEO_DATA_DIR`, default `/openmeteo`)
+  and holds the system list PR 2's freshness check uses: the app's `models` name →
+  folders (`gfs_seamless` → `ncep_gefs025` + `ncep_gefs05`, `ecmwf_ifs025` →
+  `ecmwf_ifs025_ensemble`, `gem_global` → `cmc_gem_geps`).
 
 ### PR 2: the app uses them
 - [ ] `settings.py`: `OPEN_METEO_ENSEMBLES` = `public` (default: milestone 1, unchanged) |
@@ -845,8 +908,8 @@ End to end, per milestone:
   M1b; the owner says the cap is fine).
 - **Disk:** the 60 GB VM disk filled on 27 Nov 2026 (the 30 GB cache and 16.8 GB of
   build cache) and can't grow. Fixed with a 10 GB cache and the deploy's build-cache
-  prune; M1b fits with 25–30 GB to spare, and its `openmeteo status` warns under 10 GB
-  free. If the ensemble folders grow more than expected, prune them (M1b PR 1).
+  prune; M1b keeps ~1.5–2 GB of ensembles, pauses its downloads under 5 GB free, and its
+  `openmeteo status` warns under 10 GB free.
 - **Downloads depend on three upstreams** (NOAA on AWS, ECMWF, Environment Canada), which
   change file names (the GEPS land file) and throttle (ECMWF's AWS mirror). Each system
   falls back to the public API on its own, and the freshness check catches a downloader
@@ -858,9 +921,10 @@ End to end, per milestone:
     against the scorecard.
   - Are ensemble days 11–16 used anywhere? (M4)
   - Do `*_previous_day1` variables work self-hosted? (M5)
-  - Does ECMWF ENS download cleanly from the mini PC, and does the running server pick up
-    new runs without a restart? (M1b)
-  - How much do the ensemble folders grow per week, and what can be pruned? (M1b)
+  - Does ECMWF ENS download cleanly from the mini PC? (M1b; it did from PR 1's sandbox.)
+  - ~~Does the running server pick up new runs without a restart? (M1b)~~ Yes (PR 1).
+  - How much do the ensemble folders grow per week? (M1b; within a day, ~1 MB a run,
+    once the unused files are deleted, which PR 1 does after each run.)
   - ~~Does the image tolerate `read_only` and cap-drop? (M1)~~ Yes, with `/tmp` as tmpfs.
 
 ---

@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # When the self-hosted server fails, retry a saved location's requests once on the
     # public API (while today's public budget has room).
     open_meteo_fallback: bool = True
+    # The server's volume, mounted read-only (docker-compose.yml): what the ensemble
+    # downloader (`openmeteo-ensembles`, milestone 1b) has written there.
+    open_meteo_data_dir: Path = Path("/openmeteo")
     # Both default from OPEN_METEO_URL (see _local_defaults); an explicit value wins.
     max_locations: int = 25
     site_spacing_s: float = 20.0

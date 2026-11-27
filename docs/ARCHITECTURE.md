@@ -17,13 +17,17 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
    avalanche centers, map sources                avalanche, map frames, backups, cleanup)
                                                  │ forecasts and elevation, when OPEN_METEO_URL is set
    public Open-Meteo data on AWS ◄── openmeteo :8080 (optional, compose profile `openmeteo`)
+                                         ▲ serves what lands in its volume
+   NOAA (AWS), ECMWF, Environment  ◄── openmeteo-ensembles (optional, profile `ensembles`)
+   Canada: ensemble runs
 ```
 
 | Piece | What it does |
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
 | `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect); ensembles stay on the public API. No published port |
+| `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect); ensembles stay on the public API unless the downloader below fills its volume. No published port |
+| `openmeteo-ensembles` | Optional (compose profile `ensembles`): the same image running `docker/ensembles.sh`, which every 10 minutes downloads each new GEFS, ECMWF ENS and GEPS run (snowfall only, 16 days) from NOAA on AWS, ECMWF and Environment Canada into the `openmeteo-data` volume, where the server serves it at `/v1/ensemble` with no restart. One system at a time, 2 CPUs, a 2 h limit per download; it deletes what the server doesn't need after each run and skips runs below 5 GB free. It writes `ensembles/status.json` (each system's last run, time, size, last error) and `ensembles/disk.log` (a line a day). `worker` and `api` mount the volume read-only at `/openmeteo`; `snowwatch openmeteo status` reads it. The app keeps asking the public API for ensembles until milestone 1b's second part (docs/OPEN-METEO-PLAN.md) |
 | `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a

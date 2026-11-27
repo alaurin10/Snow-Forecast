@@ -350,9 +350,11 @@ def openmeteo_status(
     fetcher: Fetcher,
     *,
     cpu: tuple[bool | None, str] | None = None,
+    ensembles: tuple[bool, list[str]] | None = None,
 ) -> tuple[bool, list[str]]:
     """`snowwatch openmeteo status`: (all OK, lines to print). `usage` is today's ledger
-    (`repo.usage_today`)."""
+    (`repo.usage_today`); `ensembles` is `ensembles.status_lines` (downloaded ensembles
+    and free disk)."""
     cpu_ok, cpu_text = cpu or cpu_supported()
     lines = [f"{'OPEN_METEO_URL':16s} {url or '(empty: every request uses the public API)'}"]
     lines.append(f"{'CPU':16s} {cpu_text}")
@@ -370,6 +372,10 @@ def openmeteo_status(
         f"{'today (UTC)':16s} {usage.local_requests} self-hosted requests{each}, "
         f"{usage.fallbacks} fallbacks, {usage.public_weight:.0f} of {budget} public calls"
     )
+    if ensembles is not None:
+        ens_ok, ens_lines = ensembles
+        ok = ok and ens_ok
+        lines += ens_lines
     lines.append("model runs in the public data:")
     lines += model_runs(fetcher)
     lines.append("OK" if ok else "NOT OK")

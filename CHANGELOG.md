@@ -21,6 +21,14 @@ Notable changes to Snow Watch. The format follows
 - `snowwatch openmeteo status` (CPU, one request's time, today's fallbacks and public use,
   each model's latest run) and `snowwatch check-sources --local` (every model and
   variable on the server, and the share of empty values against the public API).
+- **Self-hosted ensembles, part 1: the downloader (optional).** With the compose profile
+  `ensembles` next to `openmeteo`, a new service downloads every GEFS, ECMWF ENS and GEPS
+  run (snowfall only, 16 days) from NOAA, ECMWF and Environment Canada into the server,
+  which serves them right away. ~15 GB of downloads a day; on disk it stays at about
+  1.5–2 GB (it deletes what isn't needed after each run) and pauses below 5 GB free.
+  `snowwatch openmeteo status` lists each system's run, age, reach, size and last error,
+  and free disk (warning under 10 GB). The app keeps using public ensembles until the
+  second part. See DEPLOYMENT.md, "Self-hosted ensembles".
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

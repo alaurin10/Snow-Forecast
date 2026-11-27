@@ -30,6 +30,11 @@ fi
 echo "$(date -u +%FT%TZ) deploying $local_sha -> $remote_sha"
 git merge --ff-only --quiet "origin/$BRANCH"
 GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+# The ensemble downloader reads its script from the checkout (a bind mount), so a new
+# script needs a restart; `up` doesn't see it. Nothing happens without the profile.
+if ! git diff --quiet "$local_sha" "$remote_sha" -- docker/ensembles.sh; then
+  docker compose restart openmeteo-ensembles >/dev/null 2>&1 || true
+fi
 docker image prune -f >/dev/null
 # Build cache too: every deploy adds to it, and on the home VM it reached 16.8 GB of a
 # 60 GB disk. -a: unused cache, not only dangling entries. A week's worth keeps rebuilds fast.
