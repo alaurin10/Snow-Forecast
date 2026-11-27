@@ -178,13 +178,37 @@ export const spotQuery = (lat: number, lon: number) =>
 	`lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`;
 
 const spots = new Map<string, Promise<Snapshot>>();
+/** Spots started early (startSpot): the snapshot, or null if the server skipped it. */
+const early = new Map<string, Promise<Snapshot | null>>();
+
+/** Start a spot's forecast before it's asked for (the map's spot panel opened on it),
+ *  so "Full forecast here" finds it made or on its way. The server makes it only when
+ *  that costs nothing (its own small allowance, a free build slot); otherwise nothing. */
+export function startSpot(lat: number, lon: number): void {
+	const q = spotQuery(lat, lon);
+	if (spots.has(q) || early.has(q)) return;
+	const p = request(`/api/spot?${q}&early=1`)
+		.then((r) => (r.status === 200 ? (r.json() as Promise<Snapshot>) : null))
+		.catch(() => null);
+	early.set(q, p);
+	// Forgotten once settled: a skipped one may be asked for properly later.
+	void p.then((s) => {
+		early.delete(q);
+		if (s) spots.set(q, Promise.resolve(s));
+	});
+}
+
 /** A full forecast for any point in the US or Canada, made on request (with a
  *  self-hosted forecast server; `/api/meta` says `local_forecasts`). 422 outside the US
- *  and Canada, 503 while the server can't make one, 429 when asked too often. */
+ *  and Canada, 503 while the server can't make one, 429 when asked too often. One the
+ *  map started early is waited for instead of asked for again. */
 export function getSpot(lat: number, lon: number, { fresh = false } = {}): Promise<Snapshot> {
 	const q = spotQuery(lat, lon);
 	if (fresh || !spots.has(q)) {
-		const p = get<Snapshot>(`/api/spot?${q}`);
+		const started = fresh ? undefined : early.get(q);
+		const p = started
+			? started.then((s) => s ?? get<Snapshot>(`/api/spot?${q}`))
+			: get<Snapshot>(`/api/spot?${q}`);
 		p.catch(() => spots.delete(q));
 		spots.set(q, p);
 	}

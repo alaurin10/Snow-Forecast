@@ -784,12 +784,41 @@ in one PR:
   saved areas' OpenStreetMap file: the most prominent zoomed out, every named peak from
   zoom 13, under the Peaks switch, beneath the saved areas' own labels.
 
-Still possible if spots stay slow on the mini PC: keep the server's cache warm over the
-mountains (a background job asking a coarse grid of points after each model run; costs
-download volume), or start building a spot as soon as the map's spot panel opens, before
-"Full forecast here" is pressed (costs a build per tap, against the per-visitor limit).
-Spots are named only from the saved areas' peaks; naming them from the label tiles' peaks
-would need the server to read those tiles.
+Spots are named only from the saved areas' peaks; naming them from the label tiles'
+peaks would need the server to read those tiles.
+
+**Early builds** (a second PR): once the map's spot panel has stayed open on a point for
+0.7 s, the app asks for its spot with `early=1`, so "Full forecast here" finds it made or
+on its way (the spot page waits for that request rather than asking again). The server
+makes it only when that costs nobody anything (`SpotService.early`): an allowance of its
+own per visitor (6, then one every 10 s), so tapping around never uses up the button's;
+the site's hourly cap; a free build slot (it never waits); not while the server is down.
+Otherwise it answers 204 at once. Hardware: one build is ~0.4 s of the API's CPU and
+~8 MB of memory, plus the server's reads (none in an area it already holds); the worst
+case for one visitor is a build every 10 s, and the site's 600 an hour and 2 at once
+still bound everything. A tap that's never followed by the button costs that build.
+
+**Keeping the server's cache warm over the mountains: not done**, from a sandbox test
+against the pinned server (each line of spots in a fresh range, after the server's
+one-time setup of 30 s):
+
+| Spots in a line | 1st (new range) | 2nd | 3rd | 4th |
+|---|---|---|---|---|
+| 2 km apart | 8.8 s | 1.8 s | 1.7 s | 0.5 s |
+| 10 km apart | 5.7 s | 0.3 s | 0.9 s | 1.3 s |
+| 40 km apart | 5.2 s | 0.5 s | 0.5 s | 0.5 s |
+
+The data is stored in large blocks: once the server has read one spot, spots at least
+120 km around it are warm. So a range nobody has looked at costs ~5–6 s once, and the
+saved locations already keep their regions warm. Warming the rest of the map's box
+would take a grid of a few hundred points (about one per 100 km over the mountains), and
+the server keeps refreshing everything it holds after each model run: ~10 GB a day for
+the 36 locations measured in "What the test found", so likely several times that for
+the whole West, on top of the ~250–470 GB a month already planned, and a share of the
+10 GB cache. That's a lot of download for ~3–5 s once per range. (The sandbox couldn't
+count the server's downloads, so these volumes are from the earlier test, not new.) If
+the mini PC's logs show first spots in a range staying slow, warm a few chosen ranges
+(one point per ~100 km) rather than the whole box.
 
 ## Milestone 3: Richer weather variables and better physics
 

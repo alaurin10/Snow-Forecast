@@ -39,7 +39,10 @@ for (const theme of ['light', 'dark'] as const) {
 		if (info.project.name === 'phone') await page.setViewportSize({ width: 380, height: 800 });
 		await page.addInitScript((t) => localStorage.setItem('sw.theme', t), theme);
 		await page.goto(MAP, { waitUntil: 'networkidle' });
+		// The open panel starts the spot's forecast before the button is pressed.
+		const early = page.waitForRequest(/\/api\/spot\?.*early=1/, { timeout: 20_000 });
 		const panel = await tapSpot(page);
+		await early;
 		await panel.getByRole('link', { name: 'Full forecast here' }).click();
 
 		await expect(page).toHaveURL(/\/spot\?lat=50\.\d{3}&lon=-122\.\d{3}/);

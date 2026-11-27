@@ -611,3 +611,52 @@ def test_merge_models_rebuilds_the_multi_model_answer() -> None:
     }
     with pytest.raises(ValueError):
         merge_models({})
+
+
+def test_early_builds_cost_nobody_anything() -> None:
+    """The map starts a spot when its panel opens: within an allowance of its own, never
+    waiting, and the button then finds it made."""
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    got = svc.early(47.0, -121.0, "v")
+    assert got is not None and calls == [(47.0, -121.0)]
+    # The button finds it made, and the visitor's own builds are untouched.
+    assert svc.get(47.0, -121.0, "v") is got
+    for i in range(8):
+        svc.get(48 + i / 100, -121, "v")
+    # Its own allowance: 6, then one every 10 s; past it, skipped at once.
+    svc2 = fake_service(Clock(), [])
+    assert all(svc2.early(47 + i / 100, -121, "w") is not None for i in range(6))
+    assert svc2.early(47.5, -121, "w") is None
+    svc2.get(47.6, -121, "w")  # the button still works
+    # A server just failed: skipped, not tried.
+    svc3 = fake_service(Clock(), calls := [])
+    with pytest.raises(SpotUnavailable):
+        svc3.early(-47, -121, "v")
+    assert svc3.early(47, -121, "v") is None and calls == [(-47, -121)]
+
+
+def test_early_build_never_waits_for_a_busy_server() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls, max_builds=1)
+    assert svc._builds.acquire(blocking=False)  # someone else's build is running
+    assert svc.early(47.0, -121.0, "v") is None and calls == []
+    svc._builds.release()
+
+
+def test_api_spot_early(spot_client: TestClient) -> None:
+    r = spot_client.get("/api/spot", params={"lat": 47.0, "lon": -121.0, "early": 1})
+    assert r.status_code == 200 and r.json()["spot"]["band"] == "summit"
+    # The button's request is then served from the cache.
+    again = spot_client.get("/api/spot", params={"lat": 47.0, "lon": -121.0})
+    assert again.status_code == 200 and again.headers["etag"] == r.headers["etag"]
+    # Outside the US and Canada, or skipped: 204, never an error.
+    out = spot_client.get("/api/spot", params={"lat": 31, "lon": -110, "early": 1})
+    assert out.status_code == 204
+    codes = {
+        spot_client.get(
+            "/api/spot", params={"lat": 47 + i / 100, "lon": -121, "early": 1}
+        ).status_code
+        for i in range(1, 10)
+    }
+    assert codes == {200, 204}

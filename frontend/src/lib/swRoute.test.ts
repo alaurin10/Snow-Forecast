@@ -40,6 +40,7 @@ describe('spots', () => {
 	it('are network-first and only the newest ten of each are kept', () => {
 		expect(at('/api/spot?lat=47.000&lon=-121.000')).toBe('spot');
 		expect(at('/api/spot/nearby?lat=47.000&lon=-121.000')).toBe('spot');
+		expect(at('/api/spot?lat=47.000&lon=-121.000&early=1')).toBe('network');
 		const entries = [
 			...Array.from({ length: 12 }, (_, i) => ({ url: `${O}/api/spot?lat=${i}&lon=0`, at: i })),
 			{ url: `${O}/api/spot/nearby?lat=0&lon=0`, at: 0 },
