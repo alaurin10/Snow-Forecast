@@ -185,6 +185,82 @@ server is AGPL-3.0; Snow Watch runs it unmodified.
 To turn it off again, remove the two lines and run `docker compose up -d --remove-orphans`;
 `docker volume rm snowwatch_openmeteo-data` frees the cache's disk.
 
+### Self-hosted ensembles (optional, after the server above)
+
+The public data the server reads has no per-member snowfall, so ensembles (GEFS, ECMWF
+ENS and GEPS) still use the public API. The service `openmeteo-ensembles` downloads them
+instead: every new run of each, straight from NOAA (on AWS), ECMWF and Environment
+Canada, snowfall only, 16 days, into the server's volume. The server serves them at
+`/v1/ensemble` as soon as each run lands, with no restart. It uses the image's own
+downloaders; `docker/ensembles.sh` decides when.
+
+**This part only downloads.** The app keeps using public ensembles until the second
+part of milestone 1b (`OPEN_METEO_ENSEMBLES`, docs/OPEN-METEO-PLAN.md) ships and is
+switched on, so it's safe to run alone for a few days and watch.
+
+**What it needs** (measured 27 Nov 2026 on a 4-core sandbox, one run of each):
+
+| | Download per run | Time | On disk |
+|---|---|---|---|
+| GEFS 0.25° to 240 h, 4 runs a day | ~2.2 GB | ~3.5 min | 0.34 GB |
+| GEFS 0.5° to 384 h, 4 runs a day | ~1.1 GB | ~3 min | 0.12 GB |
+| ECMWF ENS to 360 h (00/12z; 144 h at 06/18z) | ~0.9 GB | ~11.5 min | 0.77 GB |
+| GEPS to 384 h, 2 runs a day | 0.25 GB | ~1.5 min | 0.07 GB |
+
+- **Disk:** ~1.3 GB after the first runs, on top of the server's cache, and expected to
+  level off around 1.5–2 GB once each file holds its 3 past days. Each system keeps one
+  file of members' snowfall that every run rewrites in place; everything else a run
+  writes (the downloaders' inputs, ensemble means) is deleted right after it, so nothing
+  piles up from run to run. Below 5 GB free (`ENSEMBLES_MIN_FREE_GB` in `.env`) the
+  downloader skips runs until space is freed, so the database and forecasts always keep
+  room; `openmeteo status` warns under 10 GB. Keep at least 15 GB free before turning it
+  on (`df -h /`).
+- **Bandwidth:** ~15 GB a day, ~450 GB a month, the same however many locations there
+  are.
+- **CPU and memory:** capped at 2 CPUs and 1.5 GB (GEFS 0.25° peaked at 0.7 GB), so
+  forecast runs and the map's jobs keep their share.
+
+**Turn it on:** add `ensembles` to the profiles in `.env`, then start it:
+
+```
+COMPOSE_PROFILES=openmeteo,ensembles
+```
+```bash
+docker compose up -d
+```
+
+The first runs download within ~20 minutes. Check with:
+
+```bash
+docker compose run --rm worker snowwatch openmeteo status
+```
+
+which now lists each system's run, its age, how far ahead it reaches, how long it took,
+its size and its last error, plus free disk. `docker compose logs openmeteo-ensembles`
+has a line per download. In the volume, `ensembles/disk.log` has a line per day (free
+disk, the cache, each system's size) for watching growth, and `ensembles/<system>.log`
+the last download's full output:
+
+```bash
+docker compose exec openmeteo-ensembles cat /app/data/ensembles/disk.log
+```
+
+**If a download fails** it's retried 30 minutes later (an hour after an upstream says
+slow down); ECMWF alternates between its own server and its AWS mirror. A download that
+hangs is stopped after 2 hours. A stopped downloader costs nothing: the app uses public
+ensembles regardless, and with milestone 1b's second part each system whose run gets
+old falls back to the public API on its own.
+
+**Turn it off:** take `ensembles` out of `COMPOSE_PROFILES` and run
+`docker compose up -d --remove-orphans`. The downloaded runs stay in the volume (about
+2 GB) until deleted:
+
+```bash
+docker run --rm -v snowwatch_openmeteo-data:/d alpine sh -c 'rm -rf /d/ncep_gefs025* /d/ncep_gefs05* /d/ecmwf_ifs025_ensemble* /d/cmc_gem_geps* /d/ensembles'
+```
+
+The downloader uses the same pinned image as the server; bump both together.
+
 ## Everyday tasks
 
 **Manage locations:** Settings → Manage locations, then sign in with the owner

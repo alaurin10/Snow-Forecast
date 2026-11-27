@@ -28,6 +28,9 @@ services:
       ENV: prod # production cookies, headers and no API docs, whatever .env says
     volumes:
       - ./data:/data
+      # The Open-Meteo server's volume, read-only: what the ensemble downloader wrote
+      # (milestone 1b). Empty, and unused, without the openmeteo profiles.
+      - openmeteo-data:/openmeteo:ro
     ports:
       - "8090:8000" # point your reverse proxy or tunnel at http://<host>:8090
     mem_limit: 768m
@@ -49,6 +52,7 @@ services:
       ENV: prod
     volumes:
       - ./data:/data
+      - openmeteo-data:/openmeteo:ro # see api
     healthcheck:
       test: ["CMD", "snowwatch", "healthcheck", "worker"]
       interval: 60s
@@ -60,10 +64,10 @@ services:
     mem_limit: 2560m
     restart: unless-stopped
 
-  # A self-hosted Open-Meteo server for forecasts and elevation (ensembles stay on the
-  # public API). Opt-in: it starts only with COMPOSE_PROFILES=openmeteo in .env, and the
-  # app uses it only with OPEN_METEO_URL=http://openmeteo:8080. It needs a CPU with AVX2
-  # (x86) or ARM64; without, it crash-loops with "Illegal instruction". It reads the
+  # A self-hosted Open-Meteo server for forecasts and elevation, and the ensembles the
+  # service below downloads (otherwise ensembles use the public API). Opt-in: it starts
+  # only with COMPOSE_PROFILES=openmeteo in .env, and the app uses it only with
+  # OPEN_METEO_URL=http://openmeteo:8080. It needs a CPU with AVX2 (x86) or ARM64; without, it crash-loops with "Illegal instruction". It reads the
   # public Open-Meteo data on AWS as asked and caches it in the volume (CACHE_SIZE is
   # reserved on disk at once). See docs/DEPLOYMENT.md, "Self-hosted forecasts".
   openmeteo:
@@ -89,6 +93,36 @@ services:
       start_period: 30s
       retries: 3
     mem_limit: 1g
+    restart: unless-stopped
+
+  # Downloads every new GEFS, ECMWF ENS and GEPS run (snowfall only) into the server's
+  # volume, which the server then serves at /v1/ensemble (docs/OPEN-METEO-PLAN.md,
+  # milestone 1b). Opt-in: add `ensembles` to COMPOSE_PROFILES next to `openmeteo`. Uses
+  # ~1.5-2 GB of disk, kept bounded (docker/ensembles.sh), and ~15 GB of downloads a day. See
+  # docs/DEPLOYMENT.md, "Self-hosted ensembles".
+  openmeteo-ensembles:
+    <<: *hardening
+    profiles: [ensembles]
+    # The same pinned image as openmeteo: bump both together.
+    image: ghcr.io/open-meteo/open-meteo@sha256:bf94e8b39761b59a91bd04bb926b3834cad00eaf71f1aa64b2fd17fbe987846a
+    entrypoint: ["sh", "/ensembles.sh"]
+    environment:
+      # No "previous day" copies of the time-chunk files: nothing reads them here.
+      GENERATE_PREVIOUS_DAY: "false"
+      ENSEMBLES_MIN_FREE_GB: ${ENSEMBLES_MIN_FREE_GB:-5}
+    volumes:
+      - openmeteo-data:/app/data
+      - ./docker/ensembles.sh:/ensembles.sh:ro
+    # Half the mini PC, so forecast runs and the map's jobs keep their share. The largest
+    # download (GEFS 0.25°) peaked at 722 MiB with 2 CPUs (27 Nov 2026): room to spare.
+    cpus: 2
+    mem_limit: 1536m
+    # The script writes one line per download; keep docker's log of it small anyway.
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
     restart: unless-stopped
 
 volumes:

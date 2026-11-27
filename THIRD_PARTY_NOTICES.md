@@ -55,3 +55,12 @@ container. It is licensed AGPL-3.0; Snow Watch runs the published image unmodifi
 talks to it only over HTTP, so its own code stays MIT. The source of the exact version
 is linked from the image's labels (`org.opencontainers.image.revision`). The weather
 data it reads is Open-Meteo's, CC BY 4.0, credited above.
+
+With the compose profile `ensembles`, the same image also downloads ensemble forecasts
+straight from their publishers into that server:
+
+| Source | Used for | Terms |
+|---|---|---|
+| [NOAA GEFS](https://registry.opendata.aws/noaa-gefs/) (NOAA Open Data Dissemination on AWS) | GEFS ensemble members | US public domain |
+| [ECMWF open data](https://www.ecmwf.int/en/forecasts/datasets/open-data) | ECMWF ENS ensemble members | CC BY 4.0; credit ECMWF |
+| [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | GEPS ensemble members | Open Government Licence – Canada |

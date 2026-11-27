@@ -12,7 +12,7 @@ what is specific to this machine.
 
 | Where | What |
 |---|---|
-| Docker VM (Debian 12) | `api` (port 8090), `worker` and `openmeteo` (self-hosted forecasts), from `/opt/snow-forecast` |
+| Docker VM (Debian 12) | `api` (port 8090), `worker`, `openmeteo` (self-hosted forecasts) and `openmeteo-ensembles` (self-hosted ensembles), from `/opt/snow-forecast` |
 | Home Assistant VM | The Cloudflared app, which also runs the tunnel for `ha.` and `dash.` |
 | Cloudflare | DNS and the tunnel edge (HTTPS) |
 
@@ -25,8 +25,10 @@ what is specific to this machine.
    can't grow here: the mini PC has 128 GB and Home Assistant OS holds 64 GB, which it
    can't give back. 60 GB is enough: about 14 GB for the app, its data and images, the
    server's cache (`OPEN_METEO_CACHE_SIZE=10GB`, reserved in full when it starts) and,
-   with self-hosted ensembles (OPEN-METEO-PLAN.md, milestone 1b), 5–10 GB of downloaded
-   runs. Keep 15 GB free (`df -h /`). In Nov 2026 the disk filled up: a 30 GB cache
+   with self-hosted ensembles (OPEN-METEO-PLAN.md, milestone 1b), ~1.5–2 GB of downloaded
+   runs (the downloader deletes what it doesn't need after each run, and skips runs
+   below 5 GB free). Keep 15 GB free (`df -h /`); `snowwatch openmeteo status` warns
+   under 10 GB. In Nov 2026 the disk filled up: a 30 GB cache
    plus 16.8 GB of Docker build cache, which the deploy now prunes after a week;
    `docker builder prune -af` clears it all at once (without `-a`, only dangling entries go).
 2. **Code:** the repository is private, so the VM uses a read-only deploy key:
@@ -55,9 +57,16 @@ what is specific to this machine.
    `MAX_LOCATIONS=25`), `docker compose up -d`, then `docker compose run --rm worker
    snowwatch openmeteo status` should end with `OK`. The home connection downloads
    roughly 300–450 GB a month for it.
-6. **Automatic updates and monitoring:** [`DEPLOYMENT.md`](DEPLOYMENT.md) step 4
+6. **Self-hosted ensembles** (once step 5 runs): [`DEPLOYMENT.md`](DEPLOYMENT.md),
+   "Self-hosted ensembles". Check `df -h /` shows at least 15 GB free, set
+   `COMPOSE_PROFILES=openmeteo,ensembles` in `.env`, run `docker compose up -d`. For the
+   first few days, check once a day (OPEN-METEO-PLAN.md, milestone 1b, "Verify on the
+   mini PC"): `snowwatch openmeteo status` (each system's run and age, ECMWF with 51
+   members), `ensembles/disk.log` in the volume (disk growth), `docker stats` during a
+   forecast run (memory and CPU), and the router's counter (~15 GB a day more).
+7. **Automatic updates and monitoring:** [`DEPLOYMENT.md`](DEPLOYMENT.md) step 4
    (the timer, Uptime Kuma on `/api/health`, two Healthchecks.io checks).
-7. **Check from outside**, on a phone with Wi-Fi off: the site opens, Manage asks
+8. **Check from outside**, on a phone with Wi-Fi off: the site opens, Manage asks
    for the password, Add to Home Screen works, and the router still has no
    port-forward rules.
 

@@ -181,6 +181,7 @@ def cmd_check_sources(args: argparse.Namespace, settings: Settings) -> int:
 def cmd_openmeteo(args: argparse.Namespace, settings: Settings) -> int:
     """`openmeteo status`: is the self-hosted server usable, and how has today gone."""
     from snowwatch.checks import openmeteo_status
+    from snowwatch.ensembles import status_lines
 
     usage = repo.Usage()
     if settings.database.exists():
@@ -194,6 +195,7 @@ def cmd_openmeteo(args: argparse.Namespace, settings: Settings) -> int:
             settings.open_meteo_daily_budget,
             usage,
             fetcher,
+            ensembles=status_lines(settings.open_meteo_data_dir, fallback_dir=settings.data_dir),
         )
     print("\n".join(lines))
     return 0 if ok else 1
