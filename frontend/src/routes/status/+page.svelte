@@ -27,6 +27,7 @@
 
 	const NAMES: Record<string, string> = {
 		'open-meteo': 'Open-Meteo (weather models)',
+		'open-meteo-local': 'Open-Meteo (self-hosted)',
 		nws: 'National Weather Service',
 		snotel: 'NRCS SNOTEL',
 		'bc-asws': 'BC snow pillows',
@@ -53,15 +54,39 @@
 {:else}
 	<div class="grid">
 		<section class="card">
-			<h2>Open-Meteo usage today</h2>
+			<h2>{status.local ? 'Public Open-Meteo use today' : 'Open-Meteo usage today'}</h2>
 			<div class="bar" role="img" aria-label={`${Math.round(pct)}% of the free daily limit`}>
 				<span style:width="{pct}%" class:hot={pct > 80}></span>
 			</div>
 			<p class="small muted">
 				About <strong>{Math.round(status.weight_today).toLocaleString('en-US')}</strong> of
-				{status.budget.toLocaleString('en-US')} free calls (UTC day).
+				{status.budget.toLocaleString('en-US')} free calls (UTC day).{status.local
+					? " Ensembles, plus any forecasts the server couldn't answer."
+					: ''}
 			</p>
 		</section>
+
+		{#if status.local}
+			{@const local = status.local}
+			<section class="card" class:bad={!local.ok}>
+				<h2>Self-hosted forecasts</h2>
+				<p class="small">
+					{#if local.ok}<strong>Working</strong>, last answer {ago(local.last_ok_at)}.
+					{:else if local.last_error_at}<strong>Not answering</strong>: it last failed
+						{ago(local.last_error_at)}.
+					{:else}<strong>No requests yet.</strong>{/if}
+				</p>
+				<p class="small muted">
+					{local.requests_today.toLocaleString('en-US')} requests today{#if local.latency_s !== null},
+						{local.latency_s.toFixed(1)} s each on average{/if}.
+					{#if local.fallbacks_today}{local.fallbacks_today.toLocaleString('en-US')} went to the public
+						API instead.{:else}None went to the public API instead.{/if}
+				</p>
+				{#if !local.ok && local.last_error}
+					<p class="small err-line">{local.last_error}</p>
+				{/if}
+			</section>
+		{/if}
 
 		<section class="card">
 			<h2>Sources</h2>
@@ -186,8 +211,13 @@
 		background: var(--temp);
 	}
 	.bad th,
-	.bad td {
+	.bad td,
+	.card.bad strong {
 		color: var(--temp);
+	}
+	.err-line {
+		overflow-wrap: anywhere;
+		font-size: 0.8rem;
 	}
 	.err {
 		max-width: 260px;

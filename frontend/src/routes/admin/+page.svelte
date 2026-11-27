@@ -292,12 +292,23 @@
 		<h1>Manage locations</h1>
 		{#if me?.is_owner}<button class="btn" onclick={signOut}>Sign out</button>{/if}
 	</div>
-	{#if budget}
+	{#if budget?.local_forecasts}
+		<p class="muted small">
+			{budget.active} of {budget.max_locations} locations. Forecasts come from your own Open-Meteo server
+			(about {Math.round(budget.forecasts_total).toLocaleString('en-US')} calls a day, free). Ensembles
+			use about {Math.round(budget.total).toLocaleString('en-US')}
+			of {budget.budget.toLocaleString('en-US')} free public calls a day ({Math.round(
+				budget.public_used_today
+			).toLocaleString('en-US')} so far today). Each new location adds about {perLoc}.
+		</p>
+	{:else if budget}
 		<p class="muted small">
 			{budget.active} of {budget.max_locations} locations · about {Math.round(
 				budget.total
 			).toLocaleString('en-US')}
-			of {budget.budget.toLocaleString('en-US')} free Open-Meteo calls a day. Each new location adds about
+			of {budget.budget.toLocaleString('en-US')} free Open-Meteo calls a day ({Math.round(
+				budget.public_used_today
+			).toLocaleString('en-US')} so far today). Each new location adds about
 			{perLoc}.
 		</p>
 	{/if}
