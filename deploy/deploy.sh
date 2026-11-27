@@ -32,6 +32,6 @@ git merge --ff-only --quiet "origin/$BRANCH"
 GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 docker image prune -f >/dev/null
 # Build cache too: every deploy adds to it, and on the home VM it reached 16.8 GB of a
-# 60 GB disk. A week's worth keeps rebuilds fast.
-docker builder prune -f --filter until=168h >/dev/null
+# 60 GB disk. -a: unused cache, not only dangling entries. A week's worth keeps rebuilds fast.
+docker builder prune -af --filter until=168h >/dev/null
 echo "$(date -u +%FT%TZ) deployed $remote_sha"

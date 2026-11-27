@@ -28,7 +28,7 @@ what is specific to this machine.
    with self-hosted ensembles (OPEN-METEO-PLAN.md, milestone 1b), 5–10 GB of downloaded
    runs. Keep 15 GB free (`df -h /`). In Nov 2026 the disk filled up: a 30 GB cache
    plus 16.8 GB of Docker build cache, which the deploy now prunes after a week;
-   `docker builder prune -f` clears it all at once.
+   `docker builder prune -af` clears it all at once (without `-a`, only dangling entries go).
 2. **Code:** the repository is private, so the VM uses a read-only deploy key:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/snowwatch_deploy -N "" -C "snowwatch deploy"
