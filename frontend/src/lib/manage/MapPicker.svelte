@@ -15,9 +15,11 @@
 		active: PinBand;
 		onpick: (band: PinBand, lat: number, lon: number) => void;
 		center?: [number, number];
+		/** How close it opens (9: a region; a saved spot opens closer). */
+		zoom?: number;
 	}
 
-	let { pins, active, onpick, center = [47.6, -121.3] }: Props = $props();
+	let { pins, active, onpick, center = [47.6, -121.3], zoom = 9 }: Props = $props();
 	let el = $state<HTMLDivElement>();
 	let map: LeafletMap | null = null;
 	let L: typeof import('leaflet') | null = null;
@@ -31,7 +33,7 @@
 		import('leaflet').then((mod) => {
 			if (cancelled || !el) return;
 			L = mod.default ?? mod;
-			map = L.map(el, { zoomControl: true }).setView(center, 9);
+			map = L.map(el, { zoomControl: true }).setView(center, zoom);
 			// Through the server's tile cache, like the main map: no third-party requests.
 			L.tileLayer('/api/tiles/otm/{z}/{x}/{y}.png', {
 				maxZoom: 17,

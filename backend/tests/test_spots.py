@@ -128,15 +128,47 @@ def test_outline_is_small() -> None:
 def test_name_from_a_peak_then_a_location_then_coordinates() -> None:
     crystal = make_location(id="crystal", name="Crystal Mountain")
     mid = crystal.band("mid")  # 47.0, -121.0
-    peaks = [("Silver King", 47.01, -121.0), ("Far Peak", 47.2, -121.0)]
-    assert spot_name(47.0, -121.0, peaks, (crystal, 0.0)) == "Silver King"  # 1.1 km
+    on = [("Silver King", 47.003, -121.0), ("Far Peak", 47.2, -121.0)]
+    name, peak = spot_name(47.0, -121.0, on, (crystal, 0.0))  # 0.33 km: on it
+    assert name == "Silver King" and peak is not None and peak.bearing is None
+    # Within 6 km: where it is from the peak, from the peak's side.
+    near = [("Silver King", 47.0 - 1.2 / 111.2, -121.0)]
+    name, peak = spot_name(47.0, -121.0, near, (crystal, 30.0))
+    assert name == "1.2 km N of Silver King"
+    assert peak is not None and peak.name == "Silver King" and peak.bearing == "N"
+    assert spot_name(47.0, -121.0, [("P", 47.0 - 0.6 / 111.2, -121.0)], None)[0] == ("600 m N of P")
+    # Farther from any peak: from a saved location, then the coordinates.
     lat, lon = 47.0 + 6 / 111.2 * math.cos(math.radians(45)), -121.0
     lon += 6 / (111.2 * math.cos(math.radians(47))) * math.sin(math.radians(45))
-    near = (crystal, 6.0)
-    assert spot_name(lat, lon, peaks, near) == "6 km NE of Crystal Mountain"
-    assert spot_name(mid.lat, mid.lon, [], (crystal, 0.3)) == "Near Crystal Mountain"
-    assert spot_name(47.5, -121.0, [], (crystal, 55.6)) == "47.500° N, 121.000° W"
-    assert spot_name(47.5, -121.0, [], None) == "47.500° N, 121.000° W"
+    assert spot_name(lat, lon, on[1:], (crystal, 6.0)) == ("6 km NE of Crystal Mountain", None)
+    assert spot_name(mid.lat, mid.lon, [], (crystal, 0.3))[0] == "Near Crystal Mountain"
+    assert spot_name(47.5, -121.0, [], (crystal, 55.6))[0] == "47.500° N, 121.000° W"
+    assert spot_name(47.5, -121.0, [], None)[0] == "47.500° N, 121.000° W"
+
+
+def test_peaks_from_the_label_tiles() -> None:
+    """A real label tile (OpenFreeMap, zoom 11, east of Stevens Pass), read without any
+    vector-tile library."""
+    from snowwatch import peaks
+
+    tile = (FIXTURES.parent / "labels" / "11-335-714.pbf").read_bytes()
+    points = peaks.layer_points(tile, "mountain_peak")
+    assert len(points) == 70
+    asked: list[tuple[int, int, int]] = []
+
+    def get(z: int, x: int, y: int) -> bytes | None:
+        asked.append((z, x, y))
+        return tile if (x, y) == (335, 714) else None
+
+    found = peaks.peaks_near(get, 47.70, -120.93, z=11)
+    assert len(asked) == 9 and (11, 335, 714) in asked  # the tile and the eight round it
+    by_name = {n: (a, b) for n, a, b in found}
+    lat, lon = by_name["Big Chiwaukum"]
+    assert abs(lat - 47.7024) < 0.001 and abs(lon - -120.9346) < 0.001
+    name, peak = spot_name(47.705, -120.93, found, None)
+    assert name == "Big Chiwaukum" and peak is not None
+    # Bad data is skipped, not raised.
+    assert peaks.peaks_near(lambda z, x, y: b"\x0a\xff", 47.7, -120.93, z=11) == []
 
 
 def test_geohash_and_ids() -> None:
@@ -216,6 +248,11 @@ def one_model(data: Any, params: dict[str, str]) -> Any:
         return {**p, "hourly": {"time": h.get("time", []), **keep}}
 
     return [point(p) for p in data] if isinstance(data, list) else point(data)
+
+
+def no_tiles(z: int, x: int, y: int) -> bytes | None:
+    """No label tiles (the tests make no network calls)."""
+    return None
 
 
 def spot_settings(settings: Settings, mode: str = "public") -> Settings:
@@ -338,7 +375,9 @@ def test_spot_names_a_nearby_peak(settings: Settings) -> None:
             peaks=[("Cone Peak", 47.005, -121.0)],
         )
         snap = build_spot(f, config(), ctx, 47.0, -121.0, captured_at())
-    assert snap.location.name == "Cone Peak"
+    assert snap.location.name == "600 m S of Cone Peak"
+    assert snap.spot is not None and snap.spot.peak is not None
+    assert (snap.spot.peak.name, snap.spot.peak.bearing) == ("Cone Peak", "S")
 
 
 def test_read_peaks(tmp_path: Path) -> None:
@@ -459,7 +498,10 @@ def spot_client(settings: Settings, conn: sqlite3.Connection) -> TestClient:
     s = spot_settings(settings)
     app = create_app(s)
     app.state.spots = spots.make_service(
-        s, config(), lambda: fetcher_for(s, transport=spot_transport(), tries=1)
+        s,
+        config(),
+        lambda: fetcher_for(s, transport=spot_transport(), tries=1),
+        label_tile=no_tiles,
     )
     return TestClient(app)
 
@@ -503,7 +545,10 @@ def test_api_spot_needs_the_self_hosted_server(
     s = spot_settings(settings)
     app = create_app(s)
     app.state.spots = spots.make_service(
-        s, config(), lambda: fetcher_for(s, transport=spot_transport(down=True), tries=1)
+        s,
+        config(),
+        lambda: fetcher_for(s, transport=spot_transport(down=True), tries=1),
+        label_tile=no_tiles,
     )
     r = TestClient(app).get("/api/spot", params={"lat": 47.0, "lon": -121.0})
     assert r.status_code == 503 and r.headers["retry-after"] == "30"
@@ -682,7 +727,10 @@ def test_api_spot_early_for_the_signed_in_owner(
     s = spot_settings(settings).model_copy(update={"owner_password": "correct horse battery"})
     app = create_app(s)
     app.state.spots = spots.make_service(
-        s, config(), lambda: fetcher_for(s, transport=spot_transport(), tries=1)
+        s,
+        config(),
+        lambda: fetcher_for(s, transport=spot_transport(), tries=1),
+        label_tile=no_tiles,
     )
     client = TestClient(app)
     origin = {"Origin": "http://testserver"}
@@ -693,3 +741,34 @@ def test_api_spot_early_for_the_signed_in_owner(
         for i in range(10)
     ]
     assert codes == [200] * 10
+
+
+def test_spot_named_from_the_label_tiles_and_never_held_up_by_them(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time as clock
+
+    opts: dict[str, Any] = {"transport": spot_transport(), "tries": 1}
+    with fetcher_for(spot_settings(settings), **opts) as f:
+        ctx = SpotContext(
+            borders=load_borders(BORDERS),
+            locations=[],
+            peaks=[],
+            tile_peaks=lambda a, b: [("Tile Peak", 47.0 + 1.5 / 111.2, -121.0)],
+        )
+        snap = build_spot(f, config(), ctx, 47.0, -121.0, captured_at())
+    assert snap.location.name == "1.5 km S of Tile Peak"
+    # A tile server that doesn't answer costs at most the wait, then the name comes from
+    # elsewhere (here, the coordinates).
+    monkeypatch.setattr(spots, "PEAKS_WAIT_S", 0.3)
+
+    def stuck(a: float, b: float) -> list[spots.Peak]:
+        clock.sleep(3)
+        return []
+
+    with fetcher_for(spot_settings(settings), **opts) as f:
+        ctx = SpotContext(borders=load_borders(BORDERS), locations=[], peaks=[], tile_peaks=stuck)
+        t0 = clock.monotonic()
+        snap = build_spot(f, config(), ctx, 47.0, -121.0, captured_at())
+        took = clock.monotonic() - t0
+    assert took < 2.5 and snap.location.name == "47.000° N, 121.000° W"

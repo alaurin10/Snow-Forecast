@@ -36,12 +36,13 @@ from typing import TYPE_CHECKING, Any, Literal
 from snowwatch.analysis.build import build_snapshot
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import ForecastConfig
-from snowwatch.doc import Snapshot, SpotInfo, SpotNearest
+from snowwatch.doc import Snapshot, SpotInfo, SpotNearest, SpotPeak
 from snowwatch.geo import bbox, bearing_deg, compass, contains, destination, edge_km, haversine_km
 from snowwatch.http import Fetcher, FetchError
 from snowwatch.inputs import inputs_from_responses
 from snowwatch.locations.resolve import MID_SHARE
 from snowwatch.models import Band, BandName, Location
+from snowwatch.peaks import Peak, peaks_near
 from snowwatch.sources import nws
 from snowwatch.sources.base import Request, fetch
 from snowwatch.sources.openmeteo import (
@@ -67,7 +68,9 @@ BEARINGS = 12
 NEAR_EDGE_M = 100.0  # within this of the ring's highest (lowest) ground: the top (bottom)
 MIN_GAP_M = 150.0  # bands at least this far apart
 FLAT_M = 300.0  # flat ground: bands this far below and above the point
-PEAK_KM = 2.0  # a named peak this close names the spot
+PEAK_KM = 0.5  # a named peak this close names the spot ("Mount Stuart")…
+PEAK_NEAR_KM = 6.0  # …and one this close places it ("1.2 km NE of Mount Stuart")
+PEAKS_WAIT_S = 3.0  # the label tiles' peaks are waited for this long, at most
 NAME_LOCATION_KM = 40.0  # "6 km NE of Crystal Mountain" from a saved location this close
 NEAREST_KM = 100.0  # SpotInfo.nearest
 BORDER_KM = 3.0  # a point this close to the simplified US/Canada outline counts as inside
@@ -194,7 +197,6 @@ def country_at(borders: list[Border], lat: float, lon: float) -> Literal["US", "
     return "US" if best[1] == "US" else "CA"
 
 
-Peak = tuple[str, float, float]  # name, lat, lon
 _peaks: dict[str, tuple[float, list[Peak]]] = {}
 
 
@@ -241,24 +243,44 @@ def coords_label(lat: float, lon: float) -> str:
     return f"{abs(lat):.3f}° {ns}, {abs(lon):.3f}° {ew}"
 
 
-def spot_name(
-    lat: float, lon: float, peaks: Iterable[Peak], nearest: tuple[Location, float] | None
-) -> str:
-    """The nearest named peak within 2 km; else "6 km NE of Crystal Mountain" from the
-    nearest saved location within 40 km; else the coordinates."""
-    peak = min(
-        ((haversine_km(lat, lon, p_lat, p_lon), name) for name, p_lat, p_lon in peaks),
+def nearest_peak(peaks: Iterable[Peak], lat: float, lon: float) -> tuple[Peak, float] | None:
+    """The nearest named peak and its distance (km)."""
+    return min(
+        ((pk, haversine_km(lat, lon, pk[1], pk[2])) for pk in peaks),
+        key=lambda x: x[1],
         default=None,
     )
-    if peak is not None and peak[0] <= PEAK_KM:
-        return peak[1]
+
+
+def km_label(km: float) -> str:
+    """600 m, 1.2 km, 14 km."""
+    if km < 1:
+        return f"{max(100, round(km * 10) * 100):.0f} m"
+    return f"{km:.1f} km" if km < 10 else f"{km:.0f} km"
+
+
+def spot_name(
+    lat: float, lon: float, peaks: Iterable[Peak], nearest: tuple[Location, float] | None
+) -> tuple[str, SpotPeak | None]:
+    """The spot's name after the terrain: the nearest named peak within 0.5 km ("Mount
+    Stuart"); else where it is from the nearest within 6 km ("1.2 km NE of Mount
+    Stuart"); else from the nearest saved location within 40 km ("6 km NE of Crystal
+    Mountain"); else the coordinates. With the peak it's named after, if any (the app
+    words its distance in the viewer's units)."""
+    found = nearest_peak(peaks, lat, lon)
+    if found is not None and found[1] <= PEAK_NEAR_KM:
+        (name, p_lat, p_lon), km = found
+        if km <= PEAK_KM:
+            return name, SpotPeak(name=name, km=round(km, 2), bearing=None)
+        way = compass(bearing_deg(p_lat, p_lon, lat, lon))
+        return f"{km_label(km)} {way} of {name}", SpotPeak(name=name, km=round(km, 2), bearing=way)
     if nearest is not None and nearest[1] <= NAME_LOCATION_KM:
         loc, km = nearest
         if km < 1:
-            return f"Near {loc.name}"
+            return f"Near {loc.name}", None
         mid = loc.band("mid")
-        return f"{km:.0f} km {compass(bearing_deg(mid.lat, mid.lon, lat, lon))} of {loc.name}"
-    return coords_label(lat, lon)
+        return f"{km:.0f} km {compass(bearing_deg(mid.lat, mid.lon, lat, lon))} of {loc.name}", None
+    return coords_label(lat, lon), None
 
 
 def geohash(lat: float, lon: float, precision: int = 7) -> str:
@@ -445,6 +467,9 @@ class SpotContext:
     conn: sqlite3.Connection | None = None  # read-write: the ensemble cache
     spot_used: float = 0.0  # today's public weight for spots (the allowance)
     alerts: Callable[[float, float], Any] | None = None  # cached NWS alerts at a point
+    # Named peaks round a point from the label tiles (snowwatch/peaks.py): every peak,
+    # where `peaks` only has those round saved locations.
+    tile_peaks: Callable[[float, float], list[Peak]] | None = None
 
 
 def build_spot(
@@ -488,6 +513,12 @@ def build_spot(
     # The point's own requests don't depend on the bands' elevations, only on where it
     # is: a provisional location with the point's lat/lon builds them.
     here = spot_location(lat, lon, Bands(0, 1, 2, "flat", "mid"), country, "here")
+    # The label tiles' peaks, on a pool of their own: waited for only so long, and a slow
+    # tile server must not hold the build up when it ends.
+    peaks_f: Future[list[Peak]] | None = None
+    if ctx.tile_peaks is not None:
+        tile_peaks = ctx.tile_peaks
+        peaks_f = _PEAKS_POOL.submit(timed("peaks", lambda: tile_peaks(lat, lon)))
     with ThreadPoolExecutor(max_workers=12, thread_name_prefix="spot") as pool:
         elev_f = pool.submit(
             timed(
@@ -518,7 +549,14 @@ def build_spot(
             raise SpotUnavailable("terrain elevation unavailable: wrong number of values")
         bands = choose_bands(elevs[0], elevs[1:])
         near = nearest_location(ctx.locations, lat, lon)
-        loc = spot_location(lat, lon, bands, country, spot_name(lat, lon, ctx.peaks, near))
+        all_peaks = list(ctx.peaks)
+        if peaks_f is not None:
+            try:
+                all_peaks += peaks_f.result(timeout=PEAKS_WAIT_S)
+            except Exception as e:  # a name from elsewhere then; never the forecast's fault
+                log.info("spot peaks unavailable: %s", e)
+        name, peak = spot_name(lat, lon, all_peaks, near)
+        loc = spot_location(lat, lon, bands, country, name)
         models = cfg.models_for(country)
         blend_f = pool.submit(
             timed("blend", lambda: fetch(fetcher, blend_request(loc), allow_fallback=False))
@@ -576,6 +614,7 @@ def build_spot(
         band=bands.band,
         method=bands.method,
         ensembles=ens.status,
+        peak=peak,
         nearest=(
             SpotNearest(id=near[0].id, name=near[0].name, km=round(near[1], 1))
             if near is not None and near[1] <= NEAREST_KM
@@ -583,6 +622,9 @@ def build_spot(
         ),
     )
     return snap
+
+
+_PEAKS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="spot-peaks")
 
 
 def _optional(fetcher: Fetcher, req: Request, errors: list[str]) -> Any | None:
@@ -756,14 +798,31 @@ class SpotService:
 
 
 def make_service(
-    settings: Settings, cfg: ForecastConfig, make_fetcher: Callable[[], Fetcher]
+    settings: Settings,
+    cfg: ForecastConfig,
+    make_fetcher: Callable[[], Fetcher],
+    label_tile: Callable[[int, int, int], bytes | None] | None = None,
 ) -> SpotService:
     """The API's SpotService: builds with a fresh fetcher each time (the self-hosted server,
     no public fallback for forecasts), records public use under the spots' ledger row, and
     keeps NWS alerts per 0.1° cell for 10 minutes."""
     from snowwatch.locations import service as locations
+    from snowwatch.tiles import TileCache
 
     alerts_cache: dict[tuple[int, int], tuple[float, Any]] = {}
+    # The map's label tiles, through the server's tile cache (kept on disk, so an area's
+    # peaks are fetched once): the peaks to name spots after.
+    if label_tile is None:
+        tiles = TileCache(
+            settings.tiles_dir, settings.user_agent, max_bytes=settings.tiles_max_mb * 1_000_000
+        )
+
+        def label_tile(z: int, x: int, y: int) -> bytes | None:
+            got = tiles.get("labels", z, x, y)
+            return got[0] if got else None
+
+    get_tile = label_tile
+
     alerts_lock = threading.Lock()
 
     def build(lat: float, lon: float) -> Snapshot:
@@ -804,6 +863,7 @@ def make_service(
                 conn=conn,
                 spot_used=spot_used,
                 alerts=alerts,
+                tile_peaks=lambda a, b: peaks_near(get_tile, a, b),
             )
             times: dict[str, float] = {}
             t0 = time.monotonic()

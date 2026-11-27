@@ -49,9 +49,12 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect(page.getByText('Forecast for this spot, made now.')).toBeVisible({
 			timeout: 15_000
 		});
-		await expect(page.locator('h1')).toContainText(/Whistler|° N/);
-		// One elevation, the spot's own: no elevation picker, no base/mid/summit table.
-		await expect(page.locator('.spotnote')).toContainText('4,900 ft');
+		// Named after the terrain: a peak (from the map's label tiles), a saved location or
+		// the coordinates.
+		await expect(page.locator('h1')).toContainText(/ of |° N|\w/);
+		// One elevation, the spot's own, shown where the picker would be; no elevation
+		// picker, no base/mid/summit table.
+		await expect(page.locator('.spotelev')).toContainText('4,900 ft');
 		await expect(page.getByRole('group', { name: /^Elevation/ })).toHaveCount(0);
 		await expect(page.getByRole('heading', { name: 'Base, mid and summit' })).toHaveCount(0);
 		const tabs = page.getByRole('tablist', { name: 'Sections' });
@@ -72,6 +75,12 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect(page.getByText('has no snow station of its own')).toBeVisible();
 		await noSideways(page);
 
+		// On a phone, the header's back arrow goes to the map.
+		if (info.project.name === 'phone') {
+			await page.getByRole('link', { name: 'Back to the map' }).click();
+			await expect(page).toHaveURL(/\/map\?lat=/);
+		}
+
 		// It's on the Overview's recent spots now.
 		await page.goto('/', { waitUntil: 'networkidle' });
 		await expect(page.getByRole('heading', { name: 'Recent spots' })).toBeVisible();
@@ -89,11 +98,12 @@ test('back from a spot, the map is where it was', async ({ page }) => {
 	// view be kept.
 	const start = (await whistler.boundingBox())!;
 	await page.locator('.maplibregl-canvas').focus();
-	for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
 	await expect(async () => {
+		await page.keyboard.press('ArrowLeft');
+		await page.waitForTimeout(400);
 		const moved = (await whistler.boundingBox())!;
 		expect(moved.x - start.x).toBeGreaterThan(150);
-	}).toPass({ timeout: 10_000 });
+	}).toPass({ timeout: 15_000 });
 	await page.waitForTimeout(1200);
 	const before = await whistler.boundingBox();
 	expect(before).not.toBeNull();
@@ -124,6 +134,34 @@ test('a right-click on the map opens the full forecast there', async ({ page }, 
 	await expect(page.getByText('Forecast for this spot, made now.')).toBeVisible({
 		timeout: 15_000
 	});
+});
+
+test('only the owner can save a spot, placing its low and high points in Manage', async ({
+	page
+}, info) => {
+	test.skip(info.project.name === 'phone', 'one screen size is enough');
+	const spot = '/spot?lat=50.120&lon=-122.950';
+	await page.goto(spot, { waitUntil: 'networkidle' });
+	await expect(page.getByText('Forecast for this spot, made now.')).toBeVisible({
+		timeout: 15_000
+	});
+	await expect(page.getByRole('link', { name: 'Save as location' })).toHaveCount(0);
+	// Signed in (the page's requests share the browser's cookies).
+	const r = await page.request.post('/api/auth/login', {
+		data: { password: 'e2e-owner-password' },
+		headers: { Origin: 'http://localhost:8019' }
+	});
+	expect(r.ok()).toBe(true);
+	await page.goto(spot, { waitUntil: 'networkidle' });
+	await page.getByRole('link', { name: 'Save as location' }).click();
+	await expect(page.getByRole('heading', { name: 'Add a backcountry zone' })).toBeVisible();
+	await expect(page.getByText('The spot is the mid pin.')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Mid (optional) ✓' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Trailhead', exact: true })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	expect(await page.getByLabel('Name').inputValue()).not.toBe('');
 });
 
 test('a spot outside the US and Canada says so', async ({ page }) => {

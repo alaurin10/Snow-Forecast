@@ -62,6 +62,7 @@
 	import DaySheet from '../charts/DaySheet.svelte';
 	import type { LoadState } from '../load';
 	import { getMeta } from '../api';
+	import { spotTitle } from '../spotname';
 
 	interface Props {
 		/** The forecast; replaced in place when `refresh` brings a newer one. */
@@ -82,6 +83,9 @@
 		compareHref?: string | null;
 		/** Extra actions in the header (a spot's "Save as location"). */
 		actions?: Snippet;
+		/** Where the phone header's back arrow goes: the overview, or the map for a spot. */
+		backHref?: string | null;
+		backLabel?: string;
 	}
 
 	let {
@@ -95,7 +99,9 @@
 		openPeriod = null,
 		mapHref,
 		compareHref = null,
-		actions
+		actions,
+		backHref = null,
+		backLabel = 'All locations'
 	}: Props = $props();
 	const spot = $derived(snap.spot ?? null);
 	let trend = $state<TrendOut | null>(null);
@@ -222,6 +228,8 @@
 	// The elevations the charts mark (the freezing-level view's lines): a spot's only.
 	const chartBands = $derived(spot ? [band] : snap.bands);
 	const units = $derived<UnitSystem>(prefs.units);
+	// A spot's name words its distance from the peak in the viewer's units.
+	const title = $derived(spot ? spotTitle(snap, units) : snap.location.name);
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
 	const c = $derived(converters(units));
 	const storm = $derived(band ? nextStorm(band.periods) : null);
@@ -267,9 +275,7 @@
 	// Elevation buttons on a phone: just the number, so long band names never crowd them.
 	const elevNum = (m: number) => elevation(m, units).replace(/\s*(ft|m)$/, '');
 	const place = $derived(
-		snap
-			? { name: snap.location.name, region: snap.location.region, generatedAt: snap.generated_at }
-			: null
+		snap ? { name: title, region: snap.location.region, generatedAt: snap.generated_at } : null
 	);
 	const updated = $derived(
 		snap
@@ -326,10 +332,7 @@
 {#snippet spotNote()}
 	{#if spot}
 		<p class="spotnote">
-			<span class="num"
-				>{#if phone}{coords} ·
-				{/if}{elevation(spot.elev_m, units)}</span
-			>
+			{#if phone}<span class="num">{coords}</span>{/if}
 			<span class="muted note1"
 				>Forecast for this spot, made now. No snow station history or forecast trend here.</span
 			>
@@ -433,16 +436,16 @@
 		<!-- The map and Compare links come resolved from the route. -->
 		<!-- eslint-disable svelte/no-navigation-without-resolve -->
 		<header class="mhead">
-			<a class="mback glass" href={resolve('/')} aria-label="All locations">
+			<a class="mback glass" href={backHref ?? resolve('/')} aria-label={backLabel}>
 				<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
 					><path d="M15 5l-7 7 7 7" /></svg
 				>
 			</a>
-			<h1>{snap.location.name}</h1>
+			<h1 class:long={!!spot}>{title}</h1>
 			<a
 				class="mmap glass"
 				href={mapHref}
-				aria-label="View {snap.location.name} on the map"
+				aria-label="View {title} on the map"
 				title="View on the map"
 			>
 				<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
@@ -453,7 +456,7 @@
 				<a
 					class="mmap glass"
 					href={compareHref}
-					aria-label="Compare {snap.location.name} with other locations"
+					aria-label="Compare {title} with other locations"
 					title="Compare with other locations"
 				>
 					<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"
@@ -493,7 +496,13 @@
 					<span class="wxpop glass" id="wxpop" role="status">{wxLine}</span>
 				{/if}
 			</span>
-			{#if !spot}
+			{#if spot}
+				<p class="glass spotelev small" title="The terrain's elevation where you tapped">
+					<span class="bn">This spot</span><span class="be num"
+						>{elevation(band.elev_m, units)}</span
+					>
+				</p>
+			{:else}
 				<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
 					{#each snap.bands as b (b.band)}
 						<button
@@ -511,7 +520,7 @@
 		<!-- eslint-disable svelte/no-navigation-without-resolve -->
 		<header class="lhead">
 			<div class="title">
-				<h1>{snap.location.name}</h1>
+				<h1>{title}</h1>
 				<div class="pills">
 					<span class="pill glass" title="{placeLine} · {sky.label} now">
 						<span
@@ -529,7 +538,7 @@
 					<a
 						class="pill glass maplink"
 						href={mapHref}
-						aria-label="View {snap.location.name} on the map"
+						aria-label="View {title} on the map"
 						title="View on the map"
 					>
 						<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
@@ -541,7 +550,7 @@
 						<a
 							class="pill glass maplink"
 							href={compareHref}
-							aria-label="Compare {snap.location.name} with other locations"
+							aria-label="Compare {title} with other locations"
 							title="Compare with other locations"
 						>
 							<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
@@ -559,7 +568,13 @@
 		<!-- Which section and which elevation: two pills that scroll with the page. -->
 		<div class="ltools" bind:this={toolsEl}>
 			{@render sectionTabs()}
-			{#if !spot}
+			{#if spot}
+				<p class="glass spotelev" title="The terrain's elevation where you tapped">
+					<span class="bn">This spot</span><span class="be num"
+						>{elevation(band.elev_m, units)}</span
+					>
+				</p>
+			{:else}
 				<div class="seg glass elev" role="group" aria-label="Elevation">
 					{#each snap.bands as b (b.band)}
 						<button aria-pressed={band.band === b.band} onclick={() => setBand(b.band)}
@@ -819,7 +834,7 @@
 			{units}
 			tz={snap.location.tz}
 			avy={avy?.doc ?? null}
-			name={snap.location.name}
+			name={title}
 		/>
 	{:else}
 		<ObservedTab {snap} {scores} {scoresLoad} {nearby} {nearbyLoad} {units} spot={!!spot} />
@@ -1271,6 +1286,16 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+	/* A spot's name ("3.5 mi E of Mount Sproatt") is longer: two lines rather than cut. */
+	.mhead h1.long {
+		white-space: normal;
+		font-size: 1.35rem;
+		line-height: 1.1;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+	}
 	.mback,
 	.mmap {
 		flex: 0 0 44px;
@@ -1450,6 +1475,28 @@
 	.note1 {
 		flex: 1 0 100%;
 		font-size: 0.82rem;
+	}
+	/* A spot's one elevation, where a location's elevation picker is. */
+	.spotelev {
+		display: grid;
+		align-content: center;
+		justify-items: center;
+		margin: 0;
+		height: 52px;
+		box-sizing: border-box;
+		padding: 0 22px;
+		border-radius: 999px;
+		line-height: 1.2;
+	}
+	.spotelev .be {
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.spotelev.small {
+		height: auto;
+		margin-left: auto;
+		padding: 6px 16px;
 	}
 	.mactions {
 		display: flex;

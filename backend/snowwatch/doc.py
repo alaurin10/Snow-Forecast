@@ -375,6 +375,15 @@ class SpotNearest(BaseModel):
     km: float
 
 
+class SpotPeak(BaseModel):
+    """The named peak a spot is named after: on it (`bearing` None, within 0.5 km), or
+    `km` away with the spot to its `bearing` (N, NE …). The app words the distance."""
+
+    name: str
+    km: float
+    bearing: str | None = None
+
+
 class SpotInfo(BaseModel):
     """A forecast for a point tapped on the map (a spot), made on request
     (snowwatch/spots.py). Its three bands share the point and differ in elevation."""
@@ -392,6 +401,7 @@ class SpotInfo(BaseModel):
     # are missing), unavailable (none could be had).
     ensembles: Literal["fresh", "cached", "allowance_spent", "unavailable"]
     nearest: SpotNearest | None = None  # within 100 km
+    peak: SpotPeak | None = None  # named after a peak within 6 km
 
 
 class Snapshot(BaseModel):
