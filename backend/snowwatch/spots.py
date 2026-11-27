@@ -679,17 +679,18 @@ class SpotService:
                 self._cache.popitem(last=False)
         return built
 
-    def early(self, lat: float, lon: float, visitor: str) -> Built | None:
+    def early(self, lat: float, lon: float, visitor: str, *, owner: bool = False) -> Built | None:
         """Start a spot before it's asked for (the map's spot panel opened on it), so the
         button finds it made or on its way. Only when it costs nobody anything: within the
-        early allowance and the site's, with a build slot free and the point not already
-        being made; otherwise None at once. Raises OutsideCoverage, SpotUnavailable."""
+        early allowance (not for the signed-in owner) and the site's, with a build slot
+        free and the point not already being made; otherwise None at once. Raises
+        OutsideCoverage, SpotUnavailable."""
         hit = self.cached(lat, lon)
         if hit is not None:
             return hit
         if self.clock() < self.down_until:
             return None
-        if not self.early_limit.allow(visitor) or not self.site.allow("site"):
+        if not (owner or self.early_limit.allow(visitor)) or not self.site.allow("site"):
             return None
         key = round_point(lat, lon)
         with self._lock:

@@ -50,9 +50,10 @@ for (const theme of ['light', 'dark'] as const) {
 			timeout: 15_000
 		});
 		await expect(page.locator('h1')).toContainText(/Whistler|° N/);
-		await expect(page.locator('.spotnote .tag')).toHaveText('This spot');
-		// The stand-in ground rises to the north: the spot is the middle band, chosen at once.
-		await expect(page.locator('.spotband[aria-pressed="true"]').first()).toBeVisible();
+		// One elevation, the spot's own: no elevation picker, no base/mid/summit table.
+		await expect(page.locator('.spotnote')).toContainText('4,900 ft');
+		await expect(page.getByRole('group', { name: /^Elevation/ })).toHaveCount(0);
+		await expect(page.getByRole('heading', { name: 'Base, mid and summit' })).toHaveCount(0);
 		const tabs = page.getByRole('tablist', { name: 'Sections' });
 		await expect(tabs.getByRole('tab')).toHaveText([
 			'Forecast',
