@@ -172,6 +172,29 @@ export const getVerification = (id: string) =>
 export const getNearby = (id: string) =>
 	get<NearbyOut>(`/api/locations/${encodeURIComponent(id)}/nearby`);
 
+/** Where a spot is asked for: rounded to ~100 m, as the server keys it, so the browser's
+ *  and the service worker's copies match a nearby tap. */
+export const spotQuery = (lat: number, lon: number) =>
+	`lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`;
+
+const spots = new Map<string, Promise<Snapshot>>();
+/** A full forecast for any point in the US or Canada, made on request (with a
+ *  self-hosted forecast server; `/api/meta` says `local_forecasts`). 422 outside the US
+ *  and Canada, 503 while the server can't make one, 429 when asked too often. */
+export function getSpot(lat: number, lon: number, { fresh = false } = {}): Promise<Snapshot> {
+	const q = spotQuery(lat, lon);
+	if (fresh || !spots.has(q)) {
+		const p = get<Snapshot>(`/api/spot?${q}`);
+		p.catch(() => spots.delete(q));
+		spots.set(q, p);
+	}
+	return spots.get(q)!;
+}
+
+/** A spot's nearest snow stations, field reports, and its avalanche zone and rating. */
+export const getSpotNearby = (lat: number, lon: number) =>
+	get<NearbyOut>(`/api/spot/nearby?${spotQuery(lat, lon)}`);
+
 export const getStatus = () => get<StatusOut>('/api/status');
 
 // Version and server numbers; they don't change while the page is open.

@@ -45,6 +45,12 @@
 	const href = (id: string) => resolve('/location/[id]', { id });
 	// From a location's Map button (/map?loc=<id>): open on that location.
 	const focus = $derived(page.url.searchParams.get('loc'));
+	// From a spot's Map button (/map?lat=…&lon=…): open on that point.
+	const focusPoint = $derived.by(() => {
+		const lat = Number(page.url.searchParams.get('lat') ?? NaN);
+		const lon = Number(page.url.searchParams.get('lon') ?? NaN);
+		return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+	});
 </script>
 
 <svelte:head><title>Map · Snow Watch</title></svelte:head>
@@ -56,7 +62,7 @@
 {:else if !rows}
 	<p class="loading glass" aria-live="polite">Loading…</p>
 {:else}
-	<MapView {rows} units={prefs.units} {href} {focus} radar />
+	<MapView {rows} units={prefs.units} {href} {focus} {focusPoint} radar />
 {/if}
 
 <style>

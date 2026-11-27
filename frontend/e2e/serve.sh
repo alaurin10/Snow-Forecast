@@ -37,4 +37,15 @@ cat >"$data/osm/ski.geojson" <<'JSON'
 JSON
 # Precipitation frames at the real size, so the timeline plays (e2e/perf.spec.ts).
 uv run --frozen python "$here/precip_fixture.py" "$data/precip"
-exec uv run --frozen uvicorn --factory snowwatch.api.app:production_app --port 8019
+# A stand-in self-hosted Open-Meteo server answering from the fixtures, so spots (a full
+# forecast for any point on the map) can be made with no network; ensembles come from it
+# too (their meta.json says they're fresh). Locations' forecasts stay the rebuilt ones.
+uv run --frozen python "$here/openmeteo_fixture.py" 8029 "$data/openmeteo" &
+fake=$!
+trap 'kill "$fake" 2>/dev/null; rm -rf "$data"' EXIT
+for _ in $(seq 1 50); do
+	curl -s -o /dev/null "http://127.0.0.1:8029/v1/elevation?latitude=50&longitude=-122" && break
+	sleep 0.2
+done
+export OPEN_METEO_URL=http://127.0.0.1:8029 OPEN_METEO_ENSEMBLES=local OPEN_METEO_DATA_DIR="$data/openmeteo"
+uv run --frozen uvicorn --factory snowwatch.api.app:production_app --port 8019

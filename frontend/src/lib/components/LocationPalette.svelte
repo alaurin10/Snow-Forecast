@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { modal } from '../modal';
+	import { recentSpots, spotSearch } from '../recentSpots';
 
 	interface Props {
 		locations: { id: string; name: string; region: string }[];
@@ -13,17 +14,35 @@
 
 	let q = $state('');
 	let at = $state(0);
+	// Saved locations, then the spots opened lately in this browser (points on the map).
+	type Item = { key: string; name: string; region: string; href: string };
+	const spots: Item[] = recentSpots().map((sp) => ({
+		key: `spot:${sp.lat},${sp.lon}`,
+		name: sp.name,
+		region: 'Recent spot',
+		href: resolve('/spot') + spotSearch(sp.lat, sp.lon)
+	}));
+	const items = $derived<Item[]>([
+		...locations.map((l) => ({
+			key: l.id,
+			name: l.name,
+			region: l.region,
+			href: resolve('/location/[id]', { id: l.id })
+		})),
+		...spots
+	]);
 	const shown = $derived(
-		locations.filter((l) => `${l.name} ${l.region}`.toLowerCase().includes(q.trim().toLowerCase()))
+		items.filter((l) => `${l.name} ${l.region}`.toLowerCase().includes(q.trim().toLowerCase()))
 	);
-	const open = (id: string) => {
+	const open = (item: Item) => {
 		onclose();
-		void goto(resolve('/location/[id]', { id }));
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved above
+		void goto(item.href);
 	};
 	function onkey(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') at = Math.min(shown.length - 1, at + 1);
 		else if (e.key === 'ArrowUp') at = Math.max(0, at - 1);
-		else if (e.key === 'Enter' && shown[at]) open(shown[at].id);
+		else if (e.key === 'Enter' && shown[at]) open(shown[at]);
 		else return;
 		e.preventDefault();
 	}
@@ -47,16 +66,13 @@
 			/>
 		</label>
 		<ul role="listbox" aria-label="Locations">
-			{#each shown as l, i (l.id)}
+			{#each shown as l, i (l.key)}
 				<li role="option" aria-selected={i === at}>
-					<a
-						href={resolve('/location/[id]', { id: l.id })}
-						class:on={i === at}
-						onclick={onclose}
-						onmouseenter={() => (at = i)}
-					>
+					<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved above -->
+					<a href={l.href} class:on={i === at} onclick={onclose} onmouseenter={() => (at = i)}>
 						<strong>{l.name}</strong><span class="faint">{l.region}</span>
 					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				</li>
 			{:else}
 				<li class="none muted">No location matches “{q}”.</li>

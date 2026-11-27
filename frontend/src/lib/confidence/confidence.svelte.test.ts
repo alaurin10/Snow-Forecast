@@ -263,6 +263,21 @@ describe('confidence tab', () => {
 		expectMarksInside(container);
 	});
 
+	it('leaves out the trend and the scorecard for a spot (no history)', () => {
+		const { queryByRole, getByRole } = render(ConfidenceTab, {
+			snap: snowy,
+			band: snowy.bands[1],
+			trend: null,
+			scores: null,
+			units: 'imperial',
+			history: false,
+			width: 380
+		});
+		expect(getByRole('heading', { name: 'How sure is this forecast?' })).toBeTruthy();
+		expect(queryByRole('heading', { name: 'How the forecast has changed' })).toBeNull();
+		expect(queryByRole('heading', { name: 'Track record here' })).toBeNull();
+	});
+
 	it('switches the model chart between each day and the running total', async () => {
 		const { getByRole, container } = render(ConfidenceTab, {
 			snap: snowy,

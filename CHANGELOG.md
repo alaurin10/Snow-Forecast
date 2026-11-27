@@ -46,7 +46,15 @@ Notable changes to Snow Watch. The format follows
   2,000 calls, `spots` in `config/forecast.yaml`). `GET /api/spot/nearby` adds the
   nearest snow stations, field reports and the avalanche zone with its rating. Built
   spots are kept for an hour; new ones are rate limited per visitor and for the site.
-  Without a server, both answer 503 and nothing else changes. The app's side follows.
+  Without a server, both answer 503 and nothing else changes.
+- **Forecasts anywhere, part 2: the app.** With a self-hosted forecast server, tap any
+  point on the map and press **Full forecast here** (or right-click, or long-press) for
+  the same forecast page a location has, at `/spot?lat=…&lon=…` (shareable): three bands
+  from the terrain, the tapped one marked "This spot" and opened first, with the
+  Forecast, Confidence, Backcountry (the zone's rating) and Observed tabs; no trend,
+  scorecard or webcams. The last 10 spots are listed on the Overview and in the location
+  palette (Ctrl/⌘ K), and kept for offline use. The owner can **save a spot as a
+  location** from its page.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

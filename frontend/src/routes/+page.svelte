@@ -20,8 +20,12 @@
 	import LocationDaySheet from '../lib/components/LocationDaySheet.svelte';
 	import StormSheet from '../lib/components/StormSheet.svelte';
 	import { monthDay, weekday } from '../lib/time';
+	import { forgetSpots, recentSpots, spotSearch, type RecentSpot } from '../lib/recentSpots';
+	import { elevation } from '../lib/units';
 
 	let rows = $state<OverviewRow[] | null>(null);
+	// Spots opened lately in this browser (points tapped on the map for a full forecast).
+	let spots = $derived<RecentSpot[]>(recentSpots());
 	let error = $state<string | null>(null);
 	let retry = $state(0);
 
@@ -246,6 +250,31 @@
 		<span><i style:background="var(--mix)"></i>Mixed</span>
 		<span><i style:background="var(--rain)"></i>Rain</span>
 	</div>
+{/if}
+
+{#if spots.length}
+	<section class="card spots" aria-labelledby="spots-h">
+		<div class="spotshead">
+			<h2 id="spots-h">Recent spots</h2>
+			<button
+				class="link small"
+				onclick={() => {
+					forgetSpots();
+					spots = [];
+				}}>Clear</button
+			>
+		</div>
+		<ul>
+			{#each spots as sp (`${sp.lat},${sp.lon}`)}
+				<li>
+					<a href="{resolve('/spot')}{spotSearch(sp.lat, sp.lon)}"
+						><strong>{sp.name}</strong>
+						<span class="faint num">{elevation(sp.elev_m, prefs.units)}</span></a
+					>
+				</li>
+			{/each}
+		</ul>
+	</section>
 {/if}
 
 {#if openStorm}
@@ -578,5 +607,43 @@
 			padding: 4px 16px 14px;
 			scroll-padding-inline: 16px;
 		}
+	}
+	.spots {
+		margin-top: 16px;
+	}
+	.spotshead {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.spots h2 {
+		margin: 0 0 6px;
+		font-size: 1rem;
+	}
+	.spots ul {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 2px;
+	}
+	.spots a {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 6px;
+		border-radius: 10px;
+		color: var(--text);
+		text-decoration: none;
+		min-width: 0;
+	}
+	.spots a strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.spots a:hover {
+		background: var(--hover);
 	}
 </style>

@@ -3,7 +3,8 @@
 // - /api/* is network-first, falling back to the last good response (up to 2 days
 //   old) when offline. Owner endpoints (/api/me, /api/auth, /api/admin) are never
 //   cached: they depend on who is signed in. Nor are the map's tap-for-numbers answers
-//   (/api/map/point): every tap is a new spot.
+//   (/api/map/point): every tap is a new spot. A spot's full forecast (/api/spot, a point
+//   tapped on the map) is network-first too, keeping only the last 10.
 //   The copy is written in the background, so the page never waits for it; entries past
 //   2 days, and precipitation pictures the newest index no longer names, are pruned.
 // - Map tiles, terrain, label fonts and ski runs saved for offline use (Map → offline
@@ -15,7 +16,7 @@
 /// <reference lib="webworker" />
 import { self } from '$app/service-worker';
 import { assets, immutable } from '$app/manifest';
-import { precipFiles, route } from './lib/swRoute';
+import { precipFiles, route, spotsToDrop } from './lib/swRoute';
 
 const shellFiles = [
 	'/',
@@ -103,6 +104,18 @@ async function prunePrecip(index: Response) {
 	}
 }
 
+/** Keep only the newest few spots (each is a forecast for one tapped point). */
+async function pruneSpots() {
+	const cache = await caches.open(API);
+	const entries = [];
+	for (const req of await cache.keys()) {
+		if (!new URL(req.url).pathname.startsWith('/api/spot')) continue;
+		const res = await cache.match(req);
+		entries.push({ url: req.url, at: Number(res?.headers.get('x-sw-cached-at') ?? 0) });
+	}
+	for (const url of spotsToDrop(entries)) await cache.delete(url);
+}
+
 /** Keep a copy of a good answer for offline use, without holding up the page. */
 async function keep(request: Request, copy: Response) {
 	const headers = new Headers(copy.headers);
@@ -110,7 +123,9 @@ async function keep(request: Request, copy: Response) {
 	const body = await copy.blob();
 	const cache = await caches.open(API);
 	await cache.put(request, new Response(body, { status: copy.status, headers }));
-	if (new URL(request.url).pathname === '/api/precip') await prunePrecip(new Response(body));
+	const path = new URL(request.url).pathname;
+	if (path === '/api/precip') await prunePrecip(new Response(body));
+	if (path.startsWith('/api/spot')) await pruneSpots();
 	if (Date.now() - prunedAt > PRUNE_EVERY_MS) await pruneOld();
 }
 
@@ -171,7 +186,7 @@ self.addEventListener('fetch', (event: FetchEvent) => {
 	});
 	if (how === 'saved') event.respondWith(savedFirst(request));
 	else if (how === 'network-then-saved') event.respondWith(networkThenSaved(request));
-	else if (how === 'api') event.respondWith(apiFirst(event));
+	else if (how === 'api' || how === 'spot') event.respondWith(apiFirst(event));
 	else if (how === 'page') event.respondWith(pageNetworkFirst(request));
 	else if (how === 'shell')
 		event.respondWith(caches.match(request, { cacheName: SHELL }).then((r) => r ?? fetch(request)));

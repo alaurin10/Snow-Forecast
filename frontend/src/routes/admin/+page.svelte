@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
+	import { spotToResolve } from '../../lib/manage/fromSpot';
 	import {
 		adminLocations,
 		adminLookups,
@@ -68,6 +71,12 @@
 			me = await getMe();
 			if (!me.is_owner) return;
 			[locs, budget, lookups] = await Promise.all([adminLocations(), getBudget(), adminLookups()]);
+			// From a spot's "Save as location": straight to the review of its details.
+			const fromSpot = spotToResolve(new URLSearchParams(page.url.search));
+			if (fromSpot && mode === 'list') {
+				replaceState(resolve('/admin'), {});
+				void detect(fromSpot);
+			}
 		} catch (e) {
 			if (!signedOut(e)) error = friendlyError(e);
 		}
