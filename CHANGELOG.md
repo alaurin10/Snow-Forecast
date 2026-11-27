@@ -7,6 +7,20 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Self-hosted forecasts (optional).** Snow Watch can run Open-Meteo's own server next
+  to it (compose profile `openmeteo`, then `OPEN_METEO_URL=http://openmeteo:8080`; see
+  DEPLOYMENT.md step 5). Every forecast and elevation then comes from it for free; only
+  ensembles use the public API (~24 calls per location a day instead of ~316), so up to
+  50 locations with no pause between them. If the server is down, saved locations fall
+  back to the public API within its daily limit. Off by default: nothing changes until
+  it's turned on. Needs a CPU with AVX2 or ARM64.
+- **Status shows the self-hosted server**: whether it's answering, how fast, today's
+  requests and how many fell back to the public API. The usage bar now counts public
+  Open-Meteo calls from a ledger of every request, and Manage shows the budget split
+  between the server and the public API.
+- `snowwatch openmeteo status` (CPU, one request's time, today's fallbacks and public use,
+  each model's latest run) and `snowwatch check-sources --local` (every model and
+  variable on the server, and the share of empty values against the public API).
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.
@@ -53,6 +67,10 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- `snowwatch budget` prints the public and self-hosted estimates separately, plus today's
+  actual public calls. The api container's memory limit is 768 MB (was 384 MB), ahead of
+  forecasts built on demand. NWS, SNOTEL and the BC snow-pillow server get at least half a
+  second between requests.
 - **The backend tests no longer reach the network**: the worker's map test and the
   healthcheck test stubbed only part of their jobs, so they drew every weather layer and
   fetched avalanche forecasts for real. The suite takes about a minute and a half, down

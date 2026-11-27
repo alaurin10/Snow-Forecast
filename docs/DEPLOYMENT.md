@@ -49,7 +49,8 @@ docker compose run --rm worker snowwatch pull
 `init` creates the database and adds six starting locations
 (`config/seed-locations.yaml`). `lookups refresh` loads the ski-area list, snow
 stations and avalanche zones that Manage uses. `pull` fetches the first forecasts
-(a few minutes: it pauses 20 s between locations). After that the worker runs by
+(a few minutes: it pauses 20 s between locations, unless forecasts are self-hosted,
+step 5). After that the worker runs by
 itself at 03:30, 09:30, 15:30 and 21:30 UTC.
 
 Check it: `curl -s http://localhost:8090/api/health` should say `"status":"ok"`,
@@ -109,6 +110,77 @@ sudo systemctl daemon-reload && sudo systemctl enable --now snowwatch-deploy.tim
 
 Keep that checkout free of local edits (it only fast-forwards). Watch it with
 `journalctl -u snowwatch-deploy -f`.
+
+## 5. Self-hosted forecasts (optional)
+
+Every forecast comes from [Open-Meteo](https://open-meteo.com/). Its free public API
+allows 10,000 weighted calls a day, which caps Snow Watch at 25 locations (each uses
+about 316 a day) and keeps runs 3 hours apart with a 20 s pause between locations.
+Open-Meteo's server is open source and can run next to Snow Watch: it reads the public
+Open-Meteo data on AWS as it's asked for and caches what it reads, so nothing has to be
+downloaded up front. With it, forecasts and elevations cost nothing; only ensembles
+still use the public API (the public data has no per-member snowfall), about 24 calls
+per location a day. That lifts the cap to 50 locations and removes the pause.
+
+It's **opt-in** (the compose profile `openmeteo`), because the server needs a CPU that
+an older or virtual machine may not offer. Without it, nothing changes.
+
+**What it needs:**
+- A CPU with **AVX2** (x86) or an ARM64 CPU. On a Proxmox VM, set the CPU type to
+  `host` (VM → Hardware → Processors → Type); the default type hides AVX2. Check with
+  `grep -c avx2 /proc/cpuinfo` (more than 0).
+- **Memory:** about 0.2–0.5 GB (the container is capped at 1 GB), plus file cache.
+- **Disk:** the cache file, 30 GB by default, reserved on disk at once
+  (`OPEN_METEO_CACHE_SIZE` in `.env` changes it, e.g. `20GB`).
+- **Bandwidth:** each location's first run reads ~27 MB; after that the server keeps
+  its cache fresh. Expect roughly 300–450 GB a month of downloads; check your
+  internet plan's data cap.
+
+**Turn it on:** add two lines to `.env`:
+
+```
+COMPOSE_PROFILES=openmeteo
+OPEN_METEO_URL=http://openmeteo:8080
+```
+
+If your `.env` still has `MAX_LOCATIONS=25` from an older `.env.example`, remove it
+(with the server the default is 50). Then:
+
+```bash
+docker compose up -d
+```
+```bash
+docker compose run --rm worker snowwatch openmeteo status
+```
+
+`status` checks the CPU, times one small request to the server, shows today's
+self-hosted requests, fallbacks and public calls, and each model's latest run in the
+public data; it ends with `OK`. The first run after turning it on is slow (a minute or
+two for the first location while the cache fills, then ~30 s each); later runs take a
+few seconds per location. The Status page gains a "Self-hosted forecasts" card, and
+Manage shows the split budget. The automatic deploy (`deploy/deploy.sh`) handles
+everything after that.
+
+**If the server is down,** each saved location's forecast requests are retried on the
+public API, while today's public budget has room, and the run still succeeds
+(`OPEN_METEO_FALLBACK=0` turns that off). Locations are 20 s apart again while that
+lasts, and runs take minutes instead of seconds. The worker logs how many requests fell
+back, and the Status page shows them. Ensembles always use the public API, within the budget.
+
+The server listens only on the compose network (no published port); `api` and `worker`
+reach it at `http://openmeteo:8080`. It can also run on another machine: point
+`OPEN_METEO_URL` there instead (for example a small cloud VM in AWS us-west-2, where the
+data lives, reached over Tailscale) and leave `COMPOSE_PROFILES` out.
+
+**Updating the server:** the image is pinned by digest in `docker-compose.yml`, so it
+changes only when that line does. Bump it in a pull request of its own: pull the new
+image, run it with `OPEN_METEO_URL` set, check
+`snowwatch check-sources --local --write ../docs/SOURCES.md` (every model and variable,
+and the share of empty values against the public API), then change the digest. The
+server is AGPL-3.0; Snow Watch runs it unmodified.
+
+To turn it off again, remove the two lines and run `docker compose up -d --remove-orphans`;
+`docker volume rm snowwatch_openmeteo-data` frees the cache's disk.
 
 ## Everyday tasks
 
@@ -297,4 +369,7 @@ the update as well (see above).
 | Map: no ski runs | `docker compose run --rm worker snowwatch ski-map` |
 | Observed: "No snow station is set" | `docker compose run --rm worker snowwatch locations stations` (after `lookups refresh`) |
 | Disk filling up | `docker image prune -f`; lower `TILES_MAX_MB` |
+| `openmeteo` keeps restarting, `Illegal instruction` in `docker compose logs openmeteo` | The CPU has no AVX2. On a VM, set the CPU type to `host`; otherwise remove `COMPOSE_PROFILES` and `OPEN_METEO_URL` from `.env` |
+| Status: "Self-hosted forecasts: Not answering" | `docker compose run --rm worker snowwatch openmeteo status`, then `docker compose logs openmeteo`. Runs fall back to the public API meanwhile |
+| `cannotCreateFile ... cache.bin, errno 13` | The server's data folder isn't writable: keep the named volume from `docker-compose.yml` rather than a bind mount |
 | Worker logs `NumPy ... X86_V2` | Give the VM the host's CPU type (NumPy is pinned below 2.4 to avoid this, but it also speeds up runs) |

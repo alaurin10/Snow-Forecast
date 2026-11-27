@@ -8,7 +8,7 @@ running a public or commercial installation.
 
 | Source | Used for | Terms |
 |---|---|---|
-| [Open-Meteo](https://open-meteo.com/) | Forecast models, ensembles, elevation, timezones | Data CC BY 4.0; the free API is for non-commercial use |
+| [Open-Meteo](https://open-meteo.com/) | Forecast models, ensembles, elevation, timezones (from the public API, or from the public data on AWS through a self-hosted Open-Meteo server) | Data CC BY 4.0; the free API is for non-commercial use |
 | [NOAA / National Weather Service](https://www.weather.gov/) | Alerts, forecast offices; HRRR and National Blend of Models forecasts for the map (NOAA Open Data Dissemination on AWS); NOHRSC's SNODAS snow depth (via NSIDC) and National Snowfall Analysis for the map | US public domain |
 | [Environment and Climate Change Canada](https://eccc-msc.github.io/open-data/) | Radar (North American composite, precipitation type, nowcast), HRDPS, RDPS and GDPS forecasts and snow totals, snow level, wind and CaLDAS snow depth for the map | Open Government Licence – Canada |
 | [RainViewer](https://www.rainviewer.com/) | Backup radar, when Environment Canada's is unavailable | Free API, with credit |
@@ -45,3 +45,13 @@ open-source packages, each under its own licence; the full lists are in
 | Leaflet | BSD-2-Clause |
 | d3-array, d3-scale, d3-shape, d3-time-format | ISC |
 | Inter and Manrope fonts (via Fontsource) | SIL Open Font License 1.1 |
+
+### Optional: the Open-Meteo server
+
+With the compose profile `openmeteo`, Snow Watch also runs
+[Open-Meteo's server](https://github.com/open-meteo/open-meteo)
+(`ghcr.io/open-meteo/open-meteo`, pinned by digest in `docker-compose.yml`) as a separate
+container. It is licensed AGPL-3.0; Snow Watch runs the published image unmodified and
+talks to it only over HTTP, so its own code stays MIT. The source of the exact version
+is linked from the image's labels (`org.opencontainers.image.revision`). The weather
+data it reads is Open-Meteo's, CC BY 4.0, credited above.

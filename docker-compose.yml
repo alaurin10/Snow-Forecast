@@ -1,5 +1,5 @@
-# Snow Watch: the api (web app and API) and the worker (forecast runs, backups).
-# See docs/DEPLOYMENT.md.
+# Snow Watch: the api (web app and API) and the worker (forecast runs, backups), plus
+# an optional self-hosted Open-Meteo server. See docs/DEPLOYMENT.md.
 #   GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
 #   docker compose run --rm worker snowwatch init     # first time only
 name: snowwatch
@@ -30,7 +30,7 @@ services:
       - ./data:/data
     ports:
       - "8090:8000" # point your reverse proxy or tunnel at http://<host>:8090
-    mem_limit: 384m
+    mem_limit: 768m
     restart: unless-stopped
 
   worker:
@@ -59,3 +59,35 @@ services:
     # ~470 MB, wide radar ~320, forecast ~570, layers ~550, totals ~400.
     mem_limit: 2560m
     restart: unless-stopped
+
+  # A self-hosted Open-Meteo server for forecasts and elevation (ensembles stay on the
+  # public API). Opt-in: it starts only with COMPOSE_PROFILES=openmeteo in .env, and the
+  # app uses it only with OPEN_METEO_URL=http://openmeteo:8080. It needs a CPU with AVX2
+  # (x86) or ARM64; without, it crash-loops with "Illegal instruction". It reads the
+  # public Open-Meteo data on AWS as asked and caches it in the volume (CACHE_SIZE is
+  # reserved on disk at once). See docs/DEPLOYMENT.md, "Self-hosted forecasts".
+  openmeteo:
+    <<: *hardening
+    profiles: [openmeteo]
+    # Pinned: bumping it is a deliberate PR (docs/DEPLOYMENT.md). AGPL-3.0, run unmodified.
+    image: ghcr.io/open-meteo/open-meteo@sha256:bf94e8b39761b59a91bd04bb926b3834cad00eaf71f1aa64b2fd17fbe987846a
+    environment:
+      REMOTE_DATA_DIRECTORY: https://openmeteo.s3.amazonaws.com/data/
+      CACHE_SIZE: ${OPEN_METEO_CACHE_SIZE:-30GB}
+    volumes:
+      # A named volume: the image runs as a non-root user, and a root-owned bind mount
+      # fails with "cannotCreateFile ... cache.bin, errno 13".
+      - openmeteo-data:/app/data
+    # No published port: only api and worker reach it, on the compose network.
+    healthcheck:
+      # Any HTTP answer (the root is a 404) means the server is up.
+      test: ["CMD", "curl", "-so", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    mem_limit: 1g
+    restart: unless-stopped
+
+volumes:
+  openmeteo-data:
