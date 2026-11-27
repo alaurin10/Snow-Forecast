@@ -390,6 +390,10 @@ container hardened like the compose service: `read_only`, `cap_drop: [ALL]`,
   | GEPS (`gem_global_ensemble`) | 77 s | 0.25 GB | 0.08 GB | 0.07 GB |
 
   Peak memory 722 MiB (GEFS 0.25°, both CPUs busy while converting).
+- **A second pass on top** (GEFS 06z, ECMWF 06z, GEPS 12z, 17:25 UTC): 324, 229, 499 and
+  116 s, and the kept files grew by 18 MB in all (1.30 → 1.32 GB). After ECMWF's 06z run
+  (144 h) its `meta.json` said the data ends ~140 h ahead, yet the server's answer still
+  reached 342 h: the rolling file keeps the 00z run's later hours.
 - **ECMWF works from `data.ecmwf.int`** this time (no `SlowDown`), with all 51 members,
   reaching 351 h ahead at 09:30 UTC.
 - **The running server picks up each new run**: it answered GEPS with empty members, then
