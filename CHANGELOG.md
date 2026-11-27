@@ -65,6 +65,9 @@ Notable changes to Snow Watch. The format follows
 - **Spots start before you press the button.** Once the map's spot panel has been open
   on a point for a moment, its full forecast starts making, so "Full forecast here" is
   often instant. It has an allowance of its own and never makes others wait.
+- **A spot shows just its own elevation**: the forecast for where you clicked, without the
+  bands above and below. Signed in as the owner, every spot panel you open starts its
+  forecast early, with no allowance.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

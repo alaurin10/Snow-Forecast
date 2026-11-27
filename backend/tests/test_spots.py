@@ -660,3 +660,36 @@ def test_api_spot_early(spot_client: TestClient) -> None:
         for i in range(1, 10)
     }
     assert codes == {200, 204}
+
+
+def test_the_owner_has_no_early_allowance_to_keep_to() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    assert all(svc.early(47 + i / 100, -121, "me", owner=True) is not None for i in range(20))
+    assert all(svc.early(48 + i / 100, -121, "v") is not None for i in range(6))
+    assert svc.early(48.5, -121, "v") is None  # visitors still have theirs
+    # The site's hourly cap still applies to the owner.
+    svc.site.burst = 0
+    svc.site._buckets.clear()
+    assert svc.early(49, -121, "me", owner=True) is None
+
+
+def test_api_spot_early_for_the_signed_in_owner(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    import_yaml(conn, REPO_ROOT / "config" / "seed-locations.yaml", max_locations=25)
+    conn.commit()
+    s = spot_settings(settings).model_copy(update={"owner_password": "correct horse battery"})
+    app = create_app(s)
+    app.state.spots = spots.make_service(
+        s, config(), lambda: fetcher_for(s, transport=spot_transport(), tries=1)
+    )
+    client = TestClient(app)
+    origin = {"Origin": "http://testserver"}
+    r = client.post("/api/auth/login", json={"password": "correct horse battery"}, headers=origin)
+    assert r.status_code == 200
+    codes = [
+        client.get("/api/spot", params={"lat": 47 + i / 100, "lon": -121, "early": 1}).status_code
+        for i in range(10)
+    ]
+    assert codes == [200] * 10

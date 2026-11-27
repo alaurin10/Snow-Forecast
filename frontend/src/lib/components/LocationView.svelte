@@ -213,12 +213,14 @@
 	const MAP_ICON = 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14';
 	// Two lines on a pair of axes, as on the Compare tab.
 	const COMPARE_ICON = 'M4 4v16h16M7 15l4-5 3 3 5-6M7 9l4 3 3-2 5 5';
-	// A spot opens at its own band (the one holding the point), without changing the
-	// band chosen for saved locations.
-	let spotBand = $state<string | null>(null);
-	const chosenBand = $derived(spot ? (spotBand ?? spot.band) : prefs.band);
-	const setBand = (b: string) => (spot ? (spotBand = b) : prefs.setBand(b as BandName));
+	// A spot shows only its own elevation, the band holding the point (the others are
+	// still made, for the Backcountry outlook's snow up high and rain lower down); a
+	// location, the band chosen for saved locations.
+	const chosenBand = $derived(spot ? spot.band : prefs.band);
+	const setBand = (b: string) => prefs.setBand(b as BandName);
 	const band = $derived(snap.bands.find((b) => b.band === chosenBand) ?? snap.bands[1]);
+	// The elevations the charts mark (the freezing-level view's lines): a spot's only.
+	const chartBands = $derived(spot ? [band] : snap.bands);
 	const units = $derived<UnitSystem>(prefs.units);
 	const backcountry = $derived(snap?.location.kind === 'backcountry');
 	const c = $derived(converters(units));
@@ -304,9 +306,6 @@
 			? `${Math.abs(spot.lat).toFixed(3)}° ${spot.lat >= 0 ? 'N' : 'S'}, ${Math.abs(spot.lon).toFixed(3)}° ${spot.lon >= 0 ? 'E' : 'W'}`
 			: ''
 	);
-	const spotBandWord = $derived(
-		spot ? { base: 'lowest band', mid: 'middle band', summit: 'highest band' }[spot.band] : ''
-	);
 	const placeLine = $derived(spot ? coords : snap.location.region);
 	const avyRated = $derived(avy?.status === 'current' && !!avy.today_max);
 	const avyCenter = $derived(avy?.doc?.center ?? null);
@@ -331,7 +330,6 @@
 				>{#if phone}{coords} ·
 				{/if}{elevation(spot.elev_m, units)}</span
 			>
-			<span class="nw"><span class="tag">This spot</span> is the {spotBandWord}</span>
 			<span class="muted note1"
 				>Forecast for this spot, made now. No snow station history or forecast trend here.</span
 			>
@@ -382,7 +380,7 @@
 {/snippet}
 
 {#snippet elevationsCard()}
-	{#if snap}
+	{#if !spot}
 		<section class="card">
 			<h2>Base, mid and summit</h2>
 			<BandTable bands={snap.bands} {units} />
@@ -467,9 +465,11 @@
 		<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		{@render spotNote()}
 		{#if actions}<div class="mactions">{@render actions()}</div>{/if}
-		<p class="elevname" aria-hidden="true">
-			{band.label} <span class="faint">· {c.heightUnit}</span>
-		</p>
+		{#if !spot}
+			<p class="elevname" aria-hidden="true">
+				{band.label} <span class="faint">· {c.heightUnit}</span>
+			</p>
+		{/if}
 		<div class="mrow">
 			<span class="pillwrap" bind:this={pillwrap}>
 				<button
@@ -493,19 +493,20 @@
 					<span class="wxpop glass" id="wxpop" role="status">{wxLine}</span>
 				{/if}
 			</span>
-			<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
-				{#each snap.bands as b (b.band)}
-					<button
-						class="num"
-						aria-pressed={band.band === b.band}
-						class:spotband={spot?.band === b.band}
-						aria-label="{b.label}, {elevation(b.elev_m, units)}"
-						onclick={() => setBand(b.band)}>{elevNum(b.elev_m)}</button
-					>
-				{/each}
-			</div>
+			{#if !spot}
+				<div class="seg glass elevs" role="group" aria-label="Elevation, {c.heightUnit}">
+					{#each snap.bands as b (b.band)}
+						<button
+							class="num"
+							aria-pressed={band.band === b.band}
+							aria-label="{b.label}, {elevation(b.elev_m, units)}"
+							onclick={() => setBand(b.band)}>{elevNum(b.elev_m)}</button
+						>
+					{/each}
+				</div>
+			{/if}
 		</div>
-		{@render elevBand()}
+		{#if !spot}{@render elevBand()}{/if}
 	{:else}
 		<!-- eslint-disable svelte/no-navigation-without-resolve -->
 		<header class="lhead">
@@ -558,20 +559,19 @@
 		<!-- Which section and which elevation: two pills that scroll with the page. -->
 		<div class="ltools" bind:this={toolsEl}>
 			{@render sectionTabs()}
-			<div class="seg glass elev" role="group" aria-label="Elevation">
-				{#each snap.bands as b (b.band)}
-					<button
-						aria-pressed={band.band === b.band}
-						class:spotband={spot?.band === b.band}
-						onclick={() => setBand(b.band)}
-						><span class="bn">{b.label}</span><span class="be num"
-							>{elevation(b.elev_m, units)}</span
-						></button
-					>
-				{/each}
-			</div>
+			{#if !spot}
+				<div class="seg glass elev" role="group" aria-label="Elevation">
+					{#each snap.bands as b (b.band)}
+						<button aria-pressed={band.band === b.band} onclick={() => setBand(b.band)}
+							><span class="bn">{b.label}</span><span class="be num"
+								>{elevation(b.elev_m, units)}</span
+							></button
+						>
+					{/each}
+				</div>
+			{/if}
 		</div>
-		{@render elevBand()}
+		{#if !spot}{@render elevBand()}{/if}
 
 		<section class="card outlook" aria-label="Outlook">
 			<div>
@@ -663,7 +663,6 @@
 						<button
 							class="num"
 							aria-pressed={band!.band === b.band}
-							class:spotband={spot?.band === b.band}
 							aria-label="{b.label}, {elevation(b.elev_m, units)}"
 							title="{b.label}, {elevation(b.elev_m, units)}"
 							onclick={() => setBand(b.band)}>{elevNum(b.elev_m)}</button
@@ -693,7 +692,7 @@
 		<div class="stackcol">
 			{#if phone}
 				<section class="card chartcard">
-					<ForecastChart {band} bands={snap.bands} {units} bind:range place={place ?? undefined} />
+					<ForecastChart {band} bands={chartBands} {units} bind:range place={place ?? undefined} />
 				</section>
 				{#if backcountry}
 					<section class="card thin">
@@ -772,7 +771,7 @@
 				<section class="card chartcard">
 					<ForecastChart
 						{band}
-						bands={snap.bands}
+						bands={chartBands}
 						{units}
 						onpick={pickTime}
 						bind:range
@@ -829,7 +828,7 @@
 	{#if hourlyDay}
 		<DaySheet
 			{band}
-			bands={snap.bands}
+			bands={chartBands}
 			{units}
 			date={hourlyDay.date}
 			start={hourlyDay.start}
@@ -1451,31 +1450,6 @@
 	.note1 {
 		flex: 1 0 100%;
 		font-size: 0.82rem;
-	}
-	.tag,
-	.spotband::after {
-		display: inline-block;
-		padding: 0 7px;
-		border-radius: 999px;
-		background: var(--accent-soft);
-		color: var(--accent-ink);
-		font-size: 0.72rem;
-		font-weight: 600;
-		line-height: 1.6;
-	}
-	/* The band holding the point: a dot on its button in every elevation picker. */
-	.spotband {
-		position: relative;
-	}
-	.spotband::after {
-		content: '';
-		position: absolute;
-		top: 4px;
-		right: 4px;
-		width: 6px;
-		height: 6px;
-		padding: 0;
-		background: var(--accent);
 	}
 	.mactions {
 		display: flex;

@@ -621,6 +621,8 @@
 		if (m === null || !elevs.length) return '';
 		const lo = elevs[0].m;
 		const hi = elevs[elevs.length - 1].m;
+		// One elevation marked (a spot's page): above or below it.
+		if (elevs.length === 1) return m < lo ? 'below this spot' : 'above this spot';
 		return m < lo ? 'below base' : m > hi ? 'above summit' : 'between base and summit';
 	};
 	const snowTxt = (st: Step) =>

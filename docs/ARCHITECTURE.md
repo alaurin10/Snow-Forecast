@@ -341,8 +341,8 @@ and recorded by name. Nightly (`store/retention.py`):
   (300 at most, per ~100 m); new ones are limited per visitor (8, then one every 15 s),
   to 2 at a time and to about 600 an hour for the whole site, and run in the thread
   pool; cached ones have a lighter limit. The map's early builds (`early=1`, when the
-  spot panel opens) have their own small allowance per visitor, never wait for a build
-  slot, and count against the site's hourly cap. Public ensembles for spots stay within a daily
+  spot panel opens) have their own small allowance per visitor (none for the signed-in
+  owner), never wait for a build slot, and count against the site's hourly cap. Public ensembles for spots stay within a daily
   allowance, and the outline check rejects points outside the US and Canada before any
   request. `/api/spot/nearby` reads local files only.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
@@ -369,7 +369,8 @@ notifications, and waits for the page's "Reload" before switching to a new versi
 
 A location's page and a spot's page are one component, `LocationView`: the route loads
 the forecast and passes loaders for the rest (trend, scorecard, nearby, avalanche), and
-a section with no loader is left out, so a spot shows no trend, scorecard or webcams.
+a section with no loader is left out, so a spot shows no trend, scorecard or webcams,
+and only its own elevation (its other two bands still feed the Backcountry outlook).
 With `/api/meta`'s `local_forecasts`, the map's spot panel offers "Full forecast here"
 and a right-click or long press opens one (`/spot?lat=…&lon=…`); the owner can save a
 spot as a location from its page (Manage, with its three bands filled in).

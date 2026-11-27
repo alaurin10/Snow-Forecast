@@ -16,6 +16,7 @@ from snowwatch import avalanche, observations, spots, stations
 from snowwatch import avalanche_zones as zones
 from snowwatch import ensembles as ens
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
+from snowwatch.api.auth import viewer_from
 from snowwatch.api.models import (
     BandSummary,
     BestDay,
@@ -757,14 +758,16 @@ def make_router() -> APIRouter:
         Open-Meteo server or while it can't answer; 429 past a visitor's limit.
 
         `early=1`: the map's spot panel opened on the point, so start it now if that costs
-        nothing (SpotService.early); 204 when it's skipped or fails, never an error."""
+        nothing (SpotService.early; the signed-in owner has no early allowance to keep to);
+        204 when it's skipped or fails, never an error."""
         settings: Settings = request.app.state.settings
         if not settings.local_open_meteo:
             raise HTTPException(503, "forecasts anywhere need a self-hosted Open-Meteo server")
         svc: spots.SpotService = request.app.state.spots
         if early:
             try:
-                got = svc.early(lat, lon, client_key(request))
+                owner = viewer_from(request).is_owner
+                got = svc.early(lat, lon, client_key(request), owner=owner)
             except (spots.OutsideCoverage, spots.SpotUnavailable):
                 got = None
             if got is None:

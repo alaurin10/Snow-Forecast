@@ -798,6 +798,20 @@ Otherwise it answers 204 at once. Hardware: one build is ~0.4 s of the API's CPU
 case for one visitor is a build every 10 s, and the site's 600 an hour and 2 at once
 still bound everything. A tap that's never followed by the button costs that build.
 
+**One elevation on a spot's page, and no early allowance for the owner** (a third PR,
+at the owner's choice):
+- A spot's page shows only the clicked elevation: no elevation picker, no base/mid/
+  summit table, and the charts mark only that elevation. The other two bands are still
+  made, since the Backcountry outlook reads snow up high and rain lower down from them.
+  Building only one wouldn't be faster: against the pinned server, a spot's blend and
+  six model requests took 4.0 s for one elevation and 4.5 s for three in a new area,
+  both instant when warm, since every band reads the same grid at the same lat/lon.
+- The signed-in owner's early builds skip the per-visitor early allowance (they still
+  count against the site's hourly cap and wait for no build slot). The allowance stays
+  for everyone else: the site is public, a build costs the server work and, while
+  ensembles come from the public API, a share of the spots' daily ensemble allowance
+  even if the button is never pressed.
+
 **Keeping the server's cache warm over the mountains: not done**, from a sandbox test
 against the pinned server (each line of spots in a fresh range, after the server's
 one-time setup of 30 s):
