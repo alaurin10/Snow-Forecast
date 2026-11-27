@@ -630,6 +630,13 @@
         "budget": {
           "type": "integer"
         },
+        "ensembles_local": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "ensembles_total": {
           "type": "number"
         },
@@ -1483,6 +1490,98 @@
         "n"
       ],
       "title": "EnsStats",
+      "type": "object"
+    },
+    "EnsembleSystemOut": {
+      "description": "Where one ensemble system's members come from (milestone 1b).",
+      "properties": {
+        "age_h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "system": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "label",
+        "source",
+        "run",
+        "age_h",
+        "reason",
+        "since"
+      ],
+      "title": "EnsembleSystemOut",
+      "type": "object"
+    },
+    "EnsemblesOut": {
+      "description": "Self-hosted ensembles (OPEN_METEO_ENSEMBLES, with OPEN_METEO_URL set).",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "shadow": {
+          "items": {
+            "$ref": "#/$defs/ShadowOut"
+          },
+          "type": "array"
+        },
+        "systems": {
+          "items": {
+            "$ref": "#/$defs/EnsembleSystemOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "systems",
+        "shadow"
+      ],
+      "title": "EnsemblesOut",
       "type": "object"
     },
     "Flag": {
@@ -5199,6 +5298,90 @@
       "title": "SaveOut",
       "type": "object"
     },
+    "ShadowOut": {
+      "description": "A system's shadow-mode comparisons over the last 7 days: the server's answers\nagainst the public API's for the same requests.",
+      "properties": {
+        "comparisons": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "max_diff_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mean_diff_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members_local_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "members_public_max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reach_gap_h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "same_run": {
+          "type": "integer"
+        },
+        "system": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "label",
+        "comparisons",
+        "errors",
+        "same_run",
+        "members_local_min",
+        "members_public_max",
+        "reach_gap_h",
+        "mean_diff_cm",
+        "max_diff_cm"
+      ],
+      "title": "ShadowOut",
+      "type": "object"
+    },
     "SkyDay": {
       "description": "Daytime sky at the summit: mean cloud per layer (%) and the lowest visibility.",
       "properties": {
@@ -5739,6 +5922,17 @@
       "properties": {
         "budget": {
           "type": "number"
+        },
+        "ensembles": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnsemblesOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "local": {
           "anyOf": [

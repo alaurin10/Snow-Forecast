@@ -7,6 +7,8 @@ built with zoneinfo and daylight-saving changes come out right.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from snowwatch.config import ForecastConfig
 from snowwatch.models import Location
 from snowwatch.sources.base import Request
@@ -227,10 +229,11 @@ def location_requests(
     return reqs
 
 
-def public_daily_weight(loc: Location, cfg: ForecastConfig) -> float:
-    """Estimated weight per day of one location's ensembles, which always use the public
-    API (a self-hosted server has no per-member data)."""
-    ens = sum(ensemble_request(loc, s).weight for s in cfg.ensembles)
+def public_daily_weight(loc: Location, cfg: ForecastConfig, local: Collection[str] = ()) -> float:
+    """Estimated weight per day of one location's ensembles on the public API: every
+    system but those the self-hosted server answers (`local`, milestone 1b), which are
+    free."""
+    ens = sum(ensemble_request(loc, s).weight for s in cfg.ensembles if s not in local)
     return round(ens * len(cfg.schedule.ensemble_runs_utc), 1)
 
 

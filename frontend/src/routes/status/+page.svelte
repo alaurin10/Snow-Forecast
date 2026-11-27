@@ -37,6 +37,12 @@
 	};
 	// A source is "late" when its last success is older than a day.
 	const late = (iso: string | null) => !iso || Date.now() - Date.parse(iso) > 26 * 3600 * 1000;
+	// A model run as "27 Nov 00z" (UTC, as runs are named).
+	const runName = (iso: string) => {
+		const d = new Date(iso);
+		const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+		return `${d.getUTCDate()} ${mon} ${String(d.getUTCHours()).padStart(2, '0')}z`;
+	};
 	const pct = $derived(status ? Math.min(100, (status.weight_today / status.budget) * 100) : 0);
 </script>
 
@@ -84,6 +90,86 @@
 				</p>
 				{#if !local.ok && local.last_error}
 					<p class="small err-line">{local.last_error}</p>
+				{/if}
+			</section>
+		{/if}
+
+		{#if status.ensembles}
+			{@const ens = status.ensembles}
+			{@const publicNow = ens.systems.filter(
+				(s) => ens.mode === 'local' && s.source !== 'self-hosted'
+			)}
+			<section class="card">
+				<h2>Ensembles</h2>
+				<p class="small">
+					{#if ens.mode === 'local'}From the self-hosted server while its downloaded run is fresh,
+						otherwise from the public API.
+					{:else if ens.mode === 'shadow'}From the public API; each run also asks the self-hosted
+						server and compares.
+					{:else}From the public API.{/if}
+				</p>
+				<div class="table-wrap" use:hscroll>
+					<table class="data">
+						<thead>
+							<tr><th>System</th><th>From</th><th>Run, age</th></tr>
+						</thead>
+						<tbody>
+							{#each ens.systems as s (s.system)}
+								<tr class:bad={publicNow.includes(s)}>
+									<th scope="row">{s.label}</th>
+									<td>{s.source === 'self-hosted' ? 'Self-hosted' : 'Public API'}</td>
+									<td class="age"
+										>{s.run ? `${runName(s.run)}, ${Math.round(s.age_h ?? 0)} h` : '–'}</td
+									>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				{#each publicNow as s (s.system)}
+					<p class="small err-line">
+						<strong class="warn">{s.label}</strong>: public API{s.since
+							? `, since ${ago(s.since)}`
+							: ''}{s.reason ? ` (${s.reason})` : ''}.
+					</p>
+				{/each}
+				{#if ens.shadow.length}
+					<h3 class="sub">Compared with the public API, last 7 days</h3>
+					<div class="table-wrap" use:hscroll>
+						<table class="data">
+							<thead>
+								<tr><th>System</th><th>Same run</th><th>Members</th><th>Diff, cm</th></tr>
+							</thead>
+							<tbody>
+								{#each ens.shadow as r (r.system)}
+									<tr>
+										<th scope="row">{r.label}</th>
+										<td class="num"
+											>{r.same_run} of {r.comparisons}{r.errors ? ` (${r.errors} failed)` : ''}</td
+										>
+										<td class="num">{r.members_local_min ?? '–'} / {r.members_public_max ?? '–'}</td
+										>
+										<td class="num"
+											>{r.mean_diff_cm === null
+												? '–'
+												: `${r.mean_diff_cm.toFixed(1)} / ${(r.max_diff_cm ?? 0).toFixed(1)}`}</td
+										>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<p class="small muted">
+						Same run: comparisons where both had the same model run; only those count towards the
+						differences. Members: the fewest the server gave / the most the public API gave. Diff:
+						how much members' 16-day snowfall differed, mean / largest.
+					</p>
+					{@const behind = Math.max(0, ...ens.shadow.map((r) => r.reach_gap_h ?? 0))}
+					{#if behind > 0}
+						<p class="small muted">
+							The server's forecasts reached up to {behind} h less far ahead than the public API's.
+						</p>
+					{/if}
 				{/if}
 			</section>
 		{/if}
@@ -213,6 +299,13 @@
 	.bad th,
 	.bad td,
 	.card.bad strong {
+		color: var(--temp);
+	}
+	.sub {
+		margin: 16px 0 8px;
+		font-size: 1rem;
+	}
+	.warn {
 		color: var(--temp);
 	}
 	.err-line {

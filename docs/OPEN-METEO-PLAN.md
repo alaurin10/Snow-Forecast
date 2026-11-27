@@ -2,10 +2,12 @@
 
 Status: **milestone 1 built** (27 Nov 2026): the opt-in `openmeteo` service, routing with
 the public fallback, the usage ledger and budget split, `snowwatch openmeteo status` and
-`check-sources --local`. **Milestone 1b PR 1 built** (27 Nov 2026): the opt-in
-`openmeteo-ensembles` downloader (compose profile `ensembles`) and its status, tested end
-to end in a sandbox; the week on the mini PC and PR 2 (the app using them) are next.
-Milestones 2–5 are planned. Each milestone's PRs tick its
+`check-sources --local`. **Milestone 1b built** (27 Nov 2026): PR 1, the opt-in
+`openmeteo-ensembles` downloader (compose profile `ensembles`) and its status; PR 2,
+`OPEN_METEO_ENSEMBLES` (`public` by default, `shadow`, `local`), per-system freshness,
+fallback and shadow comparisons, `check-ensembles`. Both tested end to end in a sandbox;
+the owner's rollout on the mini PC (a few days of downloads, a week of shadow, then
+local) is next. Milestones 2–5 are planned. Each milestone's PRs tick its
 checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -388,6 +390,10 @@ container hardened like the compose service: `read_only`, `cap_drop: [ALL]`,
   | GEPS (`gem_global_ensemble`) | 77 s | 0.25 GB | 0.08 GB | 0.07 GB |
 
   Peak memory 722 MiB (GEFS 0.25°, both CPUs busy while converting).
+- **A second pass on top** (GEFS 06z, ECMWF 06z, GEPS 12z, 17:25 UTC): 324, 229, 499 and
+  116 s, and the kept files grew by 18 MB in all (1.30 → 1.32 GB). After ECMWF's 06z run
+  (144 h) its `meta.json` said the data ends ~140 h ahead, yet the server's answer still
+  reached 342 h: the rolling file keeps the 00z run's later hours.
 - **ECMWF works from `data.ecmwf.int`** this time (no `SlowDown`), with all 51 members,
   reaching 351 h ahead at 09:30 UTC.
 - **The running server picks up each new run**: it answered GEPS with empty members, then
@@ -429,19 +435,19 @@ Choices made while building, beyond the checklist:
   `ecmwf_ifs025_ensemble`, `gem_global` → `cmc_gem_geps`).
 
 ### PR 2: the app uses them
-- [ ] `settings.py`: `OPEN_METEO_ENSEMBLES` = `public` (default: milestone 1, unchanged) |
+- [x] `settings.py`: `OPEN_METEO_ENSEMBLES` = `public` (default: milestone 1, unchanged) |
   `shadow` | `local`, used only when `OPEN_METEO_URL` is set.
-- [ ] **Freshness per system**, so a stalled downloader can't serve old runs as new:
+- [x] **Freshness per system**, so a stalled downloader can't serve old runs as new:
   - a system is *fresh* when its local run is no older than two of its cycles (GEFS
     14 h, ECMWF ENS 14 h for any run and 26 h for a 00z/12z run, GEPS 26 h), read from
     the volume's `meta.json`
   - and its response reaches at least as far ahead as expected (GEFS and GEPS ≥ 360 h,
     ECMWF ≥ 336 h from now); a shorter reach counts as a failure
-- [ ] **Routing** (`http.py`): in `local` mode, `ensemble-api.open-meteo.com/v1/ensemble`
+- [x] **Routing** (`http.py`): in `local` mode, `ensemble-api.open-meteo.com/v1/ensemble`
   is rewritten to the server only for fresh systems (the system is the request's
   `models`); otherwise, or on a failure, the public URL, under the ledger, as in
   milestone 1. Each system falls back on its own.
-- [ ] **What happens when ensembles fall back** (written down, and tested):
+- [x] **What happens when ensembles fall back** (written down, and tested):
   1. the cached ensembles (`ensemble_cache`, up to `ensemble_max_age_h`, 13 h) cover a
      short outage at no cost
   2. then the public API, on the public schedule (`ensemble_runs_utc`, mid band only):
@@ -460,30 +466,73 @@ Choices made while building, beyond the checklist:
 
   The Status page and `openmeteo status` say which systems are falling back and since
   when, and the worker logs it once per run.
-- [ ] **Schedule:** while a system is fresh, every run reads it (free); `ensemble_runs_utc`
+- [x] **Schedule:** while a system is fresh, every run reads it (free); `ensemble_runs_utc`
   applies only to public ensembles.
-- [ ] **Budget:** systems served locally cost 0 in `public_daily_weight`, `snowwatch
+- [x] **Budget:** systems served locally cost 0 in `public_daily_weight`, `snowwatch
   budget`, Manage and `/api/status` ("Ensembles: self-hosted").
-- [ ] **Shadow mode** (`shadow`): the app keeps using public ensembles as today, and each
+- [x] **Shadow mode** (`shadow`): the app keeps using public ensembles as today, and each
   run also asks the server and records the comparison per location and system in a new
   table `ensemble_shadow` (migration `010_ensemble_shadow.sql`; milestone 2's
   `spot_ensembles` becomes 011): members (local / public), reach, and the mean and largest
   difference of member 16-day totals. The Status page summarises the last 7 days.
-- [ ] **Whole-snapshot check:** `snowwatch check-ensembles` builds each location's snapshot
+- [x] **Whole-snapshot check:** `snowwatch check-ensembles` builds each location's snapshot
   twice from one run's responses, once with local ensembles and once with public ones,
   and lists every ensemble-derived field that differs (ranges, bands, exceedance, member
   totals, the consensus after 48 h, Calendar and Confidence figures), with how much.
-- [ ] `snowwatch check-sources --local` gains the ensemble comparison (members, reach,
+- [x] `snowwatch check-sources --local` gains the ensemble comparison (members, reach,
   differences against the public API or saved fixtures) in its SOURCES.md section.
-- [ ] Tests: routing only for fresh systems; one stale system falls back alone; a short
+- [x] Tests: routing only for fresh systems; one stale system falls back alone; a short
   reach counts as a failure; the fallback order above, including the reserve when the
   whole server is down; the budget with local ensembles;
   shadow records; `public` mode is exactly milestone 1 (the existing tests pass
   unchanged).
 
+### What PR 2 built and found (27 Nov 2026)
+
+Run against the sandbox's server and downloaded runs with two seed locations:
+- **`local`:** Crystal and Whistler built with every system from the server (GEFS 31,
+  ECMWF 51, GEPS 21 members through to the Calendar's running totals), **0 public
+  calls**; `snowwatch budget` "about 0 of 10000", "ensembles: self-hosted (GEFS, ECMWF
+  ENS, GEPS)"; `openmeteo status` lists each system as self-hosted since the run.
+- **`shadow`:** each public ensemble the run fetched was also asked of the server and
+  recorded. It showed why runs must match: the public API was still on ECMWF's 26 Nov
+  12z long run (18z short run) while the server had 27 Nov 00z, and the members' totals
+  differed by up to 95 cm. So each record also carries the public data's run (the public
+  bucket's `<folder>/static/meta.json`; it named ECMWF 18z and GEFS and GEPS 00z here,
+  matching what the API served), and the Status page counts differences only over
+  comparisons of the same run ("Same run"). Ends of the answers can't stand in for the
+  run: the public API's GEFS and GEPS went 7 h past the 16-day horizon for the same run.
+- **`check-ensembles`** on Crystal listed every field that moved; with ECMWF on different
+  runs it flagged the 6–10 day ensemble figures (up to 2 cm) and the sorted member
+  totals (up to 6.6 cm), as expected. Its report now names both runs per system.
+- The public API answered this sandbox with 429 after a few calls, so a week-long shadow
+  comparison can only happen on the mini PC.
+
+Choices made while building, beyond the checklist:
+- Freshness reads only the run's age from `meta.json`; the reach is checked on each
+  answer instead, because ECMWF's `data_end_time` follows its latest run, which at 06/18z
+  stops at 144 h while the rolling file still holds the 00/12z run's later hours. An
+  answer reaching 336 h also means a 00/12z run no older than ~24 h, which covers the
+  "26 h for a 00z/12z run" rule.
+- An unusable answer from the server (missing members, short reach, a 4xx) falls back
+  like a failed connection, without skipping the server for 5 minutes. Ensembles fall
+  back whatever `OPEN_METEO_FALLBACK` says (public is their usual source); their public
+  retries count as fallbacks in the ledger but don't trigger the 20 s spacing, which is
+  for forecasts falling back.
+- The reserve is the rest of today's runs' blend and multi-model weight (this run
+  included), held back only while forecasts are falling back and only in `shadow` and
+  `local`, so `public` stays exactly milestone 1. It applies to every optional request.
+- `ensemble_state` (in migration 010 with `ensemble_shadow`) records each system's
+  source after each run and since when; `ensemble_shadow` is pruned after 90 days.
+- To keep one system public (e.g. ECMWF if it fails the checks), leave it out of
+  `ENSEMBLES_SYSTEMS`; its run goes old and it falls back on its own.
+- Step 3 of the fallback order (spots and their allowance) arrives with milestone 2,
+  which has no spots to route yet; its `spots.py` should call `Fetcher.local_ensemble`
+  per system and use the allowance only for the rest.
+
 ### Switching on, and when to switch
-- **Accurate means**, from a week of shadow mode on the mini PC: the same member count
-  for every system; reach no shorter than the public API's by more than 6 h; member
+- **Accurate means**, from a week of shadow mode on the mini PC, over comparisons of the
+  same run (the Status page's "Same run"): the same member count for every system; reach no shorter than the public API's by more than 6 h; member
   16-day totals within 1 cm on average and 3 cm at most (the test gave 0.5–0.9 and 1.8);
   `check-ensembles` shows no ensemble field in a snapshot moving by more than 1 cm or 2
   percentage points. If ECMWF fails these, switch the other two and keep ECMWF public
@@ -841,7 +890,7 @@ new location shows historical skill immediately.
 | Milestone | New | Changed |
 |---|---|---|
 | 1 | `store/migrations/009_api_usage.sql`, `tests/test_openmeteo_local.py` | `docker-compose.yml`, `settings.py`, `http.py`, `cli.py`, `scheduler.py`, `pipeline.py`, `store/repo.py`, `store/retention.py`, `sources/openmeteo.py` (budget only), `checks.py`, `api/admin.py`, `api/app.py`, `api/public.py`, `api/models.py`, Manage budget panel (`routes/admin/+page.svelte`), status page, `.env.example`, README, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
-| 1b | `docker/ensembles.sh`, `store/migrations/010_ensemble_shadow.sql` | `docker-compose.yml`, `settings.py`, `http.py`, `pipeline.py`, `scheduler.py`, `checks.py`, `cli.py`, `sources/openmeteo.py` (budget), `store/repo.py`, `api/public.py`, `api/models.py`, status page, Manage budget, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
+| 1b | `docker/ensembles.sh`, `ensembles.py`, `store/migrations/010_ensemble_shadow.sql`, `tests/test_ensembles.py`, `tests/test_ensembles_local.py` | `docker-compose.yml`, `deploy/deploy.sh`, `settings.py`, `http.py`, `pipeline.py`, `checks.py`, `cli.py`, `sources/base.py`, `sources/openmeteo.py` (budget), `store/repo.py`, `store/retention.py`, `api/public.py`, `api/admin.py`, `api/models.py`, status page, Manage budget, README, `.env.example`, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, THIRD_PARTY_NOTICES, CHANGELOG |
 | 2 | `spots.py`, `config/borders.geojson`, `store/migrations/011_spot_ensembles.sql`, `frontend/src/lib/components/LocationView.svelte`, `frontend/src/routes/spot/+page.svelte` | `pipeline.py` (shared fetch helper), `doc.py`, `api/public.py`, `api/app.py`, `config/forecast.yaml`, `routes/location/[id]/+page.svelte`, `map/Inspector.svelte`, `components/MapView.svelte`, `api.ts`, `LocationPalette.svelte`, `routes/+page.svelte`, `service-worker.ts`, `swRoute.ts`, ARCHITECTURE, SECURITY |
 | 3 | `analysis/snowlevel.py`, new fixtures folder | `sources/openmeteo.py`, `analysis/slr.py`, `freezing.py`, `ridge.py`, `backcountry.py`, `flags.py`, `build.py`, `verify.py`, `push.py`, `doc.py`, `config/forecast.yaml`, BandTable, PeriodSheet, DaySheet, ForecastChart, backcountry and observed components, SOURCES |
 | 4 | `modelwatch.py`, `budget.py` | `scheduler.py`, `pipeline.py`, `store/retention.py`, `store/repo.py`, `http.py`, `sources/openmeteo.py`, `analysis/build.py`, `config/forecast.yaml`, `push.py`, Manage (catalog add, budget), Overview, Calendar, Confidence tab, status page |

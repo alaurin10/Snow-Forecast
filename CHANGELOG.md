@@ -27,8 +27,17 @@ Notable changes to Snow Watch. The format follows
   which serves them right away. ~15 GB of downloads a day; on disk it stays at about
   1.5–2 GB (it deletes what isn't needed after each run) and pauses below 5 GB free.
   `snowwatch openmeteo status` lists each system's run, age, reach, size and last error,
-  and free disk (warning under 10 GB). The app keeps using public ensembles until the
-  second part. See DEPLOYMENT.md, "Self-hosted ensembles".
+  and free disk (warning under 10 GB). See DEPLOYMENT.md, "Self-hosted ensembles".
+- **Self-hosted ensembles, part 2: the app uses them.** `OPEN_METEO_ENSEMBLES=local`
+  takes each system's ensembles from the server while its downloaded run is fresh and
+  complete, every run and for free, so `snowwatch budget` drops to ~0 public calls.
+  A system whose run gets old, or whose answer comes back short, falls back on its own:
+  first to the cached ensembles, then to the public API on its usual schedule, keeping
+  room in the public budget for forecasts if the whole server is down.
+  `OPEN_METEO_ENSEMBLES=shadow` keeps public ensembles and compares the server's each
+  run; the Status page summarises a week of it, and `snowwatch check-ensembles` compares
+  whole forecasts. `public` (the default) changes nothing. The Status page, Manage's
+  budget and `openmeteo status` show where each system's ensembles come from.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

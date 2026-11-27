@@ -14,6 +14,7 @@ from fastapi.responses import Response
 
 from snowwatch import avalanche, observations, stations
 from snowwatch import avalanche_zones as zones
+from snowwatch import ensembles as ens
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
 from snowwatch.api.models import (
     BandSummary,
@@ -24,6 +25,8 @@ from snowwatch.api.models import (
     CompareRow,
     ConcernOut,
     DangerChip,
+    EnsemblesOut,
+    EnsembleSystemOut,
     LocalServerOut,
     LocationAge,
     LocationSummary,
@@ -40,6 +43,7 @@ from snowwatch.api.models import (
     PlanOut,
     PlanRow,
     RunOut,
+    ShadowOut,
     SourceRow,
     StatusOut,
     TrendOut,
@@ -47,6 +51,7 @@ from snowwatch.api.models import (
 )
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
+from snowwatch.config import get_forecast_config
 from snowwatch.doc import BandOut, Snapshot
 from snowwatch.geo import bbox, contains, haversine_km
 from snowwatch.http import LOCAL_SUFFIX
@@ -252,6 +257,43 @@ def best_day(snap: Snapshot) -> BestDay | None:
 def avalanche_views(conn: sqlite3.Connection) -> dict[str, AvalancheView]:
     locs = service.list_locations(conn)
     return avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
+
+
+def _ensembles_out(conn: sqlite3.Connection, settings: Settings) -> EnsemblesOut:
+    """Each system's source: in local mode, what the last run used (and since when), or
+    whether its downloaded run is fresh before any run has; otherwise the public API."""
+    now = datetime.now(UTC)
+    mode = settings.ensemble_mode
+    states = repo.ensemble_states(conn)
+    systems = []
+    for system in get_forecast_config().ensembles:
+        run = ens.local_run(settings.open_meteo_data_dir, system)
+        source, reason, since = "public", None, None
+        if mode == "local":
+            state = states.get(system)
+            if state is not None:
+                local, reason, since = state.local, state.reason, state.since
+            else:
+                reason = ens.stale_reason(settings.open_meteo_data_dir, system, now)
+                local = reason is None
+            source = "self-hosted" if local else "public"
+        systems.append(
+            EnsembleSystemOut(
+                system=system,
+                label=ens.label(system),
+                source=source,
+                run=run.isoformat(timespec="seconds") if run else None,
+                age_h=round((now - run).total_seconds() / 3600, 1) if run else None,
+                reason=reason,
+                since=since,
+            )
+        )
+    try:
+        summary = repo.shadow_summary(conn, now=now)
+    except sqlite3.OperationalError:  # not migrated yet
+        summary = []
+    shadow = [ShadowOut(label=ens.label(r.system), **vars(r)) for r in summary]
+    return EnsemblesOut(mode=mode, systems=systems, shadow=shadow)
 
 
 def _today() -> str:
@@ -682,6 +724,7 @@ def make_router() -> APIRouter:
                 requests_today=usage.local_requests,
                 fallbacks_today=usage.fallbacks,
             )
+        ensembles = _ensembles_out(conn, settings) if settings.local_open_meteo else None
         snaps = latest_snapshots(conn)
         ages = []
         for loc in service.list_locations(conn):
@@ -703,6 +746,7 @@ def make_router() -> APIRouter:
             budget=settings.open_meteo_daily_budget,
             locations=ages,
             local=local,
+            ensembles=ensembles,
         )
 
     @router.get("/runs", response_model=list[RunOut])

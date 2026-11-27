@@ -110,6 +110,8 @@ services:
       # No "previous day" copies of the time-chunk files: nothing reads them here.
       GENERATE_PREVIOUS_DAY: "false"
       ENSEMBLES_MIN_FREE_GB: ${ENSEMBLES_MIN_FREE_GB:-5}
+      # Which to download (all by default). Leave one out to keep it on the public API.
+      ENSEMBLES_SYSTEMS: ${ENSEMBLES_SYSTEMS:-gefs025 gefs05 ecmwf geps}
     volumes:
       - openmeteo-data:/app/data
       - ./docker/ensembles.sh:/ensembles.sh:ro

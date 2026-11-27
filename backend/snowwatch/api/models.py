@@ -296,6 +296,45 @@ class LocalServerOut(BaseModel):
     fallbacks_today: int  # requests retried on the public API after it failed
 
 
+class EnsembleSystemOut(BaseModel):
+    """Where one ensemble system's members come from (milestone 1b)."""
+
+    system: str  # the `models` name: gfs_seamless, ecmwf_ifs025, gem_global
+    label: str  # GEFS, ECMWF ENS, GEPS
+    source: str  # "self-hosted" or "public"
+    run: str | None  # the run the server holds (ISO, UTC), when downloaded
+    age_h: float | None  # that run's age now
+    reason: str | None  # why it's on the public API in local mode
+    since: str | None  # when it last switched between the two (local mode)
+
+
+class ShadowOut(BaseModel):
+    """A system's shadow-mode comparisons over the last 7 days: the server's answers
+    against the public API's for the same requests."""
+
+    system: str
+    label: str
+    comparisons: int
+    errors: int  # the server couldn't answer
+    same_run: int  # comparisons where the server and the public data had the same run
+    members_local_min: int | None
+    members_public_max: int | None
+    # The most the server's reach fell short of the public's (negative: always ahead).
+    reach_gap_h: float | None
+    # Members' 16-day totals, over same-run comparisons: the mean of the mean
+    # differences, and the largest difference.
+    mean_diff_cm: float | None
+    max_diff_cm: float | None
+
+
+class EnsemblesOut(BaseModel):
+    """Self-hosted ensembles (OPEN_METEO_ENSEMBLES, with OPEN_METEO_URL set)."""
+
+    mode: str  # public, shadow or local
+    systems: list[EnsembleSystemOut]
+    shadow: list[ShadowOut]
+
+
 class StatusOut(BaseModel):
     """The Status page: per-source health, runs, usage and data age."""
 
@@ -307,6 +346,8 @@ class StatusOut(BaseModel):
     # Set when forecasts come from a self-hosted server: the public calls are then
     # ensembles (and any fallbacks) only.
     local: LocalServerOut | None = None
+    # Set with a self-hosted server: where ensembles come from, and shadow comparisons.
+    ensembles: EnsemblesOut | None = None
 
 
 class MetaOut(BaseModel):

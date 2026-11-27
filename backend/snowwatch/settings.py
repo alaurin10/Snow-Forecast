@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # The server's volume, mounted read-only (docker-compose.yml): what the ensemble
     # downloader (`openmeteo-ensembles`, milestone 1b) has written there.
     open_meteo_data_dir: Path = Path("/openmeteo")
+    # Where ensembles come from, with OPEN_METEO_URL set (docs/OPEN-METEO-PLAN.md, 1b):
+    # public = the public API, as milestone 1; shadow = the public API, and each run also
+    # asks the server and records how they compare; local = the server, for each system
+    # whose downloaded run is fresh, and the public API for the rest.
+    open_meteo_ensembles: Literal["public", "shadow", "local"] = "public"
     # Both default from OPEN_METEO_URL (see _local_defaults); an explicit value wins.
     max_locations: int = 25
     site_spacing_s: float = 20.0
@@ -88,6 +93,11 @@ class Settings(BaseSettings):
                 return "off"
         return v
 
+    @field_validator("open_meteo_ensembles", mode="before")
+    @classmethod
+    def _lower(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
+
     @field_validator("open_meteo_url", mode="after")
     @classmethod
     def _no_trailing_slash(cls, v: str) -> str:
@@ -104,6 +114,11 @@ class Settings(BaseSettings):
             if "max_locations" not in self.model_fields_set:
                 self.max_locations = 50
         return self
+
+    @property
+    def ensemble_mode(self) -> Literal["public", "shadow", "local"]:
+        """OPEN_METEO_ENSEMBLES, which needs OPEN_METEO_URL (public without one)."""
+        return self.open_meteo_ensembles if self.local_open_meteo else "public"
 
     @property
     def local_open_meteo(self) -> bool:

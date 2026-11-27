@@ -27,7 +27,7 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
 | `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
 | `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect); ensembles stay on the public API unless the downloader below fills its volume. No published port |
-| `openmeteo-ensembles` | Optional (compose profile `ensembles`): the same image running `docker/ensembles.sh`, which every 10 minutes downloads each new GEFS, ECMWF ENS and GEPS run (snowfall only, 16 days) from NOAA on AWS, ECMWF and Environment Canada into the `openmeteo-data` volume, where the server serves it at `/v1/ensemble` with no restart. One system at a time, 2 CPUs, a 2 h limit per download; it deletes what the server doesn't need after each run and skips runs below 5 GB free. It writes `ensembles/status.json` (each system's last run, time, size, last error) and `ensembles/disk.log` (a line a day). `worker` and `api` mount the volume read-only at `/openmeteo`; `snowwatch openmeteo status` reads it. The app keeps asking the public API for ensembles until milestone 1b's second part (docs/OPEN-METEO-PLAN.md) |
+| `openmeteo-ensembles` | Optional (compose profile `ensembles`): the same image running `docker/ensembles.sh`, which every 10 minutes downloads each new GEFS, ECMWF ENS and GEPS run (snowfall only, 16 days) from NOAA on AWS, ECMWF and Environment Canada into the `openmeteo-data` volume, where the server serves it at `/v1/ensemble` with no restart. One system at a time, 2 CPUs, a 2 h limit per download; it deletes what the server doesn't need after each run and skips runs below 5 GB free. It writes `ensembles/status.json` (each system's last run, time, size, last error) and `ensembles/disk.log` (a line a day). `worker` and `api` mount the volume read-only at `/openmeteo`; `snowwatch openmeteo status` reads it. The app uses what it downloads only with `OPEN_METEO_ENSEMBLES` (below) |
 | `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
@@ -124,6 +124,26 @@ get at least 0.5 s between requests now that the pause between locations is gone
 while a run is falling back, locations are 20 s apart again for the public API's
 per-minute limit.
 With a server, `MAX_LOCATIONS` defaults to 50 and `SITE_SPACING_S` to 0.
+
+**Self-hosted ensembles** (`OPEN_METEO_ENSEMBLES`, milestone 1b): `public` leaves
+everything above as it is. With `local`, `Fetcher._route` also rewrites
+`ensemble-api.open-meteo.com/v1/ensemble` to the server for a system (the request's
+`models`) whose downloaded run is fresh, read from `<folder>/static/meta.json` in the
+read-only volume (`snowwatch/ensembles.py`: GEFS and ECMWF ENS 14 h, GEPS 26 h). An
+answer missing members or not reaching far enough ahead (GEFS and GEPS 360 h, ECMWF
+336 h) counts as a failure. `pipeline.fetch_responses` reads fresh systems every run;
+when one fails it takes the cached ensembles (`ensemble_cache`, 13 h) first and the
+public API only when the public schedule would have asked anyway (`ensemble_runs_utc`),
+each system on its own. While forecasts are falling back too, optional requests
+(ensembles, upper air, clouds, station) leave `pipeline.forecast_reserve` (the rest of
+today's runs' blend and multi-model requests) in the public budget. Each run records
+each system's source in `ensemble_state`, shown on the Status page. With `shadow`, each
+public ensemble a run fetches is also asked of the server (`Fetcher.shadow_ensemble`),
+and the comparison goes into `ensemble_shadow` (members, reach, member totals' mean and
+largest difference, and both runs: the server's from its meta.json, the public data's
+from the public bucket's), summarised on the Status page over 7 days, same runs only.
+`snowwatch check-ensembles` builds each snapshot with both and lists every field that
+differs. Systems served locally cost nothing in the budget (`public_daily_weight`).
 
 A location that fails keeps its last good snapshot. A run always ends `ok`,
 `partial` or `failed`; runs and jobs interrupted by a restart are marked failed

@@ -29,9 +29,11 @@ MAX_BODY_BYTES = 64_000_000  # the ski-area catalog is ~21 MB; nothing else come
 CONTACT_HOSTS = ("api.weather.gov",)  # NWS asks callers to identify themselves
 
 # The public Open-Meteo API: forecasts and elevation, which a self-hosted server can
-# answer. Ensembles (ensemble-api.open-meteo.com) always stay public: the public data
-# the server reads holds no per-member snowfall (docs/OPEN-METEO-PLAN.md).
+# answer. Ensembles (ensemble-api.open-meteo.com) go to it only with
+# OPEN_METEO_ENSEMBLES=local, for systems whose downloaded run is fresh: the public data
+# the server reads holds no per-member snowfall (docs/OPEN-METEO-PLAN.md, milestone 1b).
 PUBLIC_OPEN_METEO = "https://api.open-meteo.com/v1/"
+PUBLIC_ENSEMBLE = "https://ensemble-api.open-meteo.com/v1/"
 LOCAL_TIMEOUT_S = 120.0  # an empty cache's first summit request took 52 s
 LOCAL_HOST = "local"  # the self-hosted server's row in the usage ledger
 LOCAL_SUFFIX = "-local"  # its requests' source name on the Status page: open-meteo-local
@@ -156,6 +158,9 @@ class Fetcher:
         public_budget: float = 10_000,
         host_spacing: dict[str, float] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        ensemble_mode: str = "public",
+        ensemble_stale: Callable[[str], str | None] | None = None,
+        ensemble_check: Callable[[str, Any], str | None] | None = None,
     ) -> None:
         self._deadline = time.monotonic() + time_budget_s if time_budget_s else None
         # Hosts that ask for contact details get them; every other host gets `user_agent`.
@@ -186,8 +191,22 @@ class Fetcher:
         self._last_at: dict[str, float] = {}  # host -> when its last request started
         self._local_down_until = 0.0
         self._taken = 0  # calls already handed to the ledger (take_usage)
-        self.fallbacks = 0  # public retries after the self-hosted server failed
+        self.fallbacks = 0  # forecast requests retried on the public API (server failed)
         self.local_errors = 0
+        # Ensembles (milestone 1b): OPEN_METEO_ENSEMBLES, why a system can't use the
+        # server right now (None = it can), and why an answer from it can't be used.
+        self.ensemble_mode = ensemble_mode if self.local_url else "public"
+        self.ensemble_stale = ensemble_stale
+        self.ensemble_check = ensemble_check
+        # The run each system's server copy holds (shadow records), set by fetcher_for.
+        self.ensemble_run: Callable[[str], datetime | None] | None = None
+        # The public data's run per system, looked up once per run (shadow records).
+        self.public_runs: dict[str, datetime | None] = {}
+        self.ensembles_local: set[str] = set()  # systems the server answered this fetcher
+        self.ensembles_public: dict[str, str] = {}  # system -> why it used the public API
+        # Public weight held back for the remaining runs' required forecasts while the
+        # server is down (set by the run; applies to optional requests, local/shadow only).
+        self.public_reserve = 0.0
 
     def close(self) -> None:
         self._client.close()
@@ -229,19 +248,63 @@ class Fetcher:
         self._taken = len(self.calls)
         return out
 
-    def _public_room(self, weight: float) -> bool:
+    def _public_room(self, weight: float, *, optional: bool = False) -> bool:
         """Whether today's public budget can take `weight` more: the ledger plus what this
-        fetcher spent and hasn't handed to it yet."""
+        fetcher spent and hasn't handed to it yet. An optional request (ensembles, upper
+        air, clouds, station) also leaves `public_reserve` for the required forecasts
+        while those are falling back (self-hosted ensembles on, milestone 1b)."""
         if self.public_used is None:
             return True
         pending = sum(c.weight for c in self.calls[self._taken :] if not c.local)
-        return self.public_used() + pending + weight <= self.public_budget
+        reserve = 0.0
+        if optional and self.ensemble_mode != "public" and self.forecasts_falling_back:
+            reserve = self.public_reserve
+        return self.public_used() + pending + weight + reserve <= self.public_budget
 
-    def _route(self, url: str) -> str | None:
-        """The self-hosted URL for a public forecast or elevation URL, else None."""
-        if self.local_url and url.startswith(PUBLIC_OPEN_METEO):
+    @property
+    def forecasts_falling_back(self) -> bool:
+        """Whether forecasts are going to the public API: the server failed this run."""
+        return self.fallbacks > 0 or self._clock() < self._local_down_until
+
+    def local_ensemble(self, system: str) -> bool:
+        """Whether `system`'s ensembles go to the server: OPEN_METEO_ENSEMBLES=local and
+        its downloaded run is fresh. When not, the reason is kept for the run's log."""
+        if self.ensemble_mode != "local":
+            return False
+        why = self.ensemble_stale(system) if self.ensemble_stale else None
+        if why:
+            self.ensembles_public.setdefault(system, why)
+            return False
+        return True
+
+    def _route(self, url: str, params: dict[str, str] | None = None) -> str | None:
+        """The self-hosted URL for a public forecast or elevation URL, or an ensemble URL
+        for a system the server can answer, else None."""
+        if not self.local_url:
+            return None
+        if url.startswith(PUBLIC_OPEN_METEO):
             return f"{self.local_url}/v1/{url[len(PUBLIC_OPEN_METEO) :]}"
+        if url.startswith(PUBLIC_ENSEMBLE) and self.local_ensemble(_system(params)):
+            return f"{self.local_url}/v1/{url[len(PUBLIC_ENSEMBLE) :]}"
         return None
+
+    def shadow_ensemble(self, url: str, params: dict[str, str] | None, *, source: str) -> Any:
+        """Shadow mode: the server's answer to a public ensemble request, whatever its
+        freshness, with no fallback (FetchError on any failure)."""
+        if not (self.local_url and url.startswith(PUBLIC_ENSEMBLE)):
+            raise FetchError(f"{source}: not an ensemble request ({url})")
+        local = f"{self.local_url}/v1/{url[len(PUBLIC_ENSEMBLE) :]}"
+        local_source = source + LOCAL_SUFFIX
+        try:
+            resp, _ = self._get_local(local, params, source=local_source)
+        except _LocalFailed as e:
+            raise self._fail(local_source, f"self-hosted server {e.message} ({local})") from e
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise self._fail(local_source, f"response is not JSON ({local})") from e
+        self._ok(local_source, 0.0)
+        return data
 
     def get_json(
         self,
@@ -252,8 +315,9 @@ class Fetcher:
         cache_key: str | None = None,
         weight: float = 0.0,
         allow_fallback: bool = True,
+        optional: bool = False,
     ) -> Any:
-        resp, rec, used = self._fetch(url, params, source, weight, allow_fallback)
+        resp, rec, used = self._fetch(url, params, source, weight, allow_fallback, optional)
         try:
             data = resp.json()
         except ValueError as e:
@@ -267,7 +331,7 @@ class Fetcher:
 
     def get_text(self, url: str, params: dict[str, str] | None = None, *, source: str) -> str:
         """GET a text body (CSV) with the same retries. Callers cache what they keep."""
-        resp, _, used = self._fetch(url, params, source, 0.0, True)
+        resp, _, used = self._fetch(url, params, source, 0.0, True, False)
         if "text/html" in resp.headers.get("content-type", ""):
             raise self._fail(used, f"got a web page instead of data ({url})")
         self._ok(used, 0.0)
@@ -280,36 +344,66 @@ class Fetcher:
         source: str,
         weight: float,
         allow_fallback: bool,
+        optional: bool,
     ) -> tuple[httpx.Response, CallRecord, str]:
         """The response, its call record, and the source name its outcome counts under."""
-        local = self._route(url)
+        local = self._route(url, params)
         if local is None:
             public = self.local_url and is_public_open_meteo(urlsplit(url).hostname)
-            if public and not self._public_room(weight):
+            if public and not self._public_room(weight, optional=optional):
                 raise self._fail(source, f"today's public Open-Meteo budget is spent ({url})")
             resp, rec = self._get(url, params, source=source, weight=weight)
             return resp, rec, source
+        ensemble = url.startswith(PUBLIC_ENSEMBLE)
+        system = _system(params)
         local_source = source + LOCAL_SUFFIX
         if self._clock() < self._local_down_until:
             why = "not answering (skipped for a few minutes)"
         else:
             try:
                 resp, rec = self._get_local(local, params, source=local_source)
-                return resp, rec, local_source
+                problem = self._ensemble_problem(system, resp) if ensemble else None
+                if problem is None:
+                    if ensemble:
+                        self.ensembles_local.add(system)
+                    return resp, rec, local_source
+                why = f"answered {system} unusably: {problem}"
+                self._fail(local_source, f"{why} ({local})")
             except _LocalFailed as e:
                 why = e.message
+            except FetchError as e:  # refused (4xx): final for forecasts, not ensembles
+                if not ensemble:
+                    raise
+                why = f"refused {system}: {e}"
+        if ensemble:
+            self.ensembles_public[system] = why
         refusal = None
-        if not (self.fallback and allow_fallback):
+        # Ensembles fall back on their own (public is their usual source); forecasts only
+        # with OPEN_METEO_FALLBACK.
+        if not ((ensemble or self.fallback) and allow_fallback):
             refusal = "no public fallback here"
-        elif not self._public_room(weight):
+        elif not self._public_room(weight, optional=optional):
             refusal = "no public fallback: today's public budget is spent"
         if refusal:
             raise self._fail(local_source, f"self-hosted server {why}; {refusal} ({local})")
-        if not self.fallbacks:
-            log.warning("self-hosted Open-Meteo %s; using the public API", why)
-        self.fallbacks += 1
+        if ensemble:
+            log.info("self-hosted ensembles: %s; using the public API", why)
+        else:
+            if not self.fallbacks:
+                log.warning("self-hosted Open-Meteo %s; using the public API", why)
+            self.fallbacks += 1
         resp, rec = self._get(url, params, source=source, weight=weight, fallback=True)
         return resp, rec, source
+
+    def _ensemble_problem(self, system: str, resp: httpx.Response) -> str | None:
+        """Why the server's ensemble answer can't be used (ensemble_check), else None."""
+        if self.ensemble_check is None:
+            return None
+        try:
+            data = resp.json()
+        except ValueError:
+            return "not JSON"
+        return self.ensemble_check(system, data)
 
     def _get_local(
         self, url: str, params: dict[str, str] | None, *, source: str
@@ -448,10 +542,18 @@ class Fetcher:
         path.write_bytes(gzip.compress(json.dumps(data, separators=(",", ":")).encode()))
 
 
+def _system(params: dict[str, str] | None) -> str:
+    """An ensemble request's system (its `models`)."""
+    return (params or {}).get("models", "")
+
+
 def fetcher_for(settings: Settings, **kw: Any) -> Fetcher:
     """A Fetcher set up from the settings: OPEN_METEO_URL routes forecasts and elevation
-    to the self-hosted server, OPEN_METEO_FALLBACK allows the public retry, and the
-    usage ledger in the database keeps public calls within OPEN_METEO_DAILY_BUDGET."""
+    to the self-hosted server, OPEN_METEO_FALLBACK allows the public retry, the usage
+    ledger in the database keeps public calls within OPEN_METEO_DAILY_BUDGET, and
+    OPEN_METEO_ENSEMBLES=local sends fresh systems' ensembles to the server too."""
+    from snowwatch import ensembles
+    from snowwatch.sources.openmeteo import ENSEMBLE_MEMBERS
 
     def public_used() -> float:
         from snowwatch.store import repo
@@ -474,8 +576,17 @@ def fetcher_for(settings: Settings, **kw: Any) -> Fetcher:
         "fallback": settings.open_meteo_fallback,
         "public_used": public_used if settings.local_open_meteo else None,
         "public_budget": settings.open_meteo_daily_budget,
+        "ensemble_mode": settings.ensemble_mode,
+        "ensemble_stale": lambda system: ensembles.stale_reason(
+            settings.open_meteo_data_dir, system
+        ),
+        "ensemble_check": lambda system, data: ensembles.response_problem(
+            system, data, ENSEMBLE_MEMBERS.get(system, 10)
+        ),
     }
-    return Fetcher(**(opts | kw))
+    fetcher = Fetcher(**(opts | kw))
+    fetcher.ensemble_run = lambda system: ensembles.local_run(settings.open_meteo_data_dir, system)
+    return fetcher
 
 
 def prune_raw(raw_dir: Path, *, max_age_h: float = 24, now: float | None = None) -> int:

@@ -272,6 +272,7 @@ export interface TreelineSpot {
 export interface BudgetOut {
 	active: number;
 	budget: number;
+	ensembles_local?: string[];
 	ensembles_total: number;
 	forecasts_total: number;
 	local_forecasts: boolean;
@@ -1461,11 +1462,57 @@ export interface SunDay {
  */
 export interface StatusOut {
 	budget: number;
+	ensembles?: EnsemblesOut | null;
 	local?: LocalServerOut | null;
 	locations: LocationAge[];
 	runs: RunOut[];
 	sources: SourceRow[];
 	weight_today: number;
+}
+/**
+ * Self-hosted ensembles (OPEN_METEO_ENSEMBLES, with OPEN_METEO_URL set).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "EnsemblesOut".
+ */
+export interface EnsemblesOut {
+	mode: string;
+	shadow: ShadowOut[];
+	systems: EnsembleSystemOut[];
+}
+/**
+ * A system's shadow-mode comparisons over the last 7 days: the server's answers
+ * against the public API's for the same requests.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ShadowOut".
+ */
+export interface ShadowOut {
+	comparisons: number;
+	errors: number;
+	label: string;
+	max_diff_cm: number | null;
+	mean_diff_cm: number | null;
+	members_local_min: number | null;
+	members_public_max: number | null;
+	reach_gap_h: number | null;
+	same_run: number;
+	system: string;
+}
+/**
+ * Where one ensemble system's members come from (milestone 1b).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "EnsembleSystemOut".
+ */
+export interface EnsembleSystemOut {
+	age_h: number | null;
+	label: string;
+	reason: string | null;
+	run: string | null;
+	since: string | null;
+	source: string;
+	system: string;
 }
 /**
  * The self-hosted Open-Meteo server (OPEN_METEO_URL), from today's requests.

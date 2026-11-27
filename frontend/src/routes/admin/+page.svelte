@@ -295,7 +295,11 @@
 	{#if budget?.local_forecasts}
 		<p class="muted small">
 			{budget.active} of {budget.max_locations} locations. Forecasts come from your own Open-Meteo server
-			(about {Math.round(budget.forecasts_total).toLocaleString('en-US')} calls a day, free). Ensembles
+			(about {Math.round(budget.forecasts_total).toLocaleString('en-US')} calls a day, free).
+			{#if budget.ensembles_local?.length}Ensembles: self-hosted ({budget.ensembles_local.join(
+					', '
+				)}), free.{/if}
+			{budget.ensembles_local?.length ? 'Public ensembles' : 'Ensembles'}
 			use about {Math.round(budget.total).toLocaleString('en-US')}
 			of {budget.budget.toLocaleString('en-US')} free public calls a day ({Math.round(
 				budget.public_used_today

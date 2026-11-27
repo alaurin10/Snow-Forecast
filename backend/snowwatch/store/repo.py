@@ -315,3 +315,136 @@ def record_usage(conn: sqlite3.Connection, fetcher: Any, now: datetime | None = 
     day = utc_day(now)
     for host, u in fetcher.take_usage().items():
         add_usage(conn, day, host, u.weight, u.requests, fallbacks=u.fallbacks, seconds=u.seconds)
+
+
+# --- Self-hosted ensembles (milestone 1b) -----------------------------------------------
+
+
+@dataclass
+class ShadowRow:
+    """One self-hosted ensemble answer compared with the public one (`ensemble_shadow`)."""
+
+    location_id: str
+    system: str
+    at: str
+    local_run: str | None = None
+    public_run: str | None = None
+    members_local: int | None = None
+    members_public: int | None = None
+    reach_local_h: float | None = None
+    reach_public_h: float | None = None
+    mean_diff_cm: float | None = None
+    max_diff_cm: float | None = None
+    error: str | None = None
+
+
+def save_shadow(conn: sqlite3.Connection, run_id: int, rows: Iterable[ShadowRow]) -> None:
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO ensemble_shadow (run_id, location_id, system, at, "
+            "local_run, public_run, members_local, members_public, reach_local_h, "
+            "reach_public_h, mean_diff_cm, max_diff_cm, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    run_id,
+                    r.location_id,
+                    r.system,
+                    r.at,
+                    r.local_run,
+                    r.public_run,
+                    r.members_local,
+                    r.members_public,
+                    r.reach_local_h,
+                    r.reach_public_h,
+                    r.mean_diff_cm,
+                    r.max_diff_cm,
+                    r.error,
+                )
+                for r in rows
+            ],
+        )
+
+
+@dataclass
+class ShadowSummary:
+    """A system's shadow comparisons over some days."""
+
+    system: str
+    comparisons: int
+    errors: int
+    same_run: int  # comparisons where the server and the public data had the same run
+    members_local_min: int | None
+    members_public_max: int | None
+    reach_gap_h: float | None  # the most the server's reach fell short of the public's
+    mean_diff_cm: float | None  # the mean of the same-run comparisons' mean difference
+    max_diff_cm: float | None  # the largest difference in a same-run comparison
+
+
+def shadow_summary(
+    conn: sqlite3.Connection, *, days: float = 7, now: datetime | None = None
+) -> list[ShadowSummary]:
+    since = ((now or datetime.now(UTC)) - timedelta(days=days)).isoformat(timespec="seconds")
+    # Only comparisons of the same run compare figures: the public API moves to a new
+    # run at its own pace, and two runs differ by far more than the two copies of one.
+    same = "local_run = public_run"
+    rows = conn.execute(
+        "SELECT system, COUNT(*) AS n, SUM(error IS NOT NULL) AS errors, "
+        f"SUM(COALESCE({same}, 0)) AS same_run, "
+        "MIN(members_local) AS ml, MAX(members_public) AS mp, "
+        "MAX(reach_public_h - reach_local_h) AS gap, "
+        f"AVG(CASE WHEN {same} THEN mean_diff_cm END) AS mean_diff, "
+        f"MAX(CASE WHEN {same} THEN max_diff_cm END) AS max_diff "
+        "FROM ensemble_shadow WHERE at >= ? GROUP BY system ORDER BY system",
+        (since,),
+    )
+    return [
+        ShadowSummary(
+            system=r["system"],
+            comparisons=r["n"],
+            errors=r["errors"] or 0,
+            same_run=r["same_run"] or 0,
+            members_local_min=r["ml"],
+            members_public_max=r["mp"],
+            reach_gap_h=None if r["gap"] is None else round(r["gap"], 1),
+            mean_diff_cm=None if r["mean_diff"] is None else round(r["mean_diff"], 2),
+            max_diff_cm=None if r["max_diff"] is None else round(r["max_diff"], 2),
+        )
+        for r in rows
+    ]
+
+
+@dataclass
+class EnsembleState:
+    system: str
+    local: bool
+    reason: str | None
+    since: str
+    updated_at: str
+
+
+def update_ensemble_state(
+    conn: sqlite3.Connection, system: str, local: bool, reason: str | None, now: str
+) -> None:
+    """Where a system's ensembles came from in this run; `since` moves only on a change."""
+    with conn:
+        conn.execute(
+            "INSERT INTO ensemble_state (system, local, reason, since, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (system) DO UPDATE SET "
+            "since = CASE WHEN local = excluded.local THEN since ELSE excluded.since END, "
+            "local = excluded.local, reason = excluded.reason, updated_at = excluded.updated_at",
+            (system, int(local), reason, now, now),
+        )
+
+
+def ensemble_states(conn: sqlite3.Connection) -> dict[str, EnsembleState]:
+    try:
+        rows = conn.execute("SELECT * FROM ensemble_state").fetchall()
+    except sqlite3.OperationalError:  # not migrated yet
+        return {}
+    return {
+        r["system"]: EnsembleState(
+            r["system"], bool(r["local"]), r["reason"], r["since"], r["updated_at"]
+        )
+        for r in rows
+    }
