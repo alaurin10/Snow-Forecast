@@ -26,8 +26,10 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -40,10 +42,17 @@ from snowwatch.http import Fetcher, FetchError
 from snowwatch.inputs import inputs_from_responses
 from snowwatch.locations.resolve import MID_SHARE
 from snowwatch.models import Band, BandName, Location
-from snowwatch.pipeline import fetch_forecasts
 from snowwatch.sources import nws
-from snowwatch.sources.base import fetch
-from snowwatch.sources.openmeteo import elevation_request, ensemble_request
+from snowwatch.sources.base import Request, fetch
+from snowwatch.sources.openmeteo import (
+    blend_request,
+    clouds_request,
+    elevation_request,
+    ensemble_request,
+    merge_models,
+    multimodel_request,
+    upper_air_request,
+)
 from snowwatch.store import repo
 from snowwatch.store.db import connect
 
@@ -327,21 +336,32 @@ class EnsembleResult:
     status: Literal["fresh", "cached", "allowance_spent", "unavailable"] = "unavailable"
 
 
-def spot_ensembles(
+@dataclass
+class EnsemblePlan:
+    """Which systems a spot fetches, and how (decided before anything is fetched, so the
+    fetches can run at once): `fetch` maps each system to its request and whether it may
+    fall back to the public API."""
+
+    cell: str
+    result: EnsembleResult
+    fetch: dict[str, tuple[Request, bool]] = field(default_factory=dict)
+    spent: bool = False
+
+
+def plan_ensembles(
     fetcher: Fetcher,
     loc: Location,
     cfg: ForecastConfig,
     conn: sqlite3.Connection | None,
-    errors: list[str],
     *,
     now: datetime,
     spot_used: float,
-) -> EnsembleResult:
+) -> EnsemblePlan:
     """Each system's ensembles at the mid band: a nearby spot's within the cache time;
     else the self-hosted server's while its run is fresh (OPEN_METEO_ENSEMBLES=local,
     free); else the public API within the spots' daily allowance (`spot_used` is today's
-    spot weight so far). The server's answers fall back to the public API only while the
-    allowance has room."""
+    spot weight so far). The server's answers may fall back to the public API only while
+    the allowance has room, which is set aside for them here."""
     mid = loc.band("mid")
     c_lat, c_lon, step, cell = ensemble_cell(mid.lat, mid.lon, mid.elev_m)
     sc = cfg.spots
@@ -350,16 +370,13 @@ def spot_ensembles(
         try:
             cached = repo.spot_ensembles(conn, cell, now=now, max_age_h=sc.ensemble_cache_h)
         except sqlite3.Error:  # not migrated yet: no cache
-            conn = None
-    out = EnsembleResult()
-    got: set[str] = set()
-    spent = False
+            cached = {}
+    plan = EnsemblePlan(cell, EnsembleResult())
+    planned = spot_used
     for system in cfg.ensembles:
         req = ensemble_request(loc, system)
-        name = req.name
         if system in cached:
-            out.responses[name] = cached[system]
-            got.add("cached")
+            plan.result.responses[req.name] = cached[system]
             continue
         params = req.params | {
             "latitude": f"{c_lat:g}",
@@ -367,33 +384,53 @@ def spot_ensembles(
             "elevation": f"{step:g}",
         }
         req = dataclasses.replace(req, params=params)
-        local = fetcher.local_ensemble(system)
-        room = spot_used + fetcher.total_weight + req.weight <= sc.ensemble_allowance
-        if not local and not room:
-            spent = True
+        room = planned + req.weight <= sc.ensemble_allowance
+        if not fetcher.local_ensemble(system) and not room:
+            plan.spent = True
             continue
-        before = fetcher.local_requests
+        if room:
+            planned += req.weight
+        plan.fetch[system] = (req, room)
+    return plan
+
+
+def finish_ensembles(
+    plan: EnsemblePlan,
+    got: dict[str, Any],
+    fetcher: Fetcher,
+    cfg: ForecastConfig,
+    conn: sqlite3.Connection | None,
+    *,
+    now: datetime,
+) -> EnsembleResult:
+    """The planned answers that came back (`got`, by system), kept for nearby spots, and
+    what the spot says about its ensembles."""
+    out = plan.result
+    cached = bool(out.responses)
+    for system, data in got.items():
+        req, _ = plan.fetch[system]
+        out.responses[req.name] = data
+        if conn is None:
+            continue
+        source = "local" if system in fetcher.ensembles_local else "public"
         try:
-            data = fetch(fetcher, req, optional=True, allow_fallback=room)
-        except FetchError as e:
-            errors.append(f"{name}: {e}")
-            spent = spent or not room
-            continue
-        out.responses[name] = data
-        got.add("fresh")
-        if conn is not None:
-            source = "local" if fetcher.local_requests > before else "public"
-            try:
-                repo.put_spot_ensemble(
-                    conn, cell, system, data, source, now=now, max_age_h=sc.ensemble_cache_h
-                )
-            except sqlite3.Error as e:  # a busy database only costs the cache
-                log.warning("spot ensembles not cached: %s", e)
-    if spent:
+            repo.put_spot_ensemble(
+                conn,
+                plan.cell,
+                system,
+                data,
+                source,
+                now=now,
+                max_age_h=cfg.spots.ensemble_cache_h,
+            )
+        except sqlite3.Error as e:  # a busy or unmigrated database only costs the cache
+            log.warning("spot ensembles not cached: %s", e)
+    failed_public = any(not room for system, (_, room) in plan.fetch.items() if system not in got)
+    if plan.spent or failed_public:
         out.status = "allowance_spent"
-    elif "fresh" in got:
+    elif got:
         out.status = "fresh"
-    elif "cached" in got:
+    elif cached:
         out.status = "cached"
     return out
 
@@ -417,34 +454,119 @@ def build_spot(
     lat: float,
     lon: float,
     now: datetime,
+    timings: dict[str, float] | None = None,
 ) -> Snapshot:
-    """The forecast for one point. Raises OutsideCoverage or SpotUnavailable."""
+    """The forecast for one point. Raises OutsideCoverage or SpotUnavailable.
+
+    The requests run at once, so a spot in an area the server hasn't read yet waits for
+    the slowest of them, not for all of them in turn: the terrain, upper air, clouds and
+    alerts first (they need only the point), then the blend, the multi-model forecast
+    and the ensembles once the terrain has given the bands. The multi-model forecast and
+    upper air are asked for one model each and joined (`merge_models`): the server reads
+    one request's models in turn. `timings` gets each request's seconds (the API logs
+    them)."""
     lat, lon = round_point(lat, lon)
     country = country_at(ctx.borders, lat, lon)
     if country is None:
         raise OutsideCoverage(COVERAGE)
-    try:
-        data = fetch(fetcher, elevation_request(ring_points(lat, lon)), allow_fallback=False)
-        elevs = [float(e) for e in data["elevation"]]
-    except (FetchError, KeyError, TypeError, ValueError) as e:
-        raise SpotUnavailable(f"terrain elevation unavailable: {e}") from e
-    if len(elevs) != 1 + len(RING_KM) * BEARINGS:
-        raise SpotUnavailable("terrain elevation unavailable: wrong number of values")
-    bands = choose_bands(elevs[0], elevs[1:])
-    near = nearest_location(ctx.locations, lat, lon)
-    loc = spot_location(lat, lon, bands, country, spot_name(lat, lon, ctx.peaks, near))
+    times = timings if timings is not None else {}
     errors: list[str] = []
-    try:
-        responses = fetch_forecasts(fetcher, loc, cfg, errors, allow_fallback=False)
-    except FetchError as e:
-        raise SpotUnavailable(f"forecast unavailable: {e}") from e
-    ens = spot_ensembles(fetcher, loc, cfg, ctx.conn, errors, now=now, spot_used=ctx.spot_used)
-    responses.update(ens.responses)
-    if country == "US" and ctx.alerts is not None:
+
+    def timed(name: str, work: Callable[[], Any]) -> Callable[[], Any]:
+        def run() -> Any:
+            t0 = time.monotonic()
+            try:
+                return work()
+            finally:
+                times[name] = round(time.monotonic() - t0, 1)
+
+        return run
+
+    def optional(req: Request) -> Callable[[], Any]:
+        return lambda: _optional(fetcher, req, errors)
+
+    # The point's own requests don't depend on the bands' elevations, only on where it
+    # is: a provisional location with the point's lat/lon builds them.
+    here = spot_location(lat, lon, Bands(0, 1, 2, "flat", "mid"), country, "here")
+    with ThreadPoolExecutor(max_workers=12, thread_name_prefix="spot") as pool:
+        elev_f = pool.submit(
+            timed(
+                "elevation",
+                lambda: fetch(
+                    fetcher, elevation_request(ring_points(lat, lon)), allow_fallback=False
+                ),
+            )
+        )
+        upper_f = {
+            m: pool.submit(timed(f"upper {m}", optional(upper_air_request(here, [m]))))
+            for m in cfg.upper_air_models(country)
+        }
+        side: dict[str, Future[Any]] = {}
+        cloud_model = cfg.cloud_model(country)
+        if cloud_model:
+            side["clouds"] = pool.submit(
+                timed("clouds", optional(clouds_request(here, cloud_model)))
+            )
+        if country == "US" and ctx.alerts is not None:
+            alerts = ctx.alerts
+            side["nws_alerts"] = pool.submit(timed("alerts", lambda: alerts(lat, lon)))
         try:
-            responses["nws_alerts"] = ctx.alerts(lat, lon)
+            elevs = [float(e) for e in elev_f.result()["elevation"]]
+        except (FetchError, KeyError, TypeError, ValueError) as e:
+            raise SpotUnavailable(f"terrain elevation unavailable: {e}") from e
+        if len(elevs) != 1 + len(RING_KM) * BEARINGS:
+            raise SpotUnavailable("terrain elevation unavailable: wrong number of values")
+        bands = choose_bands(elevs[0], elevs[1:])
+        near = nearest_location(ctx.locations, lat, lon)
+        loc = spot_location(lat, lon, bands, country, spot_name(lat, lon, ctx.peaks, near))
+        models = cfg.models_for(country)
+        blend_f = pool.submit(
+            timed("blend", lambda: fetch(fetcher, blend_request(loc), allow_fallback=False))
+        )
+        multi_f = {
+            m: pool.submit(
+                timed(
+                    f"multi {m}",
+                    partial(fetch, fetcher, multimodel_request(loc, [m]), allow_fallback=False),
+                )
+            )
+            for m in models
+        }
+        plan = plan_ensembles(fetcher, loc, cfg, ctx.conn, now=now, spot_used=ctx.spot_used)
+        ens_f = {
+            system: pool.submit(
+                timed(f"ens_{system}", partial(_ensemble, fetcher, req, room, errors))
+            )
+            for system, (req, room) in plan.fetch.items()
+        }
+        responses: dict[str, Any] = {}
+        try:
+            responses["blend"] = blend_f.result()
         except FetchError as e:
-            errors.append(f"nws_alerts: {e}")
+            raise SpotUnavailable(f"forecast unavailable: {e}") from e
+        multi: dict[str, Any] = {}
+        for m, f in multi_f.items():
+            try:
+                multi[m] = f.result()
+            except FetchError as e:  # one model missing is tolerated, as in one request
+                errors.append(f"multi {m}: {e}")
+        if not multi:
+            raise SpotUnavailable("forecast unavailable: no model answered")
+        responses["multi"] = merge_models(multi)
+        upper = {m: data for m, f in upper_f.items() if (data := f.result()) is not None}
+        if upper:
+            responses["upper"] = merge_models(upper)
+        for name, f in side.items():
+            try:
+                data = f.result()
+            except FetchError as e:
+                errors.append(f"{name}: {e}")
+                continue
+            if data is not None:
+                responses[name] = data
+        got = {s: data for s, f in ens_f.items() if (data := f.result()) is not None}
+    ens = finish_ensembles(plan, got, fetcher, cfg, ctx.conn, now=now)
+    responses.update(ens.responses)
     inputs = inputs_from_responses(loc, responses, cfg, warnings=errors)
     snap, _ = build_snapshot(loc, inputs, cfg, now)
     snap.spot = SpotInfo(
@@ -461,6 +583,24 @@ def build_spot(
         ),
     )
     return snap
+
+
+def _optional(fetcher: Fetcher, req: Request, errors: list[str]) -> Any | None:
+    """An optional forecast from the server (upper air, clouds): a failure is a warning."""
+    try:
+        return fetch(fetcher, req, optional=True, allow_fallback=False)
+    except FetchError as e:
+        errors.append(f"{req.name}: {e}")
+        return None
+
+
+def _ensemble(fetcher: Fetcher, req: Request, room: bool, errors: list[str]) -> Any | None:
+    """One system's ensembles; the public fallback only with room in the allowance."""
+    try:
+        return fetch(fetcher, req, optional=True, allow_fallback=room)
+    except FetchError as e:
+        errors.append(f"{req.name}: {e}")
+        return None
 
 
 # --- the service: cache and limits ------------------------------------------------------------
@@ -625,11 +765,26 @@ def make_service(
                 spot_used=spot_used,
                 alerts=alerts,
             )
+            times: dict[str, float] = {}
+            t0 = time.monotonic()
             try:
-                t0 = time.monotonic()
-                snap = build_spot(fetcher, cfg, ctx, lat, lon, now)
-                log.info("spot %s built in %.1fs", snap.location.id, time.monotonic() - t0)
+                snap = build_spot(fetcher, cfg, ctx, lat, lon, now, times)
+                log.info(
+                    "spot %s built in %.1fs (%s)",
+                    snap.location.id,
+                    time.monotonic() - t0,
+                    ", ".join(f"{k} {v:g}s" for k, v in sorted(times.items(), key=lambda x: -x[1])),
+                )
                 return snap
+            except SpotUnavailable:
+                log.warning(
+                    "spot %.3f,%.3f failed after %.1fs (%s)",
+                    lat,
+                    lon,
+                    time.monotonic() - t0,
+                    ", ".join(f"{k} {v:g}s" for k, v in times.items()),
+                )
+                raise
             finally:
                 if conn is not None:
                     try:

@@ -75,6 +75,39 @@ for (const theme of ['light', 'dark'] as const) {
 	});
 }
 
+test('back from a spot, the map is where it was', async ({ page }) => {
+	test.slow();
+	// Open the map over Washington, then move it to Whistler and in close.
+	await page.goto('/map', { waitUntil: 'networkidle' });
+	await page.goto(MAP, { waitUntil: 'networkidle' });
+	const whistler = page.getByRole('button', { name: /^Whistler/ });
+	// Pan it with the keyboard (the map would open on this point anyway), then let the
+	// view be kept.
+	const start = (await whistler.boundingBox())!;
+	await page.locator('.maplibregl-canvas').focus();
+	for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
+	await expect(async () => {
+		const moved = (await whistler.boundingBox())!;
+		expect(moved.x - start.x).toBeGreaterThan(150);
+	}).toPass({ timeout: 10_000 });
+	await page.waitForTimeout(1200);
+	const before = await whistler.boundingBox();
+	expect(before).not.toBeNull();
+	const panel = await tapSpot(page);
+	await panel.getByRole('link', { name: 'Full forecast here' }).click();
+	await expect(page.getByText('Forecast for this spot, made now.')).toBeVisible({
+		timeout: 15_000
+	});
+	await page.goBack();
+	await expect(page).toHaveURL(/\/map(\?|$)/);
+	// The same view: Whistler's pin where it was, not the opening view over Washington.
+	await expect(async () => {
+		const after = (await whistler.boundingBox())!;
+		expect(Math.abs(after.x - before!.x)).toBeLessThan(8);
+		expect(Math.abs(after.y - before!.y)).toBeLessThan(8);
+	}).toPass({ timeout: 15_000 });
+});
+
 test('a right-click on the map opens the full forecast there', async ({ page }, info) => {
 	test.skip(info.project.name === 'phone', 'right-click is for a mouse');
 	test.slow();

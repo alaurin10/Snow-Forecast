@@ -192,13 +192,30 @@ def spot_transport(log: list[str] | None = None, *, down: bool = False) -> httpx
         hourly = params.get("hourly", "").split(",")
         if "cloud_cover_850hPa" in hourly:
             return httpx.Response(200, json=synthetic_clouds(params))
-        if "wind_speed_850hPa" in hourly:
-            return httpx.Response(200, json=load_fixture(crystal / "upper.json.gz"))
         if "daily" in params:
             return httpx.Response(200, json=load_fixture(crystal / "blend.json.gz"))
-        return httpx.Response(200, json=load_fixture(crystal / "multi.json.gz"))
+        name = "upper" if "wind_speed_850hPa" in hourly else "multi"
+        return httpx.Response(
+            200, json=one_model(load_fixture(crystal / f"{name}.json.gz"), params)
+        )
 
     return httpx.MockTransport(handler)
+
+
+def one_model(data: Any, params: dict[str, str]) -> Any:
+    """A saved multi-model answer as the server gives it for a one-model request: that
+    model's columns, without the suffix."""
+    models = params.get("models", "").split(",")
+    if len(models) != 1:
+        return data
+    suffix = f"_{models[0]}"
+
+    def point(p: dict[str, Any]) -> dict[str, Any]:
+        h = p.get("hourly") or {}
+        keep = {k[: -len(suffix)]: v for k, v in h.items() if k.endswith(suffix)}
+        return {**p, "hourly": {"time": h.get("time", []), **keep}}
+
+    return [point(p) for p in data] if isinstance(data, list) else point(data)
 
 
 def spot_settings(settings: Settings, mode: str = "public") -> Settings:
@@ -253,7 +270,12 @@ def test_spot_built_from_the_fixtures(settings: Settings, conn: sqlite3.Connecti
     assert snap.run_id is None and snap.snotel is None and len(snap.alerts) >= 0
     # Forecasts from the server only; ensembles from the public API (OPEN_METEO_ENSEMBLES
     # public); no station, SNOTEL or BC requests.
-    assert sum("/v1/forecast" in x for x in log) == 4
+    # One model per request for the multi-model forecast and upper air (6 + 5), joined.
+    assert sum("/v1/forecast" in x for x in log) == 1 + 6 + 5 + 1
+    mid = snap.bands[1]
+    assert set(mid.periods[0].models) >= {"gfs_seamless", "ecmwf_ifs025", "ncep_hrrr_conus"}
+    assert sum(v is not None for v in mid.periods[0].models.values()) >= 4
+    assert snap.backcountry is not None and snap.ridge is not None  # upper air came through
     assert all(x.startswith(("om.test", "ensemble-api", "api.weather.gov")) for x in log)
     assert sum(x.startswith("ensemble-api") for x in log) == 3
     # The ensembles are kept for nearby spots, and their weight goes on the spots' row.
@@ -303,8 +325,8 @@ def test_spot_when_the_server_is_down(settings: Settings) -> None:
     log: list[str] = []
     with pytest.raises(SpotUnavailable):
         build(settings, None, log=log, down=True)
-    # No public fallback for spots, not even for elevation.
-    assert all(x.startswith("om.test") for x in log)
+    # No public fallback for spots, not even for elevation (alerts are asked for alongside).
+    assert log and not any("open-meteo" in x for x in log)
 
 
 def test_spot_names_a_nearby_peak(settings: Settings) -> None:
@@ -535,3 +557,57 @@ def test_meta_says_whether_spots_are_offered(settings: Settings) -> None:
     assert TestClient(create_app(settings)).get("/api/meta").json()["local_forecasts"] is False
     on = TestClient(create_app(spot_settings(settings))).get("/api/meta").json()
     assert on["local_forecasts"] is True
+
+
+def test_spot_requests_run_at_once(settings: Settings) -> None:
+    """A cold area waits for the slowest request, not the sum: with every answer taking
+    0.3 s, the build takes about two of them (the terrain, then the bands' forecasts)."""
+    import time as clock
+
+    inner = spot_transport()
+
+    def slow(req: httpx.Request) -> httpx.Response:
+        clock.sleep(0.3)
+        return inner.handle_request(req)
+
+    times: dict[str, float] = {}
+    opts: dict[str, Any] = {"transport": httpx.MockTransport(slow), "tries": 1}
+    with fetcher_for(spot_settings(settings), **opts) as f:
+        ctx = SpotContext(borders=load_borders(BORDERS), locations=[], peaks=[])
+        t0 = clock.monotonic()
+        snap = build_spot(f, config(), ctx, 47.0, -121.0, captured_at(), times)
+        took = clock.monotonic() - t0
+    assert snap.spot is not None and len(snap.ensembles) == 3
+    # 18 requests one after another would take 5.4 s.
+    assert took < 1.5, took
+    assert set(times) >= {
+        "elevation",
+        "blend",
+        "multi gfs_seamless",
+        "upper gfs_seamless",
+        "clouds",
+    }
+    assert {k for k in times if k.startswith("ens_")} == {f"ens_{s}" for s in config().ensembles}
+
+
+def test_merge_models_rebuilds_the_multi_model_answer() -> None:
+    from snowwatch.analysis.series import parse_points, split_models
+    from snowwatch.sources.openmeteo import merge_models
+
+    combined = load_fixture(FIXTURES / "crystal" / "multi.json.gz")
+    models = config().models_for("US")
+    merged = merge_models({m: one_model(combined, {"models": m}) for m in models})
+    assert len(merged) == 3
+    for got, want in zip(parse_points(merged), parse_points(combined), strict=True):
+        assert split_models(got, models) == split_models(want, models)
+    # A model whose hours differ is lined up on the first one's, with gaps as None.
+    a = {"timezone": "UTC", "hourly": {"time": [0, 3600, 7200], "snowfall": [1, 2, 3]}}
+    b = {"timezone": "UTC", "hourly": {"time": [3600, 7200, 10800], "snowfall": [5, 6, 7]}}
+    out = merge_models({"x": a, "y": b})
+    assert out["hourly"] == {
+        "time": [0, 3600, 7200],
+        "snowfall_x": [1, 2, 3],
+        "snowfall_y": [None, 5, 6],
+    }
+    with pytest.raises(ValueError):
+        merge_models({})

@@ -4,7 +4,8 @@ can make spots (forecasts anywhere) with no network.
 It answers any point with Crystal's saved responses (backend/tests/fixtures), moved on
 by whole days so they reach from now (a spot is built for the present):
 - /v1/forecast: the blend, multi-model, upper-air or clouds answer, told apart by what
-  is asked for (clouds are made up, as tests/helpers.py does)
+  is asked for (clouds are made up, as tests/helpers.py does); a one-model request gets
+  that model's columns, as the real server answers
 - /v1/ensemble: Crystal's ensembles, so they come "from the server" (with
   OPEN_METEO_ENSEMBLES=local and the meta.json files written at start, they're fresh)
 - /v1/elevation: ground rising 300 m a km to the north from 1,500 m at the first point,
@@ -66,6 +67,21 @@ def clouds(days: int) -> dict[str, Any]:
     return {"timezone": "UTC", "utc_offset_seconds": 0, "hourly": hourly}
 
 
+def one_model(data: Any, models: str) -> Any:
+    """A saved multi-model answer as the server gives it for one model (spots ask for one
+    model per request): that model's columns, without the suffix."""
+    if "," in models or not models:
+        return data
+    suffix = f"_{models}"
+
+    def point(p: dict[str, Any]) -> dict[str, Any]:
+        h = p.get("hourly") or {}
+        keep = {k[: -len(suffix)]: v for k, v in h.items() if k.endswith(suffix)}
+        return {**p, "hourly": {"time": h.get("time", []), **keep}}
+
+    return [point(p) for p in data] if isinstance(data, list) else point(data)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args: Any) -> None:  # quiet
         pass
@@ -94,9 +110,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/v1/forecast":
             if "cloud_cover_850hPa" in hourly:
                 return self.answer(200, clouds(int(q.get("forecast_days", "10"))))
-            if "wind_speed_850hPa" in hourly:
-                return self.answer(200, ANSWERS["upper"])
-            return self.answer(200, ANSWERS["blend" if "daily" in q else "multi"])
+            if "daily" in q:
+                return self.answer(200, ANSWERS["blend"])
+            name = "upper" if "wind_speed_850hPa" in hourly else "multi"
+            return self.answer(200, one_model(ANSWERS[name], q.get("models", "")))
         self.answer(404, {"error": True, "reason": "not here"})
 
 

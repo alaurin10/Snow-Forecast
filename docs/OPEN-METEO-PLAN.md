@@ -755,6 +755,42 @@ Choices made while building, beyond the checklist:
   Setting `OPEN_METEO_URL` there changes nothing else the other tests see (locations
   keep their rebuilt forecasts).
 
+### After first use on the mini PC (27 Nov 2026)
+
+The owner's first spots took >90 s (gave up), 25 s, 10 s and 5 s. Three changes followed,
+in one PR:
+- **Faster builds.** A spot's requests ran one after another, so a cold area paid the
+  sum of their waits. They now run at once, and the multi-model forecast and upper air
+  are asked for one model per request and joined: the server reads one request's
+  models in turn (one request for 6 models: 52 s from an empty cache, 13 s in a new
+  area; 6 requests at once: 20 s and 3.8 s). Against the pinned server in a sandbox,
+  the same three spots took (seconds):
+
+  | Spot | Before | At once | At once, one model per request |
+  |---|---|---|---|
+  | Empty server cache | 128 | 60 | 32 |
+  | 5 km away | 15 | 9 | 4.9 |
+  | 70 km away, new area | 24 | 16 | 6.0 |
+
+  The slowest request is now GEM (`gem_seamless` joins HRDPS, RDPS and GDPS). The API
+  logs each request's time per spot (`spot … built in 6.0s (upper gem_seamless 5.9s, …)`),
+  to see on the mini PC what's slow there. The spot page shows the seconds while it
+  waits, and after 12 s says a new area takes longer the first time.
+- **Back to the same map view.** The full map keeps its view (centre, zoom, tilt, turn)
+  for the tab's session and opens there again, so Back from a spot returns to it; a
+  spot's Map button does too when the spot is within 25 km of it.
+- **Peaks everywhere.** The map labels named peaks from its label tiles (OpenMapTiles'
+  `mountain_peak`, the same OpenFreeMap tiles as the names over imagery), not only the
+  saved areas' OpenStreetMap file: the most prominent zoomed out, every named peak from
+  zoom 13, under the Peaks switch, beneath the saved areas' own labels.
+
+Still possible if spots stay slow on the mini PC: keep the server's cache warm over the
+mountains (a background job asking a coarse grid of points after each model run; costs
+download volume), or start building a spot as soon as the map's spot panel opens, before
+"Full forecast here" is pressed (costs a build per tap, against the per-visitor limit).
+Spots are named only from the saved areas' peaks; naming them from the label tiles' peaks
+would need the server to read those tiles.
+
 ## Milestone 3: Richer weather variables and better physics
 
 **Goal:** use the variables we couldn't afford before, so rain/snow, snow ratio, freezing

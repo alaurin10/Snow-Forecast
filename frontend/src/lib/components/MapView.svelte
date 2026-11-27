@@ -41,6 +41,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { spotSearch } from '../recentSpots';
+	import { lastView, near, saveView } from '../map/lastView';
 	import type {
 		AtesOut,
 		ConcernOut,
@@ -233,7 +234,8 @@
 		rows: OverviewRow[];
 		units: UnitSystem;
 		href: (id: string) => string;
-		/** The full map: weather, terrain, their controls, and the whole window. */
+		/** The full map: weather, terrain, their controls, and the whole window. It opens
+		 *  where this tab last left it, unless sent to a location or a point elsewhere. */
 		radar?: boolean;
 		/** A location to open on (its id), from its page's Map button: centred, close in,
 		 *  flat, with its popup open. Otherwise the full map opens over Washington. */
@@ -2573,6 +2575,15 @@
 					const c = map.getCenter();
 					centre = { lat: c.lat, lon: c.lng };
 					viewTick++;
+					// Kept, so coming back from a spot's forecast finds the map as it was.
+					if (radar && fitted)
+						saveView({
+							lng: c.lng,
+							lat: c.lat,
+							zoom: map.getZoom(),
+							bearing: map.getBearing(),
+							pitch: map.getPitch()
+						});
 				}, 250);
 			});
 			// The "3D view" buttons inside marker popups.
@@ -2837,10 +2848,20 @@
 		if (radar && !fitted) {
 			fitted = true;
 			const f = focus ? placedRow(focus) : null;
+			// The view this tab last left the map at (from a spot's page, by Back or by its
+			// Map button when the spot is in it).
+			const kept = f ? null : lastView();
 			if (f) {
 				map.jumpTo({ center: [f.lon, f.lat], zoom: 11.5, pitch: 0, bearing: 0 });
 				popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
-			} else if (focusPoint)
+			} else if (kept && (!focusPoint || near(kept, focusPoint)))
+				map.jumpTo({
+					center: [kept.lng, kept.lat],
+					zoom: kept.zoom,
+					bearing: kept.bearing,
+					pitch: kept.pitch
+				});
+			else if (focusPoint)
 				map.jumpTo({
 					center: [focusPoint.lon, focusPoint.lat],
 					zoom: 12,
