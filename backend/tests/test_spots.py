@@ -1,0 +1,537 @@
+"""Forecasts anywhere (spots, docs/OPEN-METEO-PLAN.md milestone 2): bands from the
+terrain, the US/Canada outline, names, cache keys, limits, the ensemble allowance, and a
+spot built from the saved fixtures."""
+
+from __future__ import annotations
+
+import gzip
+import json
+import math
+import sqlite3
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from snowwatch import spots
+from snowwatch.api.app import create_app
+from snowwatch.capture import load_fixture
+from snowwatch.doc import Snapshot
+from snowwatch.http import fetcher_for
+from snowwatch.locations.service import import_yaml
+from snowwatch.settings import REPO_ROOT, Settings
+from snowwatch.spots import (
+    OutsideCoverage,
+    SpotBusy,
+    SpotContext,
+    SpotService,
+    SpotUnavailable,
+    build_spot,
+    choose_bands,
+    country_at,
+    ensemble_cell,
+    geohash,
+    load_borders,
+    ring_points,
+    round_point,
+    spot_name,
+)
+from snowwatch.store import repo
+from tests.conftest import make_location
+from tests.helpers import FIXTURES, captured_at, config, seed, synthetic_clouds
+
+BORDERS = REPO_ROOT / "config" / "borders.geojson"
+LOCAL = "http://om.test"
+
+# --- bands from the terrain -----------------------------------------------------------
+
+
+def test_bands_near_the_top() -> None:
+    b = choose_bands(2000, [1200, 1500, 1990, 1700])
+    assert (b.base, b.mid, b.summit, b.method, b.band) == (1200, 1680, 2000, "top", "summit")
+
+
+def test_bands_near_the_bottom() -> None:
+    b = choose_bands(900, [950, 1400, 1900, 1200])
+    assert (b.base, b.mid, b.summit, b.method, b.band) == (900, 1500, 1900, "bottom", "base")
+
+
+def test_bands_on_a_slope() -> None:
+    b = choose_bands(1500, [1000, 1300, 1800, 2100])
+    assert (b.base, b.mid, b.summit, b.method, b.band) == (1000, 1500, 2100, "slope", "mid")
+
+
+def test_bands_on_flat_ground() -> None:
+    b = choose_bands(600, [550, 610, 700, 580])
+    assert (b.base, b.mid, b.summit, b.method, b.band) == (300, 600, 900, "flat", "mid")
+
+
+@pytest.mark.parametrize(
+    ("h", "ring"),
+    [
+        (1000, [700, 1000, 1010]),  # top, 310 m of relief: mid pulled clear of both ends
+        (700, [700, 760, 1010]),  # bottom, likewise
+        (1000, [880, 1300]),  # slope just above the bottom edge: base pushed down
+        (1180, [880, 1300]),  # slope just below the top edge: summit pushed up
+    ],
+)
+def test_bands_stay_150_m_apart(h: float, ring: list[float]) -> None:
+    b = choose_bands(h, ring)
+    assert b.mid - b.base >= 150 and b.summit - b.mid >= 150
+    assert h in (b.base, b.mid, b.summit)
+
+
+def test_ring_points_are_one_and_two_and_a_half_km_out() -> None:
+    from snowwatch.geo import haversine_km
+
+    pts = ring_points(47.0, -121.0)
+    assert len(pts) == 25 and pts[0] == (47.0, -121.0)
+    assert all(abs(haversine_km(47, -121, *p) - 1.0) < 0.01 for p in pts[1:13])
+    assert all(abs(haversine_km(47, -121, *p) - 2.5) < 0.01 for p in pts[13:])
+
+
+# --- country -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lat", "lon", "country"),
+    [
+        (46.935, -121.475, "US"),  # Crystal Mountain
+        (50.115, -122.949, "CA"),  # Whistler
+        (51.3, -117.5, "CA"),  # Rogers Pass
+        (39.6, -106.0, "US"),  # Colorado
+        (61.1, -149.7, "US"),  # Alaska
+        (49.03, -119.0, "CA"),  # just north of the 49th parallel
+        (48.97, -119.0, "US"),  # just south
+        (45.0, -73.4, "US"),  # the Quebec/New York line
+        (45.05, -73.4, "CA"),
+        (47.92, -124.64, "US"),  # the Olympic coast, on the rocks
+        (31.0, -110.0, None),  # Sonora, Mexico
+        (45.0, -135.0, None),  # the Pacific
+        (64.0, -19.0, None),  # Iceland
+    ],
+)
+def test_country_from_the_outline(lat: float, lon: float, country: str | None) -> None:
+    assert country_at(load_borders(BORDERS), lat, lon) == country
+
+
+def test_outline_is_small() -> None:
+    assert BORDERS.stat().st_size < 400_000
+
+
+# --- names and keys -------------------------------------------------------------------
+
+
+def test_name_from_a_peak_then_a_location_then_coordinates() -> None:
+    crystal = make_location(id="crystal", name="Crystal Mountain")
+    mid = crystal.band("mid")  # 47.0, -121.0
+    peaks = [("Silver King", 47.01, -121.0), ("Far Peak", 47.2, -121.0)]
+    assert spot_name(47.0, -121.0, peaks, (crystal, 0.0)) == "Silver King"  # 1.1 km
+    lat, lon = 47.0 + 6 / 111.2 * math.cos(math.radians(45)), -121.0
+    lon += 6 / (111.2 * math.cos(math.radians(47))) * math.sin(math.radians(45))
+    near = (crystal, 6.0)
+    assert spot_name(lat, lon, peaks, near) == "6 km NE of Crystal Mountain"
+    assert spot_name(mid.lat, mid.lon, [], (crystal, 0.3)) == "Near Crystal Mountain"
+    assert spot_name(47.5, -121.0, [], (crystal, 55.6)) == "47.500° N, 121.000° W"
+    assert spot_name(47.5, -121.0, [], None) == "47.500° N, 121.000° W"
+
+
+def test_geohash_and_ids() -> None:
+    assert geohash(57.64911, 10.40744) == "u4pruyd"  # the textbook example
+    loc = spots.spot_location(46.935, -121.475, choose_bands(1500, [1000, 2000]), "US", "A spot")
+    assert loc.id == "spot-" + geohash(46.935, -121.475) and len(loc.id) == 12
+    assert [b.label for b in loc.bands] == ["Lower", "This spot", "Upper"]
+    assert {b.lat for b in loc.bands} == {46.935} and loc.tz is None
+
+
+def test_cache_keys() -> None:
+    assert round_point(46.93549, -121.47451) == (46.935, -121.475)
+    assert round_point(46.9346, -121.4754) == round_point(46.9354, -121.4746)
+    assert ensemble_cell(46.93, -121.47, 1840) == (47.0, -121.5, 1800, "47,-121.5,1800")
+    assert ensemble_cell(46.87, -121.37, 1849)[3] == "46.75,-121.25,1800"
+    assert ensemble_cell(46.87, -121.37, 1851)[3] == "46.75,-121.25,1900"
+
+
+# --- a spot built from the saved fixtures -------------------------------------------------
+
+
+def terrain(lat: float, lon: float) -> float:
+    """A cone 2,400 m high at (47, -121), falling 300 m a km: the summit of any spot there."""
+    from snowwatch.geo import haversine_km
+
+    return max(800.0, 2400.0 - 300.0 * haversine_km(lat, lon, 47.0, -121.0))
+
+
+def spot_transport(log: list[str] | None = None, *, down: bool = False) -> httpx.MockTransport:
+    """The self-hosted server answering any point with Crystal's saved responses, the
+    terrain above for elevation, and NWS and the public ensemble API likewise."""
+    crystal = FIXTURES / "crystal"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url.copy_with(query=None))
+        params = dict(req.url.params)
+        if log is not None:
+            log.append(f"{req.url.host} {req.url.path} {params.get('models', '')}".strip())
+        if down and req.url.host == "om.test":
+            raise httpx.ConnectError("refused")
+        if url.endswith("/v1/elevation"):
+            lats = [float(x) for x in params["latitude"].split(",")]
+            lons = [float(x) for x in params["longitude"].split(",")]
+            return httpx.Response(
+                200, json={"elevation": [terrain(a, b) for a, b in zip(lats, lons, strict=True)]}
+            )
+        if url.endswith("/v1/ensemble"):
+            return httpx.Response(
+                200, json=load_fixture(crystal / f"ens_{params['models']}.json.gz")
+            )
+        if url.endswith("/alerts/active"):
+            return httpx.Response(200, json=load_fixture(crystal / "nws_alerts.json.gz"))
+        hourly = params.get("hourly", "").split(",")
+        if "cloud_cover_850hPa" in hourly:
+            return httpx.Response(200, json=synthetic_clouds(params))
+        if "wind_speed_850hPa" in hourly:
+            return httpx.Response(200, json=load_fixture(crystal / "upper.json.gz"))
+        if "daily" in params:
+            return httpx.Response(200, json=load_fixture(crystal / "blend.json.gz"))
+        return httpx.Response(200, json=load_fixture(crystal / "multi.json.gz"))
+
+    return httpx.MockTransport(handler)
+
+
+def spot_settings(settings: Settings, mode: str = "public") -> Settings:
+    return settings.model_copy(update={"open_meteo_url": LOCAL, "open_meteo_ensembles": mode})
+
+
+def build(
+    settings: Settings,
+    conn: sqlite3.Connection | None,
+    *,
+    lat: float = 47.0,
+    lon: float = -121.0,
+    log: list[str] | None = None,
+    spot_used: float = 0.0,
+    local_ensembles: bool = False,
+    down: bool = False,
+) -> Snapshot:
+    opts: dict[str, Any] = {"transport": spot_transport(log, down=down), "tries": 1}
+    if local_ensembles:
+        opts |= {"ensemble_stale": lambda s: None, "ensemble_check": None}
+    s = spot_settings(settings, "local" if local_ensembles else "public")
+    with fetcher_for(s, **opts) as f:
+        ctx = SpotContext(
+            borders=load_borders(BORDERS),
+            locations=list(seed().values()),
+            peaks=[],
+            conn=conn,
+            spot_used=spot_used,
+            alerts=lambda a, b: f.get_json(
+                "https://api.weather.gov/alerts/active", {"point": f"{a},{b}"}, source="nws"
+            ),
+        )
+        snap = build_spot(f, config(), ctx, lat, lon, captured_at())
+        if conn is not None:
+            repo.record_usage(conn, f, public_as=repo.SPOT_HOST)
+        return snap
+
+
+def test_spot_built_from_the_fixtures(settings: Settings, conn: sqlite3.Connection) -> None:
+    log: list[str] = []
+    snap = build(settings, conn, log=log)
+    assert snap.spot is not None and snap.location.id.startswith("spot-")
+    assert snap.spot.method == "top" and snap.spot.band == "summit"
+    elevs = [b.elev_m for b in snap.bands]
+    assert snap.spot.elev_m == 2400 and elevs[2] == 2400
+    assert elevs[0] == pytest.approx(1650, abs=10) and elevs[1] == pytest.approx(2100, abs=5)
+    assert [b.label for b in snap.bands] == ["Lower", "Middle", "This spot"]
+    assert snap.location.tz == "America/Los_Angeles"  # from the forecast
+    assert snap.location.name == "37 km E of Crystal Mountain"
+    assert snap.spot.nearest is not None and snap.spot.nearest.id == "crystal"
+    assert snap.spot.ensembles == "fresh" and set(snap.ensembles) == set(config().ensembles)
+    assert snap.run_id is None and snap.snotel is None and len(snap.alerts) >= 0
+    # Forecasts from the server only; ensembles from the public API (OPEN_METEO_ENSEMBLES
+    # public); no station, SNOTEL or BC requests.
+    assert sum("/v1/forecast" in x for x in log) == 4
+    assert all(x.startswith(("om.test", "ensemble-api", "api.weather.gov")) for x in log)
+    assert sum(x.startswith("ensemble-api") for x in log) == 3
+    # The ensembles are kept for nearby spots, and their weight goes on the spots' row.
+    used = repo.usage_today(conn).by_host
+    assert used[repo.SPOT_HOST] == pytest.approx(11.8, abs=0.5)
+    log.clear()
+    again = build(settings, conn, log=log)  # a second visitor (the API would have it cached)
+    assert again.spot is not None and again.spot.ensembles == "cached"
+    assert not any(x.startswith("ensemble-api") for x in log)
+    assert len(again.model_dump_json()) < 300_000
+
+
+def test_spot_ensembles_from_the_server_need_no_allowance(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    log: list[str] = []
+    snap = build(settings, conn, log=log, spot_used=5000, local_ensembles=True)
+    assert snap.spot is not None and snap.spot.ensembles == "fresh"
+    assert sum(x.startswith("om.test /v1/ensemble") for x in log) == 3
+    assert not any(x.startswith("ensemble-api") for x in log)
+    assert repo.usage_today(conn).by_host.get(repo.SPOT_HOST, 0) == 0
+    rows = conn.execute("SELECT DISTINCT source FROM spot_ensembles").fetchall()
+    assert [r[0] for r in rows] == ["local"]
+
+
+def test_spot_builds_without_ensembles_when_the_allowance_is_spent(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    log: list[str] = []
+    snap = build(settings, conn, log=log, spot_used=config().spots.ensemble_allowance - 1)
+    assert snap.spot is not None and snap.spot.ensembles == "allowance_spent"
+    assert snap.ensembles == {} and not any(x.startswith("ensemble-api") for x in log)
+    assert snap.bands[1].periods  # the forecast itself is all there
+
+
+def test_spot_without_a_database_still_builds(settings: Settings) -> None:
+    snap = build(settings, None)
+    assert snap.spot is not None and snap.spot.ensembles == "fresh"
+
+
+def test_spot_outside_the_us_and_canada(settings: Settings) -> None:
+    with pytest.raises(OutsideCoverage, match="US and Canada"):
+        build(settings, None, lat=31.0, lon=-110.0)
+
+
+def test_spot_when_the_server_is_down(settings: Settings) -> None:
+    log: list[str] = []
+    with pytest.raises(SpotUnavailable):
+        build(settings, None, log=log, down=True)
+    # No public fallback for spots, not even for elevation.
+    assert all(x.startswith("om.test") for x in log)
+
+
+def test_spot_names_a_nearby_peak(settings: Settings) -> None:
+    opts: dict[str, Any] = {"transport": spot_transport(), "tries": 1}
+    with fetcher_for(spot_settings(settings), **opts) as f:
+        ctx = SpotContext(
+            borders=load_borders(BORDERS),
+            locations=list(seed().values()),
+            peaks=[("Cone Peak", 47.005, -121.0)],
+        )
+        snap = build_spot(f, config(), ctx, 47.0, -121.0, captured_at())
+    assert snap.location.name == "Cone Peak"
+
+
+def test_read_peaks(tmp_path: Path) -> None:
+    path = tmp_path / "ski.geojson"
+    assert spots.read_peaks(path) == []
+    path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-121.5, 46.9]},
+                        "properties": {"kind": "peak", "name": "Silver King", "ele": 2100},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-121.4, 46.9]},
+                        "properties": {"kind": "hut", "name": "A hut"},
+                    },
+                ],
+            }
+        )
+    )
+    assert spots.read_peaks(path) == [("Silver King", 46.9, -121.5)]
+
+
+# --- the service: cache and limits --------------------------------------------------------
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def fake_service(clock: Clock, calls: list[tuple[float, float]], **kw: Any) -> SpotService:
+    snap = Snapshot.model_validate(json.loads(fixture_doc()))
+
+    def make(lat: float, lon: float) -> Snapshot:
+        calls.append((lat, lon))
+        if lat < 0:
+            raise SpotUnavailable("server down")
+        return snap
+
+    return SpotService(config(), make, clock=clock, **kw)
+
+
+def fixture_doc() -> str:
+    from tests.helpers import fixture_snapshot
+
+    return fixture_snapshot("crystal").model_dump_json()
+
+
+def test_service_caches_by_point_until_the_models_update() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    a = svc.get(46.9351, -121.4751, "v")
+    b = svc.get(46.9349, -121.4749, "v")  # the same ~100 m
+    assert a is b and calls == [(46.935, -121.475)]
+    assert json.loads(gzip.decompress(a.gz))["location"]["id"] == "crystal"
+    clock.t += config().spots.cache_minutes * 60 + 1
+    svc.get(46.935, -121.475, "v")
+    assert len(calls) == 2
+
+
+def test_service_keeps_the_newest_few_hundred() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    svc.max_entries = 3
+    svc.visitor.burst = svc.site.burst = 100
+    for i in range(5):
+        svc.get(47 + i / 100, -121, f"v{i}")
+    assert svc.cached(47.0, -121) is None and svc.cached(47.04, -121) is not None
+
+
+def test_service_limits_new_spots_per_visitor_and_site() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    for i in range(8):
+        svc.get(47 + i / 100, -121, "visitor")
+    with pytest.raises(SpotBusy) as e:
+        svc.get(48, -121, "visitor")
+    assert e.value.visitor
+    svc.get(47.0, -121, "visitor")  # cached: still fine
+    svc.get(48, -121, "someone else")
+    clock.t += 15
+    svc.get(48.5, -121, "visitor")  # one more every 15 s
+    svc.site.burst = 0  # the site's hourly allowance used up
+    svc.site._buckets.clear()
+    with pytest.raises(SpotBusy) as e:
+        svc.get(49, -121, "a third")
+    assert not e.value.visitor
+
+
+def test_service_answers_fast_while_the_server_is_down() -> None:
+    clock, calls = Clock(), []
+    svc = fake_service(clock, calls)
+    with pytest.raises(SpotUnavailable):
+        svc.get(-47, -121, "v")
+    with pytest.raises(SpotUnavailable):
+        svc.get(47, -121, "v")  # not tried: the server just failed
+    assert calls == [(-47, -121)]
+    clock.t += 31
+    svc.get(47, -121, "v")
+    assert len(calls) == 2
+
+
+# --- the API -------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def spot_client(settings: Settings, conn: sqlite3.Connection) -> TestClient:
+    import_yaml(conn, REPO_ROOT / "config" / "seed-locations.yaml", max_locations=25)
+    conn.commit()
+    s = spot_settings(settings)
+    app = create_app(s)
+    app.state.spots = spots.make_service(
+        s, config(), lambda: fetcher_for(s, transport=spot_transport(), tries=1)
+    )
+    return TestClient(app)
+
+
+def test_api_spot(spot_client: TestClient, conn: sqlite3.Connection) -> None:
+    r = spot_client.get("/api/spot", params={"lat": 47.0, "lon": -121.0})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-encoding"] == "gzip" and r.headers["etag"]
+    body = r.json()
+    assert body["spot"]["band"] == "summit" and body["location"]["kind"] == "backcountry"
+    again = spot_client.get(
+        "/api/spot",
+        params={"lat": 47.0001, "lon": -121.0001},
+        headers={"If-None-Match": r.headers["etag"]},
+    )
+    assert again.status_code == 304
+    plain = spot_client.get(
+        "/api/spot", params={"lat": 47.0, "lon": -121.0}, headers={"Accept-Encoding": "identity"}
+    )
+    assert "content-encoding" not in plain.headers and plain.json() == body
+    assert spot_client.get("/api/spot", params={"lat": 31, "lon": -110}).status_code == 422
+    assert spot_client.get("/api/spot", params={"lat": 95, "lon": -110}).status_code == 422
+    # The spot's public ensembles were recorded on the spots' row of the ledger.
+    assert repo.usage_today(conn).by_host.get(repo.SPOT_HOST, 0) > 0
+
+
+def test_api_spot_burst_gives_429(spot_client: TestClient) -> None:
+    codes = [
+        spot_client.get("/api/spot", params={"lat": 47 + i / 100, "lon": -121}).status_code
+        for i in range(10)
+    ]
+    assert codes[:8] == [200] * 8 and codes[8:] == [429, 429]
+
+
+def test_api_spot_needs_the_self_hosted_server(
+    settings: Settings, conn: sqlite3.Connection
+) -> None:
+    client = TestClient(create_app(settings))
+    r = client.get("/api/spot", params={"lat": 47.0, "lon": -121.0})
+    assert r.status_code == 503 and "self-hosted" in r.json()["detail"]
+    s = spot_settings(settings)
+    app = create_app(s)
+    app.state.spots = spots.make_service(
+        s, config(), lambda: fetcher_for(s, transport=spot_transport(down=True), tries=1)
+    )
+    r = TestClient(app).get("/api/spot", params={"lat": 47.0, "lon": -121.0})
+    assert r.status_code == 503 and r.headers["retry-after"] == "30"
+
+
+def test_api_spot_nearby_has_the_zone_and_its_rating(
+    spot_client: TestClient, settings: Settings
+) -> None:
+    from datetime import UTC, datetime
+
+    empty = spot_client.get("/api/spot/nearby", params={"lat": 47.0, "lon": -121.0}).json()
+    assert empty["zone_id"] is None and empty["avalanche"] is None and empty["stations"] == []
+    assert empty["location_id"] == spots.spot_id(47.0, -121.0)
+    today = datetime.now(UTC).date()
+    doc = {
+        "provider": "nac",
+        "center": "NWAC",
+        "center_id": "NWAC",
+        "zone": "Test Zone",
+        "link": None,
+        "issued_at": (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+        "expires_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        "days": [{"date": today.isoformat(), "alpine": 3, "treeline": 2, "below": 1}],
+    }
+    square = [[-121.2, 46.8], [-120.8, 46.8], [-120.8, 47.2], [-121.2, 47.2], [-121.2, 46.8]]
+    settings.zones_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.zones_path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "generated_at": None,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": "nac:1",
+                        "geometry": {"type": "Polygon", "coordinates": [square]},
+                        "properties": {"tz": "UTC", "doc": doc},
+                    }
+                ],
+            }
+        )
+    )
+    body = spot_client.get("/api/spot/nearby", params={"lat": 47.0, "lon": -121.0}).json()
+    assert body["zone_id"] == "nac:1" and body["zone_name"] == "Test Zone"
+    assert body["avalanche"]["status"] == "current" and body["avalanche"]["today_max"] == 3
+    outside = spot_client.get("/api/spot/nearby", params={"lat": 48.0, "lon": -121.0}).json()
+    assert outside["zone_id"] is None and outside["avalanche"] is None
+
+
+def test_meta_says_whether_spots_are_offered(settings: Settings) -> None:
+    assert TestClient(create_app(settings)).get("/api/meta").json()["local_forecasts"] is False
+    on = TestClient(create_app(spot_settings(settings))).get("/api/meta").json()
+    assert on["local_forecasts"] is True

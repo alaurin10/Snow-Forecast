@@ -254,6 +254,10 @@ class NearbyOut(BaseModel):
     area_reports: list[NearbyReport] = []
     near_km: float = 20.0
     zone_name: str | None = None  # the location's avalanche zone, when known
+    # Spots only (`/api/spot/nearby`): the avalanche zone the point is in and its forecast
+    # with expiry applied now, as the map's zones layer shows it.
+    zone_id: str | None = None
+    avalanche: AvalancheView | None = None
 
 
 class RunOut(BaseModel):

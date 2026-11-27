@@ -38,6 +38,15 @@ Notable changes to Snow Watch. The format follows
   run; the Status page summarises a week of it, and `snowwatch check-ensembles` compares
   whole forecasts. `public` (the default) changes nothing. The Status page, Manage's
   budget and `openmeteo status` show where each system's ensembles come from.
+- **Forecasts anywhere, part 1: the API.** With a self-hosted Open-Meteo server,
+  `GET /api/spot?lat=&lon=` builds the full forecast a saved location has for any point
+  in the US or Canada, in seconds: three bands chosen from the terrain around the point,
+  named after a nearby peak or saved location, with alerts (US) and ensembles (from the
+  server when it has them, otherwise from the public API within a daily allowance of
+  2,000 calls, `spots` in `config/forecast.yaml`). `GET /api/spot/nearby` adds the
+  nearest snow stations, field reports and the avalanche zone with its rating. Built
+  spots are kept for an hour; new ones are rate limited per visitor and for the site.
+  Without a server, both answer 503 and nothing else changes. The app's side follows.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

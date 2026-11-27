@@ -10,7 +10,7 @@ field) to keep the gzipped document small.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -367,6 +367,33 @@ class CloudsOut(BaseModel):
     cover: list[int | None]  # each hour's layers together as one cover (%)
 
 
+class SpotNearest(BaseModel):
+    """The saved location nearest a spot."""
+
+    id: str
+    name: str
+    km: float
+
+
+class SpotInfo(BaseModel):
+    """A forecast for a point tapped on the map (a spot), made on request
+    (snowwatch/spots.py). Its three bands share the point and differ in elevation."""
+
+    lat: float  # the point, rounded to ~100 m
+    lon: float
+    elev_m: float  # the terrain's elevation there
+    band: Literal["base", "mid", "summit"]  # the band that holds the point ("this spot")
+    # How the bands were chosen from the terrain within 2.5 km: top (the point is near
+    # the highest ground: summit = the point), bottom (near the lowest: base = the point),
+    # slope (between: mid = the point), flat (bands 300 m below and above the point).
+    method: Literal["top", "bottom", "slope", "flat"]
+    # Ensembles: fresh (fetched for this spot), cached (fetched for a nearby one in the
+    # last hours), allowance_spent (the day's public allowance is used up, so some or all
+    # are missing), unavailable (none could be had).
+    ensembles: Literal["fresh", "cached", "allowance_spent", "unavailable"]
+    nearest: SpotNearest | None = None  # within 100 km
+
+
 class Snapshot(BaseModel):
     version: int = DOC_VERSION
     location: LocationMeta
@@ -388,3 +415,4 @@ class Snapshot(BaseModel):
     flags: list[Flag] = Field(default_factory=list)
     warnings: list[str] = []
     clouds: CloudsOut | None = None
+    spot: SpotInfo | None = None  # a forecast for a tapped point, not a saved location

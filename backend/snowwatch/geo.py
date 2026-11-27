@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Sequence
 from typing import Any
@@ -69,3 +70,46 @@ def centroid(geometry: dict[str, Any]) -> tuple[float, float] | None:
     if not pts:
         return None
     return sum(p[1] for p in pts) / len(pts), sum(p[0] for p in pts) / len(pts)
+
+
+def destination(lat: float, lon: float, bearing_deg: float, km: float) -> tuple[float, float]:
+    """(lat, lon) `km` from a point along a bearing (degrees clockwise from north)."""
+    p1, l1 = math.radians(lat), math.radians(lon)
+    b, d = math.radians(bearing_deg), km / EARTH_KM
+    p2 = math.asin(math.sin(p1) * math.cos(d) + math.cos(p1) * math.sin(d) * math.cos(b))
+    l2 = l1 + math.atan2(
+        math.sin(b) * math.sin(d) * math.cos(p1), math.cos(d) - math.sin(p1) * math.sin(p2)
+    )
+    return math.degrees(p2), (math.degrees(l2) + 540) % 360 - 180
+
+
+def bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """The initial bearing from the first point to the second, 0–360 clockwise from north."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def compass(bearing: float) -> str:
+    """The 8-point compass direction of a bearing: N, NE, E …"""
+    return ("N", "NE", "E", "SE", "S", "SW", "W", "NW")[round(bearing / 45) % 8]
+
+
+def edge_km(geometry: dict[str, Any], lat: float, lon: float) -> float:
+    """The distance from a point to the nearest edge of a (multi)polygon, roughly (flat
+    projection about the point: fine for a few km)."""
+    kx = math.cos(math.radians(lat)) * math.pi * EARTH_KM / 180
+    ky = math.pi * EARTH_KM / 180
+    best = math.inf
+    for poly in polygons(geometry):
+        for ring in poly:
+            for (x1, y1), (x2, y2) in itertools.pairwise(ring):
+                ax, ay = (x1 - lon) * kx, (y1 - lat) * ky
+                bx, by = (x2 - lon) * kx, (y2 - lat) * ky
+                dx, dy = bx - ax, by - ay
+                n = dx * dx + dy * dy
+                t = 0.0 if n == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / n))
+                best = min(best, math.hypot(ax + t * dx, ay + t * dy))
+    return best

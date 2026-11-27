@@ -137,6 +137,20 @@ class TerrainConfig(BaseModel):
         return v
 
 
+class SpotConfig(BaseModel):
+    """Forecasts for any point (spots, docs/OPEN-METEO-PLAN.md milestone 2), offered only
+    with a self-hosted Open-Meteo server (OPEN_METEO_URL)."""
+
+    # Public Open-Meteo weight a day that spots' ensembles may use (each new point's
+    # ensembles cost ~11.8): what the self-hosted server can't answer (milestone 1b).
+    ensemble_allowance: int = Field(2000, ge=0)
+    # A spot's ensembles are kept this long per 0.25° cell and 100 m of elevation.
+    ensemble_cache_h: float = Field(6, gt=0, le=24)
+    # A built spot is kept this long (until the models update) and for this many points.
+    cache_minutes: int = Field(60, ge=1, le=360)
+    cache_entries: int = Field(300, ge=1, le=5000)
+
+
 class ForecastConfig(BaseModel):
     models: ModelSets
     ensembles: list[str]
@@ -160,6 +174,7 @@ class ForecastConfig(BaseModel):
     flags: FlagConfig = FlagConfig()
     map: MapConfig = MapConfig()
     terrain: TerrainConfig = TerrainConfig()
+    spots: SpotConfig = SpotConfig()
     # Verification: the snow-to-water ratio for the observed-SWE depth estimate, and the
     # one that turns forecast snow water into settled snow, as a depth sensor sees it.
     verify_swe_ratio: float = 10

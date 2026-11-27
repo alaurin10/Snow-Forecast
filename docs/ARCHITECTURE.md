@@ -9,8 +9,8 @@ forecast is computed, and the rules the code keeps. For running it, see
 
 ```
 browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the app + /api)
-                                               │ reads; writes only locations, jobs,
-                                               │ owner sessions and push subscriptions
+                                               │ reads; writes only locations, jobs, owner
+                                               │ sessions, push subscriptions, spot ensembles
                                              SQLite (WAL) in ./data
                                                ▲ writes
    Open-Meteo, NWS, SNOTEL, BC RFC,  ◄───────── worker (APScheduler: runs, job queue,
@@ -24,9 +24,9 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 
 | Piece | What it does |
 |---|---|
-| `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
+| `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect, the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) and, with a self-hosted Open-Meteo server, forecasts for a tapped point (spots, below) |
 | `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
-| `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect); ensembles stay on the public API unless the downloader below fills its volume. No published port |
+| `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect, spots); ensembles stay on the public API unless the downloader below fills its volume. No published port |
 | `openmeteo-ensembles` | Optional (compose profile `ensembles`): the same image running `docker/ensembles.sh`, which every 10 minutes downloads each new GEFS, ECMWF ENS and GEPS run (snowfall only, 16 days) from NOAA on AWS, ECMWF and Environment Canada into the `openmeteo-data` volume, where the server serves it at `/v1/ensemble` with no restart. One system at a time, 2 CPUs, a 2 h limit per download; it deletes what the server doesn't need after each run and skips runs below 5 GB free. It writes `ensembles/status.json` (each system's last run, time, size, last error) and `ensembles/disk.log` (a line a day). `worker` and `api` mount the volume read-only at `/openmeteo`; `snowwatch openmeteo status` reads it. The app uses what it downloads only with `OPEN_METEO_ENSEMBLES` (below) |
 | `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
@@ -58,7 +58,7 @@ backend/snowwatch/
               nohrsc, gibs)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets, routing to a
   self-hosted Open-Meteo with the public fallback) cli.py checks.py (check-sources,
-  openmeteo status)
+  openmeteo status) spots.py (a forecast for any point, built on request)
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
   stations.py (every snow station in the map's box) observations.py (Avalanche
   Canada's field reports) nwac_obs.py (NWAC's observations page, read in headless
@@ -144,6 +144,41 @@ largest difference, and both runs: the server's from its meta.json, the public d
 from the public bucket's), summarised on the Status page over 7 days, same runs only.
 `snowwatch check-ensembles` builds each snapshot with both and lists every field that
 differs. Systems served locally cost nothing in the budget (`public_daily_weight`).
+
+## Forecasts anywhere (spots)
+
+With a self-hosted Open-Meteo server, anyone can tap a point in the US or Canada on the
+map for the same forecast a saved location has (`GET /api/spot?lat=&lon=`,
+`snowwatch/spots.py`, docs/OPEN-METEO-PLAN.md milestone 2). Nothing about it is stored
+but its ensembles:
+
+1. **Where**: the point, rounded to ~100 m, must be inside `config/borders.geojson`
+   (Natural Earth's US and Canada outlines, simplified; within 3 km counts), which also
+   picks the country's short-range models. Outside: 422.
+2. **Bands from the terrain**: one `/v1/elevation` request for the point and 24 samples
+   on rings 1 and 2.5 km out. Near the highest ground the point is the summit (base the
+   lowest, mid 60 % up); near the lowest it's the base; otherwise it's mid. Bands stay
+   150 m apart; flat ground gets 300 m below and above. All three share the point.
+3. **A transient `Location`** (`spot-<geohash>`, backcountry, time zone from the
+   forecast) named after a peak within 2 km in the map's OpenStreetMap file, else "6 km
+   NE of" a saved location within 40 km, else its coordinates.
+4. **Fetch** with `pipeline.fetch_forecasts` (the saved locations' request builders)
+   from the server only: no public fallback, so a stopped server means 503. No snow
+   station, SNOTEL or BC data. US spots get NWS alerts, kept 10 minutes per 0.1° cell.
+5. **Ensembles** (mid band), per system: a nearby spot's from `spot_ensembles` (per
+   0.25° cell and 100 m of elevation, 6 h); else the server's while its run is fresh
+   (`OPEN_METEO_ENSEMBLES=local`, free); else the public API within the spots' daily
+   allowance (`spots.ensemble_allowance`, 2,000 weighted calls, recorded in `api_usage`
+   as host `spots`, which counts in the public total). Past it the spot builds without
+   them and says so (`Snapshot.spot.ensembles`).
+6. **Build** with `inputs_from_responses` and `build_snapshot`, unchanged, plus
+   `Snapshot.spot` (the point, which band holds it, how the bands were chosen, the
+   ensembles' source, the nearest saved location).
+
+`/api/spot/nearby` gives a spot's Observed and Backcountry extras from local files: the
+nearest snow stations and field reports (shared with `/locations/{id}/nearby` as
+`nearby_at`) and the avalanche zone it's in, with that zone's forecast from the map's
+zones file.
 
 A location that fails keeps its last good snapshot. A run always ends `ok`,
 `partial` or `failed`; runs and jobs interrupted by a restart are marked failed
@@ -274,6 +309,7 @@ and recorded by name. Nightly (`store/retention.py`):
 | `obs_daily` | 400 days |
 | Avalanche forecasts | 30 days |
 | Raw responses | 24 h |
+| `spot_ensembles` | 6 h (`spots.ensemble_cache_h`), dropped as new ones are written |
 | Map tiles | 45 days unused, and at most `TILES_MAX_MB` |
 | Backups | 14 nightly copies |
 
@@ -292,6 +328,14 @@ and recorded by name. Nightly (`store/retention.py`):
   terrain-adjusted snow tiles (`/api/snowtiles/…`) are drawn only for grids the worker
   wrote (16-hex ids), zoom 5–11, from local files and cached Mapterhorn elevation tiles,
   and count against the tile cache's miss limit when not already drawn.
+  Forecasts for a tapped point (`/api/spot`, only with a self-hosted Open-Meteo server)
+  are the one place the API makes outbound requests for any visitor: to the `openmeteo`
+  server, NWS alerts and the public ensemble API. Each built spot is kept for an hour
+  (300 at most, per ~100 m); new ones are limited per visitor (8, then one every 15 s),
+  to 2 at a time and to about 600 an hour for the whole site, and run in the thread
+  pool; cached ones have a lighter limit. Public ensembles for spots stay within a daily
+  allowance, and the outline check rejects points outside the US and Canada before any
+  request. `/api/spot/nearby` reads local files only.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;
   third parties limited to Mapterhorn and AWS elevation tiles, and https images; satellite
   imagery comes through the server's tile cache, which fetches only Sentinel-2 items in its

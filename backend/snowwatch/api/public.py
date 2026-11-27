@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from snowwatch import avalanche, observations, stations
+from snowwatch import avalanche, observations, spots, stations
 from snowwatch import avalanche_zones as zones
 from snowwatch import ensembles as ens
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
@@ -49,6 +49,7 @@ from snowwatch.api.models import (
     TrendOut,
     TrendRun,
 )
+from snowwatch.api.ratelimit import client_key
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
 from snowwatch.config import get_forecast_config
@@ -296,6 +297,99 @@ def _ensembles_out(conn: sqlite3.Connection, settings: Settings) -> EnsemblesOut
     return EnsemblesOut(mode=mode, systems=systems, shadow=shadow)
 
 
+def nearby_at(
+    settings: Settings,
+    lat: float,
+    lon: float,
+    *,
+    location_id: str,
+    loc_zone: str | None = None,
+    others: list[tuple[str, float, float]] | None = None,
+) -> NearbyOut:
+    """The closest snow stations and recent field reports around a point (local files
+    only): a saved location's mid band, or a spot. `loc_zone`: its avalanche zone, when
+    known ("nac:3023"), else looked up by point; `others`: every saved location's
+    (id, lat, lon), so a report near several goes to the closest."""
+
+    def km(p_lat: float, p_lon: float) -> float:
+        return round(haversine_km(lat, lon, p_lat, p_lon), 1)
+
+    st = _cached(_stations_cache, settings.stations_path, stations.read)
+    near = sorted(
+        (
+            NearbyStation(station=s, distance_km=d)
+            for s in (st.stations if st else [])
+            if (d := km(s.lat, s.lon)) <= NEARBY_KM
+        ),
+        key=lambda x: x.distance_km,
+    )
+    obs = observations.merge(
+        _cached(_obs_cache, settings.obs_path, observations.read),
+        _cached(_obs_cache, settings.nwac_obs_path, observations.read),
+    )
+    located = []
+    for f in obs.features if obs else []:
+        xy = f.geometry.get("coordinates") or []
+        if len(xy) >= 2 and (d := km(float(xy[1]), float(xy[0]))) <= NEARBY_KM:
+            rep = NearbyReport(report=f.properties, distance_km=d)
+            located.append((rep, float(xy[1]), float(xy[0])))
+    located.sort(key=lambda x: x[0].report.time, reverse=True)
+    reports = [r for r, _, _ in located]
+    # The Webcams tab: near this place, or elsewhere in its avalanche zone.
+    index = _cached(_zone_index_cache, settings.zones_path, read_zone_index) or []
+    if loc_zone is None:
+        loc_zone = zone_at(index, lat, lon)
+    zone_name = next((name for zid, name, _, _ in index if zid == loc_zone and name), None)
+    area = area_groups(location_id, loc_zone, located, others or [], index)
+    photos = [r for r in area if r.report.photos]
+    if zone_name is None:
+        zone_name = next((r.report.region for r in area if r.group == "zone"), None)
+    return NearbyOut(
+        location_id=location_id,
+        radius_km=NEARBY_KM,
+        stations_at=st.generated_at if st else None,
+        stations=near[:NEARBY_STATIONS],
+        reports_at=obs.generated_at if obs else None,
+        reports_days=obs.days if obs else None,
+        reports=reports[:NEARBY_REPORTS],
+        photo_reports=photos[:NEARBY_PHOTO_REPORTS],
+        area_reports=area[:NEARBY_AREA_REPORTS],
+        near_km=NEAR_KM,
+        zone_name=zone_name or None,
+    )
+
+
+# Each avalanche zone's time zone and forecast, from the map's zones file.
+_zone_docs_cache: dict[str, tuple[float, dict[str, tuple[str | None, Any]] | None]] = {}
+
+
+def _read_zone_docs(path: Path) -> dict[str, tuple[str | None, Any]] | None:
+    data = zones.read_zones(path)
+    if data is None:
+        return None
+    return {
+        str(f.get("id")): (
+            (f.get("properties") or {}).get("tz"),
+            (f.get("properties") or {}).get("doc"),
+        )
+        for f in data.get("features") or []
+        if isinstance(f, dict)
+    }
+
+
+def zone_view(settings: Settings, zone_id: str, now: datetime) -> AvalancheView | None:
+    """An avalanche zone's forecast as the map shows it, with expiry applied at `now`."""
+    docs = _cached(_zone_docs_cache, settings.zones_path, _read_zone_docs) or {}
+    hit = docs.get(zone_id)
+    if hit is None:
+        return None
+    try:
+        doc = avalanche.AvalancheDoc.model_validate(hit[1])
+    except ValueError:
+        return None
+    return avalanche.view(zone_id, doc, now, avalanche.safe_zone(hit[0]))
+
+
 def _today() -> str:
     return datetime.now(UTC).date().isoformat()
 
@@ -306,6 +400,7 @@ def make_router() -> APIRouter:
     _zones_cache.clear()
     _stations_cache.clear()
     _obs_cache.clear()
+    _zone_docs_cache.clear()
 
     @router.get("/locations", response_model=list[LocationSummary])
     def locations(conn: Conn, response: Response) -> list[LocationSummary]:
@@ -633,61 +728,83 @@ def make_router() -> APIRouter:
         loc = service.get_location(conn, location_id)
         if loc is None:
             raise HTTPException(404, f"unknown location {location_id!r}")
-        settings: Settings = request.app.state.settings
         mid = loc.band("mid")
-
-        def km(lat: float, lon: float) -> float:
-            return round(haversine_km(mid.lat, mid.lon, lat, lon), 1)
-
-        st = _cached(_stations_cache, settings.stations_path, stations.read)
-        near = sorted(
-            (
-                NearbyStation(station=s, distance_km=d)
-                for s in (st.stations if st else [])
-                if (d := km(s.lat, s.lon)) <= NEARBY_KM
-            ),
-            key=lambda x: x.distance_km,
-        )
-        obs = observations.merge(
-            _cached(_obs_cache, settings.obs_path, observations.read),
-            _cached(_obs_cache, settings.nwac_obs_path, observations.read),
-        )
-        located = []
-        for f in obs.features if obs else []:
-            xy = f.geometry.get("coordinates") or []
-            if len(xy) >= 2 and (d := km(float(xy[1]), float(xy[0]))) <= NEARBY_KM:
-                rep = NearbyReport(report=f.properties, distance_km=d)
-                located.append((rep, float(xy[1]), float(xy[0])))
-        located.sort(key=lambda x: x[0].report.time, reverse=True)
-        reports = [r for r, _, _ in located]
-        # The Webcams tab: near this location, or elsewhere in its avalanche zone.
-        index = _cached(_zone_index_cache, settings.zones_path, read_zone_index) or []
-        if loc.avy and loc.avy.provider == "nac" and loc.avy.zone_id:
-            loc_zone: str | None = f"nac:{loc.avy.zone_id}"
-        else:
-            loc_zone = zone_at(index, mid.lat, mid.lon)
-        zone_name = next((name for zid, name, _, _ in index if zid == loc_zone and name), None)
+        avy = loc.avy
+        zone = f"nac:{avy.zone_id}" if avy and avy.provider == "nac" and avy.zone_id else None
         others = [
             (o.id, o.band("mid").lat, o.band("mid").lon) for o in service.list_locations(conn)
         ]
-        area = area_groups(loc.id, loc_zone, located, others, index)
-        photos = [r for r in area if r.report.photos]
-        if zone_name is None:
-            zone_name = next((r.report.region for r in area if r.group == "zone"), None)
         response.headers["Cache-Control"] = CACHE
-        return NearbyOut(
+        return nearby_at(
+            request.app.state.settings,
+            mid.lat,
+            mid.lon,
             location_id=loc.id,
-            radius_km=NEARBY_KM,
-            stations_at=st.generated_at if st else None,
-            stations=near[:NEARBY_STATIONS],
-            reports_at=obs.generated_at if obs else None,
-            reports_days=obs.days if obs else None,
-            reports=reports[:NEARBY_REPORTS],
-            photo_reports=photos[:NEARBY_PHOTO_REPORTS],
-            area_reports=area[:NEARBY_AREA_REPORTS],
-            near_km=NEAR_KM,
-            zone_name=zone_name or None,
+            loc_zone=zone,
+            others=others,
         )
+
+    @router.get("/spot")
+    def spot(
+        request: Request,
+        lat: float = Query(ge=-90, le=90),
+        lon: float = Query(ge=-180, le=180),
+    ) -> Response:
+        """A full forecast for any point in the US or Canada, made now (snowwatch/spots.py):
+        the snapshot document a saved location has, with `spot` set. Gzipped like
+        /locations/{id}. 422 outside the US and Canada; 503 without a self-hosted
+        Open-Meteo server or while it can't answer; 429 past a visitor's limit."""
+        settings: Settings = request.app.state.settings
+        if not settings.local_open_meteo:
+            raise HTTPException(503, "forecasts anywhere need a self-hosted Open-Meteo server")
+        svc: spots.SpotService = request.app.state.spots
+        try:
+            built = svc.get(lat, lon, client_key(request))
+        except spots.OutsideCoverage as e:
+            raise HTTPException(422, str(e)) from e
+        except spots.SpotUnavailable as e:
+            raise HTTPException(
+                503,
+                "the forecast server isn't answering; try again in a minute",
+                headers={"Retry-After": "30"},
+            ) from e
+        except spots.SpotBusy as e:
+            raise HTTPException(
+                429 if e.visitor else 503, str(e), headers={"Retry-After": str(round(e.retry_s))}
+            ) from e
+        headers = {
+            "ETag": built.etag,
+            "Cache-Control": "public, max-age=600",
+            "Vary": "Accept-Encoding",
+        }
+        if request.headers.get("if-none-match") == built.etag:
+            return Response(status_code=304, headers=headers)
+        body = built.gz
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+        else:
+            body = gzip.decompress(body)
+        return Response(body, media_type="application/json", headers=headers)
+
+    @router.get("/spot/nearby", response_model=NearbyOut)
+    def spot_nearby(
+        request: Request,
+        response: Response,
+        lat: float = Query(ge=-90, le=90),
+        lon: float = Query(ge=-180, le=180),
+    ) -> NearbyOut:
+        """A spot's Observed and Backcountry extras: the closest snow stations, recent field
+        reports, and the avalanche zone it's in with its current forecast (local files
+        only, no forecast is made)."""
+        settings: Settings = request.app.state.settings
+        lat, lon = spots.round_point(lat, lon)
+        index = _cached(_zone_index_cache, settings.zones_path, read_zone_index) or []
+        zone = zone_at(index, lat, lon)
+        out = nearby_at(settings, lat, lon, location_id=spots.spot_id(lat, lon), loc_zone=zone)
+        out.zone_id = zone
+        out.avalanche = zone_view(settings, zone, datetime.now(UTC)) if zone else None
+        response.headers["Cache-Control"] = "public, max-age=300"
+        return out
 
     @router.get("/status", response_model=StatusOut)
     def status(conn: Conn, request: Request) -> StatusOut:

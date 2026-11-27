@@ -54,14 +54,60 @@ class LocationResult:
 
 
 def _try(
-    fetcher: Fetcher, req: Request, key: str, errors: list[str], *, label: str | None = None
+    fetcher: Fetcher,
+    req: Request,
+    key: str | None,
+    errors: list[str],
+    *,
+    label: str | None = None,
+    allow_fallback: bool = True,
 ) -> Any | None:
     """An optional request: its failure becomes a warning."""
     try:
-        return fetch(fetcher, req, cache_key=key, optional=True)
+        return fetch(fetcher, req, cache_key=key, optional=True, allow_fallback=allow_fallback)
     except FetchError as e:
         errors.append(f"{label or req.name}: {e}")
         return None
+
+
+def fetch_forecasts(
+    fetcher: Fetcher,
+    loc: Location,
+    cfg: ForecastConfig,
+    errors: list[str],
+    *,
+    cache_prefix: str | None = None,
+    allow_fallback: bool = True,
+) -> dict[str, Any]:
+    """The Open-Meteo forecasts for one place: the blend and the multi-model forecast
+    (required: their failure raises FetchError), upper air and clouds (optional: a
+    failure is added to `errors`). Saved locations and spots (snowwatch/spots.py) both
+    use it; spots never fall back to the public API (`allow_fallback`)."""
+
+    def key(name: str) -> str | None:
+        return f"{cache_prefix}/{name}" if cache_prefix else None
+
+    out: dict[str, Any] = {}
+    out["blend"] = fetch(
+        fetcher, blend_request(loc), cache_key=key("blend"), allow_fallback=allow_fallback
+    )
+    out["multi"] = fetch(
+        fetcher,
+        multimodel_request(loc, cfg.models_for(loc.country)),
+        cache_key=key("multi"),
+        allow_fallback=allow_fallback,
+    )
+    req = upper_air_request(loc, cfg.upper_air_models(loc.country))
+    upper = _try(fetcher, req, key("upper"), errors, allow_fallback=allow_fallback)
+    if upper is not None:
+        out["upper"] = upper
+    cloud_model = cfg.cloud_model(loc.country)
+    if cloud_model:
+        req = clouds_request(loc, cloud_model)
+        clouds = _try(fetcher, req, key("clouds"), errors, allow_fallback=allow_fallback)
+        if clouds is not None:
+            out["clouds"] = clouds
+    return out
 
 
 def fetch_responses(
@@ -84,27 +130,13 @@ def fetch_responses(
     the public API only when the public schedule would have asked anyway. In shadow mode
     each public ensemble fetched is also asked of the server, compared into `shadow`.
     """
-    out: dict[str, Any] = {}
     errors: list[str] = []
 
     def key(name: str) -> str:
         return f"{loc.id}/{name}"
 
-    # Required: let these raise.
-    out["blend"] = fetch(fetcher, blend_request(loc), cache_key=key("blend"))
-    out["multi"] = fetch(
-        fetcher, multimodel_request(loc, cfg.models_for(loc.country)), cache_key=key("multi")
-    )
-    upper = _try(
-        fetcher, upper_air_request(loc, cfg.upper_air_models(loc.country)), key("upper"), errors
-    )
-    if upper is not None:
-        out["upper"] = upper
-    cloud_model = cfg.cloud_model(loc.country)
-    if cloud_model:
-        clouds = _try(fetcher, clouds_request(loc, cloud_model), key("clouds"), errors)
-        if clouds is not None:
-            out["clouds"] = clouds
+    # Required: blend and multi-model raise.
+    out = fetch_forecasts(fetcher, loc, cfg, errors, cache_prefix=loc.id)
 
     cached = repo.cached_ensembles(conn, loc.id, now=now, max_age_h=cfg.ensemble_max_age_h)
     for system in cfg.ensembles:
