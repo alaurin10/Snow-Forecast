@@ -66,6 +66,47 @@ UPPER_HOURLY = [
     *[f"geopotential_height_{p}hPa" for p in PRESSURE_LEVELS],
 ]
 
+# Richer lists (docs/OPEN-METEO-PLAN.md milestone 3), asked for only from a self-hosted
+# server (`rich=True`), where requests cost nothing; the public API keeps the lean lists
+# above. Names and which models carry them were checked against the server on
+# 27 Nov 2026 (docs/SOURCES.md). A model without a field answers with empty values,
+# which `split_models` drops, so every one is optional.
+SURFACE_EXTRA = [
+    "relative_humidity_2m",
+    "dew_point_2m",
+    "wet_bulb_temperature_2m",
+    "shortwave_radiation",
+    "direct_radiation",
+    "diffuse_radiation",
+    "snow_depth",
+    "cape",
+]
+# Model-specific: NBM's snow level and chances (US), GFS's and HRRR's freezing-rain flag,
+# ECMWF's precipitation type (WMO code table 4.201: 3 freezing rain, 8 ice pellets,
+# 12 freezing drizzle).
+MODEL_EXTRA = [
+    "snowfall_height",
+    "snowfall_probability",
+    "freezing_rain_probability",
+    "ice_pellets_probability",
+    "categorical_freezing_rain",
+    "precipitation_type",
+]
+RICH_LEVELS = (850, 800, 750, 700, 650, 600, 500)
+UPPER_HOURLY_RICH = [
+    f"{v}_{p}hPa"
+    for p in RICH_LEVELS
+    for v in (
+        "temperature",
+        "relative_humidity",
+        "wind_speed",
+        "wind_direction",
+        "geopotential_height",
+    )
+]
+BLEND_HOURLY_RICH = [*BLEND_HOURLY, *SURFACE_EXTRA]
+MULTI_HOURLY_RICH = [*MULTI_HOURLY, *SURFACE_EXTRA, *MODEL_EXTRA]
+
 # One model's cloud cover through the air above a location, for its cloud layers (the
 # map's 3D clouds): every ~50 hPa (~500 m) through the heights mountains reach, coarser
 # above. The pressure levels' heights come with them.
@@ -106,11 +147,14 @@ def _common() -> dict[str, str]:
     return {"timezone": "auto", "timeformat": "unixtime"}
 
 
-def blend_request(loc: Location, *, past_days: int = 3, forecast_days: int = 11) -> Request:
+def blend_request(
+    loc: Location, *, past_days: int = 3, forecast_days: int = 11, rich: bool = False
+) -> Request:
+    hourly = BLEND_HOURLY_RICH if rich else BLEND_HOURLY
     params = {
         **_coords(loc),
         **_common(),
-        "hourly": ",".join(BLEND_HOURLY),
+        "hourly": ",".join(hourly),
         "daily": ",".join(BLEND_DAILY),
         "past_days": str(past_days),
         "forecast_days": str(forecast_days),
@@ -118,41 +162,57 @@ def blend_request(loc: Location, *, past_days: int = 3, forecast_days: int = 11)
     w = estimate_weight(
         points=3,
         days=past_days + forecast_days,
-        variables=len(BLEND_HOURLY) + len(BLEND_DAILY),
+        variables=len(hourly) + len(BLEND_DAILY),
     )
-    return Request("blend", SOURCE, FORECAST_URL, params, w)
+    lean = blend_request(loc, past_days=past_days, forecast_days=forecast_days) if rich else None
+    return Request("blend", SOURCE, FORECAST_URL, params, w, lean)
 
 
-def multimodel_request(loc: Location, models: list[str], *, forecast_days: int = 16) -> Request:
+def multimodel_request(
+    loc: Location, models: list[str], *, forecast_days: int = 16, rich: bool = False
+) -> Request:
+    hourly = MULTI_HOURLY_RICH if rich else MULTI_HOURLY
     params = {
         **_coords(loc),
         **_common(),
-        "hourly": ",".join(MULTI_HOURLY),
+        "hourly": ",".join(hourly),
         "models": ",".join(models),
         "forecast_days": str(forecast_days),
     }
-    w = estimate_weight(points=3, days=forecast_days, variables=len(MULTI_HOURLY) * len(models))
-    return Request("multi", SOURCE, FORECAST_URL, params, w)
+    w = estimate_weight(points=3, days=forecast_days, variables=len(hourly) * len(models))
+    lean = multimodel_request(loc, models, forecast_days=forecast_days) if rich else None
+    return Request("multi", SOURCE, FORECAST_URL, params, w, lean)
 
 
 def upper_air_request(
-    loc: Location, models: list[str], *, forecast_days: int = 16, past_days: int = 3
+    loc: Location,
+    models: list[str],
+    *,
+    forecast_days: int = 16,
+    past_days: int = 3,
+    rich: bool = False,
 ) -> Request:
     """Free-air fields at the summit. The past days feed the wind-loading rose."""
     top = loc.band("summit")
+    hourly = UPPER_HOURLY_RICH if rich else UPPER_HOURLY
     params = {
         "latitude": f"{top.lat:g}",
         "longitude": f"{top.lon:g}",
         **_common(),
-        "hourly": ",".join(UPPER_HOURLY),
+        "hourly": ",".join(hourly),
         "models": ",".join(models),
         "past_days": str(past_days),
         "forecast_days": str(forecast_days),
     }
     w = estimate_weight(
-        points=1, days=forecast_days + past_days, variables=len(UPPER_HOURLY) * len(models)
+        points=1, days=forecast_days + past_days, variables=len(hourly) * len(models)
     )
-    return Request("upper", SOURCE, FORECAST_URL, params, w)
+    lean = (
+        upper_air_request(loc, models, forecast_days=forecast_days, past_days=past_days)
+        if rich
+        else None
+    )
+    return Request("upper", SOURCE, FORECAST_URL, params, w, lean)
 
 
 def clouds_request(loc: Location, model: str, *, forecast_days: int = CLOUD_DAYS) -> Request:
@@ -214,13 +274,14 @@ def elevation_request(points: list[tuple[float, float]]) -> Request:
 
 
 def location_requests(
-    loc: Location, cfg: ForecastConfig, *, ensembles: bool = True
+    loc: Location, cfg: ForecastConfig, *, ensembles: bool = True, rich: bool = False
 ) -> list[Request]:
-    """Every Open-Meteo request one full run makes for one location."""
+    """Every Open-Meteo request one full run makes for one location. `rich`: the longer
+    variable lists, for a self-hosted server."""
     reqs = [
-        blend_request(loc),
-        multimodel_request(loc, cfg.models_for(loc.country)),
-        upper_air_request(loc, cfg.upper_air_models(loc.country)),
+        blend_request(loc, rich=rich),
+        multimodel_request(loc, cfg.models_for(loc.country), rich=rich),
+        upper_air_request(loc, cfg.upper_air_models(loc.country), rich=rich),
     ]
     cloud_model = cfg.cloud_model(loc.country)
     if cloud_model:

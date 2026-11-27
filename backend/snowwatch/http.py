@@ -316,8 +316,13 @@ class Fetcher:
         weight: float = 0.0,
         allow_fallback: bool = True,
         optional: bool = False,
+        public: tuple[dict[str, str], float] | None = None,
     ) -> Any:
-        resp, rec, used = self._fetch(url, params, source, weight, allow_fallback, optional)
+        """public: the parameters and weight to send the public API if the self-hosted
+        server fails (a leaner request), else the same ones."""
+        resp, rec, used = self._fetch(
+            url, params, source, weight, allow_fallback, optional, public=public
+        )
         try:
             data = resp.json()
         except ValueError as e:
@@ -345,12 +350,15 @@ class Fetcher:
         weight: float,
         allow_fallback: bool,
         optional: bool,
+        *,
+        public: tuple[dict[str, str], float] | None = None,
     ) -> tuple[httpx.Response, CallRecord, str]:
         """The response, its call record, and the source name its outcome counts under."""
         local = self._route(url, params)
+        fb_params, fb_weight = public if public is not None else (params, weight)
         if local is None:
-            public = self.local_url and is_public_open_meteo(urlsplit(url).hostname)
-            if public and not self._public_room(weight, optional=optional):
+            on_public = self.local_url and is_public_open_meteo(urlsplit(url).hostname)
+            if on_public and not self._public_room(weight, optional=optional):
                 raise self._fail(source, f"today's public Open-Meteo budget is spent ({url})")
             resp, rec = self._get(url, params, source=source, weight=weight)
             return resp, rec, source
@@ -382,7 +390,7 @@ class Fetcher:
         # with OPEN_METEO_FALLBACK.
         if not ((ensemble or self.fallback) and allow_fallback):
             refusal = "no public fallback here"
-        elif not self._public_room(weight, optional=optional):
+        elif not self._public_room(fb_weight, optional=optional):
             refusal = "no public fallback: today's public budget is spent"
         if refusal:
             raise self._fail(local_source, f"self-hosted server {why}; {refusal} ({local})")
@@ -392,7 +400,7 @@ class Fetcher:
             if not self.fallbacks:
                 log.warning("self-hosted Open-Meteo %s; using the public API", why)
             self.fallbacks += 1
-        resp, rec = self._get(url, params, source=source, weight=weight, fallback=True)
+        resp, rec = self._get(url, fb_params, source=source, weight=fb_weight, fallback=True)
         return resp, rec, source
 
     def _ensemble_problem(self, system: str, resp: httpx.Response) -> str | None:

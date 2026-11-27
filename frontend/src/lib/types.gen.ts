@@ -1105,6 +1105,7 @@ export interface Snapshot {
 	ridge?: RidgeOut | null;
 	run_id: number | null;
 	snotel?: Snotel | null;
+	snowpack?: SnowpackOut | null;
 	spot?: SpotInfo | null;
 	sun: SunDay[];
 	version?: number;
@@ -1127,6 +1128,7 @@ export interface Alert {
  * via the `definition` "BackcountryOut".
  */
 export interface BackcountryOut {
+	corn?: CornDay[];
 	outlook?: OutlookDay[];
 	outlook_steps?: OutlookSteps | null;
 	refreeze: RefreezeNight[];
@@ -1134,6 +1136,27 @@ export interface BackcountryOut {
 	sky: SkyDay[];
 	storm: StormOut;
 	warming: WarmingOut;
+}
+/**
+ * A spring corn window: after a refreeze, when sunny aspects soften (an estimate
+ * from the sun on 35° slopes and the temperature at mid).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CornDay".
+ */
+export interface CornDay {
+	date: string;
+	refreeze: string;
+	windows: CornWindow[];
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CornWindow".
+ */
+export interface CornWindow {
+	aspect: string;
+	end: string;
+	start: string;
 }
 /**
  * One calendar day of avalanche weather: what the forecast would do to the
@@ -1156,6 +1179,9 @@ export interface OutlookDay {
 	sky?: SkyDay | null;
 	storm_cm: number | null;
 	stress: number;
+	sun_kwh?: {
+		[k: string]: number | null;
+	} | null;
 	temp_rise_c: number | null;
 	thaw_h: number;
 	trend: string | null;
@@ -1172,6 +1198,7 @@ export interface OutlookDay {
 export interface OutlookLevels {
 	rain: number;
 	snow: number;
+	sun?: number;
 	warm: number;
 	wind: number;
 }
@@ -1197,6 +1224,8 @@ export interface SkyDay {
 	cloud_low: number | null;
 	cloud_mid: number | null;
 	date: string;
+	fog_h?: number | null;
+	rime_h?: number | null;
 	vis_min_m: number | null;
 }
 /**
@@ -1211,6 +1240,7 @@ export interface OutlookSteps {
 	rise_c: number[];
 	snow_cm: number[];
 	storm_cm: number[];
+	sun_kwh?: number[];
 	thaw_h: number[];
 	wind_kmh: number[];
 }
@@ -1262,6 +1292,7 @@ export interface HourlyOut {
 	fl_hi: (number | null)[];
 	fl_lo: (number | null)[];
 	fl_m: (number | null)[];
+	frz?: (string | null)[];
 	gust_kmh: (number | null)[];
 	is_day: (number | null)[];
 	pop: (number | null)[];
@@ -1269,6 +1300,7 @@ export interface HourlyOut {
 	rain_mm: (number | null)[];
 	slr?: (number | null)[];
 	snow_cm: (number | null)[];
+	snow_level_how?: (string | null)[];
 	snow_level_m: (number | null)[];
 	swe_mm: (number | null)[];
 	t: string[];
@@ -1279,6 +1311,7 @@ export interface HourlyOut {
 	water_mm: (number | null)[];
 	wcode: (number | null)[];
 	wdir: (number | null)[];
+	wetbulb_c?: (number | null)[];
 	wind_hi: (number | null)[];
 	wind_kmh: (number | null)[];
 }
@@ -1292,6 +1325,8 @@ export interface PeriodOut {
 	cloud_mean: number | null;
 	date: string;
 	ens: EnsStats | null;
+	frz?: string | null;
+	frz_h?: number;
 	gust_max_kmh: number | null;
 	hours: number;
 	key: string;
@@ -1306,15 +1341,19 @@ export interface PeriodOut {
 	quality: string | null;
 	rain_mm: number | null;
 	slr: number | null;
+	slr_col?: number | null;
 	snow_cm: number | null;
 	snow_cm_raw: number | null;
 	snow_cm_slr: number | null;
+	snow_level_how?: string | null;
 	snow_level_min_m: number | null;
 	start: string;
 	swe_mm: number | null;
 	tmax_c: number | null;
 	tmin_c: number | null;
 	water_mm: number | null;
+	wetbulb_max_c?: number | null;
+	wetbulb_min_c?: number | null;
 	wind_max_kmh: number | null;
 }
 /**
@@ -1446,6 +1485,22 @@ export interface SnotelDay {
 	temp_c: number | null;
 	tmax_c?: number | null;
 	tmin_c?: number | null;
+}
+/**
+ * The models' snow on the ground at mid (milestone 3): for places with no station
+ * (every spot), and as a line beside a station's depth.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "SnowpackOut".
+ */
+export interface SnowpackOut {
+	dates: string[];
+	depth_cm: (number | null)[];
+	elev_m: number;
+	models: {
+		[k: string]: number | null;
+	};
+	now_cm: number | null;
 }
 /**
  * A forecast for a point tapped on the map (a spot), made on request
@@ -1645,6 +1700,7 @@ export interface VerificationOut {
  */
 export interface VerificationPair {
 	cons_cm: number | null;
+	cons_col_cm?: number | null;
 	cons_settled_cm?: number | null;
 	cons_slr_cm: number | null;
 	cons_water_mm?: number | null;

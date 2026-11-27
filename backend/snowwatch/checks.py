@@ -94,6 +94,59 @@ def model_section(fetcher: Fetcher, loc: Location, models: list[str]) -> list[st
     return [*lines, ""]
 
 
+def rich_section(fetcher: Fetcher, loc: Location, models: list[str]) -> list[str]:
+    """Which models carry milestone 3's richer variables on the server: the surface
+    extras, the model-specific fields, and the pressure levels with humidity."""
+    from snowwatch.sources.openmeteo import MODEL_EXTRA, RICH_LEVELS, SURFACE_EXTRA
+
+    mid = loc.band("mid")
+    upper = [f"relative_humidity_{p}hPa" for p in RICH_LEVELS] + [
+        f"temperature_{p}hPa" for p in RICH_LEVELS
+    ]
+    lines = [
+        f"#### {loc.name} ({loc.country})",
+        "",
+        "| Model | Surface extras without data | Model-specific fields with data | "
+        "Levels with temperature and humidity (hPa) |",
+        "|---|---|---|---|",
+    ]
+    for m in models:
+        req = Request(
+            "check_rich",
+            SOURCE,
+            FORECAST_URL,
+            {
+                "latitude": f"{mid.lat:g}",
+                "longitude": f"{mid.lon:g}",
+                "timeformat": "unixtime",
+                "forecast_days": "3",
+                "hourly": ",".join([*SURFACE_EXTRA, *MODEL_EXTRA, *upper]),
+                "models": m,
+            },
+        )
+        try:
+            hourly = fetch(fetcher, req)["hourly"]
+        except (FetchError, KeyError, TypeError) as e:
+            lines.append(f"| `{m}` | error: {e} | | |")
+            continue
+
+        def has(v: str, h: dict[str, list[Any]] = hourly) -> bool:
+            return any(x is not None for x in h.get(v, []))
+
+        lacking = [v for v in SURFACE_EXTRA if not has(v)]
+        own = [v for v in MODEL_EXTRA if has(v)]
+        levels = [
+            str(p)
+            for p in RICH_LEVELS
+            if has(f"temperature_{p}hPa") and has(f"relative_humidity_{p}hPa")
+        ]
+        lines.append(
+            f"| `{m}` | {', '.join(f'`{v}`' for v in lacking) or 'none'} | "
+            f"{', '.join(f'`{v}`' for v in own) or 'none'} | {', '.join(levels) or 'none'} |"
+        )
+    return [*lines, ""]
+
+
 def ensemble_section(fetcher: Fetcher, loc: Location, systems: list[str]) -> list[str]:
     mid = loc.band("mid")
     lines = ["| System | Members | Reach |", "|---|---|---|"]
@@ -561,6 +614,18 @@ def build_local_report(
         "",
         *comparison_section(local, public, picked, cfg, fixtures),
     ]
+    lines += [
+        "### Richer variables (milestone 3)",
+        "",
+        "Asked of the server only (the public API keeps the lean lists): which models "
+        "answer each extra surface variable, their own fields (NBM's snow level and "
+        "chances, GFS and HRRR's freezing-rain flag, ECMWF's precipitation type), and "
+        "which pressure levels have humidity for the wet-bulb snow level. A model "
+        "without a field answers with empty values, which the analysis skips.",
+        "",
+    ]
+    for loc in picked:
+        lines += rich_section(local, loc, cfg.models_for(loc.country))
     lines += [
         "### Ensembles against the public API",
         "",

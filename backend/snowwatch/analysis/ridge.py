@@ -1,19 +1,24 @@
-"""Free-air wind at ridge height, from the 850 and 700 hPa levels.
+"""Free-air wind at ridge height, from the pressure levels.
 
 Surface (10 m) wind on a summit is shaped by terrain in the model grid; the free
-air just above the ridges is what moves snow onto lee slopes. Each model's 850
-and 700 hPa wind is interpolated to the summit elevation by geopotential height,
-then the models are combined (median speed, mean direction).
+air just above the ridges is what moves snow onto lee slopes. Each model's wind is
+interpolated to the summit elevation by geopotential height between the two levels
+that bracket it, out of the six from 850 to 600 hPa a self-hosted server gives
+(docs/OPEN-METEO-PLAN.md milestone 3; the public API's lean request has 850 and 700
+only), then the models are combined (median speed, mean direction).
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Iterable, Mapping
 
 from snowwatch.analysis.series import Hourly, circular_mean, median
 
-LEVELS = (850, 700)
+LEVELS = (850, 800, 750, 700, 650, 600)
+
+Level = tuple[float | None, float | None, float | None]  # height m, speed, direction
 
 
 def interpolate(
@@ -52,6 +57,26 @@ def interpolate(
     return speed, direction
 
 
+def bracket(elev_m: float, levels: list[Level]) -> tuple[Level, Level] | None:
+    """The two complete levels that bracket `elev_m` (or the nearest two when it is
+    outside them all), lowest first; one level twice when only one is complete."""
+    full = sorted(
+        (lv for lv in levels if None not in lv),
+        key=lambda lv: lv[0],  # type: ignore[arg-type, return-value]
+    )
+    if not full:
+        return None
+    if len(full) == 1:
+        return full[0], full[0]
+    for lo, hi in itertools.pairwise(full):
+        assert lo[0] is not None and hi[0] is not None
+        if lo[0] <= elev_m <= hi[0]:
+            return lo, hi
+    first = full[0][0]
+    assert first is not None
+    return (full[0], full[1]) if elev_m < first else (full[-2], full[-1])
+
+
 def ridge_wind(
     upper: Mapping[str, Mapping[str, Hourly]], elev_m: float, hours: Iterable[int]
 ) -> tuple[Hourly, Hourly]:
@@ -62,7 +87,7 @@ def ridge_wind(
         speeds: list[float] = []
         dirs: list[float] = []
         for v in upper.values():
-            levels = [
+            levels: list[Level] = [
                 (
                     v.get(f"geopotential_height_{p}hPa", {}).get(h),
                     v.get(f"wind_speed_{p}hPa", {}).get(h),
@@ -70,7 +95,8 @@ def ridge_wind(
                 )
                 for p in LEVELS
             ]
-            got = interpolate(elev_m, levels[0], levels[1])
+            pair = bracket(elev_m, levels)
+            got = None if pair is None else interpolate(elev_m, pair[0], pair[1])
             if got is not None:
                 speeds.append(got[0])
                 dirs.append(got[1])

@@ -452,3 +452,9 @@ def test_contact_prefers_an_email(on: Settings) -> None:
     assert push.contact(
         on.model_copy(update={"contact_email": "", "nws_contact": "a b"})
     ).startswith("mailto:")
+
+
+def test_freezing_rain_is_an_alert_type() -> None:
+    assert "freezing_rain" in push.ALERT_TYPES
+    f = Flag(type="freezing_rain", severity="warning", date="2026-12-03", detail="base", value=3)
+    assert "freezing rain" in push.phrase(f, "metric")

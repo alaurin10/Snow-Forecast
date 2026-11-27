@@ -87,17 +87,24 @@ def fetch_forecasts(
     def key(name: str) -> str | None:
         return f"{cache_prefix}/{name}" if cache_prefix else None
 
+    # The richer variable lists (milestone 3) only from a self-hosted server: free there,
+    # and the public API keeps today's lean lists. A fallback asks the public API for the
+    # same request, which costs more weight but keeps the run whole.
+    rich = bool(fetcher.local_url)
     out: dict[str, Any] = {}
     out["blend"] = fetch(
-        fetcher, blend_request(loc), cache_key=key("blend"), allow_fallback=allow_fallback
+        fetcher,
+        blend_request(loc, rich=rich),
+        cache_key=key("blend"),
+        allow_fallback=allow_fallback,
     )
     out["multi"] = fetch(
         fetcher,
-        multimodel_request(loc, cfg.models_for(loc.country)),
+        multimodel_request(loc, cfg.models_for(loc.country), rich=rich),
         cache_key=key("multi"),
         allow_fallback=allow_fallback,
     )
-    req = upper_air_request(loc, cfg.upper_air_models(loc.country))
+    req = upper_air_request(loc, cfg.upper_air_models(loc.country), rich=rich)
     upper = _try(fetcher, req, key("upper"), errors, allow_fallback=allow_fallback)
     if upper is not None:
         out["upper"] = upper

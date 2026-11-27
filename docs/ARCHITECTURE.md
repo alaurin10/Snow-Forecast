@@ -241,8 +241,22 @@ older than `STALE_AFTER_H` (12 h).
   coordinates, except the freezing level: one height for the location, found at the
   lowest band (from the model, or from its upper-air levels with the lowest band's
   temperature as the bottom of the column) and shared by every band. The snow level is
-  305 m below it. The map's snow level is a different product (NBM's in the US, Canada's
-  models' WEonG), so the two can differ.
+  305 m below it, unless a self-hosted Open-Meteo server supplies humidity aloft
+  (docs/OPEN-METEO-PLAN.md milestone 3): then it is each model's wet-bulb 0 °C height
+  less 150 m (and NBM's own snow level), the median of those (`analysis/snowlevel.py`;
+  `snow_level_how` says which per hour). The map's snow level is a different product
+  (NBM's in the US, Canada's models' WEonG), so the two can differ.
+- **Richer variables** (milestone 3, only from a self-hosted server: the public API
+  keeps the lean lists, and a fallback asks it for the lean request): humidity, dew
+  point, wet-bulb, radiation, model snow depth and CAPE per model, NBM's snow level and
+  chances, GFS/HRRR's freezing-rain flag, ECMWF's precipitation type, and seven pressure
+  levels (850–500 hPa) with humidity. From them: precipitation type by surface wet-bulb,
+  freezing rain and sleet per hour (a warm layer aloft over sub-freezing air, plus the
+  models' flags; the `freezing_rain` flag and push alert), the column snow ratio
+  (`depth_method: column`, scored as `cons_col`), ridge wind between the two levels that
+  bracket the summit, sun on 35° slopes (`analysis/solar.py`) for the outlook's sun
+  factor and the corn window, rime and fog hours, and the models' snowpack. Every field
+  is optional: without the data the snapshot is as before.
 - **Backcountry** (no safety judgement, with two bounded exceptions below): avalanche
   danger exactly as published and hidden once expired (each listed problem's aspects
   and elevations redrawn as a small rose), ridge-height wind, a snow-loading rose,

@@ -12,8 +12,13 @@ local) is next. **Milestone 2 built** (27 Nov 2026): backend PR, `GET /api/spot`
 frontend PR, the spot page (`/spot`, sharing `LocationView` with locations), "Full
 forecast here" on the map, recent spots, "Save as location", offline copies, and e2e
 tests. On the mini PC it switches on with `OPEN_METEO_URL`; timing it there (≤ 3 s warm)
-is the owner's check. Milestones 3–5 are planned. Each milestone's PRs tick its
-checklist here and update this line.
+is the owner's check. **Milestone 3, PR 1 built** (27 Nov 2026): the richer variables
+from the server (the public API keeps the lean lists, also on a fallback), the wet-bulb
+snow level, precipitation type and freezing rain (flag and push alert), the column
+snow ratio scored as `cons_col`, ridge wind between six levels, sun on slopes (the
+outlook's sun factor, corn windows), rime and fog, the models' snowpack, and fixtures
+captured from the server (`live-20261127`); the UI PR is next. Milestones 4–5 are
+planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
 taken on 26–27 Nov 2026 from a cloud sandbox running the real Open-Meteo server against
@@ -866,9 +871,9 @@ rain, sun and ridge wind improve for saved locations and spots alike. **Two PRs:
 analysis, then UI.**
 
 ### Data
-- [ ] First run `snowwatch check-sources --local` to get the exact API names and which
+- [x] First run `snowwatch check-sources --local` to get the exact API names and which
   models have each variable; record the answers in `docs/SOURCES.md`.
-- [ ] `backend/snowwatch/sources/openmeteo.py`: extend the lists only when
+- [x] `backend/snowwatch/sources/openmeteo.py`: extend the lists only when
   `local_open_meteo` (the public API keeps today's):
   - `BLEND_HOURLY` and `MULTI_HOURLY` add: `relative_humidity_2m`, `dew_point_2m`,
     `wet_bulb_temperature_2m`, `shortwave_radiation`, `direct_radiation`,
@@ -878,12 +883,12 @@ analysis, then UI.**
   - model-specific fields where present: NBM snow level and snowfall/freezing-rain
     probabilities, GFS/HRRR freezing-rain flag, ECMWF precipitation type
   - Missing variables are tolerated, as today.
-- [ ] Capture new fixtures from the local server:
+- [x] Capture new fixtures from the local server:
   `snowwatch capture-fixtures --out backend/tests/fixtures/live-<date>/`. The old fixtures
   must keep passing, since every new field is optional.
 
 ### Analysis (`backend/snowwatch/analysis/`)
-- [ ] **Snow level from wet-bulb** (new `snowlevel.py`):
+- [x] **Snow level from wet-bulb** (new `snowlevel.py`):
   - the height where wet-bulb temperature crosses 0 °C per model, from pressure-level
     temperature and humidity (surface wet-bulb as the bottom)
   - snow level = that height − ~150 m (config)
@@ -891,16 +896,16 @@ analysis, then UI.**
     otherwise (`freezing.py`, `snow_level_offset_m`)
   - hourly precipitation type uses surface wet-bulb (snow ≤ 0.5 °C, rain ≥ 2 °C, mix
     between) instead of `slr.SNOW_MAX_C`; thresholds in config
-- [ ] **Column snow ratio** (`slr.py`):
+- [x] **Column snow ratio** (`slr.py`):
   - a ratio from the warmest temperature between the surface and 500 hPa while it snows
     (the ratio bands as today), lowered for strong wind at the surface (config)
   - a new `depth_method: column` and a new scored source `cons_col` beside `cons` and
     `cons_slr` in `verify.py` and `forecast_daily`
   - the owner switches the headline method once the scorecard shows it's closer
-- [ ] **Freezing rain and sleet:** a layer above 0 °C aloft over a sub-freezing surface,
+- [x] **Freezing rain and sleet:** a layer above 0 °C aloft over a sub-freezing surface,
   plus the models' freezing-rain flags. Adds a `freezing_rain` flag in `flags.py` and a
   push alert type in `push.py` (with `push_log` dedup).
-- [ ] **Sun on slopes:**
+- [x] **Sun on slopes:**
   - a small solar-geometry function (sun position from time and lat/lon; no new
     dependency) plus the direct and diffuse radiation give the sun on N/E/S/W slopes
     at ~35°
@@ -909,11 +914,12 @@ analysis, then UI.**
     `BackcountryConfig`)
   - a spring "corn window" in touring weather: when sunny aspects soften after a good
     refreeze
-- [ ] **Ridge wind** (`ridge.py`): interpolate between the two levels that bracket the
+- [x] **Ridge wind** (`ridge.py`): interpolate between the two levels that bracket the
   ridge height, out of six.
 - [ ] **Model snowpack:** model `snow_depth` on the Observed tab where there's no station
-  (every spot), and as a line next to the station's depth where there is one.
-- [ ] **Humidity in touring weather** (`backcountry.sky`): rime/icing (high humidity
+  (every spot), and as a line next to the station's depth where there is one. (PR 1:
+  `Snapshot.snowpack`; the Observed tab shows it in PR 2.)
+- [x] **Humidity in touring weather** (`backcountry.sky`): rime/icing (high humidity
   between −10 and 0 °C at the ridge) and fog/flat light (humidity with low cloud and
   visibility).
 
@@ -927,13 +933,56 @@ analysis, then UI.**
 - [ ] Regenerate types.
 
 ### Tests
-- [ ] Unit tests: wet-bulb zero height, the warm layer, column ratio, solar geometry
+- [x] Unit tests: wet-bulb zero height, the warm layer, column ratio, solar geometry
   (against known sun positions), ridge interpolation, the freezing-rain flag on a crafted
   case.
-- [ ] The snapshot stays under ~300 KB of JSON (test on the new fixtures).
+- [x] The snapshot stays under ~300 KB of JSON (test on the new fixtures).
 
 **Done when:** snapshots carry the new fields; the scorecard lists `cons_col`; the
 freezing-rain flag fires on the crafted case; the outlook shows sun on aspects.
+
+### What PR 1 (data and analysis) built and found (27 Nov 2026)
+
+Run against the pinned server in a cloud sandbox ([Appendix A](#appendix-a-running-the-server-in-a-cloud-sandbox)):
+- **Names and coverage** (the table is in SOURCES.md, "Richer variables"): every model
+  has the eight surface extras except NBM's `snow_depth`. There is no `snow_level`
+  variable (400); NBM's snow level is `snowfall_height`, and its chances are
+  `snowfall_probability`, `freezing_rain_probability` and `ice_pellets_probability`.
+  GFS and HRRR have `categorical_freezing_rain`, ECMWF `precipitation_type` (WMO 4.201).
+  Pressure levels: GFS, GEM, HRRR and HRDPS have all seven with humidity; ECMWF has
+  850/700/600/500 and ICON lacks 750 and 650; NBM has none. A field a model lacks comes
+  back empty (not an error), so the lists are the same for every model.
+- **Fixtures** `backend/tests/fixtures/live-20261127/` (Crystal, Snoqualmie, Whistler;
+  ~200 KB gzipped each) were captured from the server. The public ensemble API answered
+  this sandbox 429, so they have no ensembles (optional; the old fixtures still cover
+  them). Snapshots from them are 179–193 KB of JSON.
+- **The wet-bulb snow level** came out within ~300 m of "freezing level − 305 m" either
+  way (higher in moist air, lower in dry air, e.g. Whistler 370 m against 685 m as
+  drier air came in); every hour had it ("wb").
+- **Freezing rain:** a first version counted any warm layer above +1 °C and ECMWF's
+  own type at face value, and marked most of a cold, inverted day at Crystal's base as
+  sleet; ECMWF's type said freezing rain while the band was +1.7 °C. Now sleet needs a
+  layer of at least +2 °C, a model's flag counts only with the band at ≤ 0.5 °C, a third
+  of the models must agree, and the flag needs 2 hours in a period. On the captured
+  forecast it then fires once, at Snoqualmie's summit on 29 Nov (4 h); the manual check
+  on a known east-wind day at Snoqualmie is left for the mini PC.
+
+Choices made while building, beyond the checklist:
+- The richer lists are asked for whenever a server is configured (`rich` on the request
+  builders, from `Fetcher.local_url`), and each rich request carries its lean twin
+  (`Request.lean`), which a public fallback sends instead: the rich multi-model request
+  would weigh ~47 public calls instead of ~18.5.
+- The snow level is shared by every band, like the freezing level: the median of each
+  model's wet-bulb 0 °C height (from its own surface wet-bulb and levels) less 150 m,
+  plus NBM's `snowfall_height`; hours without either fall back per hour.
+- `depth_method: column` uses each period's column ratio where it has one, the
+  temperature ratio otherwise; `snow_cm_slr` stays the temperature-based depth.
+  `cons_col` is written for a day only when every snowing hour has a column ratio.
+- The sun factor counts toward the day's stress but not toward "two strong together"
+  (strong sun with a warm-up is one warm day). Corn windows are worked out for every
+  day after a Good or Partial refreeze, whatever the season.
+- Freezing rain and sleet are also worked out from the lean upper-air levels (850–500
+  hPa temperature), so installs without a server get them too, more coarsely.
 
 ## Milestone 4: Fresher and wider
 

@@ -15,6 +15,10 @@ class Request:
     url: str
     params: dict[str, str] = field(default_factory=dict)
     weight: float = 0.0
+    # What to ask the public API instead when the self-hosted server fails: the same
+    # request with today's lean variable lists (milestone 3's richer lists cost several
+    # times the weight there). None: the same request.
+    lean: Request | None = None
 
 
 def fetch(
@@ -36,4 +40,5 @@ def fetch(
         weight=req.weight,
         optional=optional,
         allow_fallback=allow_fallback,
+        public=(req.lean.params, req.lean.weight) if req.lean else None,
     )

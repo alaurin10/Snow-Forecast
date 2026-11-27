@@ -196,4 +196,29 @@ Each of a run's requests, sent to both; values aren't compared (a saved fixture 
 | Whistler | `upper` | 60 / 60 | none | none | public API |
 | Whistler | `clouds` | 24 / 24 | none | none | public API |
 
+### Richer variables (milestone 3)
+
+Checked on 2026-11-27 23:46 UTC against the pinned server. Asked of the server only (the public API keeps the lean lists): which models answer each extra surface variable, their own fields (NBM's snow level and chances, GFS and HRRR's freezing-rain flag, ECMWF's precipitation type), and which pressure levels have humidity for the wet-bulb snow level. A model without a field answers with empty values, which the analysis skips.
+
+#### Crystal Mountain (US)
+
+| Model | Surface extras without data | Model-specific fields with data | Levels with temperature and humidity (hPa) |
+|---|---|---|---|
+| `gfs_seamless` | none | `categorical_freezing_rain` | 850, 800, 750, 700, 650, 600, 500 |
+| `ecmwf_ifs025` | none | `precipitation_type` | 850, 700, 600, 500 |
+| `gem_seamless` | none | none | 850, 800, 750, 700, 650, 600, 500 |
+| `icon_seamless` | none | none | 850, 800, 700, 600, 500 |
+| `ncep_hrrr_conus` | none | `categorical_freezing_rain` | 850, 800, 750, 700, 650, 600, 500 |
+| `ncep_nbm_conus` | `snow_depth` | `snowfall_height`, `snowfall_probability`, `freezing_rain_probability`, `ice_pellets_probability` | none |
+
+#### Whistler (CA)
+
+| Model | Surface extras without data | Model-specific fields with data | Levels with temperature and humidity (hPa) |
+|---|---|---|---|
+| `gfs_seamless` | none | `categorical_freezing_rain` | 850, 800, 750, 700, 650, 600, 500 |
+| `ecmwf_ifs025` | none | `precipitation_type` | 850, 700, 600, 500 |
+| `gem_seamless` | none | none | 850, 800, 750, 700, 650, 600, 500 |
+| `icon_seamless` | none | none | 850, 800, 700, 600, 500 |
+| `gem_hrdps_continental` | none | none | 850, 800, 750, 700, 650, 600, 500 |
+
 Elevation, two points in one call: `{'elevation': [1336.0, 928.0]}`.

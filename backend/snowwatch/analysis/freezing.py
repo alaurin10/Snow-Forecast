@@ -12,7 +12,7 @@ import itertools
 from collections.abc import Sequence
 
 LAPSE_C_PER_M = 0.0065
-LEVELS = (850, 700, 600, 500)
+LEVELS = (850, 800, 750, 700, 650, 600, 500)  # those a model lacks are skipped
 
 
 def freezing_level_m(

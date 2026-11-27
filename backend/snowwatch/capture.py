@@ -21,11 +21,17 @@ Position = tuple[float, float, float]  # lat, lon, elevation (m)
 
 
 def location_capture_requests(
-    loc: Location, cfg: ForecastConfig, today: date, station: Position | None = None
+    loc: Location,
+    cfg: ForecastConfig,
+    today: date,
+    station: Position | None = None,
+    *,
+    rich: bool = False,
 ) -> list[Request]:
-    """station: where the location's snow station is, for its scorecard forecast."""
+    """station: where the location's snow station is, for its scorecard forecast. rich:
+    the longer variable lists a self-hosted server is asked for (milestone 3)."""
     mid = loc.band("mid")
-    reqs = list(location_requests(loc, cfg))
+    reqs = list(location_requests(loc, cfg, rich=rich))
     if station is not None:
         reqs.append(station_request(*station, cfg.models_for(loc.country)))
     if loc.country == "US":
@@ -103,7 +109,9 @@ def capture_fixtures(
             sleep(spacing_s)
         log(loc.id)
         station = positions.get(loc.snotel) if loc.snotel else None
-        for req in location_capture_requests(loc, cfg, today, station):
+        for req in location_capture_requests(
+            loc, cfg, today, station, rich=bool(fetcher.local_url)
+        ):
             save(loc.id, req)
 
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False) + "\n")
