@@ -8,6 +8,7 @@
 - flag_log: flags last raised more than HISTORY_DAYS ago.
 - push_log: alerted events last seen more than HISTORY_DAYS ago.
 - obs_daily: observations older than FORECAST_DAYS.
+- ensemble_shadow: comparisons older than HISTORY_DAYS.
 
 Snapshots (newest 8 per location), avalanche forecasts, the raw cache and map
 tiles have their own pruning.
@@ -60,6 +61,9 @@ def prune(conn: sqlite3.Connection, *, now: datetime | None = None) -> dict[str,
         ).rowcount
         out["api_usage"] = conn.execute(
             "DELETE FROM api_usage WHERE day < ?", (history_day,)
+        ).rowcount
+        out["ensemble_shadow"] = conn.execute(
+            "DELETE FROM ensemble_shadow WHERE at < ?", (history,)
         ).rowcount
         out["jobs"] = conn.execute(
             "DELETE FROM jobs WHERE status IN ('done', 'failed') AND created_at < ?", (history,)

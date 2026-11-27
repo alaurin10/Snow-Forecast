@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from snowwatch.config import get_forecast_config
+from snowwatch.ensembles import label, local_systems
 from snowwatch.http import Fetcher, fetcher_for
 from snowwatch.inputs import load_responses
 from snowwatch.locations import service
@@ -106,7 +107,8 @@ def cmd_budget(args: argparse.Namespace, settings: Settings) -> int:
     migrate(conn)
     cfg = get_forecast_config()
     locs = service.list_locations(conn)
-    ens = sum(public_daily_weight(loc, cfg) for loc in locs)
+    local_ens = local_systems(settings, cfg.ensembles)
+    ens = sum(public_daily_weight(loc, cfg, local_ens) for loc in locs)
     fc = sum(local_daily_weight(loc, cfg) for loc in locs)
     budget = settings.open_meteo_daily_budget
     used = repo.usage_today(conn)
@@ -117,8 +119,12 @@ def cmd_budget(args: argparse.Namespace, settings: Settings) -> int:
             f"daily public Open-Meteo calls ({100 * ens / budget:.0f}%), "
             f"~{ens / n if n else 0:.0f} per location"
         )
-        print(f"  public API (ensembles): ~{ens:.0f} a day")
+        public_ens = [label(sy) for sy in cfg.ensembles if sy not in local_ens]
+        print(f"  public API (ensembles: {', '.join(public_ens) or 'none'}): ~{ens:.0f} a day")
         print(f"  self-hosted server ({settings.open_meteo_url}): ~{fc:.0f} a day, free")
+        if local_ens:
+            names = ", ".join(label(sy) for sy in local_ens)
+            print(f"  ensembles: self-hosted ({names}), every run, free")
     else:
         total = ens + fc
         print(
@@ -178,16 +184,46 @@ def cmd_check_sources(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_check_ensembles(args: argparse.Namespace, settings: Settings) -> int:
+    """`check-ensembles`: whole snapshots with self-hosted against public ensembles."""
+    from snowwatch.checks import check_ensembles
+
+    if not settings.local_open_meteo:
+        print("set OPEN_METEO_URL to the self-hosted server first", file=sys.stderr)
+        return 2
+    conn = connect(settings.database)
+    migrate(conn)
+    locs = service.list_locations(conn)
+    if args.only:
+        locs = [loc for loc in locs if loc.id in args.only]
+    # Forecasts as configured; ensembles from the public API (within today's budget),
+    # and from the server through shadow_ensemble.
+    with fetcher_for(settings, ensemble_mode="public") as fetcher:
+        try:
+            ok, report = check_ensembles(fetcher, locs, get_forecast_config())
+        finally:
+            repo.record_usage(conn, fetcher)
+    sys.stdout.write(report)
+    if args.write:
+        Path(args.write).write_text(report)
+        print(f"wrote {args.write}")
+    return 0 if ok else 1
+
+
 def cmd_openmeteo(args: argparse.Namespace, settings: Settings) -> int:
     """`openmeteo status`: is the self-hosted server usable, and how has today gone."""
     from snowwatch.checks import openmeteo_status
     from snowwatch.ensembles import status_lines
 
     usage = repo.Usage()
+    sources: dict[str, tuple[bool, str | None, str]] = {}
     if settings.database.exists():
         conn = connect(settings.database)
         migrate(conn)
         usage = repo.usage_today(conn)
+        if settings.ensemble_mode == "local":
+            states = repo.ensemble_states(conn)
+            sources = {k: (v.local, v.reason, v.since) for k, v in states.items()}
     with fetcher_for(settings, tries=1, fallback=False) as fetcher:
         ok, lines = openmeteo_status(
             settings.open_meteo_url,
@@ -195,7 +231,12 @@ def cmd_openmeteo(args: argparse.Namespace, settings: Settings) -> int:
             settings.open_meteo_daily_budget,
             usage,
             fetcher,
-            ensembles=status_lines(settings.open_meteo_data_dir, fallback_dir=settings.data_dir),
+            ensembles=status_lines(
+                settings.open_meteo_data_dir,
+                fallback_dir=settings.data_dir,
+                mode=settings.ensemble_mode if settings.local_open_meteo else None,
+                sources=sources,
+            ),
         )
     print("\n".join(lines))
     return 0 if ok else 1
@@ -501,6 +542,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="check the self-hosted Open-Meteo server (OPEN_METEO_URL) against the public API",
     )
     s.set_defaults(func=cmd_check_sources)
+
+    s = sub.add_parser(
+        "check-ensembles",
+        help="build each location's snapshot with the server's ensembles and the public "
+        "API's, and list every field that differs",
+    )
+    s.add_argument("--only", nargs="*", help="location ids (default: every active one)")
+    s.add_argument("--write", help="also write the report to this file")
+    s.set_defaults(func=cmd_check_ensembles)
 
     s = sub.add_parser("openmeteo", help="the self-hosted Open-Meteo server: `openmeteo status`")
     s.add_argument("action", choices=["status"])

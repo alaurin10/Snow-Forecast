@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from snowwatch import jobs, overlays
 from snowwatch.api.auth import Owner
 from snowwatch.config import get_forecast_config
+from snowwatch.ensembles import label, local_systems
 from snowwatch.http import Fetcher
 from snowwatch.locations import service
 from snowwatch.locations.resolve import ResolveIn, ResolveOut, resolve
@@ -62,9 +63,12 @@ class BudgetOut(BaseModel):
     active: int
     max_locations: int
     local_forecasts: bool
-    ensembles_total: float  # always public
+    ensembles_total: float  # public: every system not in ensembles_local
     forecasts_total: float  # self-hosted (free) when local_forecasts, else public
     public_used_today: float  # from the usage ledger, UTC day
+    # Ensemble systems the self-hosted server answers now (OPEN_METEO_ENSEMBLES=local,
+    # run fresh), free: GEFS, ECMWF ENS, GEPS.
+    ensembles_local: list[str] = []
 
 
 class LookupStatus(BaseModel):
@@ -217,7 +221,8 @@ def make_admin_router() -> APIRouter:
         settings: Settings = request.app.state.settings
         cfg = get_forecast_config()
         locs = service.list_locations(conn)
-        ens = {loc.id: public_daily_weight(loc, cfg) for loc in locs}
+        local_ens = local_systems(settings, cfg.ensembles)
+        ens = {loc.id: public_daily_weight(loc, cfg, local_ens) for loc in locs}
         fc = {loc.id: local_daily_weight(loc, cfg) for loc in locs}
         local = settings.local_open_meteo
         per = {k: round(ens[k] + (0.0 if local else fc[k]), 1) for k in ens}
@@ -231,6 +236,7 @@ def make_admin_router() -> APIRouter:
             ensembles_total=round(sum(ens.values()), 1),
             forecasts_total=round(sum(fc.values()), 1),
             public_used_today=repo.usage_today(conn).public_weight,
+            ensembles_local=[label(sy) for sy in local_ens],
         )
 
     return r

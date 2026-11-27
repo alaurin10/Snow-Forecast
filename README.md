@@ -85,6 +85,8 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `SITE_SPACING_S` | `20` (`0` with `OPEN_METEO_URL`) | Seconds between locations in a run |
 | `OPEN_METEO_CACHE_SIZE` | `10GB` | Disk reserved for the self-hosted server's cache, all at once when it starts |
 | `ENSEMBLES_MIN_FREE_GB` | `5` | The self-hosted ensemble downloader (`COMPOSE_PROFILES=openmeteo,ensembles`, [DEPLOYMENT.md](docs/DEPLOYMENT.md) "Self-hosted ensembles") skips runs while the disk has less free |
+| `OPEN_METEO_ENSEMBLES` | `public` | With `OPEN_METEO_URL`: where ensembles come from. `public` (the public API), `shadow` (public, and each run compares the server's), `local` (the server, for each system whose downloaded run is fresh; the public API for the rest). [DEPLOYMENT.md](docs/DEPLOYMENT.md) "Self-hosted ensembles" |
+| `ENSEMBLES_SYSTEMS` | `gefs025 gefs05 ecmwf geps` | Which ensembles the downloader fetches; one left out stays on the public API |
 | `OPEN_METEO_DATA_DIR` | `/openmeteo` | Where `worker` and `api` see the server's volume (read-only), for the downloaded ensembles' status |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | empty (alerts off) | Push alerts: `snowwatch push keys` |
 | `CONTACT_EMAIL` | `NWS_CONTACT` | Email for push services |

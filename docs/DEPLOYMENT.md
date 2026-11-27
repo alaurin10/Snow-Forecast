@@ -194,9 +194,9 @@ Canada, snowfall only, 16 days, into the server's volume. The server serves them
 `/v1/ensemble` as soon as each run lands, with no restart. It uses the image's own
 downloaders; `docker/ensembles.sh` decides when.
 
-**This part only downloads.** The app keeps using public ensembles until the second
-part of milestone 1b (`OPEN_METEO_ENSEMBLES`, docs/OPEN-METEO-PLAN.md) ships and is
-switched on, so it's safe to run alone for a few days and watch.
+**Downloading doesn't change what the app uses.** The app keeps asking the public API
+for ensembles until `OPEN_METEO_ENSEMBLES` says otherwise (below), so run the downloader
+alone for a few days first and watch.
 
 **What it needs** (measured 27 Nov 2026 on a 4-core sandbox, one run of each):
 
@@ -247,9 +247,50 @@ docker compose exec openmeteo-ensembles cat /app/data/ensembles/disk.log
 
 **If a download fails** it's retried 30 minutes later (an hour after an upstream says
 slow down); ECMWF alternates between its own server and its AWS mirror. A download that
-hangs is stopped after 2 hours. A stopped downloader costs nothing: the app uses public
-ensembles regardless, and with milestone 1b's second part each system whose run gets
-old falls back to the public API on its own.
+hangs is stopped after 2 hours. A stopped downloader costs nothing: each system whose
+run gets old falls back to the public API on its own (below).
+
+**Using them: `OPEN_METEO_ENSEMBLES`** in `.env` (needs `OPEN_METEO_URL`):
+
+| Value | Ensembles come from |
+|---|---|
+| `public` (default) | The public API, on its schedule (09:30 and 21:30 UTC), within the daily limit: milestone 1 exactly |
+| `shadow` | The public API as with `public`; each time a run asks it, it also asks the server and records how they compare (Status page, "Compared with the public API, last 7 days") |
+| `local` | The server, every run, for each system whose downloaded run is fresh (GEFS and ECMWF ENS no older than 14 h, GEPS 26 h) and whose answer has every member and reaches far enough (GEFS and GEPS 360 h ahead, ECMWF 336 h); the public API for the rest, each system on its own |
+
+Switch in steps, after a few days of downloads:
+
+1. `OPEN_METEO_ENSEMBLES=shadow`, then `docker compose up -d`. Leave it about a week.
+2. Check the Status page's comparison and run
+   `docker compose run --rm worker snowwatch check-ensembles` (each location's forecast
+   built with both, and every figure that differs). Switch when, over runs that match
+   ("Same run"), the member counts match, the server's reach isn't more than 6 h
+   behind, members' 16-day totals differ by under 1 cm on average and 3 cm at most, and
+   `check-ensembles` flags nothing over 1 cm. A system that fails can stay public (see
+   below).
+3. `OPEN_METEO_ENSEMBLES=local`, then `docker compose up -d`. `snowwatch budget` should
+   show about 0 public calls a day, the Status page "Self-hosted" for each system.
+
+**When a system can't use the server** (its run is old, the server is down, or an
+answer comes back short), in this order:
+1. the last ensembles fetched (kept up to 13 h) cover a short outage at no cost;
+2. then the public API, on its usual schedule, within the daily limit. If the whole
+   server is down, forecasts fall back too, which alone would use more than the daily
+   limit at 50 locations, so ensembles (and upper air, clouds, station forecasts) are
+   asked for only while the rest of today's runs' forecasts still fit;
+3. otherwise the forecast is built without them, as before.
+
+The Status page and `snowwatch openmeteo status` say which systems are on the public
+API, why, and since when; the worker logs it once per run.
+
+**Keeping one system public:** if one system fails the checks (most likely ECMWF), keep
+`OPEN_METEO_ENSEMBLES=local` and stop downloading it: add
+`ENSEMBLES_SYSTEMS=gefs025 gefs05 geps` to `.env` and run `docker compose up -d`. Its
+run then goes old and it stays on the public API (about half of today's ensemble calls
+for ECMWF).
+
+**Turn it back** (any time, nothing lost): `OPEN_METEO_ENSEMBLES=public`, then
+`docker compose up -d`. That's milestone 1 exactly.
 
 **Turn it off:** take `ensembles` out of `COMPOSE_PROFILES` and run
 `docker compose up -d --remove-orphans`. The downloaded runs stay in the volume (about

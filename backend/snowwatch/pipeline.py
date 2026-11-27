@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from snowwatch import ensembles as ens
 from snowwatch.analysis.build import build_snapshot
 from snowwatch.analysis.flags import flag_key
 from snowwatch.capture import load_fixture
@@ -55,8 +56,9 @@ class LocationResult:
 def _try(
     fetcher: Fetcher, req: Request, key: str, errors: list[str], *, label: str | None = None
 ) -> Any | None:
+    """An optional request: its failure becomes a warning."""
     try:
-        return fetch(fetcher, req, cache_key=key)
+        return fetch(fetcher, req, cache_key=key, optional=True)
     except FetchError as e:
         errors.append(f"{label or req.name}: {e}")
         return None
@@ -71,11 +73,16 @@ def fetch_responses(
     now: datetime,
     ensembles: bool | None,
     bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
+    shadow: list[repo.ShadowRow] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Every response one location needs, keyed by request name, plus optional-source errors.
 
-    ensembles: True fetches them now; False reuses the cache (fetching only
-    systems with nothing cached); None fetches whatever is missing or stale.
+    ensembles: True fetches them from the public API now; False reuses the cache
+    (fetching only systems with nothing cached); None fetches whatever is missing or
+    stale. A system the self-hosted server can answer (OPEN_METEO_ENSEMBLES=local, its run
+    fresh) is fetched every run, for free; if the server fails, the cache covers it, and
+    the public API only when the public schedule would have asked anyway. In shadow mode
+    each public ensemble fetched is also asked of the server, compared into `shadow`.
     """
     out: dict[str, Any] = {}
     errors: list[str] = []
@@ -101,15 +108,25 @@ def fetch_responses(
 
     cached = repo.cached_ensembles(conn, loc.id, now=now, max_age_h=cfg.ensemble_max_age_h)
     for system in cfg.ensembles:
-        wanted = ensembles is True or system not in cached
-        if wanted:
-            data = _try(fetcher, ensemble_request(loc, system), key(f"ens_{system}"), errors)
-            if data is not None:
-                repo.put_ensemble(conn, loc.id, system, data, now.isoformat(timespec="seconds"))
-                out[f"ens_{system}"] = data
-                continue
-        if system in cached:
-            out[f"ens_{system}"] = cached[system]
+        req = ensemble_request(loc, system)
+        public_due = ensembles is True or system not in cached
+        data = None
+        if not public_due and fetcher.local_ensemble(system):
+            try:  # free; on a failure the cache below covers it, at no public cost
+                data = fetch(
+                    fetcher, req, cache_key=key(req.name), optional=True, allow_fallback=False
+                )
+            except FetchError:
+                data = None  # why is in fetcher.ensembles_public, logged once per run
+        elif public_due:
+            data = _try(fetcher, req, key(req.name), errors)
+            if data is not None and shadow is not None and fetcher.ensemble_mode == "shadow":
+                shadow.append(_shadow(fetcher, loc.id, system, req, data, now))
+        if data is not None:
+            repo.put_ensemble(conn, loc.id, system, data, now.isoformat(timespec="seconds"))
+            out[req.name] = data
+        elif system in cached:
+            out[req.name] = cached[system]
 
     mid = loc.band("mid")
     if loc.country == "US":
@@ -158,6 +175,62 @@ def fetch_responses(
     return out, errors
 
 
+def _shadow(
+    fetcher: Fetcher, loc_id: str, system: str, req: Request, public: Any, now: datetime
+) -> repo.ShadowRow:
+    """Shadow mode: ask the server the same ensemble question and compare its answer."""
+    row = repo.ShadowRow(loc_id, system, now.isoformat(timespec="seconds"))
+    run = fetcher.ensemble_run(system) if fetcher.ensemble_run else None
+    row.local_run = run.isoformat(timespec="seconds") if run else None
+    if system not in fetcher.public_runs:
+        fetcher.public_runs[system] = ens.public_run(
+            lambda url: fetcher.get_json(url, source="open-meteo-data"), system
+        )
+    pub = fetcher.public_runs[system]
+    row.public_run = pub.isoformat(timespec="seconds") if pub else None
+    try:
+        local = fetcher.shadow_ensemble(req.url, req.params, source=req.source)
+    except FetchError as e:
+        row.error = str(e)[:300]
+        return row
+    c = ens.compare(local, public, now)
+    row.members_local, row.members_public = c.members_local, c.members_public
+    row.reach_local_h = None if c.reach_local_h is None else round(c.reach_local_h, 1)
+    row.reach_public_h = None if c.reach_public_h is None else round(c.reach_public_h, 1)
+    row.mean_diff_cm, row.max_diff_cm = c.mean_diff_cm, c.max_diff_cm
+    return row
+
+
+def forecast_reserve(locs: list[Location], cfg: ForecastConfig, now: datetime) -> float:
+    """Public weight to keep for the required forecasts (blend and multi-model) of this
+    run and the rest of today's (UTC), should they all fall back to the public API."""
+    hhmm = now.astimezone(UTC).strftime("%H:%M")
+    runs = 1 + sum(t > hhmm for t in cfg.schedule.runs_utc)
+    per_run = sum(
+        blend_request(loc).weight + multimodel_request(loc, cfg.models_for(loc.country)).weight
+        for loc in locs
+    )
+    return round(runs * per_run, 1)
+
+
+def _ensemble_sources(conn: sqlite3.Connection, fetcher: Fetcher, cfg: ForecastConfig) -> None:
+    """In local mode: record where each system's ensembles came from this run (the
+    Status page shows it, and since when), and log the ones on the public API once."""
+    if fetcher.ensemble_mode != "local":
+        return
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    public = []
+    for system in cfg.ensembles:
+        why = fetcher.ensembles_public.get(system)
+        if why is None and system not in fetcher.ensembles_local:
+            continue  # not asked this run
+        repo.update_ensemble_state(conn, system, why is None, why, stamp)
+        if why is not None:
+            public.append(f"{ens.label(system)} ({why})")
+    if public:
+        log.warning("ensembles not self-hosted this run: %s", "; ".join(public))
+
+
 def fetch_bc(
     fetcher: Fetcher, triplets: Iterable[str | None]
 ) -> dict[str, dict[str, bc_asws.Series]] | None:
@@ -192,9 +265,12 @@ def run_location(
     result = LocationResult(loc.id, ok=False)
     try:
         if responses is None:
+            shadow: list[repo.ShadowRow] = []
             responses, warnings = fetch_responses(
-                conn, loc, fetcher, cfg, now=now, ensembles=ensembles, bc=bc
+                conn, loc, fetcher, cfg, now=now, ensembles=ensembles, bc=bc, shadow=shadow
             )
+            if shadow:
+                repo.save_shadow(conn, run_id, shadow)
         else:
             warnings = []
         stations = {}
@@ -238,6 +314,10 @@ def run_all(
         wanted = set(only)
         locs = [loc for loc in locs if loc.id in wanted]
     run_id = repo.start_run(conn, kind)
+    fetcher.public_reserve = forecast_reserve(locs, cfg, now or datetime.now(UTC))
+    fetcher.ensembles_local.clear()
+    fetcher.ensembles_public.clear()
+    fetcher.public_runs.clear()
     weight_before = fetcher.total_weight
     fallbacks_before = fetcher.fallbacks
     results: list[LocationResult] = []
@@ -283,6 +363,7 @@ def run_all(
         repo.record_usage(conn, fetcher)
         repo.save_source_status(conn, fetcher.sources)
         fetcher.sources.clear()
+        _ensemble_sources(conn, fetcher, cfg)
         if fallbacks := fetcher.fallbacks - fallbacks_before:
             log.warning(
                 "run %d: %d Open-Meteo requests fell back to the public API", run_id, fallbacks

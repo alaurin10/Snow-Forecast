@@ -18,7 +18,12 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from snowwatch.settings import Settings
 
 STATUS_FILE = Path("ensembles") / "status.json"
 DISK_LOG = Path("ensembles") / "disk.log"
@@ -117,13 +122,30 @@ def _gb(kb: Any) -> str:
 
 
 def status_lines(
-    data_dir: Path, *, now: datetime | None = None, fallback_dir: Path | None = None
+    data_dir: Path,
+    *,
+    now: datetime | None = None,
+    fallback_dir: Path | None = None,
+    mode: str | None = None,
+    sources: dict[str, tuple[bool, str | None, str]] | None = None,
 ) -> tuple[bool, list[str]]:
-    """Lines for `snowwatch openmeteo status`: each downloaded system's run and age, the
+    """Lines for `snowwatch openmeteo status`: OPEN_METEO_ENSEMBLES and, in local mode,
+    where each system's ensembles came from in the last run (`sources`: system ->
+    (self-hosted, why not, since)); each downloaded system's run and age, the
     downloader's errors, and free disk. False only when disk is low (under LOW_DISK_GB):
-    a stalled downloader costs nothing yet, as the app keeps using public ensembles."""
+    a stalled downloader costs nothing, as stale systems use the public API."""
     now = now or datetime.now(UTC)
     lines: list[str] = []
+    if mode is not None:
+        what = {
+            "public": "public API (OPEN_METEO_ENSEMBLES=public)",
+            "shadow": "public API, compared with the server each run (shadow)",
+            "local": "the server for fresh systems, else the public API (local)",
+        }
+        lines.append(f"{'ensembles from':16s} {what.get(mode, mode)}")
+        for system, (local, why, since) in (sources or {}).items():
+            where = "self-hosted" if local else f"PUBLIC API ({why})"
+            lines.append(f"  {label(system):14s} {where} since {since}")
     status = downloader_status(data_dir)
     if status is None:
         why = "not mounted" if not data_dir.is_dir() else "no ensembles/status.json"
@@ -183,3 +205,153 @@ def _utc_iso(text: Any) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+# --- Using them (milestone 1b, PR 2) ---------------------------------------------------
+
+Mode = Literal["public", "shadow", "local"]
+LABELS = {"gfs_seamless": "GEFS", "ecmwf_ifs025": "ECMWF ENS", "gem_global": "GEPS"}
+# A system is fresh while its run is no older than two of its cycles (and a little).
+FRESH_H = {"gfs_seamless": 14.0, "ecmwf_ifs025": 14.0, "gem_global": 26.0}
+# ... and its answer reaches this far ahead. ECMWF's 06/18z runs stop at 144 h; the
+# rolling file keeps the last 00/12z run's later hours, so a reach of 336 h also means a
+# 00/12z run no older than ~24 h.
+MIN_REACH_H = {"gfs_seamless": 360.0, "ecmwf_ifs025": 336.0, "gem_global": 360.0}
+
+
+def label(system: str) -> str:
+    return LABELS.get(system, system)
+
+
+def stale_reason(data_dir: Path, system: str, now: datetime | None = None) -> str | None:
+    """None when the server's copy of `system` is fresh enough to use, else why not."""
+    now = now or datetime.now(UTC)
+    parts = SYSTEMS.get(system)
+    if not parts:
+        return "not downloaded here"
+    runs = [domain_run(data_dir, p.folder) for p in parts]
+    if any(r is None for r in runs):
+        return "no run downloaded"
+    oldest = min(r.init for r in runs if r is not None)
+    age = (now - oldest).total_seconds() / 3600
+    limit = FRESH_H.get(system, 14.0)
+    if age > limit:
+        return f"its newest run ({oldest:%d %b %H}z) is {age:.0f} h old, more than {limit:.0f}"
+    return None
+
+
+def local_run(data_dir: Path, system: str) -> datetime | None:
+    """The oldest of a system's downloaded runs (GEFS is two), as the server serves it."""
+    runs = [domain_run(data_dir, p.folder) for p in SYSTEMS.get(system, ())]
+    inits = [r.init for r in runs if r is not None]
+    return min(inits) if len(inits) == len(runs) and inits else None
+
+
+PUBLIC_DATA_URL = "https://openmeteo.s3.amazonaws.com/data"
+
+
+def public_run(get_json: Any, system: str) -> datetime | None:
+    """The newest run in the public data's folders for `system` (the oldest of its
+    parts), from each folder's meta.json: what the public API serves, give or take its
+    own update. `get_json(url)` fetches one (Fetcher.get_json, partially applied)."""
+    inits = []
+    for part in SYSTEMS.get(system, ()):
+        try:
+            meta = get_json(f"{PUBLIC_DATA_URL}/{part.folder}/static/meta.json")
+        except Exception:  # unknown then: the comparison isn't counted
+            return None
+        init = _utc(meta.get("last_run_initialisation_time")) if isinstance(meta, dict) else None
+        if init is None:
+            return None
+        inits.append(init)
+    return min(inits) if inits else None
+
+
+def _members(data: Any) -> dict[str, list[Any]]:
+    hourly = data.get("hourly") if isinstance(data, dict) else None
+    if not isinstance(hourly, dict):
+        return {}
+    return {k: v for k, v in hourly.items() if k.startswith("snowfall") and isinstance(v, list)}
+
+
+def _times(data: Any) -> list[float]:
+    hourly = data.get("hourly") if isinstance(data, dict) else None
+    times = hourly.get("time") if isinstance(hourly, dict) else None
+    return [float(t) for t in times] if isinstance(times, list) else []
+
+
+def members_with_data(data: Any) -> int:
+    return sum(any(v is not None for v in vals) for vals in _members(data).values())
+
+
+def reach_h(data: Any, now: datetime) -> float | None:
+    """How far ahead of `now` every member with data reaches (the shortest), in hours."""
+    times = _times(data)
+    lasts = []
+    for vals in _members(data).values():
+        last = next((i for i in range(len(vals) - 1, -1, -1) if vals[i] is not None), None)
+        if last is not None and last < len(times):
+            lasts.append(times[last])
+    if not lasts:
+        return None
+    return (min(lasts) - now.timestamp()) / 3600
+
+
+def response_problem(
+    system: str, data: Any, expected_members: int, now: datetime | None = None
+) -> str | None:
+    """None when a self-hosted ensemble answer is usable, else why it counts as a failure:
+    members missing, or not reaching as far ahead as expected."""
+    now = now or datetime.now(UTC)
+    n = members_with_data(data)
+    if n < expected_members:
+        return f"{n} of {expected_members} members"
+    reach = reach_h(data, now)
+    need = MIN_REACH_H.get(system, 336.0)
+    if reach is None or reach < need:
+        return f"reaches {0 if reach is None else reach:.0f} h ahead, not {need:.0f}"
+    return None
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """A self-hosted ensemble answer against the public one (shadow mode)."""
+
+    members_local: int
+    members_public: int
+    reach_local_h: float | None
+    reach_public_h: float | None
+    mean_diff_cm: float | None  # of member 16-day totals, over the hours both have
+    max_diff_cm: float | None
+
+
+def compare(local: Any, public: Any, now: datetime) -> Comparison:
+    a, b = _members(local), _members(public)
+    ta, tb = _times(local), _times(public)
+    common = sorted(set(ta) & set(tb))
+    ia = {t: i for i, t in enumerate(ta)}
+    ib = {t: i for i, t in enumerate(tb)}
+    diffs = []
+    for key in sorted(a.keys() & b.keys()):
+        va, vb = a[key], b[key]
+        sa = sum((va[ia[t]] or 0.0) for t in common if ia[t] < len(va))
+        sb = sum((vb[ib[t]] or 0.0) for t in common if ib[t] < len(vb))
+        diffs.append(abs(sa - sb))
+    return Comparison(
+        members_local=members_with_data(local),
+        members_public=members_with_data(public),
+        reach_local_h=reach_h(local, now),
+        reach_public_h=reach_h(public, now),
+        mean_diff_cm=round(sum(diffs) / len(diffs), 2) if diffs else None,
+        max_diff_cm=round(max(diffs), 2) if diffs else None,
+    )
+
+
+def local_systems(
+    settings: Settings, systems: Iterable[str], now: datetime | None = None
+) -> list[str]:
+    """The systems whose ensembles come from the server now (OPEN_METEO_ENSEMBLES=local,
+    run fresh): free, so they cost nothing in the public budget."""
+    if settings.ensemble_mode != "local":
+        return []
+    return [s for s in systems if stale_reason(settings.open_meteo_data_dir, s, now) is None]
