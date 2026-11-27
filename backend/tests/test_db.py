@@ -20,6 +20,7 @@ EXPECTED = {
     "source_status",
     "avalanche",
     "flag_log",
+    "api_usage",
     "catalog_ski_areas",
     "snotel_stations",
     "avy_zones",
@@ -40,6 +41,7 @@ def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
         "006_push_log",
         "007_snotel_start_of_day",
         "008_webcams_applied",
+        "009_api_usage",
     ]
     assert table_names(conn) >= EXPECTED
     assert not table_names(conn) & {"alerts", "obs_hourly"}

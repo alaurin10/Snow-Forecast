@@ -15,12 +15,15 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
                                                ▲ writes
    Open-Meteo, NWS, SNOTEL, BC RFC,  ◄───────── worker (APScheduler: runs, job queue,
    avalanche centers, map sources                avalanche, map frames, backups, cleanup)
+                                                 │ forecasts and elevation, when OPEN_METEO_URL is set
+   public Open-Meteo data on AWS ◄── openmeteo :8080 (optional, compose profile `openmeteo`)
 ```
 
 | Piece | What it does |
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect and the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) |
 | `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
+| `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect); ensembles stay on the public API. No published port |
 | `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
@@ -49,7 +52,9 @@ backend/snowwatch/
               satrender.py (drawing those views and cutting them into tiles)
               sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps, snodas,
               nohrsc, gibs)
-  pipeline.py scheduler.py jobs.py http.py (retries, budgets) cli.py
+  pipeline.py scheduler.py jobs.py http.py (retries, budgets, routing to a
+  self-hosted Open-Meteo with the public fallback) cli.py checks.py (check-sources,
+  openmeteo status)
   avalanche.py avalanche_zones.py (every zone for the map, treeline bands)
   stations.py (every snow station in the map's box) observations.py (Avalanche
   Canada's field reports) nwac_obs.py (NWAC's observations page, read in headless
@@ -84,7 +89,8 @@ either is out of date, so the two sides can't drift.
 
 ## A forecast run
 
-For each active location (`pipeline.run_all`), 20 s apart to stay polite:
+For each active location (`pipeline.run_all`), 20 s apart to stay polite (no pause
+with a self-hosted Open-Meteo server, see below):
 
 1. **Fetch** (`pipeline.fetch_responses`): Open-Meteo's high-resolution blend and
    multi-model forecasts at base, mid and summit, upper-air levels, ensembles at
@@ -97,6 +103,23 @@ For each active location (`pipeline.run_all`), 20 s apart to stay polite:
    device covering every location with something new (`push.py`): a powder day or
    storm alerts once when it comes within 5 days, and again only if it grows a lot;
    `push_log` keeps flickering flags and storms that shift by a day quiet.
+
+**Self-hosted Open-Meteo** (`OPEN_METEO_URL`; docs/OPEN-METEO-PLAN.md): the request
+builders don't change. `http.Fetcher` rewrites `https://api.open-meteo.com/v1/`
+(forecasts, elevation) to the server in one place and gives it one try with a 120 s
+timeout; `ensemble-api.open-meteo.com` is never rewritten. On a connection error,
+timeout or 5xx it retries once on the public URL when `OPEN_METEO_FALLBACK` is on, the
+caller allows it, and today's public budget has room; after a connection failure it
+skips the server for 5 minutes, so a stopped container costs one failed connection.
+`total_weight` counts only requests that reached a public Open-Meteo host. When a run
+finishes, its requests go into the usage ledger (`api_usage`: per UTC day and host,
+public weight, requests, fallbacks, and the server's requests and seconds), which the
+Status page, `snowwatch budget` and the budget check read; with a server configured,
+every public Open-Meteo request checks the ledger first. NWS, NRCS AWDB and the BC RFC
+get at least 0.5 s between requests now that the pause between locations is gone;
+while a run is falling back, locations are 20 s apart again for the public API's
+per-minute limit.
+With a server, `MAX_LOCATIONS` defaults to 50 and `SITE_SPACING_S` to 0.
 
 A location that fails keeps its last good snapshot. A run always ends `ok`,
 `partial` or `failed`; runs and jobs interrupted by a restart are marked failed

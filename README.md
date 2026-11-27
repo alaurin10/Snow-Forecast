@@ -79,7 +79,11 @@ Everything is set in `.env` ([`.env.example`](.env.example) explains each line):
 | `NWS_CONTACT` | | Email or URL the US National Weather Service asks for |
 | `PUBLIC_URL` | | The site's HTTPS address |
 | `TRUSTED_PROXY` | `0` | `1` behind a reverse proxy or Cloudflare |
-| `MAX_LOCATIONS` | `25` | Cap on active locations (each uses ~310 Open-Meteo calls a day) |
+| `MAX_LOCATIONS` | `25` (`50` with `OPEN_METEO_URL`) | Cap on active locations (each uses ~316 public Open-Meteo calls a day, or ~24 with a self-hosted server) |
+| `OPEN_METEO_URL` | empty (public API only) | A self-hosted Open-Meteo server for forecasts and elevation, e.g. `http://openmeteo:8080` with `COMPOSE_PROFILES=openmeteo` ([DEPLOYMENT.md](docs/DEPLOYMENT.md) step 5); ensembles stay public |
+| `OPEN_METEO_FALLBACK` | `1` | When the self-hosted server fails, retry a saved location's requests on the public API (within the daily budget) |
+| `SITE_SPACING_S` | `20` (`0` with `OPEN_METEO_URL`) | Seconds between locations in a run |
+| `OPEN_METEO_CACHE_SIZE` | `30GB` | Disk reserved for the self-hosted server's cache |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | empty (alerts off) | Push alerts: `snowwatch push keys` |
 | `CONTACT_EMAIL` | `NWS_CONTACT` | Email for push services |
 | `HEALTHCHECKS_RUN_URL`, `HEALTHCHECKS_BACKUP_URL` | empty | Optional Healthchecks.io pings |
@@ -124,13 +128,14 @@ Run from `backend/` with `uv run snowwatch …`, or on a server with
 | `worker [--run-now]` | The scheduler (what the worker container runs) |
 | `rebuild [--from FOLDER]` | Rebuild forecasts from cached or saved responses, with no API calls |
 | `backup` | Write a database backup and a `locations.yaml` copy now |
-| `locations list\|import\|export\|stations\|webcams`, `budget` | Manage the list from the terminal (`webcams` loads `config/webcams.yaml`); estimated Open-Meteo use |
+| `locations list\|import\|export\|stations\|webcams`, `budget` | Manage the list from the terminal (`webcams` loads `config/webcams.yaml`); estimated Open-Meteo use, public and self-hosted, and today's public calls |
+| `openmeteo status` | Check the self-hosted Open-Meteo server: CPU, one request's time, today's fallbacks and public use, each model's latest run |
 | `avalanche refresh`, `lookups refresh`, `precip`, `ski-map` | Refresh one kind of data now |
 | `map radar\|forecast\|totals\|all` | Redraw one part of the map's pictures now (`precip` is `map all`) |
 | `owner logout-all` | End every owner session (after changing the password) |
 | `push keys` | Print a new key pair for push alerts |
 | `healthcheck worker` | Exit 0 if the worker is alive (its Docker health check) |
-| `check-sources --write ../docs/SOURCES.md` | Probe every upstream source and write a report |
+| `check-sources [--local] --write ../docs/SOURCES.md` | Probe every upstream source and write a report; `--local` checks the self-hosted Open-Meteo server against the public API |
 | `schema --out FILE` | Write the API's JSON Schema (source of the frontend types) |
 | `capture-fixtures` | Save today's real responses as test fixtures |
 

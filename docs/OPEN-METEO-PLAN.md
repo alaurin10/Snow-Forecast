@@ -1,7 +1,9 @@
 # Snow Watch: self-hosted Open-Meteo plan (richer forecasts, a full forecast anywhere)
 
-Status: **planned** (27 Nov 2026). Nothing below is built yet. Each milestone's PRs tick
-its checklist here and update this line.
+Status: **milestone 1 built** (27 Nov 2026): the opt-in `openmeteo` service, routing with
+the public fallback, the usage ledger and budget split, `snowwatch openmeteo status` and
+`check-sources --local`. Milestones 2–5 are planned. Each milestone's PRs tick its
+checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
 taken on 26–27 Nov 2026 from a cloud sandbox running the real Open-Meteo server against
@@ -108,7 +110,7 @@ NBM since 2024-09. This is the start of each model run stitched together (short 
 the public API, and the app keeps working if the local server is down. **One PR.**
 
 ### Compose and settings
-- [ ] `docker-compose.yml`: an `openmeteo` service with `profiles: [openmeteo]`:
+- [x] `docker-compose.yml`: an `openmeteo` service with `profiles: [openmeteo]`:
   - image `ghcr.io/open-meteo/open-meteo` pinned by digest. The one tested here was
     `sha256:bf94e8b39761b59a91bd04bb926b3834cad00eaf71f1aa64b2fd17fbe987846a`. Bumping it
     is a deliberate PR; say so in DEPLOYMENT.md.
@@ -124,8 +126,8 @@ the public API, and the app keeps working if the local server is down. **One PR.
     (`x-hardening`); keep what the image tolerates
   - add a healthcheck only if the image has a tool for one; otherwise
     `snowwatch openmeteo status` is the check
-- [ ] Raise the `api` service's `mem_limit` from 384m to 768m (spot builds, milestone 2).
-- [ ] `backend/snowwatch/settings.py`, `.env.example`, README configuration table:
+- [x] Raise the `api` service's `mem_limit` from 384m to 768m (spot builds, milestone 2).
+- [x] `backend/snowwatch/settings.py`, `.env.example`, README configuration table:
   - `open_meteo_url: str = ""` (empty = public only)
   - `open_meteo_fallback: bool = True`
   - a property `local_open_meteo` (true when the URL is set) for the switches in
@@ -137,7 +139,7 @@ the public API, and the app keeps working if the local server is down. **One PR.
     when ensembles get richer.
 
 ### Routing in the Fetcher (request builders unchanged)
-- [ ] `backend/snowwatch/http.py` `Fetcher`:
+- [x] `backend/snowwatch/http.py` `Fetcher`:
   - A rewrite map, applied in one place, swaps `https://api.open-meteo.com/v1/` for
     `{open_meteo_url}/v1/` (forecast and elevation). `https://ensemble-api.open-meteo.com/`
     is never rewritten.
@@ -151,19 +153,19 @@ the public API, and the app keeps working if the local server is down. **One PR.
     The existing 429 handling stays.
   - `total_weight` counts only requests that reached a public Open-Meteo host; local
     requests are counted separately (requests, seconds) for the status page.
-- [ ] Construct the Fetcher with the settings in both places: `cli.py:_fetcher` and
+- [x] Construct the Fetcher with the settings in both places: `cli.py:_fetcher` and
   `scheduler.py:Worker._fetcher`. `sources/openmeteo.py`, `locations/resolve.py`,
   `checks.py`, `capture.py` and the fixtures stay untouched.
 
 ### Public usage ledger and budget
-- [ ] Migration `backend/snowwatch/store/migrations/009_api_usage.sql`:
+- [x] Migration `backend/snowwatch/store/migrations/009_api_usage.sql`:
   `api_usage(day TEXT, host TEXT, weight REAL, requests INTEGER, PRIMARY KEY (day, host))`,
   where day is the UTC date (the public limit resets daily).
-- [ ] `store/repo.py`: `add_usage(conn, day, host, weight, requests)` and
+- [x] `store/repo.py`: `add_usage(conn, day, host, weight, requests)` and
   `usage_today(conn)`. The worker adds its public weight when a run finishes
   (`pipeline.run_all`, next to `repo.finish_run`). The API adds its own for spots
   (milestone 2). Everything that spends public calls checks `usage_today` first.
-- [ ] Budget split:
+- [x] Budget split:
   - `sources/openmeteo.py:daily_weight` → `public_daily_weight` (ensembles) and
     `local_daily_weight` (the rest)
   - `cli.py:cmd_budget` prints both plus today's actual public use
@@ -171,36 +173,36 @@ the public API, and the app keeps working if the local server is down. **One PR.
   - the Manage budget panel in `frontend/src/lib/manage/` shows both
 
 ### Tools and status
-- [ ] `snowwatch check-sources --local` (`checks.py`): every model and variable on the
+- [x] `snowwatch check-sources --local` (`checks.py`): every model and variable on the
   local server, plus the empty-value comparison against the public API (when it answers)
   or the saved fixtures ([Appendix B](#appendix-b-how-the-server-was-checked)). Writes a
   section in `docs/SOURCES.md` like the existing check.
-- [ ] `snowwatch openmeteo status`: AVX2 present (`/proc/cpuinfo`), local latency for one
+- [x] `snowwatch openmeteo status`: AVX2 present (`/proc/cpuinfo`), local latency for one
   small request, each model's last run from `meta.json`, today's fallbacks and public use.
-- [ ] `/api/status` (`api/public.py:status`, `StatusOut`) and
+- [x] `/api/status` (`api/public.py:status`, `StatusOut`) and
   `frontend/src/routes/status/+page.svelte`: local server OK and latency, fallbacks today,
   public ensemble use against 10,000.
-- [ ] `/api/meta` (`MetaOut`): `local_forecasts: bool`, which the frontend uses to show
+- [x] `/api/meta` (`MetaOut`): `local_forecasts: bool`, which the frontend uses to show
   spots (milestone 2).
 
 ### Docs
-- [ ] `docs/DEPLOYMENT.md`:
+- [x] `docs/DEPLOYMENT.md`:
   - the server and why it's opt-in
   - the two `.env` lines
   - hardware (AVX2, RAM, disk) and bandwidth
   - bumping the image
   - troubleshooting (`snowwatch openmeteo status`; "Illegal instruction" means no AVX2)
-- [ ] `docs/deploy-notes-home.md`: VM CPU type `host` (needed for AVX2), 10 GB RAM,
+- [x] `docs/deploy-notes-home.md`: VM CPU type `host` (needed for AVX2), 10 GB RAM,
   60 GB disk.
-- [ ] `docs/ARCHITECTURE.md` (moving parts, a forecast run), `docs/SOURCES.md`,
+- [x] `docs/ARCHITECTURE.md` (moving parts, a forecast run), `docs/SOURCES.md`,
   `THIRD_PARTY_NOTICES.md` (the AGPL server image, used unmodified), `CHANGELOG.md`.
 
 ### Tests (`backend/tests/`)
-- [ ] Rewrite only for api.open-meteo.com; ensembles untouched.
-- [ ] Fallback: local down → public. Budget spent → no fallback and an error. Fallback
+- [x] Rewrite only for api.open-meteo.com; ensembles untouched.
+- [x] Fallback: local down → public. Budget spent → no fallback and an error. Fallback
   refused when the caller forbids it.
-- [ ] Weight counts only public calls; the ledger adds up across runs; per-host spacing.
-- [ ] Budget split; settings defaults with and without `OPEN_METEO_URL`.
+- [x] Weight counts only public calls; the ledger adds up across runs; per-host spacing.
+- [x] Budget split; settings defaults with and without `OPEN_METEO_URL`.
 
 **Done when:**
 - Profile off: the site behaves exactly as today and CI passes.
@@ -208,6 +210,43 @@ the public API, and the app keeps working if the local server is down. **One PR.
   - a run logs public weight only for ensembles
   - stopping the `openmeteo` container makes the next run fall back and still succeed
   - `snowwatch budget` shows ~24 public calls per location per day
+
+### What was built and found (27 Nov 2026)
+
+Checked end to end in a cloud sandbox with the pinned image and the six seed locations
+(`OPEN_METEO_URL=http://127.0.0.1:8080`), the same way as [Appendix A](#appendix-a-running-the-server-in-a-cloud-sandbox):
+- **Cold run** (empty cache, `pull --ensembles`): 6/6 ok in 355 s (Crystal 150 s, the
+  rest 29–66 s). Public weight 71: the 18 ensemble requests only. `snowwatch budget`:
+  ~141 public calls a day for 6 locations, ~24 per location; ~1,620 self-hosted.
+- **Warm run:** 6/6 ok in 17 s (0.4–4.4 s per location), no public calls.
+- **Server stopped:** one refused connection, then all 27 forecast requests went to the
+  public API and the run finished 6/6 ok (366 s from the sandbox's shared address);
+  `openmeteo status` said NOT OK; the ledger showed 27 fallbacks.
+- **Hardening:** the image runs with `read_only` (plus `/tmp` as tmpfs), `cap_drop: [ALL]`
+  and `no-new-privileges`, so the service uses `x-hardening` like the others. The image
+  has `curl`, so the service has a healthcheck (any HTTP answer from `/`, which is a 404).
+- **GEM's folders moved:** `cmc_gem_gdps` and `cmc_gem_rdps` stopped in May 2026; the
+  current ones are `cmc_gem_gdps_15km` and `cmc_gem_rdps_10km` (`checks.MODEL_FOLDERS`).
+  Milestone 4's watcher list below is updated.
+
+Choices made while building, beyond the checklist:
+- `api_usage` also has `fallbacks` and `seconds`; the server is the host `local`, so the
+  Status page's latency and fallbacks come from the same table.
+- The server's own successes and errors are the source `open-meteo-local` in
+  `source_status`, so it shows as its own row on the Status page.
+- The server gets one try per request; after a connection error or timeout it's skipped
+  for 5 minutes (`LOCAL_RETRY_AFTER_S`), so a stopped container costs one failed
+  connection per run, not one per request. A 4xx from it is an error, not a fallback.
+- With a server configured, every public Open-Meteo request (ensembles, fallbacks)
+  checks the ledger first. Without one nothing is checked, so the site behaves as before.
+- While a run is falling back, locations are 20 s apart again
+  (`pipeline.FALLBACK_SPACING_S`): at 50 locations a full fallback would otherwise hit the
+  public per-minute limit.
+- Manage's auto-detect (`api/app.py`'s fetcher) uses the server too, with a 30 s timeout,
+  and records its public calls in the ledger.
+- The Manage budget panel is in `frontend/src/routes/admin/+page.svelte`.
+- `.env.example` no longer sets `MAX_LOCATIONS=25`; an `.env` copied from the old one keeps
+  25 until that line is removed (DEPLOYMENT.md says so).
 
 ## Milestone 2: Forecast anywhere
 
@@ -400,7 +439,8 @@ every band. **Three PRs: refresh + retention; ensembles + budget planner; locati
 - [ ] New `backend/snowwatch/modelwatch.py`:
   - every 5 min, read `meta.json` for each model in use (bucket names: `ncep_hrrr_conus`,
     `ncep_nbm_conus`, `ncep_gfs013`, `ncep_gfs025`, `ecmwf_ifs025`, `dwd_icon`,
-    `cmc_gem_gdps`, `cmc_gem_rdps`, `cmc_gem_hrdps`)
+    `cmc_gem_gdps_15km`, `cmc_gem_rdps_10km`, `cmc_gem_hrdps`; `checks.MODEL_FOLDERS`
+    has them. The older `cmc_gem_gdps` and `cmc_gem_rdps` stopped in May 2026)
   - when a model's `last_run_availability_time` advances, schedule a run ~5 min later
     (time for the local server to preload) for the locations that use it (the US set or
     the CA set, from `cfg.models_for`)
@@ -526,7 +566,7 @@ new location shows historical skill immediately.
 
 | Milestone | New | Changed |
 |---|---|---|
-| 1 | `store/migrations/009_api_usage.sql` | `docker-compose.yml`, `settings.py`, `http.py`, `cli.py`, `scheduler.py`, `pipeline.py`, `store/repo.py`, `sources/openmeteo.py` (budget only), `checks.py`, `api/admin.py`, `api/public.py`, `api/models.py`, Manage budget panel, status page, `.env.example`, README, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
+| 1 | `store/migrations/009_api_usage.sql`, `tests/test_openmeteo_local.py` | `docker-compose.yml`, `settings.py`, `http.py`, `cli.py`, `scheduler.py`, `pipeline.py`, `store/repo.py`, `store/retention.py`, `sources/openmeteo.py` (budget only), `checks.py`, `api/admin.py`, `api/app.py`, `api/public.py`, `api/models.py`, Manage budget panel (`routes/admin/+page.svelte`), status page, `.env.example`, README, DEPLOYMENT, deploy-notes-home, ARCHITECTURE, SOURCES, THIRD_PARTY_NOTICES, CHANGELOG |
 | 2 | `spots.py`, `config/borders.geojson`, `store/migrations/010_spot_ensembles.sql`, `frontend/src/lib/components/LocationView.svelte`, `frontend/src/routes/spot/+page.svelte` | `pipeline.py` (shared fetch helper), `doc.py`, `api/public.py`, `api/app.py`, `config/forecast.yaml`, `routes/location/[id]/+page.svelte`, `map/Inspector.svelte`, `components/MapView.svelte`, `api.ts`, `LocationPalette.svelte`, `routes/+page.svelte`, `service-worker.ts`, `swRoute.ts`, ARCHITECTURE, SECURITY |
 | 3 | `analysis/snowlevel.py`, new fixtures folder | `sources/openmeteo.py`, `analysis/slr.py`, `freezing.py`, `ridge.py`, `backcountry.py`, `flags.py`, `build.py`, `verify.py`, `push.py`, `doc.py`, `config/forecast.yaml`, BandTable, PeriodSheet, DaySheet, ForecastChart, backcountry and observed components, SOURCES |
 | 4 | `modelwatch.py`, `budget.py` | `scheduler.py`, `pipeline.py`, `store/retention.py`, `store/repo.py`, `http.py`, `sources/openmeteo.py`, `analysis/build.py`, `config/forecast.yaml`, `push.py`, Manage (catalog add, budget), Overview, Calendar, Confidence tab, status page |
@@ -591,7 +631,7 @@ End to end, per milestone:
     against the scorecard.
   - Are ensemble days 11–16 used anywhere? (M4)
   - Do `*_previous_day1` variables work self-hosted? (M5)
-  - Does the image tolerate `read_only` and cap-drop? (M1)
+  - ~~Does the image tolerate `read_only` and cap-drop? (M1)~~ Yes, with `/tmp` as tmpfs.
 
 ---
 

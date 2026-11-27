@@ -29,7 +29,7 @@ from snowwatch.api.public import make_router
 from snowwatch.api.push_api import make_push_router
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import load_forecast_config
-from snowwatch.http import Fetcher
+from snowwatch.http import fetcher_for
 from snowwatch.maps import tiles_render as snow_tiles
 from snowwatch.maps.point import PointOut
 from snowwatch.maps.point import probe as point_probe
@@ -210,11 +210,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.settings = settings
     app.state.forecast_config = load_forecast_config(settings.config_dir / "forecast.yaml")
-    app.state.make_fetcher = lambda: Fetcher(
-        user_agent=settings.user_agent,
-        contact_user_agent=settings.contact_user_agent,
-        tries=2,
-        timeout_s=20,
+    # The Manage page's auto-detect (elevation and time zone): the self-hosted server when
+    # configured, like the worker.
+    app.state.make_fetcher = lambda: fetcher_for(
+        settings, tries=2, timeout_s=20, local_timeout_s=30
     )
 
     @app.get("/api/meta", response_model=MetaOut)
@@ -229,6 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             storm_cm=cfg.flags.storm_cm,
             snowfall_cm_per_mm=cfg.snowfall_cm_per_mm,
             hazard_index=settings.hazard_index != "off",
+            local_forecasts=settings.local_open_meteo,
         )
 
     @app.get("/api/precip")

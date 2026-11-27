@@ -6,7 +6,8 @@ import gzip
 import json
 import sqlite3
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from snowwatch.analysis.build import DailyRecord
@@ -246,3 +247,71 @@ def save_source_status(conn: sqlite3.Connection, stats: Mapping[str, Any]) -> No
                     round((row["weight_today"] if same_day else 0.0) + st.weight, 2),
                 ),
             )
+
+
+LOCAL_HOST = "local"  # the self-hosted Open-Meteo server's row (http.LOCAL_HOST)
+
+
+def utc_day(now: datetime | None = None) -> str:
+    """The usage ledger's day: the UTC date, when the public daily limit resets."""
+    return (now or datetime.now(UTC)).astimezone(UTC).date().isoformat()
+
+
+def add_usage(
+    conn: sqlite3.Connection,
+    day: str,
+    host: str,
+    weight: float,
+    requests: int,
+    *,
+    fallbacks: int = 0,
+    seconds: float = 0.0,
+) -> None:
+    """Add requests to one host's row for the day."""
+    with conn:
+        conn.execute(
+            "INSERT INTO api_usage (day, host, weight, requests, fallbacks, seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (day, host) DO UPDATE SET "
+            "weight = weight + excluded.weight, requests = requests + excluded.requests, "
+            "fallbacks = fallbacks + excluded.fallbacks, seconds = seconds + excluded.seconds",
+            (day, host, round(weight, 2), requests, fallbacks, round(seconds, 3)),
+        )
+
+
+@dataclass
+class Usage:
+    """One day of Open-Meteo requests from the ledger."""
+
+    public_weight: float = 0.0
+    public_requests: int = 0
+    fallbacks: int = 0
+    local_requests: int = 0
+    local_seconds: float = 0.0
+    by_host: dict[str, float] = field(default_factory=dict)  # public weight per host
+
+    @property
+    def local_latency_s(self) -> float | None:
+        return self.local_seconds / self.local_requests if self.local_requests else None
+
+
+def usage_today(conn: sqlite3.Connection, now: datetime | None = None) -> Usage:
+    """Today's (UTC) Open-Meteo use, public and self-hosted."""
+    out = Usage()
+    rows = conn.execute("SELECT * FROM api_usage WHERE day = ?", (utc_day(now),))
+    for r in rows:
+        if r["host"] == LOCAL_HOST:
+            out.local_requests += r["requests"]
+            out.local_seconds += r["seconds"]
+            continue
+        out.public_weight = round(out.public_weight + r["weight"], 2)
+        out.public_requests += r["requests"]
+        out.fallbacks += r["fallbacks"]
+        out.by_host[r["host"]] = r["weight"]
+    return out
+
+
+def record_usage(conn: sqlite3.Connection, fetcher: Any, now: datetime | None = None) -> None:
+    """Add a fetcher's Open-Meteo requests since it last recorded (`Fetcher.take_usage`)."""
+    day = utc_day(now)
+    for host, u in fetcher.take_usage().items():
+        add_usage(conn, day, host, u.weight, u.requests, fallbacks=u.fallbacks, seconds=u.seconds)

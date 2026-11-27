@@ -18,7 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from snowwatch import avalanche, avalanche_zones, jobs, push
 from snowwatch.config import ForecastConfig
-from snowwatch.http import Fetcher, prune_raw
+from snowwatch.http import Fetcher, fetcher_for, prune_raw
 from snowwatch.locations.service import list_locations, sync_webcams_yaml
 from snowwatch.models import Location
 from snowwatch.pipeline import run_all
@@ -81,9 +81,8 @@ class Worker:
             log.warning("healthcheck ping failed: %s", e)
 
     def _fetcher(self) -> Fetcher:
-        return Fetcher(
-            user_agent=self.settings.user_agent,
-            contact_user_agent=self.settings.contact_user_agent,
+        return fetcher_for(
+            self.settings,
             raw_dir=self.settings.raw_dir,
             # A full run takes ~10 minutes; past this, retries stop so an upstream
             # outage can't hold the lock (and the queue behind it) for hours.
@@ -100,11 +99,15 @@ class Worker:
             if ok:
                 self.ping(self.settings.healthchecks_run_url)
             log.info(
-                "run %d: %d/%d locations ok, weight %.0f",
+                "run %d: %d/%d locations ok, public weight %.0f, %d self-hosted requests "
+                "(%.0f s), %d fallbacks",
                 run_id,
                 ok,
                 len(results),
                 fetcher.total_weight,
+                fetcher.local_requests,
+                fetcher.local_seconds,
+                fetcher.fallbacks,
             )
             avalanche_alerts = self._avalanche(conn, fetcher)
             self._notify(conn, run_id, avalanche_alerts)

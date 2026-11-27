@@ -58,6 +58,9 @@ def prune(conn: sqlite3.Connection, *, now: datetime | None = None) -> dict[str,
         out["push_log"] = conn.execute(
             "DELETE FROM push_log WHERE last_seen_at < ?", (history,)
         ).rowcount
+        out["api_usage"] = conn.execute(
+            "DELETE FROM api_usage WHERE day < ?", (history_day,)
+        ).rowcount
         out["jobs"] = conn.execute(
             "DELETE FROM jobs WHERE status IN ('done', 'failed') AND created_at < ?", (history,)
         ).rowcount

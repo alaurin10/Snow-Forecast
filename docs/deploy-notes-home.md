@@ -12,15 +12,17 @@ what is specific to this machine.
 
 | Where | What |
 |---|---|
-| Docker VM (Debian 12) | `api` (port 8090) and `worker`, from `/opt/snow-forecast` |
+| Docker VM (Debian 12) | `api` (port 8090), `worker` and `openmeteo` (self-hosted forecasts), from `/opt/snow-forecast` |
 | Home Assistant VM | The Cloudflared app, which also runs the tunnel for `ha.` and `dash.` |
 | Cloudflare | DNS and the tunnel edge (HTTPS) |
 
 ## Machine-specific steps
 
-1. **Memory:** give the Docker VM 6 GB (the frontend build needs headroom next to
-   the other stacks) and set its CPU type to `host` (Proxmox: VM → Hardware →
-   Processors → Type).
+1. **VM size:** give the Docker VM 10 GB of memory, a 60 GB disk and the CPU type
+   `host` (Proxmox: VM → Hardware → Processors → Type). `host` passes AVX2 through,
+   which the self-hosted Open-Meteo server needs (the default type hides it); the
+   memory covers the frontend build next to the other stacks plus the server, and the
+   disk its 30 GB cache next to the database and history.
 2. **Code:** the repository is private, so the VM uses a read-only deploy key:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/snowwatch_deploy -N "" -C "snowwatch deploy"
@@ -42,9 +44,14 @@ what is specific to this machine.
    - hostname: "snow.andrewlaurin.com"
      service: "http://<docker-vm-ip>:8090"
    ```
-5. **Automatic updates and monitoring:** [`DEPLOYMENT.md`](DEPLOYMENT.md) step 4
+5. **Self-hosted forecasts:** [`DEPLOYMENT.md`](DEPLOYMENT.md) step 5. Two lines in
+   `.env` (`COMPOSE_PROFILES=openmeteo`, `OPEN_METEO_URL=http://openmeteo:8080`; drop any
+   `MAX_LOCATIONS=25`), `docker compose up -d`, then `docker compose run --rm worker
+   snowwatch openmeteo status` should end with `OK`. The home connection downloads
+   roughly 300–450 GB a month for it.
+6. **Automatic updates and monitoring:** [`DEPLOYMENT.md`](DEPLOYMENT.md) step 4
    (the timer, Uptime Kuma on `/api/health`, two Healthchecks.io checks).
-6. **Check from outside**, on a phone with Wi-Fi off: the site opens, Manage asks
+7. **Check from outside**, on a phone with Wi-Fi off: the site opens, Manage asks
    for the password, Add to Home Screen works, and the router still has no
    port-forward rules.
 

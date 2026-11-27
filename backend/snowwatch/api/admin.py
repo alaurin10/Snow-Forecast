@@ -19,7 +19,8 @@ from snowwatch.locations.resolve import ResolveIn, ResolveOut, resolve
 from snowwatch.models import Location
 from snowwatch.overlays import OverlayFile
 from snowwatch.settings import Settings
-from snowwatch.sources.openmeteo import daily_weight
+from snowwatch.sources.openmeteo import local_daily_weight, public_daily_weight
+from snowwatch.store import repo
 from snowwatch.store.db import connect
 
 
@@ -51,11 +52,19 @@ class SaveOut(BaseModel):
 
 
 class BudgetOut(BaseModel):
+    """Estimated daily Open-Meteo use. `per_location` and `total` count against the public
+    daily limit (`budget`): everything without a self-hosted server, only ensembles with
+    one (`local_forecasts`)."""
+
     per_location: dict[str, float]
     total: float
     budget: int
     active: int
     max_locations: int
+    local_forecasts: bool
+    ensembles_total: float  # always public
+    forecasts_total: float  # self-hosted (free) when local_forecasts, else public
+    public_used_today: float  # from the usage ledger, UTC day
 
 
 class LookupStatus(BaseModel):
@@ -153,7 +162,9 @@ def make_admin_router() -> APIRouter:
     @r.post("/locations/resolve", response_model=ResolveOut)
     def resolve_location(body: ResolveIn, request: Request, _: Owner, conn: RW) -> ResolveOut:
         with _fetcher(request) as fetcher:
-            return resolve(conn, fetcher, body)
+            out = resolve(conn, fetcher, body)
+            repo.record_usage(conn, fetcher)
+            return out
 
     @r.post("/locations", response_model=SaveOut, status_code=201)
     def create(loc: Location, request: Request, _: Owner, conn: RW) -> SaveOut:
@@ -206,13 +217,20 @@ def make_admin_router() -> APIRouter:
         settings: Settings = request.app.state.settings
         cfg = get_forecast_config()
         locs = service.list_locations(conn)
-        per = {loc.id: daily_weight(loc, cfg) for loc in locs}
+        ens = {loc.id: public_daily_weight(loc, cfg) for loc in locs}
+        fc = {loc.id: local_daily_weight(loc, cfg) for loc in locs}
+        local = settings.local_open_meteo
+        per = {k: round(ens[k] + (0.0 if local else fc[k]), 1) for k in ens}
         return BudgetOut(
             per_location=per,
             total=round(sum(per.values()), 1),
             budget=settings.open_meteo_daily_budget,
             active=len(locs),
             max_locations=settings.max_locations,
+            local_forecasts=local,
+            ensembles_total=round(sum(ens.values()), 1),
+            forecasts_total=round(sum(fc.values()), 1),
+            public_used_today=repo.usage_today(conn).public_weight,
         )
 
     return r

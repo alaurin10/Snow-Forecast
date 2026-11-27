@@ -227,10 +227,20 @@ def location_requests(
     return reqs
 
 
+def public_daily_weight(loc: Location, cfg: ForecastConfig) -> float:
+    """Estimated weight per day of one location's ensembles, which always use the public
+    API (a self-hosted server has no per-member data)."""
+    ens = sum(ensemble_request(loc, s).weight for s in cfg.ensembles)
+    return round(ens * len(cfg.schedule.ensemble_runs_utc), 1)
+
+
+def local_daily_weight(loc: Location, cfg: ForecastConfig) -> float:
+    """Estimated weight per day of everything else (forecasts at every band, upper air,
+    clouds): free on a self-hosted server, public otherwise."""
+    base = sum(r.weight for r in location_requests(loc, cfg, ensembles=False))
+    return round(base * len(cfg.schedule.runs_utc), 1)
+
+
 def daily_weight(loc: Location, cfg: ForecastConfig) -> float:
     """Estimated Open-Meteo weight per day for one location on the default schedule."""
-    runs = len(cfg.schedule.runs_utc)
-    ens_runs = len(cfg.schedule.ensemble_runs_utc)
-    base = sum(r.weight for r in location_requests(loc, cfg, ensembles=False))
-    ens = sum(ensemble_request(loc, s).weight for s in cfg.ensembles)
-    return round(base * runs + ens * ens_runs, 1)
+    return round(public_daily_weight(loc, cfg) + local_daily_weight(loc, cfg), 1)

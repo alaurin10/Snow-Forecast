@@ -3,18 +3,25 @@
 Run it when a model or endpoint seems to have changed: the report shows which
 model provides which variable, how far each model and ensemble reaches, the
 snowfall ratio Open-Meteo uses, and the shape of every other endpoint.
+
+`check-sources --local` checks a self-hosted Open-Meteo server the same way, and compares
+the share of empty values in each column with the public API (or the saved fixtures when
+the public API won't answer). `snowwatch openmeteo status` is the quick health check.
 """
 
 from __future__ import annotations
 
+import platform
+import re
 import statistics
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from snowwatch.config import ForecastConfig
-from snowwatch.http import Fetcher, FetchError
+from snowwatch.http import LOCAL_SUFFIX, Fetcher, FetchError
 from snowwatch.models import Location
 from snowwatch.sources import avalanche_ca, avalanche_us, catalog, nws, snotel
 from snowwatch.sources.base import Request, fetch
@@ -25,6 +32,7 @@ from snowwatch.sources.openmeteo import (
     SOURCE,
     UPPER_HOURLY,
     elevation_request,
+    location_requests,
 )
 
 EXTRA_VARS = ["visibility", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"]
@@ -242,3 +250,283 @@ def _ratio_note(lines: list[str]) -> str:
         "Snowfall ratio: in cold hours, model snowfall tops out at "
         f"{statistics.median(vals):.2f} cm per mm of water, Open-Meteo's fixed 7:1 conversion."
     )
+
+
+# --- The self-hosted Open-Meteo server ---------------------------------------------
+
+LOCAL_HEADING = "## Self-hosted Open-Meteo server"
+NULL_SHARE_POINTS = 5.0  # flag a column whose share of empty values differs by more
+# The public data's model folders behind the models we use: each has a meta.json with its
+# last run (`last_run_initialisation_time`, `last_run_availability_time`, Unix seconds).
+# GEM's global and regional models moved to `cmc_gem_gdps_15km` and `cmc_gem_rdps_10km`
+# (the old `cmc_gem_gdps` and `cmc_gem_rdps` stopped in May 2026).
+DATA_URL = "https://openmeteo.s3.amazonaws.com/data"
+MODEL_FOLDERS = (
+    "ncep_hrrr_conus",
+    "ncep_nbm_conus",
+    "ncep_gfs013",
+    "ncep_gfs025",
+    "ecmwf_ifs025",
+    "dwd_icon",
+    "cmc_gem_gdps_15km",
+    "cmc_gem_rdps_10km",
+    "cmc_gem_hrdps",
+)
+
+
+def cpu_supported(
+    cpuinfo: Path = Path("/proc/cpuinfo"), machine: str | None = None
+) -> tuple[bool | None, str]:
+    """Whether this CPU can run the server: AVX2 on x86, or ARM64. None when unknown."""
+    arch = (machine or platform.machine()).lower()
+    if arch in ("aarch64", "arm64"):
+        return True, "ARM64"
+    try:
+        text = cpuinfo.read_text()
+    except OSError:
+        return None, f"unknown ({arch}; no {cpuinfo})"
+    flags = set(re.findall(r"\b[a-z0-9_]+\b", " ".join(re.findall(r"^flags\s*:(.*)$", text, re.M))))
+    if "avx2" in flags:
+        return True, "AVX2 present"
+    return False, "no AVX2: the server would stop with 'Illegal instruction'"
+
+
+def _utc(ts: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(float(ts), UTC)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def model_runs(fetcher: Fetcher) -> list[str]:
+    """Each model folder's last run and when it became available."""
+    lines = []
+    now = datetime.now(UTC)
+    for model in MODEL_FOLDERS:
+        url = f"{DATA_URL}/{model}/static/meta.json"
+        try:
+            meta = fetcher.get_json(url, source="open-meteo-data")
+        except FetchError as e:
+            lines.append(f"  {model:16s} error: {e}")
+            continue
+        init = _utc(meta.get("last_run_initialisation_time"))
+        avail = _utc(meta.get("last_run_availability_time"))
+        run = f"{init:%Y-%m-%d %H:%M} UTC" if init else "?"
+        when = (
+            f"available {avail:%H:%M} UTC ({(now - avail).total_seconds() / 60:.0f} min ago)"
+            if avail
+            else "availability unknown"
+        )
+        lines.append(f"  {model:16s} run {run}, {when}")
+    return lines
+
+
+def local_probe(fetcher: Fetcher, url: str) -> tuple[float, str | None]:
+    """Seconds for one small request to the server, and the error if it failed."""
+    t0 = time.monotonic()
+    try:
+        fetcher.get_json(
+            f"{url}/v1/forecast",
+            {
+                "latitude": "46.93",
+                "longitude": "-121.5",
+                "models": "ecmwf_ifs025",
+                "hourly": "temperature_2m",
+                "forecast_days": "1",
+            },
+            source=SOURCE + LOCAL_SUFFIX,
+            allow_fallback=False,
+        )
+    except FetchError as e:
+        return time.monotonic() - t0, str(e)
+    return time.monotonic() - t0, None
+
+
+def openmeteo_status(
+    url: str,
+    fallback: bool,
+    budget: int,
+    usage: Any,
+    fetcher: Fetcher,
+    *,
+    cpu: tuple[bool | None, str] | None = None,
+) -> tuple[bool, list[str]]:
+    """`snowwatch openmeteo status`: (all OK, lines to print). `usage` is today's ledger
+    (`repo.usage_today`)."""
+    cpu_ok, cpu_text = cpu or cpu_supported()
+    lines = [f"{'OPEN_METEO_URL':16s} {url or '(empty: every request uses the public API)'}"]
+    lines.append(f"{'CPU':16s} {cpu_text}")
+    ok = bool(url) and cpu_ok is not False
+    if url:
+        secs, err = local_probe(fetcher, url)
+        if err:
+            ok = False
+            lines.append(f"{'server':16s} FAILED after {secs:.1f} s: {err}")
+        else:
+            lines.append(f"{'server':16s} OK, {secs:.2f} s for one small request")
+        lines.append(f"{'fallback':16s} {'on' if fallback else 'off'} (OPEN_METEO_FALLBACK)")
+    each = f" ({usage.local_latency_s:.2f} s each)" if usage.local_latency_s is not None else ""
+    lines.append(
+        f"{'today (UTC)':16s} {usage.local_requests} self-hosted requests{each}, "
+        f"{usage.fallbacks} fallbacks, {usage.public_weight:.0f} of {budget} public calls"
+    )
+    lines.append("model runs in the public data:")
+    lines += model_runs(fetcher)
+    lines.append("OK" if ok else "NOT OK")
+    return ok, lines
+
+
+def _points(data: Any) -> list[dict[str, Any]]:
+    """An Open-Meteo answer as one dict per point (several coordinates give a list)."""
+    return [d for d in (data if isinstance(data, list) else [data]) if isinstance(d, dict)]
+
+
+def null_shares(data: Any) -> dict[tuple[int, str], float]:
+    """The share of empty values (%) for every hourly column at every point."""
+    out = {}
+    for i, point in enumerate(_points(data)):
+        for col, values in (point.get("hourly") or {}).items():
+            if col == "time" or not isinstance(values, list) or not values:
+                continue
+            out[(i, col)] = 100 * sum(v is None for v in values) / len(values)
+    return out
+
+
+def compare_nulls(local: Any, public: Any) -> tuple[int, int, list[str], list[str]]:
+    """(local columns, public columns, columns missing locally, columns whose share of
+    empty values differs by more than NULL_SHARE_POINTS, as text)."""
+    a, b = null_shares(local), null_shares(public)
+    cols_a = {c for _, c in a}
+    cols_b = {c for _, c in b}
+    missing = sorted(cols_b - cols_a)
+    differs = []
+    for key in sorted(a.keys() & b.keys()):
+        if abs(a[key] - b[key]) > NULL_SHARE_POINTS:
+            point, col = key
+            where = f" (point {point + 1})" if len(_points(local)) > 1 else ""
+            differs.append(f"`{col}`{where} {a[key]:.0f}% vs {b[key]:.0f}%")
+    return len(cols_a), len(cols_b), missing, differs
+
+
+def _fixture(fixtures: Path | None, loc_id: str, name: str) -> Any | None:
+    if fixtures is None:
+        return None
+    path = fixtures / loc_id / f"{name}.json.gz"
+    if not path.exists():
+        return None
+    from snowwatch.capture import load_fixture
+
+    return load_fixture(path)
+
+
+def comparison_section(
+    local: Fetcher,
+    public: Fetcher,
+    locs: list[Location],
+    cfg: ForecastConfig,
+    fixtures: Path | None,
+) -> list[str]:
+    lines = [
+        "| Location | Request | Columns (local / public) | Missing locally | "
+        f"Empty share differs by > {NULL_SHARE_POINTS:g} points | Compared with |",
+        "|---|---|---|---|---|---|",
+    ]
+    public_ok = True
+    for loc in locs:
+        for req in location_requests(loc, cfg, ensembles=False):
+            try:
+                mine = fetch(local, req)
+            except FetchError as e:
+                lines.append(f"| {loc.name} | `{req.name}` | local error: {e} | | | |")
+                continue
+            theirs, against = None, "public API"
+            if public_ok:
+                try:
+                    theirs = fetch(public, req)
+                except FetchError:
+                    public_ok = False  # usually 429 from a shared address: use fixtures
+            if theirs is None:
+                theirs, against = _fixture(fixtures, loc.id, req.name), "saved fixture"
+            if theirs is None:
+                n = len({c for _, c in null_shares(mine)})
+                lines.append(f"| {loc.name} | `{req.name}` | {n} / - | | | nothing to compare |")
+                continue
+            na, nb, missing, differs = compare_nulls(mine, theirs)
+            more = f" and {len(differs) - 8} more" if len(differs) > 8 else ""
+            lines.append(
+                f"| {loc.name} | `{req.name}` | {na} / {nb} | "
+                f"{', '.join(f'`{m}`' for m in missing) or 'none'} | "
+                f"{'; '.join(differs[:8]) + more or 'none'} | {against} |"
+            )
+    return [*lines, ""]
+
+
+def build_local_report(
+    local: Fetcher,
+    public: Fetcher,
+    locs: list[Location],
+    cfg: ForecastConfig,
+    *,
+    fixtures: Path | None = None,
+) -> str:
+    """The `## Self-hosted Open-Meteo server` section of docs/SOURCES.md."""
+    us = next((loc for loc in locs if loc.country == "US"), None)
+    ca = next((loc for loc in locs if loc.country == "CA"), None)
+    picked = [loc for loc in (us, ca) if loc is not None]
+    lines = [
+        LOCAL_HEADING,
+        "",
+        f"Generated by `snowwatch check-sources --local` on "
+        f"{datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} against `{local.local_url}`. "
+        "Ensembles aren't checked: they always use the public API, since the public data "
+        "the server reads has no per-member snowfall.",
+        "",
+        "### Models and variables",
+        "",
+    ]
+    for loc in picked:
+        try:
+            sec = model_section(local, loc, cfg.models_for(loc.country))
+        except (FetchError, KeyError, TypeError) as e:
+            lines += [f"Model check failed for {loc.name}: {e}", ""]
+            continue
+        lines += ["#" + sec[0], *sec[1:]]
+    lines += [
+        "### Empty values against the public API",
+        "",
+        "Each of a run's requests, sent to both; values aren't compared (a saved fixture is "
+        "from another day), only which columns come back and how many of their values are "
+        "empty.",
+        "",
+        *comparison_section(local, public, picked, cfg, fixtures),
+    ]
+    try:
+        d = fetch(local, elevation_request([(46.935, -121.475), (47.424, -121.418)]))
+        lines += [f"Elevation, two points in one call: `{d}`.", ""]
+    except FetchError as e:
+        lines += [f"Elevation check failed: {e}", ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def merge_section(text: str, section: str, heading: str = LOCAL_HEADING) -> str:
+    """`text` with its `heading` section (to the next `## ` heading) replaced by
+    `section`, or `section` added at the end."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+    if start is None:
+        return text.rstrip() + "\n\n" + section
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    rest = "\n".join(lines[end:])
+    head = "\n".join(lines[:start]).rstrip()
+    out = (head + "\n\n" if head else "") + section
+    return out + ("\n" + rest.rstrip() + "\n" if rest else "")
+
+
+def keep_section(old: str, new: str, heading: str = LOCAL_HEADING) -> str:
+    """A fresh full report (`new`) that keeps `old`'s `heading` section, if it has one."""
+    lines = old.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+    if start is None:
+        return new
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return merge_section(new, "\n".join(lines[start:end]).rstrip() + "\n", heading)
