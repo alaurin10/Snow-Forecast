@@ -42,7 +42,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { spotSearch } from '../recentSpots';
-	import { lastView, near, saveView } from '../map/lastView';
+	import { lastView, near, saveView, takeSpot } from '../map/lastView';
 	import type {
 		AtesOut,
 		ConcernOut,
@@ -2892,6 +2892,14 @@
 			const f = focus ? placedRow(focus) : null;
 			if (f) popupOf[f.id]?.setLngLat([f.lon, f.lat]).addTo(map);
 			else if (home) map.fitBounds(HOME_BOUNDS, { padding: 30, animate: false });
+			// Back from a spot's forecast: its panel again, once the map has settled (so what's
+			// under the point can be found), if the point is in view.
+			const back = f ? null : takeSpot();
+			if (back && map.getBounds().contains([back.lon, back.lat]))
+				map.once('idle', () => {
+					if (!map || tapInput) return;
+					tapMap(map.project([back.lon, back.lat]), { lat: back.lat, lng: back.lon });
+				});
 		}
 		// The small overview map frames the locations once; after that the view is the viewer's.
 		if (placed.length && !fitted) {

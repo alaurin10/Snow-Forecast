@@ -41,3 +41,31 @@ export function near(v: MapViewState, p: { lat: number; lon: number }, km = NEAR
 	const dx = (v.lng - p.lon) * 111.2 * Math.cos((p.lat * Math.PI) / 180);
 	return Math.hypot(dx, dy) <= km;
 }
+
+const SPOT_KEY = 'sw.mapSpot';
+
+/** The spot whose forecast was just opened, so the map can show its panel again on
+ *  return (once): the context of where the last forecast came from. */
+export function keepSpot(p: { lat: number; lon: number }): void {
+	try {
+		sessionStorage.setItem(SPOT_KEY, JSON.stringify({ lat: p.lat, lon: p.lon }));
+	} catch {
+		// not kept
+	}
+}
+
+/** The kept spot, forgotten as it's read (it reopens once). */
+export function takeSpot(): { lat: number; lon: number } | null {
+	try {
+		const v = JSON.parse(sessionStorage.getItem(SPOT_KEY) ?? 'null') as {
+			lat?: unknown;
+			lon?: unknown;
+		} | null;
+		sessionStorage.removeItem(SPOT_KEY);
+		if (!v || typeof v.lat !== 'number' || typeof v.lon !== 'number') return null;
+		if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon)) return null;
+		return { lat: v.lat, lon: v.lon };
+	} catch {
+		return null;
+	}
+}

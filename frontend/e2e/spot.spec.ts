@@ -114,6 +114,10 @@ test('back from a spot, the map is where it was', async ({ page }) => {
 	});
 	await page.goBack();
 	await expect(page).toHaveURL(/\/map(\?|$)/);
+	// The spot just opened has its panel open again, for context.
+	await expect(page.getByRole('dialog', { name: 'This spot', exact: true })).toBeVisible({
+		timeout: 15_000
+	});
 	// The same view: Whistler's pin where it was, not the opening view over Washington.
 	await expect(async () => {
 		const after = (await whistler.boundingBox())!;
