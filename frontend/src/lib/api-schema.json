@@ -441,6 +441,13 @@
     },
     "BackcountryOut": {
       "properties": {
+        "corn": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CornDay"
+          },
+          "type": "array"
+        },
         "outlook": {
           "default": [],
           "items": {
@@ -1018,6 +1025,50 @@
         "classes"
       ],
       "title": "ConcernOut",
+      "type": "object"
+    },
+    "CornDay": {
+      "description": "A spring corn window: after a refreeze, when sunny aspects soften (an estimate\nfrom the sun on 35\u00b0 slopes and the temperature at mid).",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "refreeze": {
+          "type": "string"
+        },
+        "windows": {
+          "items": {
+            "$ref": "#/$defs/CornWindow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "refreeze",
+        "windows"
+      ],
+      "title": "CornDay",
+      "type": "object"
+    },
+    "CornWindow": {
+      "properties": {
+        "aspect": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        },
+        "start": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "aspect",
+        "start",
+        "end"
+      ],
+      "title": "CornWindow",
       "type": "object"
     },
     "DailyEns": {
@@ -1771,6 +1822,20 @@
           },
           "type": "array"
         },
+        "frz": {
+          "default": [],
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
         "gust_kmh": {
           "items": {
             "anyOf": [
@@ -1848,6 +1913,20 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "snow_level_how": {
+          "default": [],
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1967,6 +2046,20 @@
           "type": "array"
         },
         "wdir": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "wetbulb_c": {
+          "default": [],
           "items": {
             "anyOf": [
               {
@@ -3367,6 +3460,27 @@
         "stress": {
           "type": "integer"
         },
+        "sun_kwh": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "temp_rise_c": {
           "anyOf": [
             {
@@ -3438,6 +3552,10 @@
         "snow": {
           "type": "integer"
         },
+        "sun": {
+          "default": 0,
+          "type": "integer"
+        },
         "warm": {
           "type": "integer"
         },
@@ -3476,6 +3594,13 @@
           "type": "array"
         },
         "storm_cm": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sun_kwh": {
+          "default": [],
           "items": {
             "type": "number"
           },
@@ -3827,6 +3952,21 @@
             }
           ]
         },
+        "frz": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "frz_h": {
+          "default": 0,
+          "type": "integer"
+        },
         "gust_max_kmh": {
           "anyOf": [
             {
@@ -3908,6 +4048,17 @@
             }
           ]
         },
+        "slr_col": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "snow_cm": {
           "anyOf": [
             {
@@ -3937,6 +4088,17 @@
               "type": "null"
             }
           ]
+        },
+        "snow_level_how": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "snow_level_min_m": {
           "anyOf": [
@@ -3990,6 +4152,28 @@
               "type": "null"
             }
           ]
+        },
+        "wetbulb_max_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "wetbulb_min_c": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "wind_max_kmh": {
           "anyOf": [
@@ -5440,6 +5624,28 @@
         "date": {
           "type": "string"
         },
+        "fog_h": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rime_h": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "vis_min_m": {
           "anyOf": [
             {
@@ -5576,6 +5782,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Snotel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snowpack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SnowpackOut"
             },
             {
               "type": "null"
@@ -5846,6 +6063,65 @@
         "precip_mm"
       ],
       "title": "SnotelDay",
+      "type": "object"
+    },
+    "SnowpackOut": {
+      "description": "The models' snow on the ground at mid (milestone 3): for places with no station\n(every spot), and as a line beside a station's depth.",
+      "properties": {
+        "dates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "depth_cm": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "elev_m": {
+          "type": "number"
+        },
+        "models": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "now_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "elev_m",
+        "dates",
+        "depth_cm",
+        "now_cm",
+        "models"
+      ],
+      "title": "SnowpackOut",
       "type": "object"
     },
     "SourceRow": {
@@ -6484,6 +6760,17 @@
               "type": "null"
             }
           ]
+        },
+        "cons_col_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cons_settled_cm": {
           "anyOf": [

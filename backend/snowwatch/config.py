@@ -13,6 +13,7 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator
 from snowwatch.analysis.backcountry import BackcountryConfig
 from snowwatch.analysis.flags import FlagConfig
 from snowwatch.analysis.skiday import SkiDayConfig
+from snowwatch.analysis.snowlevel import PhysicsConfig
 from snowwatch.settings import get_settings
 
 
@@ -167,7 +168,8 @@ class ForecastConfig(BaseModel):
     snowfall_cm_per_mm: float = 0.7
     snow_level_offset_m: float = 305
     slr_bands: list[SlrBand] = Field(min_length=1)
-    depth_method: Literal["raw", "slr"] = "raw"
+    # "column": the column snow ratio (milestone 3) where its data is, else "slr"'s.
+    depth_method: Literal["raw", "slr", "column"] = "raw"
     schedule: Schedule
     skiday: SkiDayConfig = SkiDayConfig()
     backcountry: BackcountryConfig = BackcountryConfig()
@@ -175,6 +177,7 @@ class ForecastConfig(BaseModel):
     map: MapConfig = MapConfig()
     terrain: TerrainConfig = TerrainConfig()
     spots: SpotConfig = SpotConfig()
+    physics: PhysicsConfig = PhysicsConfig()
     # Verification: the snow-to-water ratio for the observed-SWE depth estimate, and the
     # one that turns forecast snow water into settled snow, as a depth sensor sees it.
     verify_swe_ratio: float = 10

@@ -40,6 +40,24 @@ class BackcountryConfig(BaseModel):
     outlook_rain_mm: Steps = (1.0, 6.0, 20.0)  # rain onto snow at mid
     outlook_rise_c: Steps = (5.0, 8.0, 12.0)  # warming within 24 h at mid
     outlook_thaw_h: tuple[float, float] = (3.0, 8.0)  # hours above freezing at the summit
+    # Milestone 3 (radiation and humidity from a self-hosted server). Sun: the sunniest
+    # 35° aspect's sunshine in the day at the summit (kWh/m²), one step less when mid
+    # stays below `outlook_sun_cold_c` all day.
+    outlook_sun_kwh: Steps = (4.0, 6.0, 8.0)
+    outlook_sun_cold_c: float = -5.0
+    # Corn: after a Good or Partial refreeze at mid, an aspect softens once it has had
+    # `corn_soften_kwh` of sun since sunrise with mid at or above `corn_min_c`, and stays
+    # good for about `corn_window_h` hours.
+    corn_soften_kwh: float = 1.0
+    corn_min_c: float = -1.0
+    corn_window_h: int = 2
+    # Rime and icing: humidity at least this high between these temperatures (summit).
+    rime_rh_pct: float = 95.0
+    rime_c: tuple[float, float] = (-10.0, 0.0)
+    # Fog and flat light: humidity at least this high with low cloud or poor visibility.
+    fog_rh_pct: float = 97.0
+    fog_cloud_low_pct: float = 70.0
+    fog_vis_m: float = 1000.0
 
     @field_validator(
         "outlook_snow_cm",
@@ -48,6 +66,7 @@ class BackcountryConfig(BaseModel):
         "outlook_rain_mm",
         "outlook_rise_c",
         "outlook_thaw_h",
+        "outlook_sun_kwh",
     )
     @classmethod
     def _rising(cls, v: tuple[float, ...]) -> tuple[float, ...]:
@@ -180,6 +199,8 @@ class Sky:
     cloud_mid: float | None
     cloud_high: float | None
     vis_min_m: float | None
+    rime_h: int | None = None
+    fog_h: int | None = None
 
 
 def sky(
@@ -187,8 +208,13 @@ def sky(
     layers: Mapping[str, Hourly],
     visibility_m: Hourly,
     is_day: Hourly,
+    *,
+    rh_pct: Hourly | None = None,
+    temp_c: Hourly | None = None,
+    cfg: BackcountryConfig | None = None,
 ) -> Sky:
-    """Mean cloud per layer and the lowest visibility during daylight hours."""
+    """Mean cloud per layer and the lowest visibility during daylight hours; with
+    humidity, the daylight hours of likely rime/icing and of fog/flat light."""
     lit = [h for h in hours if is_day.get(h)] or list(hours)
 
     def avg(series: Hourly) -> float | None:
@@ -196,12 +222,55 @@ def sky(
         return round(sum(vals) / len(vals)) if vals else None
 
     vis = [v for h in lit if (v := visibility_m.get(h)) is not None]
+    rime_h = fog_h = None
+    if rh_pct and cfg is not None and any(rh_pct.get(h) is not None for h in lit):
+        low = layers.get("low", {})
+        temps = temp_c or {}
+        rime_h = fog_h = 0
+        for h in lit:
+            rh, t = rh_pct.get(h), temps.get(h)
+            if rh is None:
+                continue
+            if t is not None and rh >= cfg.rime_rh_pct and cfg.rime_c[0] <= t <= cfg.rime_c[1]:
+                rime_h += 1
+            v = visibility_m.get(h)
+            murky = (low.get(h) or 0) >= cfg.fog_cloud_low_pct or (
+                v is not None and v < cfg.fog_vis_m
+            )
+            if rh >= cfg.fog_rh_pct and murky:
+                fog_h += 1
     return Sky(
         avg(layers.get("low", {})),
         avg(layers.get("mid", {})),
         avg(layers.get("high", {})),
         min(vis) if vis else None,
+        rime_h,
+        fog_h,
     )
+
+
+def corn_windows(
+    hours: Sequence[int],
+    sun_w: Mapping[str, Hourly],
+    temp_c: Hourly,
+    refreeze_status: str,
+    cfg: BackcountryConfig,
+) -> list[tuple[str, int, int]]:
+    """A day's corn windows after a refreeze: (aspect, start hour, end hour) for each of
+    E, S and W that softens. `sun_w`: W/m² on each aspect's 35° slope per hour."""
+    if refreeze_status not in ("Good", "Partial"):
+        return []
+    out = []
+    for aspect in ("E", "S", "W"):
+        series = sun_w.get(aspect, {})
+        got = 0.0
+        for h in hours:
+            got += (series.get(h) or 0.0) / 1000
+            t = temp_c.get(h)
+            if got >= cfg.corn_soften_kwh and t is not None and t >= cfg.corn_min_c:
+                out.append((aspect, h, h + cfg.corn_window_h * 3600))
+                break
+    return out
 
 
 # --- The day-by-day outlook ---------------------------------------------------
@@ -222,6 +291,8 @@ class DayWeather:
     thaw_h: int  # hours above freezing at the summit
     temp_rise_c: float | None  # the biggest 24 h warming that ends in the day (mid)
     refreeze: str | None  # the night before, at the summit: Good, Partial, None
+    sun_kwh: Mapping[str, float | None] | None = None  # per aspect, 35° slopes (summit)
+    tmax_mid_c: float | None = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +303,7 @@ class Levels:
     wind: int
     rain: int
     warm: int
+    sun: int = 0
 
 
 def level(value: float | None, steps: Sequence[float]) -> int:
@@ -275,6 +347,7 @@ def day_weather(
     refreeze_status: str | None,
     on_snow: bool,
     cfg: BackcountryConfig,
+    sun_kwh: Mapping[str, float | None] | None = None,
 ) -> DayWeather:
     """A day's facts from hourly series. `snow_cm`, the wind and `temp_top_c` are the
     summit's; rain, the snow level, the freezing level and `temp_mid_c` are mid's. The
@@ -307,6 +380,10 @@ def day_weather(
         thaw_h=sum(1 for h in hours if (temp_top_c.get(h) or 0.0) > 0.0),
         temp_rise_c=max(rises) if rises else None,
         refreeze=refreeze_status,
+        sun_kwh=sun_kwh,
+        tmax_mid_c=max(mids)
+        if (mids := [v for h in hours if (v := temp_mid_c.get(h)) is not None])
+        else None,
     )
 
 
@@ -333,14 +410,19 @@ def factor_levels(d: DayWeather, cfg: BackcountryConfig) -> Levels:
     elif thaw and d.refreeze == "None":
         thaw += 1
     warm = min(3, max(level(d.temp_rise_c, cfg.outlook_rise_c), thaw))
-    return Levels(snow=snow, wind=wind, rain=rain, warm=warm)
+    sunniest = max((v for v in (d.sun_kwh or {}).values() if v is not None), default=None)
+    sun = level(sunniest, cfg.outlook_sun_kwh)
+    if sun and d.tmax_mid_c is not None and d.tmax_mid_c < cfg.outlook_sun_cold_c:
+        sun -= 1
+    return Levels(snow=snow, wind=wind, rain=rain, warm=warm, sun=sun)
 
 
 def stress(levels: Levels) -> int:
     """The day's weather stress, 0 to 3: its strongest factor, one more when two or
-    more are strong together (snow with wind, rain with warming)."""
+    more are strong together (snow with wind, rain with warming). Sun counts as a
+    factor but not toward the pair: strong sun with a warm-up is one warm day."""
     all_ = (levels.snow, levels.wind, levels.rain, levels.warm)
-    top = max(all_)
+    top = max(*all_, levels.sun)
     if sum(1 for v in all_ if v >= 2) >= 2:
         top += 1
     return min(3, top)

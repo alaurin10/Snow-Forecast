@@ -513,6 +513,7 @@ def build_spot(
     # The point's own requests don't depend on the bands' elevations, only on where it
     # is: a provisional location with the point's lat/lon builds them.
     here = spot_location(lat, lon, Bands(0, 1, 2, "flat", "mid"), country, "here")
+    rich = bool(fetcher.local_url)  # always, for spots: they need the server
     # The label tiles' peaks, on a pool of their own: waited for only so long, and a slow
     # tile server must not hold the build up when it ends.
     peaks_f: Future[list[Peak]] | None = None
@@ -529,7 +530,7 @@ def build_spot(
             )
         )
         upper_f = {
-            m: pool.submit(timed(f"upper {m}", optional(upper_air_request(here, [m]))))
+            m: pool.submit(timed(f"upper {m}", optional(upper_air_request(here, [m], rich=rich))))
             for m in cfg.upper_air_models(country)
         }
         side: dict[str, Future[Any]] = {}
@@ -559,13 +560,20 @@ def build_spot(
         loc = spot_location(lat, lon, bands, country, name)
         models = cfg.models_for(country)
         blend_f = pool.submit(
-            timed("blend", lambda: fetch(fetcher, blend_request(loc), allow_fallback=False))
+            timed(
+                "blend", lambda: fetch(fetcher, blend_request(loc, rich=rich), allow_fallback=False)
+            )
         )
         multi_f = {
             m: pool.submit(
                 timed(
                     f"multi {m}",
-                    partial(fetch, fetcher, multimodel_request(loc, [m]), allow_fallback=False),
+                    partial(
+                        fetch,
+                        fetcher,
+                        multimodel_request(loc, [m], rich=rich),
+                        allow_fallback=False,
+                    ),
                 )
             )
             for m in models

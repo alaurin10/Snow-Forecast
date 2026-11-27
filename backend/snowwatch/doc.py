@@ -57,6 +57,15 @@ class PeriodOut(BaseModel):
     gust_max_kmh: float | None
     cloud_mean: float | None
     pop_max: float | None
+    # Milestone 3 (a self-hosted Open-Meteo server); None/empty without its data.
+    slr_col: float | None = None  # the column snow ratio (warmest air up to 500 hPa, wind)
+    wetbulb_min_c: float | None = None
+    wetbulb_max_c: float | None = None
+    # How the snow level was found over most of the period: "wb" from the wet-bulb
+    # profile, "fl" the freezing level less a fixed offset.
+    snow_level_how: str | None = None
+    frz: str | None = None  # "freezing_rain" or "sleet" in some hour of the period
+    frz_h: int = 0  # hours of it
 
 
 class WindowOut(BaseModel):
@@ -102,6 +111,11 @@ class HourlyOut(BaseModel):
     # Snow-to-liquid ratio from the temperature (the configured bands); None when it is
     # too warm for snow. Empty in snapshots built before this field existed.
     slr: list[float | None] = []
+    # Milestone 3: wet-bulb temperature (°C), how the snow level was found ("wb" or
+    # "fl", as PeriodOut), and freezing rain or sleet in the hour. Empty without the data.
+    wetbulb_c: list[float | None] = []
+    snow_level_how: list[str | None] = []
+    frz: list[str | None] = []
 
 
 class ElevationOut(BaseModel):
@@ -245,6 +259,11 @@ class SkyDay(BaseModel):
     cloud_mid: float | None
     cloud_high: float | None
     vis_min_m: float | None
+    # Daylight hours with rime or icing likely (very humid air between −10 and 0 °C) and
+    # with fog or flat light likely (very humid with low cloud or poor visibility). None
+    # without humidity (milestone 3's data).
+    rime_h: int | None = None
+    fog_h: int | None = None
 
 
 class StormOut(BaseModel):
@@ -260,6 +279,7 @@ class OutlookLevels(BaseModel):
     wind: int  # drifting: sustained ridge wind with snow to move
     rain: int  # rain onto snow
     warm: int  # a sharp warm-up, or a thaw at the summit
+    sun: int = 0  # strong sun on slopes (an estimate: 0 without radiation data)
 
 
 class OutlookDay(BaseModel):
@@ -281,6 +301,9 @@ class OutlookDay(BaseModel):
     temp_rise_c: float | None  # the biggest 24 h warming that ends in the day (mid)
     refreeze: list[RefreezeNight] = []  # the night before, per band
     sky: SkyDay | None = None  # daytime cloud and visibility at the summit
+    # Sunshine on 35° slopes facing N, E, S and W at the summit (kWh/m² in the day), an
+    # estimate from the radiation forecast; None without it.
+    sun_kwh: dict[str, float | None] | None = None
     levels: OutlookLevels
     stress: int  # 0 little, 1 some, 2 strong, 3 very strong
     trend: str | None  # rising, steady or easing against the day before
@@ -296,6 +319,22 @@ class OutlookSteps(BaseModel):
     rain_mm: list[float]  # rain onto snow at mid
     rise_c: list[float]  # warming within 24 h at mid
     thaw_h: list[float]  # hours above freezing at the summit: some, strong
+    sun_kwh: list[float] = []  # the sunniest aspect's sunshine in the day (kWh/m²)
+
+
+class CornWindow(BaseModel):
+    aspect: str  # E, S or W
+    start: str  # when that aspect has likely softened
+    end: str
+
+
+class CornDay(BaseModel):
+    """A spring corn window: after a refreeze, when sunny aspects soften (an estimate
+    from the sun on 35° slopes and the temperature at mid)."""
+
+    date: str
+    refreeze: str  # the night before at mid: Good or Partial
+    windows: list[CornWindow]
 
 
 class BackcountryOut(BaseModel):
@@ -308,6 +347,7 @@ class BackcountryOut(BaseModel):
     outlook: list[OutlookDay] = []
     # The outlook's thresholds; None in snapshots built before this existed.
     outlook_steps: OutlookSteps | None = None
+    corn: list[CornDay] = []  # milestone 3: empty without radiation data
 
 
 class Reason(BaseModel):
@@ -404,6 +444,17 @@ class SpotInfo(BaseModel):
     peak: SpotPeak | None = None  # named after a peak within 6 km
 
 
+class SnowpackOut(BaseModel):
+    """The models' snow on the ground at mid (milestone 3): for places with no station
+    (every spot), and as a line beside a station's depth."""
+
+    elev_m: float
+    dates: list[str]  # each local day, its value at the start of the day
+    depth_cm: list[float | None]  # the high-resolution blend
+    now_cm: float | None
+    models: dict[str, float | None]  # each model now
+
+
 class Snapshot(BaseModel):
     version: int = DOC_VERSION
     location: LocationMeta
@@ -426,3 +477,4 @@ class Snapshot(BaseModel):
     warnings: list[str] = []
     clouds: CloudsOut | None = None
     spot: SpotInfo | None = None  # a forecast for a tapped point, not a saved location
+    snowpack: SnowpackOut | None = None  # model snow depth (milestone 3)

@@ -92,6 +92,22 @@ def synthetic_clouds(params: dict[str, str]) -> dict[str, Any]:
     return {"timezone": "UTC", "utc_offset_seconds": 0, "hourly": hourly}
 
 
+def lean_params(params: Any) -> dict[str, str]:
+    """A request with milestone 3's richer variable lists (a self-hosted server) as the
+    lean one the fixtures were captured with, so the same fixture answers both."""
+    from snowwatch.sources import openmeteo as om
+
+    out = dict(params)
+    rich = {
+        ",".join(om.BLEND_HOURLY_RICH): om.BLEND_HOURLY,
+        ",".join(om.MULTI_HOURLY_RICH): om.MULTI_HOURLY,
+        ",".join(om.UPPER_HOURLY_RICH): om.UPPER_HOURLY,
+    }
+    if out.get("hourly") in rich:
+        out["hourly"] = ",".join(rich[out["hourly"]])
+    return out
+
+
 def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = None) -> Any:
     """An httpx transport that answers with the captured responses.
 
@@ -117,7 +133,7 @@ def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = Non
             if any(f in "bc_asws" for f in fail):
                 return httpx.Response(500)
             return httpx.Response(200, text=(FIXTURES.parent / "bc" / name).read_text())
-        params = dict(req.url.params)
+        params = dict(lean_params(req.url.params))
         if "cloud_cover_850hPa" in params.get("hourly", "").split(","):
             if log is not None:
                 log.append("synthetic clouds")

@@ -21,9 +21,10 @@ bands are unchanged; this forecast is only for the scorecard.
 
 The forecast is the one from the last run issued before d began, so every score is a
 1-day lead. Sources: the consensus (model snowfall at 7:1, `cons`; the temperature-based
-snow ratio, `cons_slr`; settled, `cons_settled`; `headline` names the one the app
-shows), the ensemble median and each model. Stations sit at their own elevation, which
-can differ from the mid band, so scores show bias as much as skill.
+snow ratio, `cons_slr`; the column snow ratio, `cons_col`, with a self-hosted server's
+pressure levels; settled, `cons_settled`; `headline` names the one the app shows),
+the ensemble median and each model. Stations sit at their own elevation, which can differ
+from the mid band, so scores show bias as much as skill.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ Skip = Literal["bare", "warm"]
 
 
 class VerificationRow(BaseModel):
-    source: str  # cons, cons_slr, cons_settled, stn_settled, ens_p50, or a model id
+    source: str  # cons, cons_slr, cons_col, cons_settled, stn_settled, ens_p50, or a model id
     n: int
     bias_cm: float | None  # mean forecast − observed
     mae_cm: float | None
@@ -82,6 +83,7 @@ class VerificationPair(BaseModel):
     skip: Skip | None = None  # why the depth check leaves this day out
     cons_cm: float | None
     cons_slr_cm: float | None
+    cons_col_cm: float | None = None  # the column snow ratio (milestone 3)
     cons_settled_cm: float | None = None
     observed_water_mm: float | None = None  # the gauge's catch
     cons_water_mm: float | None = None  # the consensus's water, snow and rain
@@ -111,7 +113,7 @@ class VerificationOut(BaseModel):
 
 def headline_source(cfg: ForecastConfig) -> str:
     """The `forecast_daily` consensus source that matches the snapshot's headline depth."""
-    return "cons_slr" if cfg.depth_method == "slr" else "cons"
+    return {"slr": "cons_slr", "column": "cons_col"}.get(cfg.depth_method, "cons")
 
 
 @dataclass(frozen=True)
@@ -188,7 +190,7 @@ def _forecasts(
     return out
 
 
-ORDER = ("cons", "cons_slr", "cons_settled", "stn_settled", "stn_cons", "ens_p50")
+ORDER = ("cons", "cons_slr", "cons_col", "cons_settled", "stn_settled", "stn_cons", "ens_p50")
 
 
 def _order(source: str) -> tuple[int, str]:
@@ -254,8 +256,8 @@ def verification(
         caught = observed[d].water_mm
         assert caught is not None
         for source, (_, w) in forecasts[d].items():
-            # cons_slr's water is the consensus's: scored once, as cons.
-            if w is not None and source not in (*NOT_SCORED, "cons_slr"):
+            # cons_slr's and cons_col's water is the consensus's: scored once, as cons.
+            if w is not None and source not in (*NOT_SCORED, "cons_slr", "cons_col"):
                 water_pairs[source].append((w, caught))
 
     rows = []
@@ -302,6 +304,7 @@ def verification(
             skip=o.skip,
             cons_cm=fc.get("cons", (None, None))[0],
             cons_slr_cm=fc.get("cons_slr", (None, None))[0],
+            cons_col_cm=fc.get("cons_col", (None, None))[0],
             cons_settled_cm=fc.get("cons_settled", (None, None))[0],
             observed_water_mm=r1(o.water_mm),
             cons_water_mm=fc.get("cons", (None, None))[1],

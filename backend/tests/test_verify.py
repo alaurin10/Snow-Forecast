@@ -231,3 +231,28 @@ def test_the_forecast_at_the_station_is_scored_beside_the_mid_band(
     assert [r.source for r in out.water_rows] == ["cons", "stn_cons"]
     assert (water["cons"].bias_mm, water["stn_cons"].bias_mm) == (8.0, 0.0)
     assert [(p.stn_settled_cm, p.stn_water_mm) for p in out.pairs] == [(10.0, 12.0)] * 2
+
+
+def test_column_ratio_is_scored_beside_the_others(hill: sqlite3.Connection) -> None:
+    from snowwatch.verify import headline_source
+    from tests.helpers import config
+
+    add_obs(hill, [100, 110, 110], [None] * 3)
+    for i, (raw, slr, col) in enumerate([(8.0, 12.0, 10.0), (2.0, 3.0, 1.0)]):
+        target = START + timedelta(days=i)
+        add_forecast(
+            hill,
+            10 + i,
+            f"{target.isoformat()}T03:30:00+00:00",
+            target,
+            cons=raw,
+            cons_slr=slr,
+            cons_col=col,
+        )
+    out = verification(hill, make_location(snotel=STATION), headline="cons_col")
+    assert [r.source for r in out.rows][:3] == ["cons", "cons_slr", "cons_col"]
+    col = next(r for r in out.rows if r.source == "cons_col")
+    assert (col.n, col.bias_cm) == (2, 0.5)  # errors 0, +1
+    assert [p.cons_col_cm for p in out.pairs] == [10.0, 1.0]
+    assert "cons_col" not in {r.source for r in out.water_rows}
+    assert headline_source(config().model_copy(update={"depth_method": "column"})) == "cons_col"

@@ -44,10 +44,29 @@ slr_bands:
   - {min_c: -7.222, ratio: 14, label: "Light"}
   - {min_c: null, ratio: 17, label: "Dry & fluffy"}
 # Headline depth method: "slr" (snow water × the ratio above, from the temperature
-# while it snows) or "raw" (Open-Meteo's 7:1 model snowfall). Every snow total the
+# while it snows), "column" (the ratio from the warmest air between the ground and
+# 500 hPa, cut for strong wind; needs a self-hosted Open-Meteo server's pressure levels,
+# and falls back to "slr" where they're missing) or "raw" (Open-Meteo's 7:1 model
+# snowfall). The scorecard scores all three (cons, cons_slr, cons_col); switch once it
+# shows which is closer. Every snow total the
 # app shows (bars, totals, ranges, model bars, flags, ratings, alerts) follows it;
 # the snapshot keeps both as snow_cm_raw / snow_cm_slr.
 depth_method: slr
+
+# Milestone 3's physics (docs/OPEN-METEO-PLAN.md), used where a self-hosted Open-Meteo
+# server supplies humidity and more pressure levels; to tune against the scorecard.
+physics:
+  snow_level_wb_offset_m: 150  # snow level: this far below the wet-bulb 0 °C height
+  wb_snow_max_c: 0.5           # precipitation type from the surface wet-bulb: snow…
+  wb_rain_min_c: 2.0           # …rain from here, a mix between
+  col_wind_start_kmh: 20       # column snow ratio: cut for wind above this…
+  col_wind_full_kmh: 60        # …reaching the full cut here
+  col_wind_cut: 0.3
+  frz_warm_c: 3.0              # freezing rain: a warm layer aloft this warm melts snow…
+  sleet_warm_c: 2.0            # …a cooler one partly (sleet)
+  sleet_cold_m: 750            # a cold layer at the ground deeper than this makes sleet
+  frz_prob_pct: 50             # NBM's freezing-rain / ice-pellet chance that counts
+  flag_max_c: 0.5              # a model's own flag counts only with the band this cold
 
 # The scorecard: a depth sensor sees new snow after it has settled for up to a day,
 # denser than the fresh snow the headline ratio describes. The consensus is also scored
@@ -106,6 +125,16 @@ backcountry:
   outlook_thaw_h: [3, 8]           # hours above freezing at the summit: some, strong
                                    # (a good refreeze the night before holds it at "some";
                                    # no refreeze makes it one step more)
+  # With a self-hosted server's radiation and humidity (milestone 3), all estimates:
+  outlook_sun_kwh: [4, 6, 8]       # sun on the sunniest 35° aspect in the day (kWh/m²)
+  outlook_sun_cold_c: -5           # one step less when mid stays colder than this
+  corn_soften_kwh: 1.0             # corn: an aspect softens after this much sun…
+  corn_min_c: -1                   # …with mid at least this warm…
+  corn_window_h: 2                 # …and stays good about this long
+  rime_rh_pct: 95                  # rime/icing: this humid between −10 and 0 °C
+  fog_rh_pct: 97                   # fog/flat light: this humid with low cloud…
+  fog_cloud_low_pct: 70
+  fog_vis_m: 1000                  # …or visibility under this
 
 # The Map page's radar and forecast pictures (see docs/MAP-PLAN.md).
 map:

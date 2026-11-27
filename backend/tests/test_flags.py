@@ -213,3 +213,19 @@ def test_flag_keys_are_stable(loc: str) -> None:
     flags = fixture_snapshot(loc).flags
     keys = [(f.type, flag_key(f)) for f in flags]
     assert len(keys) == len(set(keys))
+
+
+def test_freezing_rain_flag_on_a_crafted_case() -> None:
+    s = snap()
+    assert "freezing_rain" not in types(s)
+    p = s.bands[0].periods[3]
+    p.frz, p.frz_h = "freezing_rain", 1
+    assert "freezing_rain" not in types(s)  # one hour is too little
+    p.frz_h = 3
+    got = types(s)["freezing_rain"]
+    assert len(got) == 1
+    f = got[0]
+    assert f.severity == "warning" and f.date == p.date and f.detail == "base"  # type: ignore[attr-defined]
+    assert f.value == 3  # type: ignore[attr-defined]
+    s.bands[0].periods[3].frz = "sleet"
+    assert "freezing_rain" not in types(s)

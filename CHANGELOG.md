@@ -7,6 +7,18 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Richer weather with the self-hosted server** (milestone 3, backend). With
+  `OPEN_METEO_URL` set, each run asks the server for humidity, wet-bulb, radiation,
+  model snow depth and seven pressure levels with humidity (the public API keeps
+  today's lean requests, also on a fallback). Snapshots gain: a snow level from the
+  wet-bulb profile instead of the freezing level less 305 m, precipitation type by
+  wet-bulb, freezing rain and sleet per hour (and a `freezing_rain` flag and push alert),
+  the column snow ratio (`depth_method: column`, scored on the scorecard as `cons_col`
+  beside `cons` and `cons_slr`), ridge wind interpolated between the two levels around
+  the summit, a sun factor and sunshine per aspect in the avalanche-weather outlook, a
+  spring corn window, rime and fog hours in touring weather, and the models' snowpack.
+  Thresholds in `config/forecast.yaml` (`physics:`, `backcountry:`).
+  `snowwatch check-sources --local` lists which models carry each new variable.
 - **Self-hosted forecasts (optional).** Snow Watch can run Open-Meteo's own server next
   to it (compose profile `openmeteo`, then `OPEN_METEO_URL=http://openmeteo:8080`; see
   DEPLOYMENT.md step 5). Every forecast and elevation then comes from it for free; only

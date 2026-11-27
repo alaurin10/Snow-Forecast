@@ -33,6 +33,7 @@ class FlagConfig(BaseModel):
     warming_fl_m: float = 915  # 3,000 ft freezing-level rise in 24 h
     warming_temp_c: float = 8.3  # 15 °F
     refreeze_warm_day_c: float = 5  # a spring day warm enough to soften the snow
+    freezing_rain_h: int = 2  # hours of freezing rain in a period that raise the flag
 
 
 def flag_key(f: Flag) -> str:
@@ -226,6 +227,33 @@ def compute_flags(
                     )
                 )
                 break
+
+    # Freezing rain in the next 5 days: the first period with it, at the lowest band that
+    # has it (it pools in passes and valleys under the warm air), from the models'
+    # profiles and flags (milestone 3).
+    frz = next(
+        (
+            (b, p)
+            for j in range(10)
+            for b in snap.bands
+            if j < len(b.periods)
+            and (p := b.periods[j]).frz == "freezing_rain"
+            and p.frz_h >= cfg.freezing_rain_h
+        ),
+        None,
+    )
+    if frz is not None:
+        band, p = frz
+        flags.append(
+            Flag(
+                type="freezing_rain",
+                severity="warning",
+                date=p.date,
+                period_key=p.key,
+                detail=band.band,
+                value=float(p.frz_h),
+            )
+        )
 
     for a in snap.alerts[:3]:
         flags.append(

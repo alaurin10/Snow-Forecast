@@ -32,7 +32,7 @@ from snowwatch.store.db import utcnow_iso
 
 log = logging.getLogger("snowwatch.push")
 
-ALERT_TYPES = ("powder_day", "storm_incoming", "wind_hold", "avalanche_danger")
+ALERT_TYPES = ("powder_day", "storm_incoming", "wind_hold", "freezing_rain", "avalanche_danger")
 DEFAULT_TYPES = ["powder_day", "storm_incoming"]
 MAX_FAILURES = 5
 
@@ -274,6 +274,8 @@ def phrase(f: Flag, units: str, was: float | None = None) -> str:
         return f"storm from {_day(f.date)}: {_snow(f.value, units)} in 48 h"
     if f.type == "wind_hold":
         return f"summit gusts {_speed(f.value, units)} {_day(f.date)}: lift holds likely"
+    if f.type == "freezing_rain":
+        return f"freezing rain likely {_day(f.date)} ({f.detail or 'base'})"
     if f.type == "avalanche_danger":
         level = int(f.value or 0)
         return f"avalanche danger {level} – {DANGER.get(level, '')}"
@@ -288,6 +290,8 @@ def _headline(f: Flag, units: str) -> str:
         return f"{_snow(f.value, units)} from {_day(f.date)}"
     if f.type == "wind_hold":
         return f"gusts {_speed(f.value, units)} {_day(f.date)}"
+    if f.type == "freezing_rain":
+        return f"freezing rain {_day(f.date)}"
     if f.type == "avalanche_danger":
         return f"avalanche danger {DANGER.get(int(f.value or 0), '')}"
     return f.type.replace("_", " ")
