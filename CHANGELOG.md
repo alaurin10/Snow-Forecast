@@ -72,6 +72,7 @@ Notable changes to Snow Watch. The format follows
   locations.
 - **Saving a spot as a location** (owner only) opens the zone form with the spot as the
   mid pin, to place the low and high points, so it's saved as a full location.
+- **Back on the map, the spot you just opened is still marked**, with its panel open.
 - **Back from a spot goes to the map**, and the map opens straight at the view you left
   (no zoomed-out flash first). Signed in as the owner, every spot panel you open starts its
   forecast early, with no allowance.

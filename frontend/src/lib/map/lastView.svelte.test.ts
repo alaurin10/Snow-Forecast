@@ -1,6 +1,6 @@
 // In jsdom (the .svelte.test project) for its sessionStorage.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lastView, near, saveView } from './lastView';
+import { keepSpot, lastView, near, saveView, takeSpot } from './lastView';
 
 afterEach(() => {
 	sessionStorage.clear();
@@ -28,5 +28,16 @@ describe('the map’s last view', () => {
 	it('knows whether a point is nearby', () => {
 		expect(near(v, { lat: 47.8, lon: -121.0 })).toBe(true);
 		expect(near(v, { lat: 48.5, lon: -121.0 })).toBe(false);
+	});
+});
+
+describe('the spot to reopen', () => {
+	it('is kept, then read back once', () => {
+		expect(takeSpot()).toBeNull();
+		keepSpot({ lat: 47.7, lon: -121.1 });
+		expect(takeSpot()).toEqual({ lat: 47.7, lon: -121.1 });
+		expect(takeSpot()).toBeNull();
+		sessionStorage.setItem('sw.mapSpot', '{"lat":"x"}');
+		expect(takeSpot()).toBeNull();
 	});
 });

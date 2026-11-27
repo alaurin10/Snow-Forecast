@@ -11,6 +11,7 @@
 	import ErrorNote from '../../lib/components/ErrorNote.svelte';
 	import { friendlyError } from '../../lib/errors';
 	import { rememberSpot } from '../../lib/recentSpots';
+	import { keepSpot } from '../../lib/map/lastView';
 	import { spotTitle } from '../../lib/spotname';
 	import { prefs } from '../../lib/prefs.svelte';
 
@@ -62,6 +63,8 @@
 				if (!live) return;
 				snap = s;
 				shown = k;
+				// The map shows this spot's panel again when it's next opened (Back).
+				keepSpot({ lat: a, lon: b });
 				if (s.spot)
 					rememberSpot({
 						lat: s.spot.lat,

@@ -833,6 +833,9 @@ at the owner's choice):
   zone" form, named after the spot, its map zoomed in with the spot as the mid pin, for
   the owner to place the low (trailhead) and high points; auto-detect then looks up each
   pin's elevation, so it's saved as a full three-point location.
+- Back on the map from a spot, that spot's panel (and its dot) opens again once the map
+  settles, if the point is in view: a spot page keeps its point for the tab
+  (`lastView.keepSpot`), and the map reads it once.
 - With `OPEN_METEO_ENSEMBLES=local` (the owner's setting), spot ensembles come from the
   server while its runs are fresh and the spots' public allowance isn't used; it only
   applies to a system that has fallen back to the public API.
