@@ -18,11 +18,18 @@ what is specific to this machine.
 
 ## Machine-specific steps
 
-1. **VM size:** give the Docker VM 10 GB of memory, a 60 GB disk and the CPU type
+1. **VM size:** give the Docker VM 10 GB of memory, a 100 GB disk and the CPU type
    `host` (Proxmox: VM → Hardware → Processors → Type). `host` passes AVX2 through,
    which the self-hosted Open-Meteo server needs (the default type hides it); the
-   memory covers the frontend build next to the other stacks plus the server, and the
-   disk its 30 GB cache next to the database and history.
+   memory covers the frontend build next to the other stacks plus the server. The disk
+   holds the server's 10 GB cache (reserved in full when it starts) and, with
+   self-hosted ensembles (OPEN-METEO-PLAN.md, milestone 1b), ~5–10 GB of downloaded
+   runs, next to the database, backups, map files and images. In Nov 2026 the 60 GB
+   disk filled up when the server reserved a 30 GB cache. To grow it: Proxmox → VM →
+   Hardware → Hard Disk → Disk Action → Resize, then in the VM
+   `growpart /dev/sda 1 && resize2fs /dev/sda1` (`apt install cloud-guest-utils` for
+   `growpart`). `docker builder prune -f` frees the image build cache, which the deploy
+   doesn't clear.
 2. **Code:** the repository is private, so the VM uses a read-only deploy key:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/snowwatch_deploy -N "" -C "snowwatch deploy"

@@ -130,8 +130,11 @@ an older or virtual machine may not offer. Without it, nothing changes.
   `host` (VM → Hardware → Processors → Type); the default type hides AVX2. Check with
   `grep -c avx2 /proc/cpuinfo` (more than 0).
 - **Memory:** about 0.2–0.5 GB (the container is capped at 1 GB), plus file cache.
-- **Disk:** the cache file, 30 GB by default, reserved on disk at once
-  (`OPEN_METEO_CACHE_SIZE` in `.env` changes it, e.g. `20GB`).
+- **Disk:** the cache file, 10 GB by default, reserved on disk **in full as soon as the
+  server starts** (`OPEN_METEO_CACHE_SIZE` in `.env` changes it). Check `df -h /` first:
+  you need the cache size free plus at least 10 GB to spare for the database, backups,
+  map files and image builds. A full disk stops forecast runs from saving. Each location
+  needed ~27 MB of cache in testing, so 10 GB is plenty for 50 locations.
 - **Bandwidth:** each location's first run reads ~27 MB; after that the server keeps
   its cache fresh. Expect roughly 300–450 GB a month of downloads; check your
   internet plan's data cap.
