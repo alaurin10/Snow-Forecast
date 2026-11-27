@@ -646,6 +646,10 @@ class SpotService:
         self.visitor = RateLimiter(rate=1 / 15, burst=8, clock=clock)
         self.hits = RateLimiter(rate=2, burst=60, clock=clock)
         self.site = RateLimiter(rate=600 / 3600, burst=100, clock=clock)
+        # Early builds (the map starts one when its spot panel opens, before "Full forecast
+        # here"): an allowance of their own, so tapping around never uses up a visitor's
+        # builds for the button itself.
+        self.early_limit = RateLimiter(rate=1 / 10, burst=6, clock=clock)
         self.down_until = 0.0  # after the server failed, answer 503 at once for a while
         self.down_reason = ""
 
@@ -674,6 +678,41 @@ class SpotService:
             while len(self._cache) > self.max_entries:
                 self._cache.popitem(last=False)
         return built
+
+    def early(self, lat: float, lon: float, visitor: str) -> Built | None:
+        """Start a spot before it's asked for (the map's spot panel opened on it), so the
+        button finds it made or on its way. Only when it costs nobody anything: within the
+        early allowance and the site's, with a build slot free and the point not already
+        being made; otherwise None at once. Raises OutsideCoverage, SpotUnavailable."""
+        hit = self.cached(lat, lon)
+        if hit is not None:
+            return hit
+        if self.clock() < self.down_until:
+            return None
+        if not self.early_limit.allow(visitor) or not self.site.allow("site"):
+            return None
+        key = round_point(lat, lon)
+        with self._lock:
+            key_lock = self._key_locks.setdefault(key, threading.Lock())
+        if not key_lock.acquire(blocking=False):
+            return None  # already being made
+        try:
+            if not self._builds.acquire(blocking=False):
+                return None
+            try:
+                snap = self._build(*key)
+            except SpotUnavailable as e:
+                self.down_until = self.clock() + 30
+                self.down_reason = str(e)
+                raise
+            finally:
+                self._builds.release()
+            return self._store(key, snap)
+        finally:
+            key_lock.release()
+            with self._lock:
+                if self._key_locks.get(key) is key_lock:
+                    self._key_locks.pop(key, None)
 
     def get(self, lat: float, lon: float, visitor: str) -> Built:
         """A spot, from the cache or built now. Raises SpotBusy, OutsideCoverage,

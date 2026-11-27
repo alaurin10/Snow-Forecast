@@ -340,7 +340,9 @@ and recorded by name. Nightly (`store/retention.py`):
   server, NWS alerts and the public ensemble API. Each built spot is kept for an hour
   (300 at most, per ~100 m); new ones are limited per visitor (8, then one every 15 s),
   to 2 at a time and to about 600 an hour for the whole site, and run in the thread
-  pool; cached ones have a lighter limit. Public ensembles for spots stay within a daily
+  pool; cached ones have a lighter limit. The map's early builds (`early=1`, when the
+  spot panel opens) have their own small allowance per visitor, never wait for a build
+  slot, and count against the site's hourly cap. Public ensembles for spots stay within a daily
   allowance, and the outline check rejects points outside the US and Canada before any
   request. `/api/spot/nearby` reads local files only.
 - **Headers**: a strict Content-Security-Policy (only the hashed start-up script;

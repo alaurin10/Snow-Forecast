@@ -34,6 +34,7 @@
 		getMapClouds,
 		getMapWind,
 		getMeta,
+		startSpot,
 		getReports,
 		getSat,
 		getStations
@@ -229,6 +230,8 @@
 	import { TAP_WAIT_MS, TapGate } from '../map/taps';
 	/** A press this long on a touch screen opens the full forecast there. */
 	const LONG_PRESS_MS = 600;
+	/** The spot panel open this long on a point starts its full forecast. */
+	const EARLY_SPOT_MS = 700;
 
 	interface Props {
 		rows: OverviewRow[];
@@ -1108,6 +1111,15 @@
 		if (target?.kind !== 'spot' || !at) return;
 		if (probe && probe.lat === at.lat && probe.lon === at.lon) return;
 		untrack(() => void inspect(at.lat, at.lon));
+	});
+	// Forecasts anywhere: once the spot's panel has stayed open on a point for a moment,
+	// start its full forecast, so "Full forecast here" finds it made or on its way (the
+	// server makes it only when that costs nothing; see startSpot).
+	$effect(() => {
+		const at = tapAt;
+		if (!anywhere || offline || target?.kind !== 'spot' || !at) return;
+		const t = setTimeout(() => startSpot(at.lat, at.lon), EARLY_SPOT_MS);
+		return () => clearTimeout(t);
 	});
 	// The dot on the spot described, for things with an area (not a station or a hut,
 	// which have their own mark).

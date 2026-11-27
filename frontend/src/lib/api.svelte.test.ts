@@ -1,6 +1,6 @@
 // The API client against a fake fetch (jsdom, for AbortController and Response).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, getHealth, getLocations, waitForJob } from './api';
+import { ApiError, getHealth, getLocations, getSpot, startSpot, waitForJob } from './api';
 
 const json = (status: number, body: unknown) =>
 	new Response(JSON.stringify(body), {
@@ -54,5 +54,35 @@ describe('api client', () => {
 		const job = await done;
 		expect(job.status).toBe('running');
 		expect(fetch.mock.calls.length).toBeLessThanOrEqual(4);
+	});
+});
+
+describe('spots started early', () => {
+	it('the button waits for the one the map started, instead of asking again', async () => {
+		const fetch = vi.fn(async (url: string) => json(200, { location: { id: 'spot-a' }, url }));
+		vi.stubGlobal('fetch', fetch);
+		startSpot(47.0001, -121.0001);
+		const snap = await getSpot(47.0, -121.0);
+		expect(snap).toMatchObject({ location: { id: 'spot-a' } });
+		expect(fetch).toHaveBeenCalledTimes(1);
+		expect(String(fetch.mock.calls[0][0])).toBe('/api/spot?lat=47.000&lon=-121.000&early=1');
+		startSpot(47.0, -121.0); // already have it: nothing asked
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('asks properly when the server skipped the early one', async () => {
+		const fetch = vi.fn(async (url: string) =>
+			url.includes('early=1')
+				? new Response(null, { status: 204 })
+				: json(200, { location: { id: 'spot-b' } })
+		);
+		vi.stubGlobal('fetch', fetch);
+		startSpot(48.0, -121.0);
+		const snap = await getSpot(48.0, -121.0);
+		expect(snap).toMatchObject({ location: { id: 'spot-b' } });
+		expect(fetch.mock.calls.map((c) => String(c[0]))).toEqual([
+			'/api/spot?lat=48.000&lon=-121.000&early=1',
+			'/api/spot?lat=48.000&lon=-121.000'
+		]);
 	});
 });

@@ -43,6 +43,8 @@ export function route(
 		return opts.saved === false ? 'network' : 'saved';
 	if (p.startsWith('/api/osm/')) return 'network-then-saved';
 	if ([...PRIVATE, ...UNCACHED].some((x) => p.startsWith(x))) return 'network';
+	// A spot started early by the map isn't kept: the spot page's own request is.
+	if (p === '/api/spot' && url.searchParams.has('early')) return 'network';
 	if (p === '/api/spot' || p === '/api/spot/nearby') return 'spot';
 	if (p.startsWith('/api/')) return 'api';
 	if (opts.navigate) return 'page';

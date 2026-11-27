@@ -749,15 +749,27 @@ def make_router() -> APIRouter:
         request: Request,
         lat: float = Query(ge=-90, le=90),
         lon: float = Query(ge=-180, le=180),
+        early: bool = False,
     ) -> Response:
         """A full forecast for any point in the US or Canada, made now (snowwatch/spots.py):
         the snapshot document a saved location has, with `spot` set. Gzipped like
         /locations/{id}. 422 outside the US and Canada; 503 without a self-hosted
-        Open-Meteo server or while it can't answer; 429 past a visitor's limit."""
+        Open-Meteo server or while it can't answer; 429 past a visitor's limit.
+
+        `early=1`: the map's spot panel opened on the point, so start it now if that costs
+        nothing (SpotService.early); 204 when it's skipped or fails, never an error."""
         settings: Settings = request.app.state.settings
         if not settings.local_open_meteo:
             raise HTTPException(503, "forecasts anywhere need a self-hosted Open-Meteo server")
         svc: spots.SpotService = request.app.state.spots
+        if early:
+            try:
+                got = svc.early(lat, lon, client_key(request))
+            except (spots.OutsideCoverage, spots.SpotUnavailable):
+                got = None
+            if got is None:
+                return Response(status_code=204, headers={"Cache-Control": "no-store"})
+            return _spot_response(got, request)
         try:
             built = svc.get(lat, lon, client_key(request))
         except spots.OutsideCoverage as e:
@@ -772,19 +784,7 @@ def make_router() -> APIRouter:
             raise HTTPException(
                 429 if e.visitor else 503, str(e), headers={"Retry-After": str(round(e.retry_s))}
             ) from e
-        headers = {
-            "ETag": built.etag,
-            "Cache-Control": "public, max-age=600",
-            "Vary": "Accept-Encoding",
-        }
-        if request.headers.get("if-none-match") == built.etag:
-            return Response(status_code=304, headers=headers)
-        body = built.gz
-        if "gzip" in request.headers.get("accept-encoding", ""):
-            headers["Content-Encoding"] = "gzip"
-        else:
-            body = gzip.decompress(body)
-        return Response(body, media_type="application/json", headers=headers)
+        return _spot_response(built, request)
 
     @router.get("/spot/nearby", response_model=NearbyOut)
     def spot_nearby(
@@ -871,6 +871,23 @@ def make_router() -> APIRouter:
         return [RunOut.model_validate(r) for r in repo.recent_runs(conn, limit)]
 
     return router
+
+
+def _spot_response(built: spots.Built, request: Request) -> Response:
+    """A built spot as sent: gzipped when the browser takes it, with its ETag."""
+    headers = {
+        "ETag": built.etag,
+        "Cache-Control": "public, max-age=600",
+        "Vary": "Accept-Encoding",
+    }
+    if request.headers.get("if-none-match") == built.etag:
+        return Response(status_code=304, headers=headers)
+    body = built.gz
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        headers["Content-Encoding"] = "gzip"
+    else:
+        body = gzip.decompress(body)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 def _mean(xs: list[float]) -> float | None:
