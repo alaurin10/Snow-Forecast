@@ -155,7 +155,7 @@ export const SKI_LAYERS = [
 	'lift-labels',
 	'route-labels'
 ];
-export const PEAK_LAYERS = ['peak-labels'];
+export const PEAK_LAYERS = ['peak-labels-all', 'peak-labels'];
 /** The peaks' dot: an SDF image, coloured by the layer (see peakDot). */
 export const PEAK_DOT = 'peak-dot';
 
@@ -549,6 +549,8 @@ export function mapStyle(o: StyleOptions): StyleSpecification {
 		layers.push(...contourLayers(o.dark, o.units, o.contours && imagery));
 	}
 	if (full) layers.push(...glacierLayers(o.dark, o.glaciers));
+	// Named peaks everywhere (beneath the saved areas' own, which win where both have one).
+	if (full) layers.push(allPeaksLayer(o.dark, o.units, o.peaks));
 	layers.push(...skiLayers(o.dark, o.units, full && o.runs, !full || o.peaks));
 	if (full) layers.push(...placeLayers(o.dark, o.units, o.places));
 	return {
@@ -833,6 +835,49 @@ export function skiLayers(
 			}
 		}
 	];
+}
+
+/**
+ * Named peaks everywhere, from the label tiles (OpenMapTiles' `mountain_peak`): the
+ * saved areas' file (snowwatch/osm.py) only covers the land round each location, and
+ * forecasts anywhere need peaks to find a spot by. Zoomed out, only each tile's most
+ * prominent (`rank`, 1 first); every named peak from zoom 13. Drawn like the others,
+ * and beneath them, so where both name a peak the saved areas' label wins the spot.
+ */
+export function allPeaksLayer(dark: boolean, units: UnitSystem, on: boolean): LayerSpecification {
+	return {
+		id: 'peak-labels-all',
+		type: 'symbol',
+		source: 'labels',
+		'source-layer': 'mountain_peak',
+		minzoom: 9,
+		filter: [
+			'all',
+			['match', ['get', 'class'], ['peak', 'volcano'], true, false],
+			['has', 'name'],
+			['<=', ['coalesce', ['get', 'rank'], 99], ['step', ['zoom'], 1, 10, 2, 11, 4, 12, 8, 13, 99]]
+		] as ExpressionSpecification,
+		layout: {
+			visibility: vis(on),
+			'symbol-sort-key': ['-', 0, ['coalesce', ['get', 'ele'], 0]],
+			'icon-image': PEAK_DOT,
+			'text-field': peakLabel(units),
+			'text-font': FONT,
+			'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10.5, 15, 13],
+			'text-anchor': 'top',
+			'text-offset': [0, 0.5],
+			'text-max-width': 8,
+			'text-padding': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 3]
+		},
+		paint: {
+			'icon-color': peakColor(dark),
+			'icon-halo-color': halo(dark),
+			'icon-halo-width': 1.2,
+			'text-color': peakText(dark),
+			'text-halo-color': halo(dark),
+			'text-halo-width': 1.6
+		}
+	};
 }
 
 /**

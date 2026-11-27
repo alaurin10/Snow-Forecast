@@ -165,9 +165,13 @@ but its ensembles:
 3. **A transient `Location`** (`spot-<geohash>`, backcountry, time zone from the
    forecast) named after a peak within 2 km in the map's OpenStreetMap file, else "6 km
    NE of" a saved location within 40 km, else its coordinates.
-4. **Fetch** with `pipeline.fetch_forecasts` (the saved locations' request builders)
-   from the server only: no public fallback, so a stopped server means 503. No snow
-   station, SNOTEL or BC data. US spots get NWS alerts, kept 10 minutes per 0.1° cell.
+4. **Fetch** with the saved locations' request builders, from the server only: no
+   public fallback, so a stopped server means 503. No snow station, SNOTEL or BC data.
+   US spots get NWS alerts, kept 10 minutes per 0.1° cell. Every request runs at once
+   (a thread pool): the terrain, upper air, clouds and alerts first, then the blend,
+   multi-model forecast and ensembles once the bands are known. The multi-model forecast
+   and upper air are asked for one model per request and joined (`merge_models`), since
+   the server reads one request's models in turn. The API logs each request's time.
 5. **Ensembles** (mid band), per system: a nearby spot's from `spot_ensembles` (per
    0.25° cell and 100 m of elevation, 6 h); else the server's while its run is fresh
    (`OPEN_METEO_ENSEMBLES=local`, free); else the public API within the spots' daily

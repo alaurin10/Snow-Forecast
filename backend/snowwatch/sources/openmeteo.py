@@ -8,6 +8,7 @@ built with zoneinfo and daylight-saving changes come out right.
 from __future__ import annotations
 
 from collections.abc import Collection
+from typing import Any
 
 from snowwatch.config import ForecastConfig
 from snowwatch.models import Location
@@ -247,3 +248,49 @@ def local_daily_weight(loc: Location, cfg: ForecastConfig) -> float:
 def daily_weight(loc: Location, cfg: ForecastConfig) -> float:
     """Estimated Open-Meteo weight per day for one location on the default schedule."""
     return round(public_daily_weight(loc, cfg) + local_daily_weight(loc, cfg), 1)
+
+
+def merge_models(answers: dict[str, Any]) -> Any:
+    """Single-model answers (`{model: answer}`, each from a request with one `models`)
+    joined into the answer one request for all of them gives: each hourly field gets the
+    model's suffix (`snowfall` → `snowfall_gfs_seamless`), aligned on the first answer's
+    hours. Multi-point answers (lists) are joined point by point.
+
+    The self-hosted server reads one request's models one after another; asked for one
+    model each, at once, a new area's multi-model forecast came back in 3.8 s instead of
+    13 s (spots, docs/OPEN-METEO-PLAN.md milestone 2)."""
+    models = list(answers)
+    if not models:
+        raise ValueError("no answers to merge")
+    first = answers[models[0]]
+    if isinstance(first, list):
+        return [
+            _merge_point({m: answers[m][i] for m in models if i < len(answers[m])})
+            for i in range(len(first))
+        ]
+    return _merge_point(answers)
+
+
+def _merge_point(answers: dict[str, Any]) -> dict[str, Any]:
+    base = next(iter(answers.values()))
+    times = list((base.get("hourly") or {}).get("time") or [])
+    out = {k: v for k, v in base.items() if k not in ("hourly", "hourly_units")}
+    hourly: dict[str, list[Any]] = {"time": times}
+    units: dict[str, Any] = {"time": (base.get("hourly_units") or {}).get("time", "unixtime")}
+    for model, ans in answers.items():
+        h = ans.get("hourly") or {}
+        own = h.get("time") or []
+        at = {t: i for i, t in enumerate(own)}
+        same = list(own) == times
+        for key, values in h.items():
+            if key == "time":
+                continue
+            name = f"{key}_{model}"
+            if same:
+                hourly[name] = list(values)
+            else:
+                hourly[name] = [values[at[t]] if t in at else None for t in times]
+            units[name] = (ans.get("hourly_units") or {}).get(key)
+    out["hourly"] = hourly
+    out["hourly_units"] = units
+    return out

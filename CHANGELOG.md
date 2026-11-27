@@ -55,6 +55,13 @@ Notable changes to Snow Watch. The format follows
   scorecard or webcams. The last 10 spots are listed on the Overview and in the location
   palette (Ctrl/⌘ K), and kept for offline use. The owner can **save a spot as a
   location** from its page.
+- **Faster forecasts anywhere.** A spot's requests now run at once, and the multi-model
+  forecast and upper air are asked for one model each: in a new area a spot takes about
+  6 s instead of 24, and a fresh server about 32 s instead of 128. While it waits, the
+  page shows the seconds and says why a new area is slower.
+- **The map stays where you left it.** Back from a spot (or any page) opens the map at
+  the same place, zoom and tilt, so the next spot nearby is one tap away.
+- **Peaks named everywhere on the map**, not only around saved locations.
 - **The snow level map shows what falls where: snow, mix or rain.** Instead of 17
   colours for the snow level's height, three colours (the radar's blue, pink and green)
   show where the ground is above the snow level, within 150 m (500 ft) of it, or below it.

@@ -26,6 +26,16 @@
 	let outside = $state(false);
 	let retry = $state(0);
 	let owner = $state(false);
+	// Seconds spent making it, shown while it's made (a new area takes a while).
+	let waited = $state(0);
+	$effect(() => {
+		if (snap && shown === key) return;
+		if (error) return;
+		waited = 0;
+		const t0 = Date.now();
+		const tick = setInterval(() => (waited = Math.floor((Date.now() - t0) / 1000)), 1000);
+		return () => clearInterval(tick);
+	});
 
 	$effect(() => {
 		getMe()
@@ -130,7 +140,16 @@
 	{/if}
 {:else if !snap || shown !== key}
 	<div class="skeleton" aria-busy="true" aria-live="polite">
-		<p class="loading glass">Making a forecast for this spot… (up to ~10 s in a new area)</p>
+		<p class="loading glass">
+			Making a forecast for this spot…{#if waited >= 3}&nbsp;<span class="num">{waited} s</span
+				>{/if}
+		</p>
+		{#if waited >= 12}
+			<p class="muted small slow">
+				The first forecast in an area takes longer: the server is reading this area's weather data
+				for the first time. Spots nearby will be quicker.
+			</p>
+		{/if}
 		<div class="card sk-head">
 			<span class="mp-skel sk-title"></span>
 			<span class="mp-skel"></span>
@@ -165,6 +184,10 @@
 		padding: 8px 16px;
 		border-radius: 999px;
 		color: var(--text-2);
+	}
+	.slow {
+		margin: -6px 4px 4px;
+		max-width: 40rem;
 	}
 	.skeleton {
 		display: grid;
