@@ -149,6 +149,14 @@ Notable changes to Snow Watch. The format follows
   order". New endpoint: `GET /api/compare`, every location's next 10 days at each band.
 
 ### Changed
+- **Rain and snow are split by each elevation's wet-bulb** (milestone 3c, with the
+  self-hosted server). Last winter at Crystal, Snoqualmie and Rainy Pass SNOTEL, the
+  models' own split put 16 points too little of the precipitation into snow (about
+  6.6 mm of snow water short per wet day); the wet-bulb split, refined to snow at or
+  below 0 °C and rain from 1 °C with a guard for warm air aloft, was within 4. Snow
+  totals near the snow line rise accordingly. The scorecard still scores the models'
+  own split ("Consensus (models' own rain/snow split)"). `backend/scripts/
+  backtest_split.py` re-runs the comparison for any stations and season.
 - **The self-hosted server's cache defaults to 10 GB (was 30 GB).** It's reserved on disk
   in full when the server starts, and 30 GB filled a 60 GB disk; ~27 MB per location was
   measured, so 10 GB is plenty for 50. DEPLOYMENT.md now says to check free space first.

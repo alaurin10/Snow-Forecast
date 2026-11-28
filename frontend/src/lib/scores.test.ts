@@ -6,5 +6,6 @@ describe('scorecard source names', () => {
 		expect(sourceName('cons_col')).toBe('Consensus (column snow ratio)');
 		expect(sourceName('cons_wb')).toBe('Consensus (rain and snow split by wet-bulb)');
 		expect(sourceShort('cons_wb')).toBe('the wet-bulb consensus');
+		expect(sourceName('cons_model')).toBe('Consensus (models’ own rain/snow split)');
 	});
 });

@@ -20,8 +20,10 @@ models' snowpack, and fixtures captured from the server (`live-20261127`); PR 2,
 UI for them. **Milestone 3b built** (28 Nov 2026): more from the same data (a
 wet-bulb rain/snow split scored as `cons_wb`, model snow cover for rain on snow, wet
 snow, fog, humid refreezes, showery periods) and the chart's Snow level view and
-freezing-rain marks. Choosing the headline depth method and the split from `cons_col`'s
-and `cons_wb`'s records is the owner's, after a few weeks. Milestones 4–5 are
+freezing-rain marks. **Milestone 3c** (28 Nov 2026): the wet-bulb split backtested
+against last winter's SNOTEL, refined (0.0/1.0 °C and a warm-layer guard) and switched
+on, with the models' own split still scored as `cons_model`. Choosing the headline
+depth method from `cons_col`'s record is the owner's, after a few weeks. Milestones 4–5 are
 planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1040,6 +1042,61 @@ in March once corn windows have proven themselves). **One PR.**
   switched.
 - The chart's rain/snow marks come from snow and rain amounts, not the hourly type, so
   they change only if the split is switched on.
+
+## Milestone 3c: The rain/snow split, backtested and on
+
+**Goal:** settle the wet-bulb split (milestone 3b shipped it scored, not switched,
+because it added a lot of snow) against measurements rather than a few weeks of live
+scores, refine it, and switch it on. The owner had also seen the Observed tab's
+measured snow beat the forecast by a couple of inches fairly often. **One PR.**
+
+### Backtest (`backend/scripts/backtest_split.py`)
+- [x] The server's archive (the start of each model run, stitched) for GFS, ECMWF, GEM
+  and ICON at three SNOTEL stations' own spot and elevation (Crystal 642, 1,646 m;
+  Snoqualmie 672, 1,222 m; Rainy Pass 711, 1,487 m), 15 Nov 2025 to 15 Apr 2026, against
+  each day's snow-water gain and gauge catch: 178 days with ≥ 5 mm caught.
+- [x] Scored on the snow share (snow water ÷ precipitation against gain ÷ catch, which
+  leaves the models' amounts out of it) and on the snow water.
+
+| Method | Snow share bias | Share MAE | Snow-water bias | Snow-water MAE |
+|---|---|---|---|---|
+| Models' own split | −0.159 | 0.279 | −6.6 mm | 7.9 mm |
+| Wet-bulb 0.5/2.0 °C (3b) | +0.119 | 0.224 | −1.7 mm | 6.3 mm |
+| Wet-bulb 0.0/1.5 °C | +0.069 | 0.221 | −2.9 mm | 6.4 mm |
+| **Wet-bulb 0.0/1.0 °C + guard (chosen)** | **+0.041** | **0.218** | −3.4 mm | 6.4 mm |
+| Wet-bulb −0.5/1.0 °C | +0.008 | 0.220 | −4.0 mm | 6.6 mm |
+
+- The models' own split put 16 points too little of the precipitation into snow:
+  about 6.6 mm of snow water short per wet day (2–3 in of snow), which matches the
+  owner's observation. Every wet-bulb split is closer. 3b's thresholds called 12 points
+  too much snow; their snow water looked close only because the models' precipitation
+  itself runs low, which the split shouldn't be tuned to hide.
+- 0.0/1.0 °C held in both halves of the winter (share bias +0.05 to Jan 15, +0.03
+  after; the models' own −0.14 and −0.18). −0.5/1.0 was a shade less biased but no more
+  accurate; the observed share leans high (gauges under-catch windy snow; rain soaking
+  into the snowpack adds snow water), so the colder end isn't clearly better.
+- **Warm-layer guard:** an hour with a layer of at least `sleet_warm_c` (+2 °C) above
+  the band keeps the model's own snow share (snow melted aloft isn't snow at the band
+  whatever its wet-bulb). It helped a little (share MAE 0.219 → 0.218, more in early
+  winter). Warm air aloft explained only a little of 3b's extra snow (Snoqualmie
+  summit 4 → 17 mm of 152 mm); most came from hours with the band's wet-bulb at −2 to
+  −5 °C where the models rained, at their own lower, warmer ground.
+
+### Changes
+- [x] `physics.wb_snow_max_c` 0.5 → 0.0 and `wb_rain_min_c` 2.0 → 1.0 (also the hourly
+  precipitation type and snow ratio cut-off, which share them).
+- [x] The warm-layer guard in `build._wb_split`.
+- [x] `physics.snow_split: wetbulb` (the default now).
+- [x] The models' own split is still scored, as `cons_model` ("Consensus (models' own
+  rain/snow split)"), so the scorecard keeps the comparison; `cons_wb` equals the
+  headline's split.
+- [x] Tests: the new thresholds, the guard, both splits scored whichever leads.
+
+On the captured server forecasts (5 days, base/mid/summit, cm): Crystal 2.6/16.8/18.7
+(models) → 7.2/27.0/29.9 (3b: 14.9/27.0/29.9); Snoqualmie 0.0/7.3/11.9 → 0.1/10.1/39.4
+(3b: 1.6/21.7/39.4). The marginal bands came back down; cold summits keep the snow the
+models' grid rain hid. The summits themselves weren't backtested (the stations sit
+near mid), so `cons_model` against `cons_wb` on the scorecard is the check there.
 
 ## Milestone 4: Fresher and wider
 

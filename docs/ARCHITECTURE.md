@@ -257,8 +257,9 @@ older than `STALE_AFTER_H` (12 h).
   bracket the summit, sun on 35° slopes (`analysis/solar.py`) for the outlook's sun
   factor and the corn window, rime and fog hours, and the models' snowpack. Every field
   is optional: without the data the snapshot is as before. Milestone 3b adds a rain/snow
-  split by each band's wet-bulb (`cons_wb`, the headline with `physics.snow_split:
-  wetbulb`), model snow cover for rain on snow, wet snow, fog in the ski-day rating,
+  split by each band's wet-bulb (the headline since milestone 3c, `physics.snow_split`,
+  backtested against SNOTEL by `backend/scripts/backtest_split.py`; the models' own split
+  is still scored as `cons_model`), model snow cover for rain on snow, wet snow, fog in the ski-day rating,
   humid refreezes and showery periods.
 - **Backcountry** (no safety judgement, with two bounded exceptions below): avalanche
   danger exactly as published and hidden once expired (each listed problem's aspects

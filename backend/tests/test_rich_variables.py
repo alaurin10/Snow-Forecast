@@ -126,22 +126,29 @@ def test_lean_fixtures_fall_back_to_the_freezing_level() -> None:
     assert all(o.sun_kwh is None for o in snap.backcountry.outlook)  # type: ignore[union-attr]
 
 
-def test_wet_bulb_split_is_scored_and_can_lead() -> None:
-    _, records = rich("snoqualmie")
-    by = {r.source: 0.0 for r in records}
-    for r in records:
-        by[r.source] = by.get(r.source, 0.0) + (r.snow_cm or 0.0)
-    assert "cons_wb" in by and by["cons_wb"] != by["cons_slr"]
+def test_both_splits_are_scored_whichever_leads() -> None:
+    def totals(records: list[DailyRecord]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for r in records:
+            out[r.source] = out.get(r.source, 0.0) + (r.snow_cm or 0.0)
+        return out
+
+    # The default: the wet-bulb split leads, the models' own split is scored beside it.
+    on = totals(rich("snoqualmie")[1])
+    assert on["cons_slr"] == pytest.approx(on["cons_wb"])
+    assert on["cons_model"] < on["cons_wb"]
     loc = seed()["snoqualmie"]
     at = datetime.fromisoformat(json.loads((RICH / "meta.json").read_text())["captured_at"])
     cfg = config().model_copy(
-        update={"physics": config().physics.model_copy(update={"snow_split": "wetbulb"})}
+        update={"physics": config().physics.model_copy(update={"snow_split": "model"})}
     )
     inputs = inputs_from_responses(loc, load_responses(RICH / loc.id), cfg, stations={})
-    _, recs = build_snapshot(loc, inputs, cfg, at)
-    slr = sum(r.snow_cm or 0 for r in recs if r.source == "cons_slr")
-    wb = sum(r.snow_cm or 0 for r in recs if r.source == "cons_wb")
-    assert slr == pytest.approx(wb)  # the headline now is the wet-bulb split
+    off = totals(build_snapshot(loc, inputs, cfg, at)[1])
+    assert "cons_model" not in off
+    # The same splits either way; only the snow ratios move a little, since they come
+    # from the headline's snowing hours.
+    assert off["cons_slr"] == pytest.approx(on["cons_model"], abs=1.0)
+    assert off["cons_wb"] == pytest.approx(on["cons_wb"], abs=1.0)
 
 
 def test_model_snow_depth_means_snow_cover_without_a_station() -> None:

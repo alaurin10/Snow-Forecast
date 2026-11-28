@@ -6787,6 +6787,17 @@
           ],
           "default": null
         },
+        "cons_model_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cons_settled_cm": {
           "anyOf": [
             {

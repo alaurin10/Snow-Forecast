@@ -34,9 +34,12 @@ class PhysicsConfig(BaseModel):
     """Milestone 3's thresholds (config `physics:`), to tune against the scorecard."""
 
     # How each model's precipitation becomes snow and rain at a band: "model" (its own
-    # snowfall and rain) or "wetbulb" (split by its wet-bulb at the band). Both are scored
-    # (cons_slr, cons_wb); switch once the scorecard shows which is closer.
-    snow_split: Literal["model", "wetbulb"] = "model"
+    # snowfall and rain, often split at its grid's lower, warmer elevation) or "wetbulb"
+    # (split by its wet-bulb at the band). Both are scored (cons_model / cons_wb).
+    # Last winter at three Washington SNOTEL stations the models' own split put 16 points
+    # too little of the precipitation into snow; the wet-bulb split, with the thresholds
+    # below, was within 4 (docs/OPEN-METEO-PLAN.md milestone 3c).
+    snow_split: Literal["model", "wetbulb"] = "wetbulb"
     # Snow that falls through air with a wet-bulb at least this warm is heavy and wet.
     wet_snow_wb_c: float = 0.0
     # Showery: CAPE (J/kg) at least this high in a snowy period means bursts heavier than
@@ -45,10 +48,11 @@ class PhysicsConfig(BaseModel):
 
     # Snow level: this far below the wet-bulb 0 °C height.
     snow_level_wb_offset_m: float = Field(150, ge=0, le=600)
-    # Precipitation type from the surface wet-bulb: snow at or below the first, rain at or
-    # above the second, a mix between.
-    wb_snow_max_c: float = 0.5
-    wb_rain_min_c: float = 2.0
+    # Precipitation type and the rain/snow split from the surface wet-bulb: snow at or
+    # below the first, rain at or above the second, a mix between. Fitted to last winter's
+    # SNOTEL (0.5/2.0 put 12 points too much into snow; 0.0/1.0 was within 4).
+    wb_snow_max_c: float = 0.0
+    wb_rain_min_c: float = 1.0
     # Column snow ratio: the ratio for the warmest temperature between the surface and
     # 500 hPa, cut for strong wind at the surface (broken crystals pack densely): no cut
     # below the first speed, rising to `col_wind_cut` at the second.
