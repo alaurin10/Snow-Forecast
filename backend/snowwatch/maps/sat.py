@@ -35,7 +35,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -999,10 +999,12 @@ def refresh(
     wide_km: float = 36.0,
     now: datetime | None = None,
     renderer: satrender.Renderer | None = None,
+    only: Collection[str] | None = None,
 ) -> SatResult:
     """Judge new passes, choose and draw each location's views, and write the index. A
     location that fails keeps the views it had. `wide_km` at or under the centre's
-    AREA_KM draws no wide views."""
+    AREA_KM draws no wide views. `only`: look for these locations alone (a new
+    location's first pass); every other one keeps its views and index entry as they are."""
     now = now or datetime.now(UTC)
     centre = satrender.CENTRE
     wide = replace(satrender.WIDE, km=wide_km) if wide_km > AREA_KM else None
@@ -1023,6 +1025,9 @@ def refresh(
         lat, lon = mid.lat, mid.lon
         key = _spot_key(loc.id, lat, lon)
         keep_keys.add(key)
+        if only is not None and loc.id not in only:
+            _carry(loc.id, lat, lon, key, wide, old_by_id.get(loc.id), keep_keys, used_crops, spots)
+            continue
         seen = checked.setdefault(key, {})
         box = area_box(lat, lon)
         spot = SatLocation(
@@ -1133,6 +1138,32 @@ def refresh(
     out.locations = len(spots)
     out.fetched = draw.fetched
     return out
+
+
+def _carry(
+    loc_id: str,
+    lat: float,
+    lon: float,
+    key: str,
+    wide: satrender.Area | None,
+    prev: SatLocation | None,
+    keep_keys: set[str],
+    used_crops: dict[str, set[str]],
+    spots: list[SatLocation],
+) -> None:
+    """Keep a location's views and index entry as they are (refresh's `only`)."""
+    if wide is not None:
+        keep_keys.add(_spot_key(loc_id, lat, lon, wide.km))
+    if prev is None:
+        return
+    spots.append(prev)
+    crops = used_crops.setdefault(key_dir(key), set())
+    crops.update(sc.id for sc in prev.scenes)
+    if prev.composite:
+        crops.update(x.id for x in prev.composite.layers)
+    if wide is not None and prev.wide is not None:
+        wkey = _spot_key(loc_id, lat, lon, wide.km)
+        used_crops.setdefault(key_dir(wkey), set()).update(x.id for x in prev.wide.layers)
 
 
 def _wide(

@@ -12,6 +12,8 @@ export interface ApiTypes {
 	avalanche_zones: ZonesOut;
 	budget: BudgetOut;
 	catalog: CatalogItem[];
+	catalog_add: CatalogAddOut;
+	catalog_add_in: CatalogAddIn;
 	compare: CompareOut;
 	job: JobOut;
 	locations: LocationSummary[];
@@ -313,6 +315,43 @@ export interface CatalogItem {
 	website: string | null;
 }
 /**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CatalogAddOut".
+ */
+export interface CatalogAddOut {
+	jobs: JobOut[];
+	skipped?: {
+		[k: string]: string;
+	};
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "JobOut".
+ */
+export interface JobOut {
+	arg?: string | null;
+	created_at: string;
+	error: string | null;
+	finished_at: string | null;
+	id: number;
+	kind: string;
+	location_id: string | null;
+	status: string;
+}
+/**
+ * Ski areas to add from the catalog, each resolved and saved by the worker.
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "CatalogAddIn".
+ */
+export interface CatalogAddIn {
+	/**
+	 * @minItems 1
+	 * @maxItems 25
+	 */
+	ids: [string, ...string[]];
+}
+/**
  * Every location's days at each band, for ranking them on Compare's Add list.
  *
  * This interface was referenced by `ApiTypes`'s JSON-Schema
@@ -354,19 +393,6 @@ export interface CompareDay {
 	snow_cm: number;
 	tmax_c: number | null;
 	tmin_c: number | null;
-}
-/**
- * This interface was referenced by `ApiTypes`'s JSON-Schema
- * via the `definition` "JobOut".
- */
-export interface JobOut {
-	created_at: string;
-	error: string | null;
-	finished_at: string | null;
-	id: number;
-	kind: string;
-	location_id: string | null;
-	status: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

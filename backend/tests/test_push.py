@@ -223,6 +223,20 @@ def test_digest_lines_are_capped() -> None:
     assert mixed["title"] == "Alerts at 2 spots: B avalanche danger High"
 
 
+def test_a_digest_for_50_locations_stays_small() -> None:
+    """Milestone 4: with ~50 locations a run can raise something at all of them; the
+    digest still shows a few lines and fits a push message (~4 KB)."""
+    items = [
+        (f"loc{i:02d}", f"A Long Ski Area Name Number {i}", alerts(powder(cm=10.0 + i), storm()))
+        for i in range(50)
+    ]
+    msg = push.digest(items, "imperial")
+    lines = msg["body"].split("\n")
+    assert len(lines) == push.DIGEST_LINES and lines[-1] == "+47 more"
+    assert " at 50 spots: " in msg["title"]
+    assert len(json.dumps(msg).encode()) < 1500
+
+
 def test_powder_day_inside_a_storm_is_folded_into_it() -> None:
     msg = push.digest(
         [("crystal", "Crystal", alerts(powder("2026-12-05"), powder("2026-12-06", 18), storm()))],

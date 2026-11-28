@@ -6,7 +6,7 @@ import io
 import json
 import re
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -752,13 +752,32 @@ def test_worker_looks_for_imagery_and_survives_failures(
             "max_nodata": 0.03,
             "keep": 3,
             "wide_km": 36.0,
+            "only": None,
         }
     ]
     w.sat_lock.acquire()
     w.satellite()  # still running from last time: skip
     assert len(calls) == 1
     w.sat_lock.release()
-    assert "satellite" in {j.id for j in build_scheduler(w).get_jobs()}
+    assert {"satellite", "satellite_new"} <= {j.id for j in build_scheduler(w).get_jobs()}
+    # A location added since the last full pass gets its own first pass, one at a time.
+    from snowwatch.locations import service
+    from snowwatch.store.db import connect
+    from tests.conftest import make_location
+
+    w.satellite_new()  # no index yet: the full pass covers everyone
+    assert len(calls) == 1
+    conn = connect(settings.database)
+    for loc_id in ("testhill", "newhill", "other"):
+        service.upsert_location(conn, make_location(id=loc_id), max_locations=25)
+    settings.sat_dir.mkdir(parents=True, exist_ok=True)
+    (settings.sat_dir / "index.json").write_text(
+        sat.SatOut(generated_at=NOW, viirs_date=None, locations=[
+            sat.SatLocation(id="testhill", name="Test Hill", lat=47, lon=-121)
+        ]).model_dump_json()
+    )  # fmt: skip
+    w.satellite_new()
+    assert calls[-1]["only"] == {"newhill"}
 
     def broken(*a: Any, **kw: Any) -> sat.SatResult:
         raise RuntimeError("Planetary Computer fell over")
@@ -767,4 +786,23 @@ def test_worker_looks_for_imagery_and_survives_failures(
     w.satellite()  # logged, not raised
     monkeypatch.setattr(sat, "refresh", refresh)
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
-    assert cli.main(["map", "sat"]) == 0 and len(calls) == 2
+    assert cli.main(["map", "sat"]) == 0 and len(calls) == 3
+
+
+def test_a_new_locations_first_pass_leaves_the_others_alone(tmp_path: Path, small: None) -> None:
+    """Milestone 4: a location added between full passes gets its own (`only`), and
+    every other location keeps its views and index entry untouched."""
+    client = httpx.Client(transport=httpx.MockTransport(Upstream()))
+    sat.refresh(tmp_path, client, [make_location()], now=NOW)
+    before = sat.read_index(tmp_path / "index.json")
+    assert before is not None
+    crops = {p.name for p in (tmp_path / "crops").iterdir()}
+    new = make_location(id="newhill", name="New Hill")
+    later = NOW + timedelta(hours=1)
+    res = sat.refresh(tmp_path, client, [make_location(), new], now=later, only={"newhill"})
+    after = sat.read_index(tmp_path / "index.json")
+    assert after is not None and res.errors == []
+    by_id = {s.id: s for s in after.locations}
+    assert by_id["testhill"] == before.locations[0]  # not looked at again
+    assert by_id["newhill"].checked_at == later and by_id["newhill"].scenes
+    assert crops <= {p.name for p in (tmp_path / "crops").iterdir()}  # nothing pruned

@@ -13,11 +13,15 @@ def enqueue(
     kind: str,
     location_id: str | None = None,
     requested_by: str | None = None,
+    *,
+    arg: str | None = None,
 ) -> int:
+    """arg: what a job needs besides a location (a `catalog` job's catalog id)."""
     with conn:
         cur = conn.execute(
-            "INSERT INTO jobs (kind, location_id, requested_by, created_at) VALUES (?, ?, ?, ?)",
-            (kind, location_id, requested_by, utcnow_iso()),
+            "INSERT INTO jobs (kind, location_id, requested_by, created_at, arg) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (kind, location_id, requested_by, utcnow_iso(), arg),
         )
     return int(cur.lastrowid or 0)
 

@@ -20,6 +20,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from snowwatch import avalanche, avalanche_zones, jobs, modelwatch, push
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, fetcher_for, prune_raw
+from snowwatch.locations import service
 from snowwatch.locations.service import list_locations, sync_webcams_yaml
 from snowwatch.models import Location
 from snowwatch.pipeline import RunMemo, run_all
@@ -347,6 +348,8 @@ class Worker:
                     with self._fetcher() as fetcher:
                         avalanche_alerts = self._avalanche(conn, fetcher)
                     self._notify(conn, run_id, avalanche_alerts)
+                elif job["kind"] == "catalog" and job.get("arg"):
+                    error = self._add_from_catalog(conn, job["arg"])
                 elif job["kind"] == "lookups":
                     self.refresh_lookups(locked=True)
                 else:
@@ -355,6 +358,35 @@ class Worker:
                 log.exception("job %s failed", job["id"])
                 error = f"{type(e).__name__}: {e}"
             jobs.finish(conn, job["id"], error=error)
+
+    def _add_from_catalog(self, conn: sqlite3.Connection, catalog_id: str) -> str | None:
+        """A queued catalog ski area: resolve and save it, then its first forecast (and
+        its satellite pass in the background). Returns the error, if any."""
+        from snowwatch.locations.from_catalog import CatalogAddError, add_from_catalog
+
+        try:
+            with self._fetcher() as fetcher:
+                loc = add_from_catalog(
+                    conn, fetcher, catalog_id, max_locations=self.settings.max_locations
+                )
+                repo.record_usage(conn, fetcher)
+        except (CatalogAddError, service.LocationLimitError) as e:
+            return str(e)
+        log.info("added %s (%s) from the catalog", loc.id, loc.name)
+        with self._fetcher() as fetcher:
+            _, results = run_all(
+                conn,
+                fetcher,
+                self.cfg,
+                kind="job",
+                only=[loc.id],
+                ensembles=None,
+                spacing_s=0,
+                memo=self.memo,
+            )
+        self.planner.ran([loc.id], datetime.now(UTC))
+        failed = [e for r in results if not r.ok for e in r.errors]
+        return "; ".join(failed) or None
 
     def nightly(self) -> None:
         with self.lock:
@@ -542,6 +574,25 @@ class Worker:
     def satellite(self) -> None:
         """The newest clear Sentinel-2 scenes near each location, for the map's recent
         satellite base. Failures are only logged."""
+        self._satellite()
+
+    def satellite_new(self) -> None:
+        """A location added since the last pass gets its first one now, in the background,
+        one at a time (every 30 minutes at most: each takes 4–5 minutes), instead of
+        waiting up to `sat_hours` for the next full pass."""
+        from snowwatch.maps import sat
+
+        index = sat.read_index(self.settings.sat_dir / "index.json")
+        if index is None:
+            return  # no full pass yet: it covers everyone
+        have = {s.id for s in index.locations}
+        locs = list_locations(connect(self.settings.database))
+        new = [loc.id for loc in locs if loc.id not in have]
+        if new:
+            log.info("satellite: first pass for %s", new[0])
+            self._satellite(only={new[0]})
+
+    def _satellite(self, only: set[str] | None = None) -> None:
         from snowwatch.maps import sat
 
         if not self.sat_lock.acquire(blocking=False):
@@ -561,6 +612,7 @@ class Worker:
                     max_nodata=mc.sat_max_nodata,
                     keep=mc.sat_keep,
                     wide_km=mc.sat_wide_km,
+                    only=only,
                 )
             log.info(
                 "satellite: %d whole scenes for %d locations (%d passes judged, %d pictures "
@@ -722,6 +774,14 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
         IntervalTrigger(hours=mc.sat_hours),
         id="satellite",
         next_run_time=datetime.now(UTC),
+        **opts,
+    )
+    # A new location's first pass, between the full ones: at most two an hour.
+    sched.add_job(
+        worker.satellite_new,
+        IntervalTrigger(minutes=30),
+        id="satellite_new",
+        next_run_time=datetime.now(UTC) + timedelta(minutes=10),
         **opts,
     )
     h, m = _hm(cfg.backup_utc)

@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from snowwatch import jobs, overlays
 from snowwatch.api.auth import Owner
@@ -18,6 +18,7 @@ from snowwatch.config import get_forecast_config
 from snowwatch.ensembles import label, local_systems
 from snowwatch.http import Fetcher
 from snowwatch.locations import service
+from snowwatch.locations.from_catalog import already_added
 from snowwatch.locations.resolve import ResolveIn, ResolveOut, resolve
 from snowwatch.models import Location
 from snowwatch.overlays import OverlayFile
@@ -47,6 +48,18 @@ class JobOut(BaseModel):
     created_at: str
     finished_at: str | None
     error: str | None
+    arg: str | None = None  # a catalog job's catalog id
+
+
+class CatalogAddIn(BaseModel):
+    """Ski areas to add from the catalog, each resolved and saved by the worker."""
+
+    ids: list[str] = Field(min_length=1, max_length=25)
+
+
+class CatalogAddOut(BaseModel):
+    jobs: list[JobOut]  # one per ski area queued
+    skipped: dict[str, str] = {}  # catalog id -> why (unknown, already added)
 
 
 class SaveOut(BaseModel):
@@ -177,6 +190,38 @@ def make_admin_router() -> APIRouter:
             params,
         )
         return [CatalogItem.model_validate(dict(row)) for row in rows]
+
+    @r.post("/locations/catalog", response_model=CatalogAddOut, status_code=202)
+    def add_from_catalog(body: CatalogAddIn, request: Request, _: Owner, conn: RW) -> CatalogAddOut:
+        """Queue several catalog ski areas; the worker resolves and saves each with every
+        auto-detected suggestion, then fetches its forecast (Manage's multi-select)."""
+        settings: Settings = request.app.state.settings
+        skipped: dict[str, str] = {}
+        queued: list[str] = []
+        pending = {
+            r["arg"]
+            for r in conn.execute(
+                "SELECT arg FROM jobs WHERE kind = 'catalog' AND status IN ('queued', 'running')"
+            )
+        }
+        for cid in dict.fromkeys(body.ids):
+            row = conn.execute("SELECT name FROM catalog_ski_areas WHERE id = ?", (cid,)).fetchone()
+            if row is None:
+                skipped[cid] = "not in the ski-area list"
+            elif (have := already_added(conn, cid)) is not None:
+                skipped[cid] = f"already added as {have.name}"
+            elif cid in pending:
+                skipped[cid] = "already being added"
+            else:
+                queued.append(cid)
+        room = settings.max_locations - service.count_active(conn) - len(pending)
+        if len(queued) > room:
+            raise HTTPException(
+                409,
+                f"at most {settings.max_locations} active locations: room for {max(room, 0)} more",
+            )
+        ids = [jobs.enqueue(conn, "catalog", None, "owner", arg=cid) for cid in queued]
+        return CatalogAddOut(jobs=[_job(conn, i) for i in ids], skipped=skipped)
 
     @r.post("/locations/resolve", response_model=ResolveOut)
     def resolve_location(body: ResolveIn, request: Request, _: Owner, conn: RW) -> ResolveOut:

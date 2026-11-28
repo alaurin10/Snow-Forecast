@@ -3,6 +3,7 @@ import type {
 	AvalancheView,
 	BudgetOut,
 	ConcernOut,
+	CatalogAddOut,
 	CatalogItem,
 	CompareOut,
 	JobOut,
@@ -248,6 +249,9 @@ export const adminLookups = () => get<LookupStatus>('/api/admin/lookups');
 export const refreshLookups = () => send<JobOut>('POST', '/api/admin/lookups/refresh');
 export const searchCatalog = (q: string) =>
 	get<CatalogItem[]>(`/api/admin/catalog/search?q=${encodeURIComponent(q)}`);
+/** Queue several catalog ski areas; the worker resolves, saves and fetches each. */
+export const addFromCatalog = (ids: string[]) =>
+	send<CatalogAddOut>('POST', '/api/admin/locations/catalog', { ids });
 export const resolveLocation = (body: ResolveIn) =>
 	send<ResolveOut>('POST', '/api/admin/locations/resolve', body);
 export const createLocation = (loc: Location) => send<SaveOut>('POST', '/api/admin/locations', loc);

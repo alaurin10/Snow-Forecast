@@ -336,13 +336,10 @@ def ca_zones(
 
 
 def map_box(region: Box, locations: Iterable[Location]) -> Box:
-    """The map's box (config `map.region`), widened to take in every location."""
-    south, west, north, east = region
-    for loc in locations:
-        for b in loc.bands[:1]:
-            south, north = min(south, b.lat - 1), max(north, b.lat + 1)
-            west, east = min(west, b.lon - 1), max(east, b.lon + 1)
-    return south, west, north, east
+    """The map's box (config `map.region`), widened only for locations outside it."""
+    from snowwatch.maps.region import widen_box
+
+    return widen_box(region, ((b.lat, b.lon) for loc in locations for b in loc.bands[:1]))
 
 
 def read_zones(path: Path) -> dict[str, Any] | None:
