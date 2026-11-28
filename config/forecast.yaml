@@ -22,8 +22,8 @@ ensembles: [gfs_seamless, ecmwf_ifs025, gem_global]
 short_range_hours: 48
 consensus_min_models: 3
 blend_periods: 4
-periods: 20
-hourly_hours: 240
+periods: 32          # day and night halves: today and the next 15 days
+hourly_hours: 384    # 16 days of hourly series
 day_start_hour: 6
 night_start_hour: 18
 min_period_hours: 6

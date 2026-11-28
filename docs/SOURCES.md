@@ -196,6 +196,36 @@ Each of a run's requests, sent to both; values aren't compared (a saved fixture 
 | Whistler | `upper` | 60 / 60 | none | none | public API |
 | Whistler | `clouds` | 24 / 24 | none | none | public API |
 
+### How far ahead (milestone 4B)
+
+Every request asks for 16 days (today and the next 15): how far the blend and each model
+reach, in days from the check (28 Nov 2026 08:40 UTC, the pinned server; `reach_section`,
+part of `snowwatch check-sources --local`). Past where the global models thin out, the
+forecast rests on the ensemble mean (GEFS and GEPS to ~15.9 days, ECMWF ENS to ~14.2).
+
+#### Crystal Mountain (US)
+
+| Answer | Reaches (days ahead) |
+|---|---|
+| blend (`best_match`) | 15.6 |
+| `gfs_seamless` | 15.6 |
+| `ecmwf_ifs025` | 14.7 |
+| `gem_seamless` | 9.6 |
+| `icon_seamless` | 7.1 |
+| `ncep_hrrr_conus` | 1.9 |
+| `ncep_nbm_conus` | 10.9 |
+
+#### Whistler (CA)
+
+| Answer | Reaches (days ahead) |
+|---|---|
+| blend (`best_match`) | 15.6 |
+| `gfs_seamless` | 15.6 |
+| `ecmwf_ifs025` | 14.7 |
+| `gem_seamless` | 9.6 |
+| `icon_seamless` | 7.1 |
+| `gem_hrdps_continental` | 1.6 |
+
 ### Richer variables (milestone 3)
 
 Checked on 2026-11-27 23:46 UTC against the pinned server. Asked of the server only (the public API keeps the lean lists): which models answer each extra surface variable, their own fields (NBM's snow level and chances, GFS and HRRR's freezing-rain flag, ECMWF's precipitation type), and which pressure levels have humidity for the wet-bulb snow level. A model without a field answers with empty values, which the analysis skips.

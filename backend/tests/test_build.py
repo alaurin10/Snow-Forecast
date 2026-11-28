@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+from datetime import date
 
 import pytest
 
@@ -27,7 +28,8 @@ def test_hourly_adds_up_to_the_bars(loc_id: str) -> None:
                 continue  # period runs past the shown hours
             swe = sum(h.swe_mm[i] or 0 for i in idx)
             assert swe == pytest.approx(p.swe_mm, abs=0.05 + 0.005 * p.hours), (band.band, p.key)
-            assert sum(h.snow_cm[i] or 0 for i in idx) == pytest.approx(p.snow_cm or 0, abs=0.1)
+            snow = sum(h.snow_cm[i] or 0 for i in idx)  # each hour rounded to 0.1
+            assert snow == pytest.approx(p.snow_cm or 0, abs=0.1 + 0.005 * p.hours)
 
 
 @pytest.mark.parametrize("loc_id", LOCS)
@@ -35,7 +37,9 @@ def test_document_shape_and_size(loc_id: str) -> None:
     snap = fixture_snapshot(loc_id)
     assert [b.band for b in snap.bands] == ["base", "mid", "summit"]
     for band in snap.bands:
-        assert len(band.periods) == 20 and len(band.hourly.t) == 240
+        # 16 days (milestone 4B): these captures' blend stops at day 11, and the global
+        # models carry the hours on to GFS's end (~15.4 days).
+        assert len(band.periods) == 32 and 360 <= len(band.hourly.t) <= 384
         assert band.windows["next5"].snow_cm is not None
     assert snap.bands[1].windows["next5"].members_cm  # mid carries the member totals
     others = [b.windows["next5"].ens for b in (snap.bands[0], snap.bands[2])]
@@ -50,7 +54,7 @@ def test_document_shape_and_size(loc_id: str) -> None:
 @pytest.mark.parametrize("loc_id", LOCS)
 def test_backcountry_ridge_and_days(loc_id: str) -> None:
     snap = fixture_snapshot(loc_id)
-    assert snap.ridge is not None and len(snap.ridge.kmh) == 240
+    assert snap.ridge is not None and len(snap.ridge.kmh) == len(snap.bands[2].hourly.t)
     assert snap.ridge.level_m == snap.bands[2].elev_m
     bc = snap.backcountry
     assert bc is not None
@@ -83,7 +87,12 @@ def test_backcountry_ridge_and_days(loc_id: str) -> None:
     days = [p for p in snap.bands[1].periods if p.kind == "day"]
     assert [d.date for d in snap.days] == [p.date for p in days]
     resort = snap.location.kind == "resort"
-    assert all((d.rating is not None) == resort for d in snap.days)
+    # Resorts' days are rated for 10 days; days 11–16 aren't (milestone 4B).
+    first = date.fromisoformat(snap.now[:10])
+    assert len(snap.days) >= 15
+    for d in snap.days:
+        rated = resort and (date.fromisoformat(d.date) - first).days < 10
+        assert (d.rating is not None) == rated, d.date
     assert all(len(d.reasons) <= 3 for d in snap.days)
     # The day's snow is the mid-band day bar.
     assert [d.day_cm for d in snap.days] == [p.snow_cm for p in days]

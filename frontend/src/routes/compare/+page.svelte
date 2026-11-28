@@ -519,8 +519,11 @@
 		<div class="rangebar">
 			<div class="seg" role="group" aria-label="Time range">
 				{#each COMPARE_RANGES as r (r)}
-					<button aria-pressed={cmp.range === r} onclick={() => commit({ ...cmp, range: r })}
-						>{r} {r === 1 ? 'day' : 'days'}</button
+					<button
+						aria-pressed={cmp.range === r}
+						aria-label="{r} {r === 1 ? 'day' : 'days'}"
+						onclick={() => commit({ ...cmp, range: r })}
+						>{viewport.phone ? `${r}d` : `${r} ${r === 1 ? 'day' : 'days'}`}</button
 					>
 				{/each}
 			</div>

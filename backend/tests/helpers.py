@@ -141,6 +141,10 @@ def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = Non
                 return httpx.Response(500)
             return httpx.Response(200, json=synthetic_clouds(params))
         key = index.get((url, frozenset(params.items())))
+        if key is None and "daily" in params and params.get("forecast_days") == "16":
+            # The blend asks for 16 days since milestone 4B; these captures asked for 11,
+            # so the answer stops at day 11 and the models carry the hours on.
+            key = index.get((url, frozenset((params | {"forecast_days": "11"}).items())))
         if key is None and "ensemble" in url and "," in params.get("latitude", ""):
             # Ensembles at all three bands (milestone 4): the captures asked at mid only,
             # so every band gets mid's members (each band's own ensemble, unscaled).

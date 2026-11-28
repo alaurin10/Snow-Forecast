@@ -262,6 +262,15 @@ def avalanche_views(conn: sqlite3.Connection) -> dict[str, AvalancheView]:
     return avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
 
 
+def _outlook(item: LocationSummary | OverviewRow, mid: BandOut) -> None:
+    """Days 11–16 at mid (snapshots before milestone 4B have no such window)."""
+    w = mid.windows.get("d11_16")
+    if w is not None:
+        item.d11_16_cm = w.snow_cm
+        item.d11_16_p10_cm = w.ens.p10 if w.ens else None
+        item.d11_16_p90_cm = w.ens.p90 if w.ens else None
+
+
 def _model_runs_out(conn: sqlite3.Connection, cfg: ForecastConfig) -> list[ModelRunOut]:
     """Each model in use (either country's set) with its latest run, if the watcher has
     seen one."""
@@ -449,6 +458,7 @@ def make_router() -> APIRouter:
                 item.next5_p10_cm = w5.ens.p10 if w5.ens else None
                 item.next5_p90_cm = w5.ens.p90 if w5.ens else None
                 item.d6_10_cm = w10.snow_cm
+                _outlook(item, mid)
                 item.last24_cm = mid.stats.last24_cm
                 item.alerts = len(snap.alerts)
             out.append(item)
@@ -481,6 +491,7 @@ def make_router() -> APIRouter:
                 row.next5_p10_cm = w5.ens.p10 if w5.ens else None
                 row.next5_p90_cm = w5.ens.p90 if w5.ens else None
                 row.d6_10_cm = w10.snow_cm
+                _outlook(row, mid)
                 row.alerts = [a.event or "Alert" for a in snap.alerts]
                 row.snow_depth_cm = snap.snotel.depth_cm if snap.snotel else None
                 row.periods = [

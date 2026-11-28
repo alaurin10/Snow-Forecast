@@ -19,7 +19,7 @@ from snowwatch.sources import openmeteo as om
 from snowwatch.sources.base import fetch
 from tests.helpers import config, seed
 
-RICH = Path(__file__).parent / "fixtures" / "live-20261127"
+RICH = Path(__file__).parent / "fixtures" / "live-20261128"
 LOCAL = "http://om.test:8080"
 
 
@@ -94,8 +94,9 @@ def test_snapshots_carry_the_new_fields(loc_id: str) -> None:
 
 
 @pytest.mark.parametrize("loc_id", ["crystal", "snoqualmie", "whistler"])
-def test_the_snapshot_stays_under_300_kb(loc_id: str) -> None:
-    assert len(rich(loc_id)[0].model_dump_json()) < 300_000
+def test_the_snapshot_stays_under_360_kb(loc_id: str) -> None:
+    # 16 days (milestone 4B): 298–311 KB of JSON (44–49 KB gzipped) on 28 Nov 2026.
+    assert len(rich(loc_id)[0].model_dump_json()) < 360_000
 
 
 def test_column_headline_uses_the_column_ratios() -> None:
@@ -146,9 +147,9 @@ def test_both_splits_are_scored_whichever_leads() -> None:
     off = totals(build_snapshot(loc, inputs, cfg, at)[1])
     assert "cons_model" not in off
     # The same splits either way; only the snow ratios move a little, since they come
-    # from the headline's snowing hours.
-    assert off["cons_slr"] == pytest.approx(on["cons_model"], abs=1.0)
-    assert off["cons_wb"] == pytest.approx(on["cons_wb"], abs=1.0)
+    # from the headline's snowing hours (a few percent over 16 days of snow).
+    assert off["cons_slr"] == pytest.approx(on["cons_model"], rel=0.05, abs=1.0)
+    assert off["cons_wb"] == pytest.approx(on["cons_wb"], rel=0.05, abs=1.0)
 
 
 def test_model_snow_depth_means_snow_cover_without_a_station() -> None:

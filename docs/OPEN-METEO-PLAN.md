@@ -33,7 +33,8 @@ and favourites, and new locations' first satellite pass. The 50-location run tim
 HRRR refresh timing on the mini PC are the owner's checks.
 **Milestone 4B** (16 days
 everywhere, a 15-day chart, a second "Less certain" mark at day 11; the map to 16 days
-from GFS) is explored, decided and planned.
+from GFS) is explored, decided and planned; PR 1, the data (16-day forecasts, no
+ratings past day 10, the days 11–16 window), is built.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1442,36 +1443,72 @@ probabilities, not amounts.
 | Alerts | **None for days 6–16** (unchanged: flags and push alerts look 5 days ahead) |
 
 ### PR 1: the data (backend)
-- [ ] `sources/openmeteo.py`: `blend_request(forecast_days=16)`. Check that the server's
+- [x] `sources/openmeteo.py`: `blend_request(forecast_days=16)`. Check that the server's
   `best_match` reaches 16 days for US and Canadian points (it should continue on GFS),
   and record what each blend column reaches past day 10 (weather code, visibility,
   cloud layers, chance of precipitation) in `docs/SOURCES.md`.
-- [ ] `analysis/build.py`:
+- [x] `analysis/build.py`:
   - the hours run to the furthest of the blend and the global models (not the blend
     alone), so a short or old blend answer doesn't cut the forecast;
   - `periods: 32` and `hourly_hours: 384` in `config/forecast.yaml`;
   - a third window, `WINDOWS["d11_16"] = (20, 32)`, with its own ensemble statistics;
-  - `Snapshot.less_certain_from`: the times of the day-5 and day-10 marks (now + 120 h
-    and the start of the 11th day), so every view puts them in the same place;
+  - `Snapshot.less_certain_from`: the times of the two marks, 5 and 10 days from now
+    (now + 120 h and + 240 h, like the chart's 5- and 10-day ranges), so every view
+    puts them in the same place;
   - `DayOut.rating` left empty for days 11–16, and `PeriodOut.nmodels` kept honest
     (1 when only GFS is left, which the period sheet can say).
-- [ ] Unchanged on purpose, with tests saying so:
+- [x] Unchanged on purpose, with tests saying so:
   - flags and push alerts (5 days ahead);
   - the avalanche-weather outlook (7 days);
   - the scorecard (up to 2 days ahead);
   - `forecast_daily` (already 16 days).
-- [ ] Snapshot size: measure on new fixtures. Raise the tests' limit to 400 KB if the
+- [x] Snapshot size: measure on new fixtures. Raise the tests' limit to 400 KB if the
   measured size is under ~360 KB. Otherwise round days 11–16's hourly values more coarsely
   before thinking of 3-hourly steps.
-- [ ] `api/models.py` `OverviewRow`: the days 11–16 total and its ensemble range, for a
+- [x] `api/models.py` `OverviewRow`: the days 11–16 total and its ensemble range, for a
   "Days 11–16" column on the Overview.
-- [ ] Spots: the same build, so they get 16 days too (free on the server).
-- [ ] New fixtures from the server with the 16-day blend: `snowwatch capture-fixtures
+- [x] Spots: the same build, so they get 16 days too (free on the server).
+- [x] New fixtures from the server with the 16-day blend: `snowwatch capture-fixtures
   --out backend/tests/fixtures/live-<date>/`, the way Appendix A runs it. The e2e
   stand-in server (`e2e/openmeteo_fixture.py`) moves to them.
-- [ ] `snowwatch check-sources --local`: a reach-per-model table in its SOURCES.md
+- [x] `snowwatch check-sources --local`: a reach-per-model table in its SOURCES.md
   section.
-- [ ] Regenerate types; CHANGELOG; ARCHITECTURE ("A forecast run", the snapshot).
+- [x] Regenerate types; CHANGELOG; ARCHITECTURE ("A forecast run", the snapshot).
+
+### What PR 1 (the data) built and found (28 Nov 2026)
+
+- **The server's blend reaches day 16.** Asked for 16 days, `best_match` carried every
+  column (temperature, weather code, visibility, chance of precipitation, cloud layers)
+  to the end of day 16 for Crystal and Whistler: 15.6–15.9 days from the check. The
+  reach table is in SOURCES.md ("How far ahead"). On the public API the 19-day blend
+  weighs 8.55 instead of 6.3.
+- **New fixtures** `backend/tests/fixtures/live-20261128/` (Crystal, Snoqualmie,
+  Whistler): the 16-day blend and the richer lists from the server, and ensembles from
+  the public API, which answered this time. They replace `live-20261127`, and the e2e
+  stand-in server uses them. The first capture was mixed: a cold server timed out on a
+  few requests, which then fell back to the public API's lean lists without saying so.
+  So `snowwatch capture-fixtures` now never falls back when a server is set; a slow
+  answer fails instead.
+- **Size:** 16-day snapshots from the new fixtures are 298–311 KB of JSON (44–49 KB
+  gzipped), 377 hours and 32 periods. The tests' limit is now 360 KB; the hourly arrays
+  stay hourly.
+- **Days 11–16 rest on the ensemble mean** (period basis "ensemble"), from GFS and
+  ECMWF's hours to ~14.7 days, then GFS alone (`nmodels` 2, then 1). The wet-bulb snow
+  level holds to day 16 on the server (GFS has humidity aloft to the end).
+- **The older captures** (`live-20261104`) asked the blend for 11 days: the test
+  transport answers the 16-day blend with them, so they now test the short-blend path,
+  where the global models carry the hours on and the blend-only columns (weather code,
+  chance) stop at day 11.
+- `less_certain_from` is 120 h and 240 h from the run's hour, the same as the chart's
+  existing day-5 mark and its 10-day range, rather than the start of day 11.
+- Flags still read the first 10 days (`snap.days[:10]`, a powder day) or 5 (storms,
+  freezing rain), and push alerts 5; tests check nothing is raised past day 10.
+- With 32 periods in every snapshot, the app shows 16 days in the day by day and offers
+  the chart's 15-day range at once. Two of PR 2's items came along because the new data
+  needed them: on a phone the five range buttons read "1d … 15d" (full words for screen
+  readers), which keeps the chart from widening the page past 380 px, and Compare goes
+  to 16 days with a 15-day range (its "10 days" no longer showed everything). The marks,
+  the Calendar and the rest are PR 2's.
 
 ### PR 2: the location pages (frontend)
 - [ ] **Forecast chart** (`charts/forecast.ts`, `ForecastChart.svelte`):
@@ -1479,10 +1516,11 @@ probabilities, not amounts.
     data (~31 bars). It shows whenever the data reaches past ~14.5 days, so a run that
     ends a little before 360 h doesn't hide it (just before local midnight, the end of
     day 16 is barely 15 days away).
-  - The range picker fits five buttons at 380 px.
+  - [x] The range picker fits five buttons at 380 px ("1d … 15d" on a phone; done in
+    PR 1).
   - X labels every other day on a phone, every day on wider screens.
-  - Bars and lines look the same on every day. A second tick and "Less certain →" at
-    the start of day 11 (`less_certain_from`), like the day-5 one; no second veil.
+  - Bars and lines look the same on every day. A second tick and "Less certain →" 10
+    days from now (`less_certain_from`), like the day-5 one; no second veil.
     Where the two labels would crowd (the 10-day view, a phone) the day-10 one shows
     only its tick.
 - [ ] **Day by day** (`DayList`, `PeriodGrid`): rows for days 11–16, the same as the
@@ -1494,7 +1532,7 @@ probabilities, not amounts.
   - `ModelTable` gets 16 columns (it scrolls sideways);
   - `ModelDays` gets a "16 days" choice on narrow screens;
   - the chances gain the days 11–16 window.
-- [ ] **Compare**: `COMPARE_RANGES` gains 15, and its dates go to 16.
+- [x] **Compare**: `COMPARE_RANGES` gains 15, and its dates go to 16 (done in PR 1).
 - [ ] **Share**: day by day up to 16 days. The Overview card keeps 7.
 - [ ] **Overview**: the 7 bars stay. Desktop adds a "Days 11–16" column (total and
   range) beside "Next 5 days".
@@ -1528,7 +1566,7 @@ probabilities, not amounts.
 - [ ] Not extended: gusts, ridge wind and snow level (they stop at ~84 h for want of
   sources, not because of the 16 days), and the 3D clouds request (`CLOUD_DAYS`), which
   follows the clouds' own timeline.
-- [ ] The index says where day 11 starts (`less_certain_from`, a time) so the map's UI
+- [ ] The index says where the second mark is (`less_certain_from`, a time) so the map's UI
   needn't guess; old apps ignore it. Frames carry `src: "gfs"`.
 - [ ] Disk: GFS messages pruned with the other GRIB caches (`data/maps/`).
 - [ ] Tests: the `.idx` parse and byte ranges, snow from `APCP` × `CPOFP`, the hand-over
@@ -1540,7 +1578,7 @@ probabilities, not amounts.
 ### PR 4: the map's UI (frontend)
 - [ ] **Timeline** (`map/Timeline.svelte`):
   - the slider runs to 16 days, the same as the rest past 48 h (its dashed band), with a
-    tick and "Less certain" at day 11 like the chart's;
+    tick and "Less certain" 10 days from now like the chart's;
   - labels read as now, e.g. "Thu 13 · 6-hour average · in 15 days";
   - day names thin out where they'd crowd;
   - the player stops at day 10 unless the slider is already past it.

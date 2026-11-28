@@ -172,7 +172,7 @@ def test_overview_rows(client: TestClient) -> None:
     rows = client.get("/api/overview").json()
     assert [r["id"] for r in rows][:2] == ["crystal", "snoqualmie"]
     whistler = next(r for r in rows if r["id"] == "whistler")
-    assert len(whistler["periods"]) == 20 and whistler["periods"][0]["key"]
+    assert 30 <= len(whistler["periods"]) <= 32 and whistler["periods"][0]["key"]
     assert whistler["next5_cm"] > 10 and whistler["run_id"] == 2
     crystal = next(r for r in rows if r["id"] == "crystal")
     assert crystal["snow_depth_cm"] is not None  # SNOTEL Morse Lake

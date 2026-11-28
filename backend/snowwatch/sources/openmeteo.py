@@ -148,8 +148,12 @@ def _common() -> dict[str, str]:
 
 
 def blend_request(
-    loc: Location, *, past_days: int = 3, forecast_days: int = 11, rich: bool = False
+    loc: Location, *, past_days: int = 3, forecast_days: int = 16, rich: bool = False
 ) -> Request:
+    """The high-resolution blend (`best_match`) at every band: 16 days (milestone 4B),
+    today and the next 15, as far as the multi-model forecast. The self-hosted server's
+    blend carries every column to the end of day 16 (checked 28 Nov 2026); on the
+    public API 19 days with the past ones weigh ~8.6 instead of 6.3."""
     hourly = BLEND_HOURLY_RICH if rich else BLEND_HOURLY
     params = {
         **_coords(loc),

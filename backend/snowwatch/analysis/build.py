@@ -91,7 +91,12 @@ from snowwatch.doc import (
 from snowwatch.models import Location
 from snowwatch.sources.openmeteo import CLOUD_DAYS, CLOUD_LEVELS
 
-WINDOWS = {"next5": (0, 10), "d6_10": (10, 20)}
+WINDOWS = {"next5": (0, 10), "d6_10": (10, 20), "d11_16": (20, 32)}
+# Where the forecast becomes less certain, in hours from now (milestone 4B): the chart
+# and the map mark both (Snapshot.less_certain_from). Days 11–16 also get no ski-day
+# rating: it reads lift-hour gusts, low cloud and visibility, meaningless that far out.
+LESS_CERTAIN_H = (120, 240)
+RATED_DAYS = 10
 
 
 @dataclass
@@ -308,8 +313,13 @@ def build_snapshot(
     short_models = cfg.short_range_for(loc.country)
     short_until = now_h + cfg.short_range_hours * 3600
 
+    # The hours: as far as the blend or any global model reaches (milestone 4B: 16 days),
+    # so a shorter blend (an older cache, a lean fallback) doesn't cut the forecast.
     temps_mid = inputs.blend[1].get("temperature_2m")
-    all_hours = sorted(h for h, v in temps_mid.items() if h >= now_h and v is not None)
+    reach = {h for h, v in temps_mid.items() if v is not None}
+    for series in split_models(inputs.multi[1], cfg.models.global_).values():
+        reach.update(h for h, v in series.get("temperature_2m", {}).items() if v is not None)
+    all_hours = sorted(h for h in reach if h >= now_h)
     periods = build_periods(
         all_hours,
         tz,
@@ -627,6 +637,7 @@ def build_snapshot(
         models=[*global_models, *short_models],
         ensembles={s: len(m) for s, m in systems.items()},
         basis_switch=_iso(switch.hours[0], tz) if switch else None,
+        less_certain_from=[_iso(now_h + h * 3600, tz) for h in LESS_CERTAIN_H],
         bands=bands_out,
         daily=daily,
         sun=_sun(inputs.blend[1], tz),
@@ -1316,7 +1327,8 @@ def _days(
             fog_h=fog_h,
             tmax_c=max(temps) if temps else po.tmax_c,
         )
-        rating = rate(facts, scfg) if loc.kind == "resort" else None
+        rated = (p.date - local(now_h, tz).date()).days < RATED_DAYS
+        rating = rate(facts, scfg) if loc.kind == "resort" and rated else None
         out.append(
             DayOut(
                 date=p.date.isoformat(),

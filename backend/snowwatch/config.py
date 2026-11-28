@@ -173,8 +173,8 @@ class ForecastConfig(BaseModel):
     short_range_hours: int = 48
     consensus_min_models: int = 3
     blend_periods: int = 4
-    periods: int = 20
-    hourly_hours: int = 240
+    periods: int = 32  # day and night halves: 16 days (milestone 4B)
+    hourly_hours: int = 384
     day_start_hour: int = 6
     night_start_hour: int = 18
     min_period_hours: int = 6

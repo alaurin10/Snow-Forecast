@@ -50,6 +50,11 @@ class LocationSummary(BaseModel):
     next5_p10_cm: float | None = None
     next5_p90_cm: float | None = None
     d6_10_cm: float | None = None
+    # Days 11–16 (milestone 4B): the consensus (the ensemble mean, that far out) and the
+    # ensembles' likely range.
+    d11_16_cm: float | None = None
+    d11_16_p10_cm: float | None = None
+    d11_16_p90_cm: float | None = None
     last24_cm: float | None = None
     alerts: int = 0
 
@@ -93,6 +98,11 @@ class OverviewRow(BaseModel):
     next5_p10_cm: float | None = None
     next5_p90_cm: float | None = None
     d6_10_cm: float | None = None
+    # Days 11–16 (milestone 4B): the consensus (the ensemble mean, that far out) and the
+    # ensembles' likely range.
+    d11_16_cm: float | None = None
+    d11_16_p10_cm: float | None = None
+    d11_16_p90_cm: float | None = None
     alerts: list[str] = []
     snow_depth_cm: float | None = None
     periods: list[OverviewPeriod] = []

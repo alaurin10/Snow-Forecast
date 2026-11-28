@@ -402,6 +402,9 @@ export interface LocationSummary {
 	alerts?: number;
 	bands: BandSummary[];
 	country: string;
+	d11_16_cm?: number | null;
+	d11_16_p10_cm?: number | null;
+	d11_16_p90_cm?: number | null;
 	d6_10_cm?: number | null;
 	generated_at?: string | null;
 	id: string;
@@ -838,6 +841,9 @@ export interface OverviewRow {
 	alerts?: string[];
 	best_day?: BestDay | null;
 	country: string;
+	d11_16_cm?: number | null;
+	d11_16_p10_cm?: number | null;
+	d11_16_p90_cm?: number | null;
 	d6_10_cm?: number | null;
 	danger?: DangerChip | null;
 	flags?: Flag[];
@@ -1139,6 +1145,7 @@ export interface Snapshot {
 	};
 	flags?: Flag[];
 	generated_at: string;
+	less_certain_from?: string[];
 	location: LocationMeta;
 	model_runs?: {
 		[k: string]: string;

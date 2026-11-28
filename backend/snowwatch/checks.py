@@ -94,6 +94,48 @@ def model_section(fetcher: Fetcher, loc: Location, models: list[str]) -> list[st
     return [*lines, ""]
 
 
+def reach_section(
+    fetcher: Fetcher, loc: Location, models: list[str], now: datetime | None = None
+) -> list[str]:
+    """How far ahead the blend and each model reach on the server, asked for 16 days
+    (milestone 4B): the last hour with a temperature, in days from now."""
+    mid = loc.band("mid")
+    now = now or datetime.now(UTC)
+    base = {
+        "latitude": f"{mid.lat:g}",
+        "longitude": f"{mid.lon:g}",
+        "timeformat": "unixtime",
+        "timezone": "auto",
+        "forecast_days": "16",
+        "hourly": "temperature_2m",
+    }
+
+    def last(data: Any, key: str) -> str:
+        h = (data or {}).get("hourly") or {}
+        times, vals = h.get("time") or [], h.get(key) or []
+        i = max((j for j, v in enumerate(vals) if v is not None and j < len(times)), default=None)
+        return "none" if i is None else f"{(times[i] - now.timestamp()) / 86400:.1f}"
+
+    lines = [
+        f"#### {loc.name} ({loc.country})",
+        "",
+        "| Answer | Reaches (days ahead) |",
+        "|---|---|",
+    ]
+    try:
+        blend = fetch(fetcher, Request("check_reach", SOURCE, FORECAST_URL, base))
+        lines.append(f"| blend (`best_match`) | {last(blend, 'temperature_2m')} |")
+        multi = fetch(
+            fetcher,
+            Request("check_reach", SOURCE, FORECAST_URL, base | {"models": ",".join(models)}),
+        )
+        for m in models:
+            lines.append(f"| `{m}` | {last(multi, f'temperature_2m_{m}')} |")
+    except FetchError as e:
+        lines.append(f"| check failed | {e} |")
+    return [*lines, ""]
+
+
 def rich_section(fetcher: Fetcher, loc: Location, models: list[str]) -> list[str]:
     """Which models carry milestone 3's richer variables on the server: the surface
     extras, the model-specific fields, and the pressure levels with humidity."""
@@ -614,6 +656,16 @@ def build_local_report(
         "",
         *comparison_section(local, public, picked, cfg, fixtures),
     ]
+    lines += [
+        "### How far ahead (milestone 4B)",
+        "",
+        "Every request asks for 16 days (today and the next 15): how far the blend and "
+        "each model reach. Past where the global models thin out, the forecast rests on "
+        "the ensemble mean.",
+        "",
+    ]
+    for loc in picked:
+        lines += reach_section(local, loc, cfg.models_for(loc.country))
     lines += [
         "### Richer variables (milestone 3)",
         "",
