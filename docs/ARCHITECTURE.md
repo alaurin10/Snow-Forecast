@@ -130,12 +130,16 @@ locations each run, so adding locations drops a tier; `snowwatch budget` and Man
 it.
 
 1. **Fetch** (`pipeline.fetch_responses`): Open-Meteo's high-resolution blend and
-   multi-model forecasts at base, mid and summit, upper-air levels, ensembles at
+   multi-model forecasts at base, mid and summit (16 days: today and the next 15), upper-air levels, ensembles at
    base, mid and summit in one request per system (each band its own members; on its
    own schedule per system, cached between, at the budget planner's tier), NWS alerts
    (US), and the snow station.
    Each source fails on its own; only the two Open-Meteo forecasts are required.
-2. **Build** (`analysis/build.py`) one snapshot document, described below.
+2. **Build** (`analysis/build.py`) one snapshot document, described below: 32 day and
+   night periods and 16 days of hours, as far as the blend or any global model reaches.
+   Past about day 10 (GEM's end) fewer than three models cover a period, so it rests on
+   the ensemble mean; days 11–16 get no ski-day rating, and `less_certain_from` marks
+   5 and 10 days out for the chart.
 3. **Store**: the gzipped snapshot (newest 24 kept), per-day totals for the trend
    and scorecard (after 48 h thinned to runs 6 h apart plus each local day's last,
    `store/retention.py`), observations, and when each flag was first raised.

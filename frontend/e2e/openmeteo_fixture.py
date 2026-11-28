@@ -28,9 +28,11 @@ from urllib.parse import parse_qs, urlsplit
 from snowwatch.capture import load_fixture
 from snowwatch.ensembles import SYSTEMS
 
-FIXTURES = Path(__file__).resolve().parents[2] / "backend" / "tests" / "fixtures" / "live-20261104"
+# Captured from the self-hosted server with the 16-day blend and the richer lists
+# (milestone 4B), ensembles included.
+FIXTURES = Path(__file__).resolve().parents[2] / "backend" / "tests" / "fixtures" / "live-20261128"
 CRYSTAL = FIXTURES / "crystal"
-CAPTURED = 1793828092  # 2026-11-04T21:34:52Z, meta.json's captured_at
+CAPTURED = 1795854466  # 2026-11-28T08:27:46Z, meta.json's captured_at
 DAY = 86400
 # Whole days from the capture to just past now: the data keeps its time of day.
 SHIFT = math.ceil((time.time() - CAPTURED) / DAY) * DAY

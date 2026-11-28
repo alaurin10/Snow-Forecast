@@ -1020,8 +1020,12 @@
 		<div class="controls">
 			<div class="seg" role="group" aria-label="Time range">
 				{#each ranges as r (r)}
-					<button aria-pressed={R === r} onclick={() => pickRange(r)}
-						>{r} {r === 1 ? 'day' : 'days'}</button
+					<!-- Five ranges (to 15 days, milestone 4B) fit a phone only as "15d". -->
+					<button
+						aria-pressed={R === r}
+						aria-label="{r} {r === 1 ? 'day' : 'days'}"
+						onclick={() => pickRange(r)}
+						>{phone ? `${r}d` : `${r} ${r === 1 ? 'day' : 'days'}`}</button
 					>
 				{/each}
 			</div>

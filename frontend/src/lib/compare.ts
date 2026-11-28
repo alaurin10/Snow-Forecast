@@ -19,7 +19,7 @@ export const METRIC_NAMES: Record<CompareMetric, { long: string; short: string }
 };
 export type BandName = 'base' | 'mid' | 'summit';
 export const BANDS: readonly BandName[] = ['base', 'mid', 'summit'];
-export const COMPARE_RANGES = [1, 3, 5, 10] as const satisfies readonly Range[];
+export const COMPARE_RANGES = [1, 3, 5, 10, 15] as const satisfies readonly Range[];
 export type CompareRange = (typeof COMPARE_RANGES)[number];
 
 /** Locations in one comparison or group, every one a line on the chart: four is the most
@@ -369,7 +369,7 @@ export function buildTimeline(
 	const refBand = tracks[r].band;
 	const dates = [...new Set(refBand.periods.map((p) => p.date))]
 		.filter((d) => refBand.hourly.t.some((x) => dateOf(x) === d))
-		.slice(0, 10);
+		.slice(0, 16); // today and the next 15 (milestone 4B)
 	return { ref: tracks[r], slots, tracks, dates };
 }
 

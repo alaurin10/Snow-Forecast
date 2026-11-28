@@ -2591,6 +2591,39 @@
         "country": {
           "type": "string"
         },
+        "d11_16_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "d11_16_p10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "d11_16_p90_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "d6_10_cm": {
           "anyOf": [
             {
@@ -3854,6 +3887,39 @@
         },
         "country": {
           "type": "string"
+        },
+        "d11_16_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "d11_16_p10_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "d11_16_p90_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "d6_10_cm": {
           "anyOf": [
@@ -5872,6 +5938,13 @@
         },
         "generated_at": {
           "type": "string"
+        },
+        "less_certain_from": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "location": {
           "$ref": "#/$defs/LocationMeta"

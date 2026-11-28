@@ -483,3 +483,6 @@ class Snapshot(BaseModel):
     # Each model's latest run when this was made: model -> initialisation time (UTC, ISO),
     # from the model watcher (milestone 4); empty before it has looked.
     model_runs: dict[str, str] = {}
+    # Where the forecast becomes less certain (milestone 4B): 5 and 10 days from now, as
+    # local times. The chart marks both; days 11–16 have no ski-day rating.
+    less_certain_from: list[str] = []

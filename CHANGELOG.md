@@ -7,6 +7,15 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **16-day forecasts** (milestone 4B, the data). Every location and spot now carries
+  today and the next 15 days: the high-resolution blend is asked for 16 days (it was
+  11), snapshots hold 32 day-and-night periods and 16 days of hours, and a "Days 11–16"
+  window (with the ensembles' range) joins "Next 5 days" and "Days 6–10". Past about
+  day 10 the forecast rests on the ensemble mean. Days 11–16 have no ski-day rating,
+  nothing alerts past its usual limit, and each snapshot says where the forecast
+  becomes less certain (5 and 10 days out). `snowwatch check-sources --local` lists how
+  far each model reaches. The forecast chart offers 15 days (its range buttons read
+  "1d … 15d" on a phone) and Compare goes to 16 days with a 15-day range.
 - **Room for ~50 locations** (milestone 4, locations and UI). Manage's "Add a resort"
   can tick several ski areas and add them at once: the worker resolves each with every
   detected detail and fetches its forecast (`POST /api/admin/locations/catalog`, a

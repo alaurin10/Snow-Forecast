@@ -236,10 +236,10 @@ test('the timeline and the range sit right under the chart, and move it', async 
 	await expect(page.getByRole('button', { name: 'One day earlier' })).toBeEnabled();
 	// Two drawn lines: two bars a day.
 	await expect(track.locator('.day').nth(2).locator('i')).toHaveCount(2);
-	// Ten days show every day: nothing to move.
+	// Fifteen days show every day (today and the next 15): nothing to move.
 	await page
 		.getByRole('group', { name: 'Time range' })
-		.getByRole('button', { name: '10 days' })
+		.getByRole('button', { name: '15 days' })
 		.click();
 	await expect(page.getByRole('button', { name: 'One day later' })).toBeDisabled();
 	await expect(page.locator('.ct .note')).toContainText('Showing all');

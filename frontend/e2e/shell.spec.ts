@@ -154,7 +154,10 @@ test('a location’s Map button opens the map on it', async ({ page }) => {
 	await page.getByRole('link', { name: 'View Whistler on the map' }).click();
 	await expect(page).toHaveURL(/\/map\?loc=whistler$/);
 	const popup = page.locator('.maplibregl-popup');
-	await expect(popup).toContainText('Whistler');
+	// The popup opens once the map has loaded, which on a fresh server waits for its
+	// base-map and terrain tiles from upstream: 5.4–5.5 s measured (on main as well), so
+	// the default 5 s was a coin toss.
+	await expect(popup).toContainText('Whistler', { timeout: 15_000 });
 	await expect(popup.getByRole('link', { name: 'Open forecast →' })).toBeVisible();
 	await expect(page.getByRole('button', { name: '3D terrain' })).toHaveAttribute(
 		'aria-pressed',

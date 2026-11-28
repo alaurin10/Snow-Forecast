@@ -322,7 +322,7 @@ def test_spot_built_from_the_fixtures(settings: Settings, conn: sqlite3.Connecti
     again = build(settings, conn, log=log)  # a second visitor (the API would have it cached)
     assert again.spot is not None and again.spot.ensembles == "cached"
     assert not any(x.startswith("ensemble-api") for x in log)
-    assert len(again.model_dump_json()) < 300_000
+    assert len(again.model_dump_json()) < 360_000
 
 
 def test_spot_ensembles_from_the_server_need_no_allowance(

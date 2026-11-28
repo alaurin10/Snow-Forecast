@@ -169,7 +169,9 @@ def cmd_capture(args: argparse.Namespace, settings: Settings) -> int:
     if args.only:
         locs = [loc for loc in locs if loc.id in args.only]
     out = Path(args.out) if args.out else FIXTURES_DIR / f"live-{date.today():%Y%m%d}"
-    with _fetcher(settings) as fetcher:
+    # From a self-hosted server: no public fallback, so a slow (cold) answer fails rather
+    # than being replaced by the public API's leaner lists in fixtures meant as the server's.
+    with fetcher_for(settings, fallback=False, local_retry_after_s=0) as fetcher:
         meta = capture_fixtures(locs, fetcher, out, get_forecast_config(), spacing_s=args.spacing)
     print(f"saved {len(meta['requests'])} responses to {out}; {len(meta['errors'])} errors")
     return 1 if meta["errors"] else 0

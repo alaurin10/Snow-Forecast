@@ -1,0 +1,602 @@
+{
+ "captured_at": "2026-11-28T08:27:46+00:00",
+ "locations": [
+  {
+   "id": "crystal",
+   "name": "Crystal Mountain",
+   "kind": "resort",
+   "region": "WA Cascades",
+   "country": "US",
+   "tz": "America/Los_Angeles",
+   "bands": [
+    {
+     "band": "base",
+     "label": "Base",
+     "lat": 46.935,
+     "lon": -121.475,
+     "elev_m": 1341.0
+    },
+    {
+     "band": "mid",
+     "label": "Mid-mountain",
+     "lat": 46.935,
+     "lon": -121.475,
+     "elev_m": 1800.0
+    },
+    {
+     "band": "summit",
+     "label": "Summit",
+     "lat": 46.935,
+     "lon": -121.475,
+     "elev_m": 2095.0
+    }
+   ],
+   "snotel": "642:WA:SNTL",
+   "nws_office": "SEW",
+   "radar_station": "KATX",
+   "avy": {
+    "provider": "nac",
+    "center_id": "NWAC",
+    "zone_id": "3023"
+   },
+   "links": {
+    "Radar (Seattle)": "https://radar.weather.gov/station/katx/standard",
+    "NWS forecast": "https://forecast.weather.gov/MapClick.php?lat=46.935&lon=-121.475",
+    "Avalanche (NWAC)": "https://nwac.us/forecasts/avalanche/west-slopes-south",
+    "Mountain passes (WSDOT)": "https://wsdot.com/travel/real-time/mountainpasses/"
+   },
+   "webcams": [],
+   "catalog_ref": null,
+   "active": true,
+   "sort_order": 0
+  },
+  {
+   "id": "snoqualmie",
+   "name": "Snoqualmie Pass",
+   "kind": "resort",
+   "region": "WA Cascades",
+   "country": "US",
+   "tz": "America/Los_Angeles",
+   "bands": [
+    {
+     "band": "base",
+     "label": "Base",
+     "lat": 47.424,
+     "lon": -121.418,
+     "elev_m": 914.0
+    },
+    {
+     "band": "mid",
+     "label": "Upper lifts",
+     "lat": 47.424,
+     "lon": -121.418,
+     "elev_m": 1150.0
+    },
+    {
+     "band": "summit",
+     "label": "Alpental top",
+     "lat": 47.424,
+     "lon": -121.418,
+     "elev_m": 1652.0
+    }
+   ],
+   "snotel": "672:WA:SNTL",
+   "nws_office": "SEW",
+   "radar_station": "KATX",
+   "avy": {
+    "provider": "nac",
+    "center_id": "NWAC",
+    "zone_id": "3028"
+   },
+   "links": {
+    "Radar (Seattle)": "https://radar.weather.gov/station/katx/standard",
+    "NWS forecast": "https://forecast.weather.gov/MapClick.php?lat=47.424&lon=-121.418",
+    "Avalanche (NWAC)": "https://nwac.us/forecasts/avalanche/snoqualmie-pass",
+    "Pass report (WSDOT)": "https://wsdot.com/travel/real-time/mountainpasses/snoqualmie"
+   },
+   "webcams": [],
+   "catalog_ref": null,
+   "active": true,
+   "sort_order": 1
+  },
+  {
+   "id": "whistler",
+   "name": "Whistler",
+   "kind": "resort",
+   "region": "BC Coast Mountains",
+   "country": "CA",
+   "tz": "America/Vancouver",
+   "bands": [
+    {
+     "band": "base",
+     "label": "Village",
+     "lat": 50.06,
+     "lon": -122.95,
+     "elev_m": 675.0
+    },
+    {
+     "band": "mid",
+     "label": "Roundhouse",
+     "lat": 50.06,
+     "lon": -122.95,
+     "elev_m": 1850.0
+    },
+    {
+     "band": "summit",
+     "label": "Peak",
+     "lat": 50.06,
+     "lon": -122.95,
+     "elev_m": 2182.0
+    }
+   ],
+   "snotel": "3A20P:BC:ASWS",
+   "nws_office": null,
+   "radar_station": null,
+   "avy": {
+    "provider": "avcan",
+    "center_id": null,
+    "zone_id": null
+   },
+   "links": {
+    "Radar (ECCC)": "https://weather.gc.ca/radar/index_e.html?id=CASSS",
+    "Mountain forecast (ECCC)": "https://weather.gc.ca/mountain_forecast/",
+    "Avalanche Canada": "https://avalanche.ca/map",
+    "Hwy 99 (DriveBC)": "https://www.drivebc.ca/"
+   },
+   "webcams": [],
+   "catalog_ref": null,
+   "active": true,
+   "sort_order": 3
+  }
+ ],
+ "requests": {
+  "shared/avalanche_us_map_layer": {
+   "url": "https://api.avalanche.org/v2/public/products/map-layer",
+   "params": {},
+   "bytes_gz": 96003
+  },
+  "shared/avalanche_ca_areas": {
+   "url": "https://api.avalanche.ca/forecasts/en/areas",
+   "params": {},
+   "bytes_gz": 49543
+  },
+  "shared/avalanche_ca_products": {
+   "url": "https://api.avalanche.ca/forecasts/en/products",
+   "params": {},
+   "bytes_gz": 19235
+  },
+  "shared/snotel_stations_BC": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/stations",
+   "params": {
+    "stationTriplets": "*:BC:SNTL",
+    "returnForecastPointMetadata": "false",
+    "returnReservoirMetadata": "false",
+    "returnStationElements": "false"
+   },
+   "bytes_gz": 22
+  },
+  "shared/snotel_stations_WA": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/stations",
+   "params": {
+    "stationTriplets": "*:WA:SNTL",
+    "returnForecastPointMetadata": "false",
+    "returnReservoirMetadata": "false",
+    "returnStationElements": "false"
+   },
+   "bytes_gz": 5094
+  },
+  "crystal/blend": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "46.935,46.935,46.935",
+    "longitude": "-121.475,-121.475,-121.475",
+    "elevation": "1341,1800,2095",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_2m,apparent_temperature,precipitation,rain,showers,snowfall,precipitation_probability,freezing_level_height,weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape",
+    "daily": "sunrise,sunset,daylight_duration",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 36642
+  },
+  "crystal/multi": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "46.935,46.935,46.935",
+    "longitude": "-121.475,-121.475,-121.475",
+    "elevation": "1341,1800,2095",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall,precipitation,rain,temperature_2m,freezing_level_height,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape,snowfall_height,snowfall_probability,freezing_rain_probability,ice_pellets_probability,categorical_freezing_rain,precipitation_type",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 76825
+  },
+  "crystal/upper": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "46.935",
+    "longitude": "-121.475",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_850hPa,relative_humidity_850hPa,wind_speed_850hPa,wind_direction_850hPa,geopotential_height_850hPa,temperature_800hPa,relative_humidity_800hPa,wind_speed_800hPa,wind_direction_800hPa,geopotential_height_800hPa,temperature_750hPa,relative_humidity_750hPa,wind_speed_750hPa,wind_direction_750hPa,geopotential_height_750hPa,temperature_700hPa,relative_humidity_700hPa,wind_speed_700hPa,wind_direction_700hPa,geopotential_height_700hPa,temperature_650hPa,relative_humidity_650hPa,wind_speed_650hPa,wind_direction_650hPa,geopotential_height_650hPa,temperature_600hPa,relative_humidity_600hPa,wind_speed_600hPa,wind_direction_600hPa,geopotential_height_600hPa,temperature_500hPa,relative_humidity_500hPa,wind_speed_500hPa,wind_direction_500hPa,geopotential_height_500hPa",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 70217
+  },
+  "crystal/clouds": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "46.935",
+    "longitude": "-121.475",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "cloud_cover_1000hPa,cloud_cover_950hPa,cloud_cover_900hPa,cloud_cover_850hPa,cloud_cover_800hPa,cloud_cover_750hPa,cloud_cover_700hPa,cloud_cover_650hPa,cloud_cover_600hPa,cloud_cover_500hPa,cloud_cover_400hPa,cloud_cover_300hPa,geopotential_height_1000hPa,geopotential_height_950hPa,geopotential_height_900hPa,geopotential_height_850hPa,geopotential_height_800hPa,geopotential_height_750hPa,geopotential_height_700hPa,geopotential_height_650hPa,geopotential_height_600hPa,geopotential_height_500hPa,geopotential_height_400hPa,geopotential_height_300hPa",
+    "models": "gfs_seamless",
+    "forecast_days": "10"
+   },
+   "bytes_gz": 8423
+  },
+  "crystal/ens_gfs_seamless": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "46.935,46.935,46.935",
+    "longitude": "-121.475,-121.475,-121.475",
+    "elevation": "1341,1800,2095",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gfs_seamless",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 13826
+  },
+  "crystal/ens_ecmwf_ifs025": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "46.935,46.935,46.935",
+    "longitude": "-121.475,-121.475,-121.475",
+    "elevation": "1341,1800,2095",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "ecmwf_ifs025",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 15868
+  },
+  "crystal/ens_gem_global": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "46.935,46.935,46.935",
+    "longitude": "-121.475,-121.475,-121.475",
+    "elevation": "1341,1800,2095",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gem_global",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 8676
+  },
+  "crystal/station": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "46.9059",
+    "longitude": "-121.483",
+    "elevation": "1646",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall,precipitation",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+    "forecast_days": "3"
+   },
+   "bytes_gz": 904
+  },
+  "crystal/nws_alerts": {
+   "url": "https://api.weather.gov/alerts/active",
+   "params": {
+    "point": "46.9350,-121.4750"
+   },
+   "bytes_gz": 176
+  },
+  "crystal/nws_points": {
+   "url": "https://api.weather.gov/points/46.9350,-121.4750",
+   "params": {},
+   "bytes_gz": 894
+  },
+  "crystal/snotel_daily": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "642:WA:SNTL",
+    "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
+    "duration": "DAILY",
+    "beginDate": "2026-10-14",
+    "endDate": "2026-11-28"
+   },
+   "bytes_gz": 1350
+  },
+  "crystal/snotel_hourly": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "642:WA:SNTL",
+    "elements": "SNWD,TOBS",
+    "duration": "HOURLY",
+    "beginDate": "2026-11-24 00:00",
+    "endDate": "2026-11-28 23:59"
+   },
+   "bytes_gz": 959
+  },
+  "snoqualmie/blend": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "47.424,47.424,47.424",
+    "longitude": "-121.418,-121.418,-121.418",
+    "elevation": "914,1150,1652",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_2m,apparent_temperature,precipitation,rain,showers,snowfall,precipitation_probability,freezing_level_height,weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape",
+    "daily": "sunrise,sunset,daylight_duration",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 34873
+  },
+  "snoqualmie/multi": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "47.424,47.424,47.424",
+    "longitude": "-121.418,-121.418,-121.418",
+    "elevation": "914,1150,1652",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall,precipitation,rain,temperature_2m,freezing_level_height,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape,snowfall_height,snowfall_probability,freezing_rain_probability,ice_pellets_probability,categorical_freezing_rain,precipitation_type",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 72281
+  },
+  "snoqualmie/upper": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "47.424",
+    "longitude": "-121.418",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_850hPa,relative_humidity_850hPa,wind_speed_850hPa,wind_direction_850hPa,geopotential_height_850hPa,temperature_800hPa,relative_humidity_800hPa,wind_speed_800hPa,wind_direction_800hPa,geopotential_height_800hPa,temperature_750hPa,relative_humidity_750hPa,wind_speed_750hPa,wind_direction_750hPa,geopotential_height_750hPa,temperature_700hPa,relative_humidity_700hPa,wind_speed_700hPa,wind_direction_700hPa,geopotential_height_700hPa,temperature_650hPa,relative_humidity_650hPa,wind_speed_650hPa,wind_direction_650hPa,geopotential_height_650hPa,temperature_600hPa,relative_humidity_600hPa,wind_speed_600hPa,wind_direction_600hPa,geopotential_height_600hPa,temperature_500hPa,relative_humidity_500hPa,wind_speed_500hPa,wind_direction_500hPa,geopotential_height_500hPa",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 70567
+  },
+  "snoqualmie/clouds": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "47.424",
+    "longitude": "-121.418",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "cloud_cover_1000hPa,cloud_cover_950hPa,cloud_cover_900hPa,cloud_cover_850hPa,cloud_cover_800hPa,cloud_cover_750hPa,cloud_cover_700hPa,cloud_cover_650hPa,cloud_cover_600hPa,cloud_cover_500hPa,cloud_cover_400hPa,cloud_cover_300hPa,geopotential_height_1000hPa,geopotential_height_950hPa,geopotential_height_900hPa,geopotential_height_850hPa,geopotential_height_800hPa,geopotential_height_750hPa,geopotential_height_700hPa,geopotential_height_650hPa,geopotential_height_600hPa,geopotential_height_500hPa,geopotential_height_400hPa,geopotential_height_300hPa",
+    "models": "gfs_seamless",
+    "forecast_days": "10"
+   },
+   "bytes_gz": 8415
+  },
+  "snoqualmie/ens_gfs_seamless": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "47.424,47.424,47.424",
+    "longitude": "-121.418,-121.418,-121.418",
+    "elevation": "914,1150,1652",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gfs_seamless",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 11376
+  },
+  "snoqualmie/ens_ecmwf_ifs025": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "47.424,47.424,47.424",
+    "longitude": "-121.418,-121.418,-121.418",
+    "elevation": "914,1150,1652",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "ecmwf_ifs025",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 14838
+  },
+  "snoqualmie/ens_gem_global": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "47.424,47.424,47.424",
+    "longitude": "-121.418,-121.418,-121.418",
+    "elevation": "914,1150,1652",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gem_global",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 7505
+  },
+  "snoqualmie/station": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "47.3741",
+    "longitude": "-121.442",
+    "elevation": "1222",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall,precipitation",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,ncep_hrrr_conus,ncep_nbm_conus",
+    "forecast_days": "3"
+   },
+   "bytes_gz": 833
+  },
+  "snoqualmie/nws_alerts": {
+   "url": "https://api.weather.gov/alerts/active",
+   "params": {
+    "point": "47.4240,-121.4180"
+   },
+   "bytes_gz": 174
+  },
+  "snoqualmie/nws_points": {
+   "url": "https://api.weather.gov/points/47.4240,-121.4180",
+   "params": {},
+   "bytes_gz": 900
+  },
+  "snoqualmie/snotel_daily": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "672:WA:SNTL",
+    "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
+    "duration": "DAILY",
+    "beginDate": "2026-10-14",
+    "endDate": "2026-11-28"
+   },
+   "bytes_gz": 1318
+  },
+  "snoqualmie/snotel_hourly": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "672:WA:SNTL",
+    "elements": "SNWD,TOBS",
+    "duration": "HOURLY",
+    "beginDate": "2026-11-24 00:00",
+    "endDate": "2026-11-28 23:59"
+   },
+   "bytes_gz": 962
+  },
+  "whistler/blend": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "50.06,50.06,50.06",
+    "longitude": "-122.95,-122.95,-122.95",
+    "elevation": "675,1850,2182",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_2m,apparent_temperature,precipitation,rain,showers,snowfall,precipitation_probability,freezing_level_height,weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape",
+    "daily": "sunrise,sunset,daylight_duration",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 34730
+  },
+  "whistler/multi": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "50.06,50.06,50.06",
+    "longitude": "-122.95,-122.95,-122.95",
+    "elevation": "675,1850,2182",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall,precipitation,rain,temperature_2m,freezing_level_height,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,relative_humidity_2m,dew_point_2m,wet_bulb_temperature_2m,shortwave_radiation,direct_radiation,diffuse_radiation,snow_depth,cape,snowfall_height,snowfall_probability,freezing_rain_probability,ice_pellets_probability,categorical_freezing_rain,precipitation_type",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,gem_hrdps_continental",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 61063
+  },
+  "whistler/upper": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "50.06",
+    "longitude": "-122.95",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "temperature_850hPa,relative_humidity_850hPa,wind_speed_850hPa,wind_direction_850hPa,geopotential_height_850hPa,temperature_800hPa,relative_humidity_800hPa,wind_speed_800hPa,wind_direction_800hPa,geopotential_height_800hPa,temperature_750hPa,relative_humidity_750hPa,wind_speed_750hPa,wind_direction_750hPa,geopotential_height_750hPa,temperature_700hPa,relative_humidity_700hPa,wind_speed_700hPa,wind_direction_700hPa,geopotential_height_700hPa,temperature_650hPa,relative_humidity_650hPa,wind_speed_650hPa,wind_direction_650hPa,geopotential_height_650hPa,temperature_600hPa,relative_humidity_600hPa,wind_speed_600hPa,wind_direction_600hPa,geopotential_height_600hPa,temperature_500hPa,relative_humidity_500hPa,wind_speed_500hPa,wind_direction_500hPa,geopotential_height_500hPa",
+    "models": "gfs_seamless,ecmwf_ifs025,gem_seamless,icon_seamless,gem_hrdps_continental",
+    "past_days": "3",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 67914
+  },
+  "whistler/clouds": {
+   "url": "https://api.open-meteo.com/v1/forecast",
+   "params": {
+    "latitude": "50.06",
+    "longitude": "-122.95",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "cloud_cover_1000hPa,cloud_cover_950hPa,cloud_cover_900hPa,cloud_cover_850hPa,cloud_cover_800hPa,cloud_cover_750hPa,cloud_cover_700hPa,cloud_cover_650hPa,cloud_cover_600hPa,cloud_cover_500hPa,cloud_cover_400hPa,cloud_cover_300hPa,geopotential_height_1000hPa,geopotential_height_950hPa,geopotential_height_900hPa,geopotential_height_850hPa,geopotential_height_800hPa,geopotential_height_750hPa,geopotential_height_700hPa,geopotential_height_650hPa,geopotential_height_600hPa,geopotential_height_500hPa,geopotential_height_400hPa,geopotential_height_300hPa",
+    "models": "gem_seamless",
+    "forecast_days": "10"
+   },
+   "bytes_gz": 7653
+  },
+  "whistler/ens_gfs_seamless": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "50.06,50.06,50.06",
+    "longitude": "-122.95,-122.95,-122.95",
+    "elevation": "675,1850,2182",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gfs_seamless",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 14146
+  },
+  "whistler/ens_ecmwf_ifs025": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "50.06,50.06,50.06",
+    "longitude": "-122.95,-122.95,-122.95",
+    "elevation": "675,1850,2182",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "ecmwf_ifs025",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 15735
+  },
+  "whistler/ens_gem_global": {
+   "url": "https://ensemble-api.open-meteo.com/v1/ensemble",
+   "params": {
+    "latitude": "50.06,50.06,50.06",
+    "longitude": "-122.95,-122.95,-122.95",
+    "elevation": "675,1850,2182",
+    "timezone": "auto",
+    "timeformat": "unixtime",
+    "hourly": "snowfall",
+    "models": "gem_global",
+    "forecast_days": "16"
+   },
+   "bytes_gz": 9282
+  },
+  "whistler/snotel_daily": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "3A20P:BC:ASWS",
+    "elements": "SNWD,WTEQ,TOBS,PREC,TMIN,TMAX",
+    "duration": "DAILY",
+    "beginDate": "2026-10-14",
+    "endDate": "2026-11-28"
+   },
+   "bytes_gz": 22
+  },
+  "whistler/snotel_hourly": {
+   "url": "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data",
+   "params": {
+    "stationTriplets": "3A20P:BC:ASWS",
+    "elements": "SNWD,TOBS",
+    "duration": "HOURLY",
+    "beginDate": "2026-11-24 00:00",
+    "endDate": "2026-11-28 23:59"
+   },
+   "bytes_gz": 22
+  }
+ },
+ "errors": []
+}
