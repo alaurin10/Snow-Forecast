@@ -8,13 +8,14 @@ import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from snowwatch.budget import plan as plan_budget
 from snowwatch.config import get_forecast_config
 from snowwatch.ensembles import label, local_systems
 from snowwatch.http import Fetcher, fetcher_for
 from snowwatch.inputs import load_responses
 from snowwatch.locations import service
 from snowwatch.settings import REPO_ROOT, Settings, get_settings
-from snowwatch.sources.openmeteo import daily_weight, local_daily_weight, public_daily_weight
+from snowwatch.sources.openmeteo import daily_weight, local_daily_weight
 from snowwatch.store import repo
 from snowwatch.store.db import connect, migrate
 
@@ -108,7 +109,15 @@ def cmd_budget(args: argparse.Namespace, settings: Settings) -> int:
     cfg = get_forecast_config()
     locs = service.list_locations(conn)
     local_ens = local_systems(settings, cfg.ensembles)
-    ens = sum(public_daily_weight(loc, cfg, local_ens) for loc in locs)
+    public = [sy for sy in cfg.ensembles if sy not in local_ens]
+    ens_plan = plan_budget(
+        locs,
+        cfg,
+        budget=settings.open_meteo_daily_budget,
+        public=public,
+        local_forecasts=settings.local_open_meteo,
+    )
+    ens = ens_plan.weight
     fc = sum(local_daily_weight(loc, cfg) for loc in locs)
     budget = settings.open_meteo_daily_budget
     used = repo.usage_today(conn)
@@ -132,6 +141,19 @@ def cmd_budget(args: argparse.Namespace, settings: Settings) -> int:
             f"({100 * total / budget:.0f}%)"
         )
         print(f"  forecasts: ~{fc:.0f} a day; ensembles: ~{ens:.0f} a day")
+    if public:
+        print(
+            f"  ensembles tier {ens_plan.tier.n} of 4 ({ens_plan.tier.label}): "
+            f"~{ens_plan.weight:.0f} of {ens_plan.available:.0f} a day available "
+            f"(90% of {settings.open_meteo_daily_budget} less "
+            + (
+                f"{cfg.spots.ensemble_allowance} for spots"
+                if settings.local_open_meteo
+                else "the forecasts"
+            )
+            + ")"
+            + ("" if ens_plan.fits else "; even tier 4 doesn't fit: fewer locations")
+        )
     print(
         f"used today (UTC): {used.public_weight:.0f} public calls"
         + (f", {used.fallbacks} fallbacks" if used.fallbacks else "")

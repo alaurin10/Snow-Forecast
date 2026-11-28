@@ -51,7 +51,8 @@ docker compose run --rm worker snowwatch pull
 stations and avalanche zones that Manage uses. `pull` fetches the first forecasts
 (a few minutes: it pauses 20 s between locations, unless forecasts are self-hosted,
 step 5). After that the worker runs by
-itself at 03:30, 09:30, 15:30 and 21:30 UTC.
+itself: every 3 hours (`schedule.runs_utc`), or with a self-hosted server a few minutes
+after each model update (`schedule.refresh: data`).
 
 Check it: `curl -s http://localhost:8090/api/health` should say `"status":"ok"`,
 and `http://<host>:8090` shows the app.
@@ -254,7 +255,7 @@ run gets old falls back to the public API on its own (below).
 
 | Value | Ensembles come from |
 |---|---|
-| `public` (default) | The public API, on its schedule (09:30 and 21:30 UTC), within the daily limit: milestone 1 exactly |
+| `public` (default) | The public API, on each system's schedule (`schedule.ensemble_runs`) at the budget planner's tier, within the daily limit |
 | `shadow` | The public API as with `public`; each time a run asks it, it also asks the server and records how they compare (Status page, "Compared with the public API, last 7 days") |
 | `local` | The server, every run, for each system whose downloaded run is fresh (GEFS and ECMWF ENS no older than 14 h, GEPS 26 h) and whose answer has every member and reaches far enough (GEFS and GEPS 360 h ahead, ECMWF 336 h); the public API for the rest, each system on its own |
 

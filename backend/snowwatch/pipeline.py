@@ -8,6 +8,7 @@ and a failure there becomes a warning.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import sqlite3
 import threading
@@ -19,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from snowwatch import budget
 from snowwatch import ensembles as ens
 from snowwatch.analysis.build import build_snapshot
 from snowwatch.analysis.flags import flag_key
@@ -155,6 +157,7 @@ class _Known:
 
     cached: dict[str, Any]  # ensembles by system, no older than ensemble_max_age_h
     station: dict[str, Any] | None  # its snow station's metadata, if known
+    fetched: dict[str, datetime] = field(default_factory=dict)  # when each was cached
 
 
 @dataclass
@@ -172,7 +175,7 @@ class _Fetched:
 def _known(conn: sqlite3.Connection, loc: Location, cfg: ForecastConfig, now: datetime) -> _Known:
     cached = repo.cached_ensembles(conn, loc.id, now=now, max_age_h=cfg.ensemble_max_age_h)
     station = repo.station_meta(conn, loc.snotel) if loc.snotel else None
-    return _Known(cached, station)
+    return _Known(cached, station, repo.cached_ensemble_times(conn, loc.id))
 
 
 def _station_in(stations: Any, triplet: str) -> dict[str, Any] | None:
@@ -200,9 +203,11 @@ def _fetch_location(
     bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
     shadow: bool = False,
     memo: RunMemo | None = None,
+    tier: budget.Tier = budget.TIERS[0],
 ) -> _Fetched:
     """Every response one location needs. Touches no database, so it can run in a
-    thread; see fetch_responses."""
+    thread; see fetch_responses. `tier`: how the public API's ensembles are asked for
+    (bands and runs a day, from the budget planner)."""
     errors: list[str] = []
 
     def key(name: str) -> str:
@@ -214,10 +219,19 @@ def _fetch_location(
 
     cached = known.cached
     for system in cfg.ensembles:
-        req = ensemble_request(loc, system)
-        public_due = ensembles is True or system not in cached
+        local = fetcher.local_ensemble(system)
+        # The server's answers are free: all three bands. The public API's: the tier's.
+        req = ensemble_request(loc, system, bands=local or tier.bands)
+        if local and not tier.bands:  # a fallback to the public API asks as the tier does
+            req = dataclasses.replace(req, lean=ensemble_request(loc, system, bands=False))
+        if ensembles is None:
+            public_due = system not in cached or budget.ensemble_due(
+                known.fetched.get(system), budget.runs_for(cfg, system, tier), now
+            )
+        else:
+            public_due = ensembles is True or system not in cached
         data = None
-        if not public_due and fetcher.local_ensemble(system):
+        if not public_due and local:
             try:  # free; on a failure the cache below covers it, at no public cost
                 data = fetch(
                     fetcher, req, cache_key=key(req.name), optional=True, allow_fallback=False
@@ -307,15 +321,18 @@ def fetch_responses(
     bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
     shadow: list[repo.ShadowRow] | None = None,
     memo: RunMemo | None = None,
+    tier: budget.Tier = budget.TIERS[0],
 ) -> tuple[dict[str, Any], list[str]]:
     """Every response one location needs, keyed by request name, plus optional-source errors.
 
-    ensembles: True fetches them from the public API now; False reuses the cache
-    (fetching only systems with nothing cached); None fetches whatever is missing or
-    stale. A system the self-hosted server can answer (OPEN_METEO_ENSEMBLES=local, its run
-    fresh) is fetched every run, for free; if the server fails, the cache covers it, and
-    the public API only when the public schedule would have asked anyway. In shadow mode
-    each public ensemble fetched is also asked of the server, compared into `shadow`.
+    ensembles: True fetches them from the public API now; False reuses the cache (fetching
+    only systems with nothing cached); None fetches each system that's missing or whose
+    scheduled time (`schedule.ensemble_runs`, at the budget planner's `tier`) has passed
+    since it was cached. A system the self-hosted server can answer
+    (OPEN_METEO_ENSEMBLES=local, its run fresh) is fetched every run, for free; if the
+    server fails, the cache covers it, and the public API only when the public schedule
+    would have asked anyway. In shadow mode each public ensemble fetched is also asked of
+    the server, compared into `shadow`.
     """
     got = _fetch_location(
         loc,
@@ -327,6 +344,7 @@ def fetch_responses(
         bc=bc,
         shadow=shadow is not None,
         memo=memo,
+        tier=tier,
     )
     _save_fetched(conn, loc, got, now)
     if shadow is not None:
@@ -358,6 +376,26 @@ def _shadow(
     row.reach_public_h = None if c.reach_public_h is None else round(c.reach_public_h, 1)
     row.mean_diff_cm, row.max_diff_cm = c.mean_diff_cm, c.max_diff_cm
     return row
+
+
+def ensemble_plan(locs: list[Location], fetcher: Fetcher, cfg: ForecastConfig) -> budget.Plan:
+    """The budget planner's tier for this run, counting the systems on the public API
+    (every system unless the server answers it: OPEN_METEO_ENSEMBLES=local, run fresh)."""
+    public = [
+        s
+        for s in cfg.ensembles
+        if not (
+            fetcher.ensemble_mode == "local"
+            and (fetcher.ensemble_stale is None or fetcher.ensemble_stale(s) is None)
+        )
+    ]
+    return budget.plan(
+        locs,
+        cfg,
+        budget=fetcher.public_budget,
+        public=public,
+        local_forecasts=bool(fetcher.local_url),
+    )
 
 
 def forecast_reserve(locs: list[Location], cfg: ForecastConfig, now: datetime) -> float:
@@ -421,6 +459,7 @@ def run_location(
     bc: Mapping[str, Mapping[str, bc_asws.Series]] | None = None,
     memo: RunMemo | None = None,
     model_runs: Mapping[str, str | None] | None = None,
+    tier: budget.Tier = budget.TIERS[0],
 ) -> LocationResult:
     """Fetch (unless responses are given), build and store one location."""
     try:
@@ -436,6 +475,7 @@ def run_location(
                 bc=bc,
                 shadow=shadow,
                 memo=memo,
+                tier=tier,
             )
             if shadow:
                 repo.save_shadow(conn, run_id, shadow)
@@ -528,10 +568,22 @@ def run_all(
     (the database stays on one thread). With spacing (the public API), one at a time.
     `between` is called on this thread after each location (the worker serves queued
     Manage jobs there, so they don't wait for the whole run)."""
-    locs = service.list_locations(conn)
+    every = service.list_locations(conn)
+    locs = every
     if only is not None:
         wanted = set(only)
         locs = [loc for loc in locs if loc.id in wanted]
+    ens_plan = ensemble_plan(every, fetcher, cfg)
+    if ens_plan.public:
+        log.info(
+            "public ensembles (%s): tier %d, %s, ~%.0f a day of %.0f available",
+            ", ".join(ens.label(s) for s in ens_plan.public),
+            ens_plan.tier.n,
+            ens_plan.tier.label,
+            ens_plan.weight,
+            ens_plan.available,
+        )
+    tier = ens_plan.tier
     run_id = repo.start_run(conn, kind)
     fetcher.public_reserve = forecast_reserve(locs, cfg, now or datetime.now(UTC))
     fetcher.ensembles_local.clear()
@@ -579,6 +631,7 @@ def run_all(
                     bc=bc,
                     memo=memo,
                     model_runs=inits,
+                    tier=tier,
                 )
                 done(loc, res, t0)
         else:
@@ -596,6 +649,7 @@ def run_all(
                 workers,
                 sleep,
                 done,
+                tier,
             )
     except BaseException as e:  # always close the run, then let the error go on
         crash.append(f"run stopped: {type(e).__name__}: {e}")
@@ -635,6 +689,7 @@ def _run_pooled(
     workers: int,
     sleep: Callable[[float], None],
     done: Callable[[Location, LocationResult, float], None],
+    tier: budget.Tier,
 ) -> None:
     """Fetch locations in a pool; build and store each here as it arrives."""
     gate = _FallbackGate(fetcher, sleep)
@@ -655,6 +710,7 @@ def _run_pooled(
             bc=bc,
             shadow=True,
             memo=memo,
+            tier=tier,
         )
         return got, at
 

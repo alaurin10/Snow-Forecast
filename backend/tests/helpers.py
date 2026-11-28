@@ -141,6 +141,18 @@ def fixture_transport(*, fail: tuple[str, ...] = (), log: list[str] | None = Non
                 return httpx.Response(500)
             return httpx.Response(200, json=synthetic_clouds(params))
         key = index.get((url, frozenset(params.items())))
+        if key is None and "ensemble" in url and "," in params.get("latitude", ""):
+            # Ensembles at all three bands (milestone 4): the captures asked at mid only,
+            # so every band gets mid's members (each band's own ensemble, unscaled).
+            mid = {k: params[k].split(",")[1] for k in ("latitude", "longitude", "elevation")}
+            key = index.get((url, frozenset((params | mid).items())))
+            if key is not None:
+                if log is not None:
+                    log.append(key)
+                if any(f in key for f in fail):
+                    return httpx.Response(500)
+                one = load_fixture(FIXTURES / f"{key}.json.gz")
+                return httpx.Response(200, json=[one, one, one])
         if log is not None:
             log.append(key or f"unmatched {url}")
         if key is None:

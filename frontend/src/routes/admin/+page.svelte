@@ -336,6 +336,29 @@
 			{perLoc}.
 		</p>
 	{/if}
+	{#if budget && budget.tiers?.length && (budget.ensembles_local?.length ?? 0) < 3}
+		<details class="muted small tiers" class:bad={!budget.tier_fits}>
+			<summary>
+				Public ensembles: tier {budget.tier} of 4, {budget.tier_label} (about {Math.round(
+					budget.ensembles_total
+				).toLocaleString('en-US')} of {Math.round(budget.ensembles_available ?? 0).toLocaleString(
+					'en-US'
+				)} calls a day available).{#if !budget.tier_fits}
+					Even the lowest tier is over; fewer locations would fit.{/if}
+			</summary>
+			<p>
+				The richest tier that fits is used, and adding locations drops a tier on its own. Systems
+				your server answers are free.
+			</p>
+			<ul>
+				{#each budget.tiers as t (t.n)}
+					<li class:current={t.n === budget.tier}>
+						{t.n}. {t.label}: about {Math.round(t.weight).toLocaleString('en-US')} a day
+					</li>
+				{/each}
+			</ul>
+		</details>
+	{/if}
 </div>
 
 {#if error}<p class="card bad" role="alert">{error}</p>{/if}
@@ -646,5 +669,15 @@
 		justify-content: flex-end;
 		gap: 8px;
 		margin-top: 10px;
+	}
+	.tiers summary {
+		cursor: pointer;
+	}
+	.tiers ul {
+		margin: 0.25rem 0 0;
+		padding-left: 1.2rem;
+	}
+	.tiers li.current {
+		font-weight: 600;
 	}
 </style>

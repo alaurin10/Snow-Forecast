@@ -26,7 +26,8 @@ on, with the models' own split still scored as `cons_model`. Choosing the headli
 depth method from `cons_col`'s record is the owner's, after a few weeks. **Milestone 4** (28 Nov 2026):
 PR 1, refresh when models update (the model watcher, `schedule.refresh: data`), a pool of
 4 fetch threads, Manage jobs between locations, and thinner history (24 snapshots,
-`forecast_daily` runs 6 h apart after 48 h, 6 h of raw responses); PRs 2–3 next.
+`forecast_daily` runs 6 h apart after 48 h, 6 h of raw responses); PR 2, ensembles at
+all three bands, a schedule per system and the budget planner; PR 3 next.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1148,27 +1149,29 @@ every band. **Three PRs: refresh + retention; ensembles + budget planner; locati
 ### Richer ensembles
 With milestone 1b in `local` mode these cost nothing; the budget planner below applies
 only to systems on the public API (milestone 1b off, or falling back).
-- [ ] `sources/openmeteo.py:ensemble_request` takes all three bands as one request with
+- [x] `sources/openmeteo.py:ensemble_request` takes all three bands as one request with
   three coordinates (weight × 3).
-- [ ] `analysis/build.py`: each band uses its own ensemble statistics; `_scaled_ens_mean`
+- [x] `analysis/build.py`: each band uses its own ensemble statistics; `_scaled_ens_mean`
   (mid scaled by the deterministic models) stays as the fallback.
-- [ ] Schedule per system in `config/forecast.yaml` (`ensemble_runs`): GEFS and ECMWF ENS
+- [x] Schedule per system in `config/forecast.yaml` (`ensemble_runs`): GEFS and ECMWF ENS
   4×/day, GEPS 2×/day (it runs 00/12z only), each timed after it usually becomes
   available. Replaces `ensemble_runs_utc`.
-- [ ] Check whether ensemble days 11–16 show anywhere (Calendar, Confidence). If not,
-  request 11 days instead of 16 (−12 % weight).
+- [x] Check whether ensemble days 11–16 show anywhere (Calendar, Confidence). If not,
+  request 11 days instead of 16 (−12 % weight). **They do**: the Confidence tab's
+  running totals (Model agreement) and, on wide screens, its day-by-day chart run to
+  16 days, so requests stay at 16.
 
 ### Budget planner
-- [ ] New `backend/snowwatch/budget.py`. For the systems on the public API (all of them
+- [x] New `backend/snowwatch/budget.py`. For the systems on the public API (all of them
   without milestone 1b), it picks the richest ensemble tier that fits 90 % of 10,000 minus
   the spot allowance:
   1. 3 bands, runs 4/4/2 (GEFS/ECMWF/GEPS)
   2. 3 bands, 2 runs each
   3. mid only, 4 runs
   4. mid only, 2 runs
-- [ ] Shown on the Manage budget panel; drops a tier automatically when locations are
+- [x] Shown on the Manage budget panel; drops a tier automatically when locations are
   added.
-- [ ] Arithmetic at 50 locations, tier 1: 50 × 3 × ((3.54 + 5.83) × 4 + 2.4 × 2) ≈ 6,340/day,
+- [x] Arithmetic at 50 locations, tier 1: 50 × 3 × ((3.54 + 5.83) × 4 + 2.4 × 2) ≈ 6,340/day,
   plus 2,000 for spots, leaving ~660 margin.
 
 ### ~50 locations
@@ -1225,6 +1228,40 @@ only to systems on the public API (milestone 1b off, or falling back).
   digest per run that brings something new.
 - Without a server nothing changes except the watcher's 9 small reads every 5 minutes
   (for the Status page and the Confidence tab's model runs).
+
+### What PR 2 (ensembles and budget planner) built and found (28 Nov 2026)
+
+- **Three bands per request:** `ensemble_request(…, bands=True)` asks base, mid and
+  summit as three points (weight × 3); `bands=False` is mid only. The answer is a list;
+  `inputs_from_responses` keeps mid in `ensembles` (everything that read it before still
+  does: daily rows, `forecast_daily`'s `ens_p*`, member counts) and all three in
+  `ensemble_bands`. A band uses its own members only when every system in use has an
+  answer for it, so the pool always holds the same systems as mid's; otherwise it scales
+  mid's as before (an old cached mid-only answer, a lower tier, or one system falling
+  back while the others come from the server). Its period and window ranges then aren't
+  "estimated" and carry their own members, which the Confidence tab's chances use.
+- `ensembles.py`'s checks read every point (the fewest members and the shortest reach
+  at any band); shadow comparisons compare mid.
+- **Schedule:** `schedule.ensemble_runs` per system (GEFS 00:15/06:15/12:15/18:15, ECMWF
+  ENS 02:00/08:15/14:00/20:15, GEPS 07:45/19:45 UTC, about when each run is usually
+  complete); `ensemble_runs_utc` is still read when `ensemble_runs` is empty. A system on
+  the public API is asked again once one of its times has passed since its cached
+  answer, in both `fixed` and `data` refresh, so the scheduler no longer passes
+  `ensembles=True` to some runs.
+- **Planner:** `budget.plan` runs at the start of each run over every active location
+  (not only the run's), counting systems not answered by the server. Without a server
+  there are no spots, so the allowance isn't held back; the forecasts' own weight is
+  instead. At 50 locations tier 1 is 6,340 (as planned); 60 locations drop to tier 2,
+  120 to tier 3. Without a server, 25 locations (≈7,300 of forecasts) land on tier 2.
+  The worker logs the tier each run; `snowwatch budget` and Manage show it (Manage
+  lists all four with their cost).
+- When the server answers a system but the tier is mid only, a fallback to the public
+  API sends the mid-only request (`Request.lean`), so a failing server can't spend
+  three bands' weight.
+- **Spots:** systems from the server are asked at all three bands (cached per 0.25°
+  cell and the three bands' 100 m steps); public ones stay at mid within the allowance.
+- The test fixtures were captured at mid only; the test transport answers a three-band
+  request with mid's answer at each band.
 
 ## Milestone 5: Learning from history
 
@@ -1358,7 +1395,8 @@ End to end, per milestone:
 - Open questions, to settle while building:
   - The column snow ratio's wind adjustment and the wet-bulb thresholds need tuning
     against the scorecard.
-  - Are ensemble days 11–16 used anywhere? (M4)
+  - ~~Are ensemble days 11–16 used anywhere? (M4)~~ Yes: the Confidence tab's running
+    totals and day chart (M4 PR 2).
   - Do `*_previous_day1` variables work self-hosted? (M5)
   - Does ECMWF ENS download cleanly from the mini PC? (M1b; it did from PR 1's sandbox.)
   - ~~Does the running server pick up new runs without a restart? (M1b)~~ Yes (PR 1).

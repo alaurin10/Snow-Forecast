@@ -649,7 +649,8 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
             sched.add_job(
                 worker.full_run,
                 CronTrigger(hour=h, minute=m, timezone=UTC),
-                kwargs={"ensembles": t in cfg.ensemble_runs_utc},
+                # Each ensemble system follows its own schedule.ensemble_runs.
+                kwargs={"ensembles": None},
                 id=f"run-{t}",
                 **opts,
             )

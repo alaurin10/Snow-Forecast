@@ -63,8 +63,11 @@
 		if (moved.direction === 'steady') return `Holding steady since ${back}, over ${span}.`;
 		return `${moved.direction === 'up' ? 'Up' : 'Down'} ${snow(Math.abs(moved.change_cm), units)} since ${back}, over ${span}.`;
 	});
-	// Ensemble members are fetched at mid; other elevations scale them.
+	// A band's own ensemble members when they were asked for at every elevation;
+	// otherwise mid's, scaled to it.
 	const membersFor = (name: 'next5' | 'd6_10'): number[] => {
+		const own = band.windows[name]?.members_cm;
+		if (band.band !== 'mid' && own?.length) return own;
 		const m = mid.windows[name]?.members_cm ?? [];
 		const scale = band.band === 'mid' ? 1 : (band.windows[name]?.scale ?? null);
 		return scale === null ? [] : m.map((v) => v * scale);
@@ -152,7 +155,7 @@
 				next5={membersFor('next5')}
 				d6_10={membersFor('d6_10')}
 				{units}
-				estimated={band.band !== 'mid'}
+				estimated={band.band !== 'mid' && !band.windows.next5?.members_cm?.length}
 			/>
 		</section>
 		{#if history}

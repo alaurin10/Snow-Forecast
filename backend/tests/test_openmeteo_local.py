@@ -22,6 +22,7 @@ from snowwatch.sources.openmeteo import (
     ENSEMBLE_URL,
     FORECAST_URL,
     daily_weight,
+    ensemble_request,
     local_daily_weight,
     public_daily_weight,
 )
@@ -293,7 +294,10 @@ def test_a_run_logs_public_weight_only_for_ensembles(seeded: sqlite3.Connection)
     sleeps: list[float] = []
     run_id, results = local_run(seeded, f, sleeps)
     assert all(r.ok for r in results) and sleeps == []  # fetched 4 at once, no pauses
-    ens = sum(public_daily_weight(loc, config()) for loc in seed().values()) / 2
+    # One run asks each system at all three bands (milestone 4's tier 1).
+    ens = sum(
+        ensemble_request(loc, sy).weight for loc in seed().values() for sy in config().ensembles
+    )
     weight = seeded.execute("SELECT api_weight FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
     assert weight == pytest.approx(ens, abs=0.5)
     u = repo.usage_today(seeded)
@@ -377,7 +381,9 @@ def test_budget_split() -> None:
     cfg = config()
     crystal = seed()["crystal"]
     ens, fc = public_daily_weight(crystal, cfg), local_daily_weight(crystal, cfg)
-    assert 22 < ens < 26  # ~24 public calls per location per day
+    # ~127 public calls per location per day at the richest tier: three bands, GEFS and
+    # ECMWF ENS 4 runs a day, GEPS 2 (milestone 4; the budget planner picks the tier).
+    assert 120 < ens < 135
     assert 250 < fc < 320
     assert daily_weight(crystal, cfg) == pytest.approx(ens + fc, abs=0.1)
 
@@ -413,13 +419,20 @@ def test_budget_command_shows_the_split(
     capsys.readouterr()
     cli.main(["budget"])
     out = capsys.readouterr().out
-    assert "6 active locations" in out and "ensembles: ~141 a day" in out
+    six = sum(public_daily_weight(loc, config()) for loc in seed().values())
+    assert "6 active locations" in out and f"ensembles: ~{six:.0f} a day" in out
+    assert "tier 1 of 4 (3 bands, every run)" in out
     local = env.model_copy(update={"open_meteo_url": LOCAL, "max_locations": 50})
     monkeypatch.setattr(cli, "get_settings", lambda: local)
     cli.main(["budget"])
     out = capsys.readouterr().out
-    assert "6 of 50 active locations, about 141 of 10000 daily public" in out
-    assert "~24 per location" in out and "free" in out and "used today (UTC): 0" in out
+    assert f"6 of 50 active locations, about {six:.0f} of 10000 daily public" in out
+    assert (
+        f"~{six / 6:.0f} per location" in out
+        and "less 2000 for spots" in out
+        and "free" in out
+        and "used today (UTC): 0" in out
+    )
 
 
 # --- Tools ---------------------------------------------------------------------------
@@ -557,7 +570,9 @@ def test_status_meta_and_budget_with_a_server(
     assert client.post("/api/auth/login", json={"password": password}, headers=h).is_success
     b = client.get("/api/admin/budget", headers=h).json()
     assert b["local_forecasts"] and b["max_locations"] == 50
-    assert b["total"] == b["ensembles_total"] == pytest.approx(141, abs=1)
+    six = sum(public_daily_weight(loc, config()) for loc in seed().values())
+    assert b["total"] == b["ensembles_total"] == pytest.approx(six, abs=1)
+    assert b["tier"] == 1 and b["ensembles_available"] == 7000
     assert b["forecasts_total"] > 1400 and b["public_used_today"] == 174.2
 
     # Without a server: no local card, and the budget counts everything as public.

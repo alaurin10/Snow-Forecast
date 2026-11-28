@@ -42,11 +42,19 @@ def inputs_from_responses(
         multi=multi,
         upper=parse_point(responses["upper"]) if "upper" in responses else None,
         clouds=parse_point(responses["clouds"]) if "clouds" in responses else None,
-        ensembles={
-            s: parse_point(responses[f"ens_{s}"]) for s in cfg.ensembles if f"ens_{s}" in responses
-        },
         warnings=list(warnings or []),
     )
+    # Ensembles: one point (mid, as before milestone 4) or all three bands in one answer.
+    for s in cfg.ensembles:
+        resp = responses.get(f"ens_{s}")
+        if resp is None:
+            continue
+        pts = parse_points(resp)
+        if len(pts) == 3:
+            inputs.ensembles[s] = pts[1]
+            inputs.ensemble_bands[s] = pts
+        elif pts:
+            inputs.ensembles[s] = pts[0]
     if isinstance(responses.get("station"), dict):
         inputs.station = parse_point(responses["station"])
     if "nws_alerts" in responses:
