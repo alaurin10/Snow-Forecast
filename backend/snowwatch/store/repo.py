@@ -99,6 +99,18 @@ def cached_ensembles(
     return {r["system"]: _ungz(r["doc_gz"]) for r in rows}
 
 
+def cached_ensemble_times(conn: sqlite3.Connection, location_id: str) -> dict[str, datetime]:
+    """When each system's cached ensembles were fetched."""
+    rows = conn.execute(
+        "SELECT system, fetched_at FROM ensemble_cache WHERE location_id = ?", (location_id,)
+    )
+    out = {}
+    for r in rows:
+        t = datetime.fromisoformat(r["fetched_at"])
+        out[r["system"]] = t if t.tzinfo else t.replace(tzinfo=UTC)
+    return out
+
+
 def save_daily(
     conn: sqlite3.Connection,
     location_id: str,

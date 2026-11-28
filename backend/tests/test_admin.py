@@ -331,7 +331,9 @@ def test_reorder_and_budget(client: TestClient) -> None:
     assert client.put("/api/admin/locations/order", json=order, headers=H).json() == {"ok": True}
     assert [x["id"] for x in client.get("/api/locations").json()] == order
     b = client.get("/api/admin/budget", headers=H).json()
-    assert b["active"] == 6 and b["max_locations"] == 25 and 1400 < b["total"] < 2000
+    assert b["active"] == 6 and b["max_locations"] == 25 and 2000 < b["total"] < 2600
+    # Ensembles at all three bands, every run (milestone 4's tier 1): it fits easily.
+    assert b["tier"] == 1 and b["tier_fits"] and [t["n"] for t in b["tiers"]] == [1, 2, 3, 4]
 
 
 def test_location_cap(client: TestClient, app_settings: Settings, conn: sqlite3.Connection) -> None:

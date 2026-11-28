@@ -272,6 +272,7 @@ export interface TreelineSpot {
 export interface BudgetOut {
 	active: number;
 	budget: number;
+	ensembles_available?: number;
 	ensembles_local?: string[];
 	ensembles_total: number;
 	forecasts_total: number;
@@ -281,7 +282,20 @@ export interface BudgetOut {
 		[k: string]: number;
 	};
 	public_used_today: number;
+	tier?: number;
+	tier_fits?: boolean;
+	tier_label?: string;
+	tiers?: TierOut[];
 	total: number;
+}
+/**
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "TierOut".
+ */
+export interface TierOut {
+	label: string;
+	n: number;
+	weight: number;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

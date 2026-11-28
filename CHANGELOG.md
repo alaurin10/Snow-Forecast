@@ -7,6 +7,15 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Ensembles at every elevation** (milestone 4, ensembles and budget). Each ensemble
+  system is asked at base, mid and summit in one request, so each band's likely range,
+  chances and the forecast after 48 h come from its own members (no more "(est.)" from
+  scaling mid's). Each system follows its own schedule (`schedule.ensemble_runs`: GEFS
+  and ECMWF ENS four times a day, GEPS twice; replaces `ensemble_runs_utc`). A budget
+  planner (`snowwatch/budget.py`) picks the richest of four tiers that fits the public
+  daily limit (three bands or mid only, every run or two a day), drops a tier as
+  locations are added, and shows on `snowwatch budget` and Manage. Systems the
+  self-hosted server answers are free and always at three bands, spots included.
 - **Fresher forecasts** (milestone 4, refresh and retention). With a self-hosted
   Open-Meteo server, each location refreshes a few minutes after a model it uses has a
   new run (HRRR and NBM hourly; at most every 40 minutes, at least every 3 hours;

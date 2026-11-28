@@ -249,19 +249,27 @@ def station_request(
     return Request("station", SOURCE, FORECAST_URL, params, w)
 
 
-def ensemble_request(loc: Location, system: str, *, forecast_days: int = 16) -> Request:
-    mid = loc.band("mid")
+def ensemble_request(
+    loc: Location, system: str, *, forecast_days: int = 16, bands: bool = True
+) -> Request:
+    """One system's members' snowfall for 16 days (days 11–16 show in the Confidence
+    tab's running totals and day chart). `bands`: at base, mid and summit in one request
+    (three points, weight × 3; milestone 4), so each band has its own ensemble; else mid
+    only, which the other bands scale."""
+    pts = loc.bands if bands else [loc.band("mid")]
     params = {
-        "latitude": f"{mid.lat:g}",
-        "longitude": f"{mid.lon:g}",
-        "elevation": f"{mid.elev_m:g}",
+        "latitude": ",".join(f"{b.lat:g}" for b in pts),
+        "longitude": ",".join(f"{b.lon:g}" for b in pts),
+        "elevation": ",".join(f"{b.elev_m:g}" for b in pts),
         **_common(),
         "hourly": ",".join(ENSEMBLE_HOURLY),
         "models": system,
         "forecast_days": str(forecast_days),
     }
     members = ENSEMBLE_MEMBERS.get(system, 30)
-    w = estimate_weight(points=1, days=forecast_days, variables=len(ENSEMBLE_HOURLY) * members)
+    w = estimate_weight(
+        points=len(pts), days=forecast_days, variables=len(ENSEMBLE_HOURLY) * members
+    )
     return Request(f"ens_{system}", SOURCE, ENSEMBLE_URL, params, w)
 
 
@@ -292,11 +300,16 @@ def location_requests(
 
 
 def public_daily_weight(loc: Location, cfg: ForecastConfig, local: Collection[str] = ()) -> float:
-    """Estimated weight per day of one location's ensembles on the public API: every
-    system but those the self-hosted server answers (`local`, milestone 1b), which are
-    free."""
-    ens = sum(ensemble_request(loc, s).weight for s in cfg.ensembles if s not in local)
-    return round(ens * len(cfg.schedule.ensemble_runs_utc), 1)
+    """Estimated weight per day of one location's ensembles on the public API at their
+    richest (all three bands, every scheduled run; `snowwatch/budget.py` picks the tier
+    actually used): every system but those the self-hosted server answers (`local`,
+    milestone 1b), which are free."""
+    ens = sum(
+        ensemble_request(loc, s).weight * len(cfg.schedule.runs_for(s))
+        for s in cfg.ensembles
+        if s not in local
+    )
+    return round(ens, 1)
 
 
 def local_daily_weight(loc: Location, cfg: ForecastConfig) -> float:

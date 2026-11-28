@@ -47,7 +47,18 @@ class Schedule(BaseModel):
     # self-hosted Open-Meteo server. "fixed" (and always without one): runs_utc.
     refresh: Literal["data", "fixed"] = "data"
     runs_utc: list[HHMM] = Field(min_length=1)
-    ensemble_runs_utc: list[HHMM]
+    # When each ensemble system's runs are usually on the public API (UTC): a run asks a
+    # system on the public API again once one of its times has passed since the last
+    # answer (snowwatch/budget.py may use every other time). Systems the self-hosted
+    # server answers are read every run instead.
+    ensemble_runs: dict[str, list[HHMM]] = {}
+    # Before milestone 4: one list for every system (still read when ensemble_runs is empty).
+    ensemble_runs_utc: list[HHMM] = []
+
+    def runs_for(self, system: str) -> list[str]:
+        """A system's public-API times, sorted."""
+        return sorted(self.ensemble_runs.get(system) or self.ensemble_runs_utc)
+
     backup_utc: HHMM = "10:00"
     # Avalanche centers publish 6–10 am Mountain time; check again after the runs.
     avalanche_utc: list[HHMM] = []

@@ -93,7 +93,16 @@ schedule:
   # the hourly HRRR and NBM (US) and keep "now" fresh. Each run costs ~33 Open-Meteo
   # calls per location (`snowwatch budget` shows the daily total).
   runs_utc: ["00:30", "03:30", "06:30", "09:30", "12:30", "15:30", "18:30", "21:30"]
-  ensemble_runs_utc: ["09:30", "21:30"]
+  # When each ensemble system's new run is usually on the public API (UTC), for the
+  # systems it serves (all of them without a self-hosted server's downloads): GEFS and
+  # ECMWF ENS four runs a day, GEPS two (it runs 00z and 12z only). A run asks again for
+  # a system once one of its times has passed. The budget planner (`snowwatch budget`,
+  # Manage) uses every other time, or the mid band only, when 50 locations at all three
+  # bands wouldn't fit the daily limit.
+  ensemble_runs:
+    gfs_seamless: ["00:15", "06:15", "12:15", "18:15"]   # GEFS 18/00/06/12z, ~6 h after
+    ecmwf_ifs025: ["02:00", "08:15", "14:00", "20:15"]   # ECMWF ENS 18/00/06/12z
+    gem_global: ["07:45", "19:45"]                       # GEPS 00/12z
   backup_utc: "10:00"
   vacuum_weekday: sun
   # Extra avalanche-forecast checks (centers publish 6–10 am Mountain time).

@@ -280,12 +280,35 @@ def _times(data: Any) -> list[float]:
     return [float(t) for t in times] if isinstance(times, list) else []
 
 
+def _points(data: Any) -> list[Any]:
+    """An answer's points: a list for several (base, mid, summit: milestone 4), else one."""
+    return list(data) if isinstance(data, list) else [data]
+
+
+def _mid(data: Any) -> Any:
+    pts = _points(data)
+    return pts[1] if len(pts) == 3 else (pts[0] if pts else None)
+
+
 def members_with_data(data: Any) -> int:
-    return sum(any(v is not None for v in vals) for vals in _members(data).values())
+    """Members with data; for several points, the fewest at any of them."""
+    counts = [
+        sum(any(v is not None for v in vals) for vals in _members(pt).values())
+        for pt in _points(data)
+    ]
+    return min(counts, default=0)
 
 
 def reach_h(data: Any, now: datetime) -> float | None:
-    """How far ahead of `now` every member with data reaches (the shortest), in hours."""
+    """How far ahead of `now` every member with data reaches (the shortest, at any
+    point), in hours."""
+    reaches = [_reach_point(pt, now) for pt in _points(data)]
+    if any(r is None for r in reaches) or not reaches:
+        return None
+    return min(r for r in reaches if r is not None)
+
+
+def _reach_point(data: Any, now: datetime) -> float | None:
     times = _times(data)
     lasts = []
     for vals in _members(data).values():
@@ -326,8 +349,9 @@ class Comparison:
 
 
 def compare(local: Any, public: Any, now: datetime) -> Comparison:
-    a, b = _members(local), _members(public)
-    ta, tb = _times(local), _times(public)
+    """Compared at mid (where both have it); counts and reach over every point."""
+    a, b = _members(_mid(local)), _members(_mid(public))
+    ta, tb = _times(_mid(local)), _times(_mid(public))
     common = sorted(set(ta) & set(tb))
     ia = {t: i for i, t in enumerate(ta)}
     ib = {t: i for i, t in enumerate(tb)}

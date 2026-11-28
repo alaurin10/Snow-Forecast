@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from snowwatch.config import ForecastConfig
 from snowwatch.locations.service import load_yaml
 from snowwatch.sources import openmeteo as om
@@ -48,10 +50,13 @@ def test_clouds_are_one_model_at_every_level_over_the_middle(cfg: ForecastConfig
     assert req.weight == 2.4
 
 
-def test_ensemble_at_mid(cfg: ForecastConfig) -> None:
+def test_ensemble_at_every_band_or_mid(cfg: ForecastConfig) -> None:
     req = om.ensemble_request(make_location(), "ecmwf_ifs025")
     assert req.url == om.ENSEMBLE_URL
-    assert req.params["elevation"] == "1500" and req.params["models"] == "ecmwf_ifs025"
+    assert req.params["elevation"] == "1000,1500,2000" and req.params["models"] == "ecmwf_ifs025"
+    mid = om.ensemble_request(make_location(), "ecmwf_ifs025", bands=False)
+    assert mid.params["elevation"] == "1500" and mid.params["forecast_days"] == "16"
+    assert req.weight == pytest.approx(3 * mid.weight) and mid.weight == pytest.approx(5.83)
 
 
 def test_weights() -> None:
@@ -75,7 +80,12 @@ def test_full_run_requests_and_daily_budget(cfg: ForecastConfig) -> None:
         "ens_ecmwf_ifs025",
         "ens_gem_global",
     ]
-    per_day = [om.daily_weight(loc, cfg) for loc in locs]
     # 25 locations on 8 runs a day must still fit inside the 10,000-call free tier,
-    # with room for retries and manual runs.
-    assert max(per_day) * 25 < 8000
+    # with room for retries and manual runs: the budget planner picks the ensembles' tier.
+    from snowwatch import budget
+
+    heaviest = max(locs, key=lambda loc: om.daily_weight(loc, cfg))
+    many = [heaviest] * 25
+    plan = budget.plan(many, cfg, budget=10_000, public=cfg.ensembles, local_forecasts=False)
+    forecasts = sum(om.local_daily_weight(loc, cfg) for loc in many)
+    assert plan.fits and plan.tier.n > 1 and forecasts + plan.weight < 9000

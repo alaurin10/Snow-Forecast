@@ -112,9 +112,24 @@ runs it was made from (`model_runs`, "GFS 18z · ECMWF 12z" on the Confidence ta
 the Status page lists them. SNOTEL's daily values are fetched every 6 h (`RunMemo`);
 its hourly values, NWS alerts and the BC CSV every run.
 
+**Ensembles and the budget planner** (milestone 4). Each system is asked at all three
+bands in one request (three points, weight × 3), so each band's ensemble range,
+exceedance and consensus after 48 h come from its own members; a band without every
+system's answer (an old cached mid-only answer, or a lower tier) scales mid's as before
+(`_scaled_ens_mean`). A system on the public API is asked again once one of its times in
+`schedule.ensemble_runs` has passed (GEFS and ECMWF ENS 4 a day, GEPS 2); systems the
+self-hosted server answers are read every run at three bands, free. `budget.py` picks the
+richest tier that fits 90 % of the public daily limit less the spots' allowance (or less
+the forecasts, without a server): 1. three bands, every run; 2. three bands, 2 runs a day;
+3. mid only, every run; 4. mid only, 2 runs a day. It's worked out from the active
+locations each run, so adding locations drops a tier; `snowwatch budget` and Manage show
+it.
+
 1. **Fetch** (`pipeline.fetch_responses`): Open-Meteo's high-resolution blend and
    multi-model forecasts at base, mid and summit, upper-air levels, ensembles at
-   mid (twice a day, cached between), NWS alerts (US), and the snow station.
+   base, mid and summit in one request per system (each band its own members; on its
+   own schedule per system, cached between, at the budget planner's tier), NWS alerts
+   (US), and the snow station.
    Each source fails on its own; only the two Open-Meteo forecasts are required.
 2. **Build** (`analysis/build.py`) one snapshot document, described below.
 3. **Store**: the gzipped snapshot (newest 24 kept), per-day totals for the trend
@@ -150,7 +165,7 @@ read-only volume (`snowwatch/ensembles.py`: GEFS and ECMWF ENS 14 h, GEPS 26 h).
 answer missing members or not reaching far enough ahead (GEFS and GEPS 360 h, ECMWF
 336 h) counts as a failure. `pipeline.fetch_responses` reads fresh systems every run;
 when one fails it takes the cached ensembles (`ensemble_cache`, 13 h) first and the
-public API only when the public schedule would have asked anyway (`ensemble_runs_utc`),
+public API only when the public schedule would have asked anyway (`ensemble_runs`),
 each system on its own. While forecasts are falling back too, optional requests
 (ensembles, upper air, clouds, station) leave `pipeline.forecast_reserve` (the rest of
 today's runs' blend and multi-model requests) in the public budget. Each run records

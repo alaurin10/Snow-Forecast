@@ -100,7 +100,9 @@ class ForecastInputs:
     multi: list[PointData]  # base, mid, summit
     upper: PointData | None = None
     clouds: PointData | None = None  # one model's cloud cover at each pressure level
-    ensembles: dict[str, PointData] = field(default_factory=dict)
+    ensembles: dict[str, PointData] = field(default_factory=dict)  # at mid
+    # Each system at base, mid and summit, when it was asked for all three (milestone 4).
+    ensemble_bands: dict[str, list[PointData]] = field(default_factory=dict)
     alerts: list[Alert] = field(default_factory=list)
     snotel: Snotel | None = None
     warnings: list[str] = field(default_factory=list)
@@ -326,6 +328,12 @@ def build_snapshot(
 
     period_members = [ens.member_totals(members, p.hours) for p in periods]
     mid_ens_mean = [mean(t) if t else None for t in period_members]
+    # Bands with ensembles of their own (every system asked at all three bands): their
+    # members, unscaled. Other bands scale mid's (`_scaled_ens_mean`, as before).
+    own_pools = _band_pools(inputs, systems, k)
+    own_members = {
+        i: [ens.member_totals(pool, p.hours) for p in periods] for i, pool in own_pools.items()
+    }
 
     # The freezing level is one height for the whole location, found once at the lowest
     # band and shared by every band. Found at each band, it depended on the band: a model
@@ -446,6 +454,8 @@ def build_snapshot(
             early = j < cfg.blend_periods
             if i == 1:
                 e_mean = mid_ens_mean[j]
+            elif i in own_members:
+                e_mean = mean(own_members[i][j]) if own_members[i][j] else None
             else:
                 e_mean = _scaled_ens_mean(
                     mid_ens_mean[j], sw_g, work[1].model_sums[j] if 1 in work else {}, p.hours
@@ -555,6 +565,8 @@ def build_snapshot(
             depth,
             snow_level,
             sl_how,
+            own_members.get(i),
+            own_pools.get(i),
         )
         for i in range(3)
     ]
@@ -1329,6 +1341,30 @@ def _days(
     return out
 
 
+def _band_pools(
+    inputs: ForecastInputs, systems: Mapping[str, Sequence[Hourly]], k: float
+) -> dict[int, list[Hourly]]:
+    """Base's and summit's own pooled ensemble members (snow water), for bands every
+    system in use was asked at; a band missing any system scales mid's instead, so the
+    pool always holds the same systems as mid's."""
+    out: dict[int, list[Hourly]] = {}
+    if not systems:
+        return out
+    for i in (0, 2):
+        band: dict[str, list[Hourly]] = {}
+        for s in systems:
+            pts = inputs.ensemble_bands.get(s)
+            if not pts or len(pts) <= i:
+                break
+            got = [_swe(m, k) for m in ensemble_members(pts[i])]
+            if not got:
+                break
+            band[s] = got
+        else:
+            out[i] = ens.pooled(band)
+    return out
+
+
 def _scaled_ens_mean(
     mid_mean: float | None,
     band_sw: Mapping[str, Hourly],
@@ -1370,7 +1406,11 @@ def _band_out(
     depth: Depth,
     snow_level: Hourly,
     sl_how: Mapping[int, str | None],
+    own_members: Sequence[Sequence[float]] | None = None,
+    own_pool: Sequence[Hourly] | None = None,
 ) -> BandOut:
+    """own_members, own_pool: this band's own ensemble (period totals, pooled members),
+    when every system was asked at every band; else mid's are scaled to it."""
     band = loc.bands[i]
     phys = cfg.physics
     k = cfg.snowfall_cm_per_mm
@@ -1401,6 +1441,8 @@ def _band_out(
         e: EnsStats | None
         if i == 1:
             e = _ens_stats(period_members[j], cm_per_mm, min_m)
+        elif own_members is not None:
+            e = _ens_stats(own_members[j], cm_per_mm, min_m)
         else:
             mid_c = mid.sw[j].value
             e = None
@@ -1452,7 +1494,7 @@ def _band_out(
 
     members = ens.pooled(systems)
     windows = {
-        name: _window(w, mid, periods, a, b, i, k, min_m, depth, members)
+        name: _window(w, mid, periods, a, b, i, k, min_m, depth, members, own_pool)
         for name, (a, b) in WINDOWS.items()
     }
 
@@ -1543,19 +1585,24 @@ def _window(
     min_m: int,
     depth: Depth,
     members: Sequence[Hourly],
+    own: Sequence[Hourly] | None = None,
 ) -> WindowOut:
+    """members: mid's pooled ensemble; own: this band's, if it was asked for (then its
+    totals use this band's own snow ratios, unscaled)."""
     ps = list(periods[a:b])
     if not ps:
         return WindowOut(
             snow_cm=None, snow_cm_raw=None, snow_cm_slr=None, ens=None, ens_raw=None, ens_slr=None
         )
     raw, slr, headline = _window_totals(w, a, b, k, depth)
-    # Ensemble members are fetched at mid, so their totals use mid's snow ratios.
-    ratios = [rt for rt, _ in mid.ratios[a:b]]
-    raw_m = sorted(_member_depths(members, ps, [k] * len(ps)))
-    slr_m = sorted(_member_depths(members, ps, [rt / 10 if rt else k for rt in ratios]))
+    # Mid's members use mid's snow ratios; a band's own members, its own.
+    at = w if own is not None and i != 1 else mid
+    pool = own if own is not None and i != 1 else members
+    ratios = [rt for rt, _ in at.ratios[a:b]]
+    raw_m = sorted(_member_depths(pool, ps, [k] * len(ps)))
+    slr_m = sorted(_member_depths(pool, ps, [rt / 10 if rt else k for rt in ratios]))
     head_m = slr_m if depth.slr else raw_m
-    if i == 1:
+    if i == 1 or own is not None:
         return WindowOut(
             snow_cm=r(headline),
             snow_cm_raw=r(raw),

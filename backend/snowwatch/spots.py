@@ -369,10 +369,20 @@ class EnsemblePlan:
     fetches can run at once): `fetch` maps each system to its request and whether it may
     fall back to the public API."""
 
-    cell: str
+    cell: str  # mid-only answers' cache key
     result: EnsembleResult
     fetch: dict[str, tuple[Request, bool]] = field(default_factory=dict)
     spent: bool = False
+    cells: dict[str, str] = field(default_factory=dict)  # a system's own key (three bands)
+
+
+def bands_cell(loc: Location) -> tuple[float, float, list[float], str]:
+    """Where a spot's three-band ensembles are asked for (the 0.25° cell's centre and each
+    band's 100 m step), and the cache key."""
+    mid = loc.band("mid")
+    c_lat, c_lon, _, _ = ensemble_cell(mid.lat, mid.lon, mid.elev_m)
+    steps = [round(b.elev_m / ENS_STEP_M) * ENS_STEP_M for b in loc.bands]
+    return c_lat, c_lon, steps, f"{c_lat:g},{c_lon:g}," + "/".join(f"{x:g}" for x in steps)
 
 
 def plan_ensembles(
@@ -384,39 +394,59 @@ def plan_ensembles(
     now: datetime,
     spot_used: float,
 ) -> EnsemblePlan:
-    """Each system's ensembles at the mid band: a nearby spot's within the cache time;
-    else the self-hosted server's while its run is fresh (OPEN_METEO_ENSEMBLES=local,
-    free); else the public API within the spots' daily allowance (`spot_used` is today's
-    spot weight so far). The server's answers may fall back to the public API only while
-    the allowance has room, which is set aside for them here."""
+    """Each system's ensembles: a nearby spot's within the cache time; else the
+    self-hosted server's while its run is fresh (OPEN_METEO_ENSEMBLES=local, free), at
+    all three bands (milestone 4); else the public API at the mid band within the spots'
+    daily allowance (`spot_used` is today's spot weight so far). The server's answers
+    may fall back to the public API only while the allowance has room, which is set
+    aside for them here."""
     mid = loc.band("mid")
     c_lat, c_lon, step, cell = ensemble_cell(mid.lat, mid.lon, mid.elev_m)
+    b_lat, b_lon, steps, b_cell = bands_cell(loc)
     sc = cfg.spots
     cached: dict[str, Any] = {}
+    cached_bands: dict[str, Any] = {}
     if conn is not None:
         try:
             cached = repo.spot_ensembles(conn, cell, now=now, max_age_h=sc.ensemble_cache_h)
+            cached_bands = repo.spot_ensembles(conn, b_cell, now=now, max_age_h=sc.ensemble_cache_h)
         except sqlite3.Error:  # not migrated yet: no cache
-            cached = {}
+            cached = cached_bands = {}
     plan = EnsemblePlan(cell, EnsembleResult())
     planned = spot_used
     for system in cfg.ensembles:
-        req = ensemble_request(loc, system)
-        if system in cached:
-            plan.result.responses[req.name] = cached[system]
+        local = fetcher.local_ensemble(system)
+        req = ensemble_request(loc, system, bands=local)
+        hit = cached_bands.get(system) if local else None
+        hit = hit if hit is not None else cached.get(system)
+        if hit is not None:
+            plan.result.responses[req.name] = hit
             continue
-        params = req.params | {
-            "latitude": f"{c_lat:g}",
-            "longitude": f"{c_lon:g}",
-            "elevation": f"{step:g}",
-        }
-        req = dataclasses.replace(req, params=params)
-        room = planned + req.weight <= sc.ensemble_allowance
-        if not fetcher.local_ensemble(system) and not room:
+        mid_req = ensemble_request(loc, system, bands=False)
+        mid_req = dataclasses.replace(
+            mid_req,
+            params=mid_req.params
+            | {"latitude": f"{c_lat:g}", "longitude": f"{c_lon:g}", "elevation": f"{step:g}"},
+        )
+        if local:
+            n = len(steps)
+            params = req.params | {
+                "latitude": ",".join([f"{b_lat:g}"] * n),
+                "longitude": ",".join([f"{b_lon:g}"] * n),
+                "elevation": ",".join(f"{x:g}" for x in steps),
+            }
+            # A fallback from the server goes to the public API at mid only.
+            req = dataclasses.replace(req, params=params, lean=mid_req)
+            plan.cells[system] = b_cell
+        else:
+            req = mid_req
+        public_w = mid_req.weight
+        room = planned + public_w <= sc.ensemble_allowance
+        if not local and not room:
             plan.spent = True
             continue
         if room:
-            planned += req.weight
+            planned += public_w
         plan.fetch[system] = (req, room)
     return plan
 
@@ -443,7 +473,7 @@ def finish_ensembles(
         try:
             repo.put_spot_ensemble(
                 conn,
-                plan.cell,
+                plan.cells.get(system, plan.cell),
                 system,
                 data,
                 source,

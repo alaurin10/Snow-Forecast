@@ -92,7 +92,8 @@ def test_scheduler_jobs(env: Settings) -> None:
     runs = [f"run-{h:02d}:30" for h in range(0, 24, 3)]
     assert {*runs, "jobs", "nightly", "weekly"} <= ids
     ens = {j.id: j.kwargs.get("ensembles") for j in sched.get_jobs() if j.id.startswith("run-")}
-    assert ens == {r: r in ("run-09:30", "run-21:30") for r in runs}
+    # Each ensemble system follows its own schedule.ensemble_runs (milestone 4).
+    assert ens == dict.fromkeys(runs)
 
 
 def test_healthcheck_pings(env: Settings, monkeypatch: pytest.MonkeyPatch) -> None:

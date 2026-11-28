@@ -63,7 +63,8 @@ def transport(
             if req.url.params.get("models") in broken:
                 data = json.loads(resp.read())
                 keep = {"time", "snowfall", *[f"snowfall_member0{i}" for i in range(1, 5)]}
-                data["hourly"] = {k: v for k, v in data["hourly"].items() if k in keep}
+                for pt in data if isinstance(data, list) else [data]:  # 3 bands or 1
+                    pt["hourly"] = {k: v for k, v in pt["hourly"].items() if k in keep}
                 return httpx.Response(200, json=data)
             return resp
         if public is not None and "open-meteo.com" in str(req.url.host):
@@ -297,7 +298,7 @@ def test_budget_with_local_ensembles(tmp_path: Path) -> None:
     loc, cfg = seed()["crystal"], config()
     full = public_daily_weight(loc, cfg)
     assert public_daily_weight(loc, cfg, cfg.ensembles) == 0
-    gefs = ensemble_request(loc, "gfs_seamless").weight * len(cfg.schedule.ensemble_runs_utc)
+    gefs = ensemble_request(loc, "gfs_seamless").weight * len(cfg.schedule.runs_for("gfs_seamless"))
     assert public_daily_weight(loc, cfg, ["gfs_seamless"]) == pytest.approx(full - gefs, abs=0.1)
 
     now = datetime.now(UTC)

@@ -637,6 +637,10 @@
         "budget": {
           "type": "integer"
         },
+        "ensembles_available": {
+          "default": 0.0,
+          "type": "number"
+        },
         "ensembles_local": {
           "default": [],
           "items": {
@@ -664,6 +668,25 @@
         },
         "public_used_today": {
           "type": "number"
+        },
+        "tier": {
+          "default": 1,
+          "type": "integer"
+        },
+        "tier_fits": {
+          "default": true,
+          "type": "boolean"
+        },
+        "tier_label": {
+          "default": "",
+          "type": "string"
+        },
+        "tiers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TierOut"
+          },
+          "type": "array"
         },
         "total": {
           "type": "number"
@@ -6552,6 +6575,26 @@
         "daylight_s"
       ],
       "title": "SunDay",
+      "type": "object"
+    },
+    "TierOut": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "n": {
+          "type": "integer"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "label",
+        "weight"
+      ],
+      "title": "TierOut",
       "type": "object"
     },
     "TreelineRule": {

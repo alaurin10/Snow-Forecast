@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from snowwatch import jobs, overlays
 from snowwatch.api.auth import Owner
+from snowwatch.budget import ensemble_weight
+from snowwatch.budget import plan as budget_plan
 from snowwatch.config import get_forecast_config
 from snowwatch.ensembles import label, local_systems
 from snowwatch.http import Fetcher
@@ -20,7 +22,7 @@ from snowwatch.locations.resolve import ResolveIn, ResolveOut, resolve
 from snowwatch.models import Location
 from snowwatch.overlays import OverlayFile
 from snowwatch.settings import Settings
-from snowwatch.sources.openmeteo import local_daily_weight, public_daily_weight
+from snowwatch.sources.openmeteo import local_daily_weight
 from snowwatch.store import repo
 from snowwatch.store.db import connect
 
@@ -52,6 +54,12 @@ class SaveOut(BaseModel):
     job_id: int | None
 
 
+class TierOut(BaseModel):
+    n: int
+    label: str
+    weight: float  # public ensembles a day at this tier, for the active locations
+
+
 class BudgetOut(BaseModel):
     """Estimated daily Open-Meteo use. `per_location` and `total` count against the public
     daily limit (`budget`): everything without a self-hosted server, only ensembles with
@@ -69,6 +77,13 @@ class BudgetOut(BaseModel):
     # Ensemble systems the self-hosted server answers now (OPEN_METEO_ENSEMBLES=local,
     # run fresh), free: GEFS, ECMWF ENS, GEPS.
     ensembles_local: list[str] = []
+    # The ensemble budget planner (milestone 4): the tier in use for the systems on the
+    # public API, what it costs, what's available, and every tier's cost.
+    tier: int = 1
+    tier_label: str = ""
+    tier_fits: bool = True
+    ensembles_available: float = 0.0
+    tiers: list[TierOut] = []
 
 
 class LookupStatus(BaseModel):
@@ -222,9 +237,17 @@ def make_admin_router() -> APIRouter:
         cfg = get_forecast_config()
         locs = service.list_locations(conn)
         local_ens = local_systems(settings, cfg.ensembles)
-        ens = {loc.id: public_daily_weight(loc, cfg, local_ens) for loc in locs}
-        fc = {loc.id: local_daily_weight(loc, cfg) for loc in locs}
         local = settings.local_open_meteo
+        public = [sy for sy in cfg.ensembles if sy not in local_ens]
+        plan = budget_plan(
+            locs,
+            cfg,
+            budget=settings.open_meteo_daily_budget,
+            public=public,
+            local_forecasts=local,
+        )
+        ens = {loc.id: ensemble_weight([loc], cfg, plan.tier, public) for loc in locs}
+        fc = {loc.id: local_daily_weight(loc, cfg) for loc in locs}
         per = {k: round(ens[k] + (0.0 if local else fc[k]), 1) for k in ens}
         return BudgetOut(
             per_location=per,
@@ -237,6 +260,11 @@ def make_admin_router() -> APIRouter:
             forecasts_total=round(sum(fc.values()), 1),
             public_used_today=repo.usage_today(conn).public_weight,
             ensembles_local=[label(sy) for sy in local_ens],
+            tier=plan.tier.n,
+            tier_label=plan.tier.label,
+            tier_fits=plan.fits,
+            ensembles_available=plan.available,
+            tiers=[TierOut(n=t.n, label=t.label, weight=w) for t, w in plan.weights],
         )
 
     return r
