@@ -391,6 +391,35 @@ def test_layers_are_drawn_blended_and_kept_as_numbers(
     assert again["layers"] == ix["layers"]
 
 
+def test_temperature_and_clouds_run_on_to_16_days(
+    tmp_path: Path, sources: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past GDPS's 240 h (milestone 4B), GFS every 6 h to 384 h in both countries, with
+    NBM over it in the US to 264 h."""
+    from tests.test_gfs_map import FakeGfs  # -1 °C on its 500 m ground, 70% cloud
+
+    monkeypatch.setattr(Renderer, "_gfs", lambda self, region: FakeGfs(T0, region))
+    out = tmp_path / "precip"
+    lay = Renderer(out, LayersNet(), now=lambda: NOW).layers(REGION)["layers"]
+    ahead = [f for f in lay["clouds"]["frames"] if f["kind"] == "forecast"]
+    far = [f for f in ahead if f["t"] > T0 + 240 * H]
+    assert [f["t"] - T0 for f in far] == [h * H for h in range(246, 385, 6)]
+    assert far[0]["src"] == {"south": "nbm", "north": "gfs"}
+    assert far[-1]["src"] == {"south": "gfs", "north": "gfs"} and far[-1]["runs"] == {"gfs": T0}
+    top, bottom = 0, REGION.height - 1
+    assert probe_at(out, far[0]["file"], top, 5)[0] == pytest.approx(70, abs=0.5)
+    assert probe_at(out, far[0]["file"], bottom, 5)[0] == pytest.approx(10, abs=0.5)  # NBM
+    assert probe_at(out, far[-1]["file"], bottom, 5)[0] == pytest.approx(70, abs=0.5)
+    # The temperature keeps the clouds' timeline. GFS's -1 °C at its 500 m ground is
+    # 2.25 °C at sea level and -4.25 °C on the real 1,000 m ground.
+    tt = lay["temp"]["frames"]
+    assert [f["t"] for f in tt] == [f["t"] for f in ahead]
+    assert tt[-1]["src"] == {"south": "gfs", "north": "gfs"}
+    assert probe_at(out, tt[-1]["file"], top, 5).tolist() == pytest.approx([-4.25, 2.25], abs=0.05)
+    # Gusts, ridge wind and the snow level aren't GFS's: they stop where they did.
+    assert max(f["t"] for f in lay["snowlevel"]["frames"]) == T0 + 84 * H
+
+
 def test_forecast_clouds_are_kept_as_numbers_with_their_heights(
     tmp_path: Path, sources: dict[str, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:

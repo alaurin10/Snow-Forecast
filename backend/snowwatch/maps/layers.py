@@ -47,6 +47,7 @@ from snowwatch.maps.geomet import (
 from snowwatch.maps.palette import DEPTH, SNOWLEVEL, SNOWLINE, TEMP, TOTAL, WIND
 from snowwatch.maps.region import Region, spread, stitch
 from snowwatch.maps.sources import gibs, nohrsc, snodas
+from snowwatch.maps.sources.gfs import Gfs
 from snowwatch.maps.sources.nbm import Nbm
 
 if TYPE_CHECKING:
@@ -517,6 +518,11 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
             continue
         start = times[-1] if times else now
         times += [t for t in run.times if t > start and t % (step * HOUR) == 0]
+    # Days 11–16 (milestone 4B): GFS every 6 h past GDPS, in both countries.
+    far: Gfs | None = r._gfs(region)
+    far_from = times[-1] if times else now
+    if far is not None:
+        times += far.times(far_from)
     us: Nbm | None = r._nbm(region)
     prev = _reuse(r, old)
     w_hrdps = r._hrdps_weight(region) if hr is not None else None
@@ -533,12 +539,13 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
             lead = us.lead(t) if us is not None else 0
             use_n = us is not None and 1 <= lead <= 264
             use_z = use_n and grounded and lead <= CLOUD_HEIGHTS_TO_H
+            use_g = base is None and far is not None and t > far_from
             key = "|".join(
                 [
                     f"cloudf@{CLOUD_DRAWING}",
                     str(t),
                     f"h:{hr.ref}" if use_h and hr else "-",
-                    f"b:{base.ref}" if base else "-",
+                    f"b:{base.ref}" if base else (f"g:{far.run}" if use_g and far else "-"),
                     f"n:{us.run}:{lead}" if use_n and us else "-",
                     "z" if use_z else "-",
                     region.key,
@@ -572,6 +579,12 @@ def cloud_forecast(r: Renderer, region: Region, old: list[LayerFrame]) -> list[L
                     layers.append(Layer(model, v, 1.0))
                     north = north or model
                     runs[model] = _ts(base.ref)
+            elif use_g and far is not None:
+                v = far.cloud_pct(t)
+                if v is not None:
+                    layers.append(Layer("gfs", v, 1.0))
+                    north = "gfs"
+                    runs["gfs"] = far.run
             if not north:
                 return None  # try again next time rather than draw only the US
             src["north"] = north
@@ -628,6 +641,11 @@ def temperature(r: Renderer, region: Region, old: list[LayerFrame]) -> list[Laye
             continue
         start = times[-1] if times else now
         times += [t for t in run.times if t > start and t % (step * HOUR) == 0]
+    # Days 11–16 (milestone 4B): GFS every 6 h past GDPS, in both countries.
+    far: Gfs | None = r._gfs(region)
+    far_from = times[-1] if times else now
+    if far is not None:
+        times += far.times(far_from)
     us: Nbm | None = r._nbm(region)
     prev = _reuse(r, old)
     w_hrdps = r._hrdps_weight(region) if hr is not None else None
@@ -641,12 +659,13 @@ def temperature(r: Renderer, region: Region, old: list[LayerFrame]) -> list[Laye
                 base = gd
             lead = us.lead(t) if us is not None else 0
             use_n = us is not None and 1 <= lead <= 264
+            use_g = base is None and far is not None and t > far_from
             key = "|".join(
                 [
                     f"temp@{TEMP_DRAWING}",
                     str(t),
                     f"h:{hr.ref}" if use_h and hr else "-",
-                    f"b:{base.ref}" if base else "-",
+                    f"b:{base.ref}" if base else (f"g:{far.run}" if use_g and far else "-"),
                     f"n:{us.run}:{lead}" if use_n and us else "-",
                     region.key,
                 ]
@@ -679,6 +698,13 @@ def temperature(r: Renderer, region: Region, old: list[LayerFrame]) -> list[Laye
                     layers.append(Layer(model, v, 1.0))
                     north = north or model
                     runs[model] = _ts(base.ref)
+            elif use_g and far is not None:
+                gc, g_ground = far.temp_c(t), far.ground_m()
+                if gc is not None and g_ground is not None:
+                    gc = np.where((gc >= TEMP_RANGE_C[0]) & (gc <= TEMP_RANGE_C[1]), gc, np.nan)
+                    layers.append(Layer("gfs", gc + g_ground * LAPSE_C_PER_M, 1.0))
+                    north = "gfs"
+                    runs["gfs"] = far.run
             if not north:
                 return None  # try again next time rather than draw only the US
             src["north"] = north

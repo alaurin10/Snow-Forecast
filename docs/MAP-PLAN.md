@@ -1567,6 +1567,35 @@ snow level, and the drape's white and pink were washed out by the bands beneath.
   this change, or no WebGL 2), in the same three colours.
 - The key reads "Snow · Mix · Rain at the ground", and zoomed in "snow above X at the centre".
 
+## Days 11–16 (milestone 4B of OPEN-METEO-PLAN.md, 28 Nov 2026)
+
+The location pages went to 16 days, and the map follows where it can. Past GDPS's 240 h
+(Canada) and NBM's 264 h (US), NOAA's GFS 0.25° (`maps/sources/gfs.py`) carries the
+precipitation loop, the temperature and the forecast cloud cover on to 384 h, every 6 h,
+in both countries, with NBM over it in the US while NBM lasts. Days 11–16 are a rough
+guide: GFS is a 25 km model, put on the box's grid by bilinear interpolation, so its
+softness is honest rather than smoothed over.
+
+- **Precipitation loop:** 6-hourly frames to 384 h (`render._outlook`), 24 more on the
+  fine palette like the 6-hour frames before them, `src` `{"north": "gfs", "south":
+  "nbm" | "gfs"}`. Rate as the 6-hour average; the type from how much of the six hours
+  had snow (`CSNOW`).
+- **Snow totals:** windows of 14 days and "to the end" (~15.8 days), and the numbers for
+  the map every 24 h from 264 h to 384 h: the 10-day total plus GFS's snow from there.
+  Plain totals only: the snow by elevation stops at 10 days.
+- **Temperature and forecast clouds:** every 6 h to 384 h (GFS's 2 m temperature taken to
+  sea level from its own ground and back to the real one; its 6-hour average cloud
+  cover).
+- **Not extended:** gusts, ridge wind and the snow level, which stop at ~84 h for want of
+  sources, and the 3D clouds' heights (to 84 h).
+- **The index** gains `less_certain_from` (a time, 10 days from the hour it was written)
+  for the timeline's second "Less certain" mark, and a GFS attribution line.
+- Cost, measured over the default box: 52 MB per GFS run (two a day), ~23 s to fetch and
+  decode, ~11 s a pass from the cache.
+
+The timeline, the totals slider and the browser's loading of days 11–16 are PR 4 of that
+milestone.
+
 ## Files
 
 - New: `backend/snowwatch/maps/{region,geomet,palette,grib,render,frames,totals,fields,bins,terrain_totals,tiles_render,layers,point,sat}.py`,

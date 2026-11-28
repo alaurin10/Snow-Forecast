@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **The map's data to 16 days** (milestone 4B). Past 10 days NOAA's GFS carries the
+  precipitation loop, the temperature and the forecast cloud cover on to 16 days, every
+  6 hours, in both countries (NBM stays over it in the US to day 11). Snow totals gain
+  14 days and "to the end", and the map's snow numbers go to 16 days. The map's index
+  says where the second "Less certain" mark goes. The map's own controls for days 11–16
+  come in the next PR.
 - **16 days on the location pages** (milestone 4B). The forecast chart's 15-day view
   runs to the end of the forecast with a second "Less certain →" mark 10 days out (bars
   and lines look the same throughout). The day by day lists 16 days, the Calendar shows

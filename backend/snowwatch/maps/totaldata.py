@@ -71,6 +71,8 @@ STEP_WINDOWS = (
     *range(60, 121, 12),
     *range(144, 241, 24),
 )
+# And every 24 h on to 16 days (milestone 4B), from GFS past Canada's and NBM's reach.
+FAR_STEPS = tuple(range(264, 385, 24))
 
 
 # Temperature codes: 1..255 for TEMP_MIN, TEMP_MIN + TEMP_STEP … (−70 to 57 °C), 0 none.
