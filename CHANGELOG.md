@@ -7,6 +7,12 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Richer weather on the page** (milestone 3, UI). With the self-hosted server: wet-bulb
+  and freezing rain in the band table and period details, how the snow level was found,
+  the column snow ratio, a "Sun (est.)" factor in the avalanche-weather outlook, fog,
+  rime and corn-window rows in touring weather, a Model snowpack card on the Observed
+  tab (every spot gets one), and Freezing rain as a push alert choice. The freezing-level
+  chart now draws the snow level as a dashed line.
 - **Richer weather with the self-hosted server** (milestone 3, backend). With
   `OPEN_METEO_URL` set, each run asks the server for humidity, wet-bulb, radiation,
   model snow depth and seven pressure levels with humidity (the public API keeps

@@ -24,6 +24,8 @@ export function flagTitle(f: Flag): string {
 			return f.detail === 'below_base' ? 'Snow to the base' : 'Snow level rising';
 		case 'wind_hold':
 			return `Wind holds ${day(f.date)}`;
+		case 'freezing_rain':
+			return `Freezing rain ${day(f.date)}`;
 		case 'best_day':
 			return `Best day ${day(f.date)}`;
 		case 'wind_loading':
@@ -65,6 +67,8 @@ export function flagText(f: Flag, units: UnitSystem): string {
 				: `The snow level rises to ${elevation(v, units)}, above mid-mountain (${elevation(v2, units)}), by ${day(f.date)}.`;
 		case 'wind_hold':
 			return `Summit gusts to ${speed(v, units)} during lift hours ${day(f.date)}: lift holds likely.`;
+		case 'freezing_rain':
+			return `Freezing rain likely ${day(f.date)} at the ${f.detail === 'summit' ? 'summit' : f.detail === 'mid' ? 'middle' : 'base'} (${v ?? 0} h): warm air aloft over freezing air below. Expect ice on roads and snow.`;
 		case 'best_day':
 			return `${day(f.date)} rates ${f.detail ?? 'best'} for skiing this week.`;
 		case 'wind_loading':

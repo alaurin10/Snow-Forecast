@@ -12,12 +12,13 @@ local) is next. **Milestone 2 built** (27 Nov 2026): backend PR, `GET /api/spot`
 frontend PR, the spot page (`/spot`, sharing `LocationView` with locations), "Full
 forecast here" on the map, recent spots, "Save as location", offline copies, and e2e
 tests. On the mini PC it switches on with `OPEN_METEO_URL`; timing it there (≤ 3 s warm)
-is the owner's check. **Milestone 3, PR 1 built** (27 Nov 2026): the richer variables
-from the server (the public API keeps the lean lists, also on a fallback), the wet-bulb
-snow level, precipitation type and freezing rain (flag and push alert), the column
-snow ratio scored as `cons_col`, ridge wind between six levels, sun on slopes (the
-outlook's sun factor, corn windows), rime and fog, the models' snowpack, and fixtures
-captured from the server (`live-20261127`); the UI PR is next. Milestones 4–5 are
+is the owner's check. **Milestone 3 built** (27 Nov 2026): PR 1, the richer variables from the server
+(the public API keeps the lean lists, also on a fallback), the wet-bulb snow level,
+precipitation type and freezing rain (flag and push alert), the column snow ratio
+scored as `cons_col`, ridge wind between six levels, sun on slopes, rime and fog, the
+models' snowpack, and fixtures captured from the server (`live-20261127`); PR 2, the
+UI for them. Choosing the headline depth method from `cons_col`'s record is the
+owner's, after a few weeks. Milestones 4–5 are
 planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -919,21 +920,21 @@ analysis, then UI.**
     refreeze
 - [x] **Ridge wind** (`ridge.py`): interpolate between the two levels that bracket the
   ridge height, out of six.
-- [ ] **Model snowpack:** model `snow_depth` on the Observed tab where there's no station
+- [x] **Model snowpack:** model `snow_depth` on the Observed tab where there's no station
   (every spot), and as a line next to the station's depth where there is one. (PR 1:
-  `Snapshot.snowpack`; the Observed tab shows it in PR 2.)
+  `Snapshot.snowpack`; PR 2: `observed/ModelSnowpack.svelte`.)
 - [x] **Humidity in touring weather** (`backcountry.sky`): rime/icing (high humidity
   between −10 and 0 °C at the ridge) and fog/flat light (humidity with low cloud and
   visibility).
 
 ### UI
-- [ ] New rows in `frontend/src/lib/components/BandTable.svelte`,
+- [x] New rows in `frontend/src/lib/components/BandTable.svelte`,
   `frontend/src/lib/charts/PeriodSheet.svelte` and `DaySheet.svelte` (wet-bulb, how the
   snow level was found, freezing rain).
-- [ ] A snow-level line on `frontend/src/lib/charts/ForecastChart.svelte`.
-- [ ] The sun factor in `frontend/src/lib/backcountry/`; model snowpack in
+- [x] A snow-level line on `frontend/src/lib/charts/ForecastChart.svelte`.
+- [x] The sun factor in `frontend/src/lib/backcountry/`; model snowpack in
   `frontend/src/lib/observed/`.
-- [ ] Regenerate types.
+- [x] Regenerate types.
 
 ### Tests
 - [x] Unit tests: wet-bulb zero height, the warm layer, column ratio, solar geometry
@@ -971,6 +972,16 @@ Run against the pinned server in a cloud sandbox ([Appendix A](#appendix-a-runni
   on a known east-wind day at Snoqualmie is left for the mini PC.
 
 Choices made while building, beyond the checklist:
+- (PR 2, the UI) Everything new shows only when the snapshot has the data, so installs
+  without a server look as before: the band table's wet-bulb and freezing-rain columns,
+  the period sheet's wet-bulb, how the snow level was found, freezing rain or sleet and
+  the column ratio; the freezing-level chart's dashed snow-level line (always, since
+  every snapshot has a snow level); a fifth outlook factor, "Sun (est.)", with the
+  sunniest aspect; fog, rime and corn rows in the touring table; the Model snowpack
+  card on the Observed tab (station depths as dots beside it); and "Freezing rain" in
+  push alert choices. The day sheet is the forecast chart, so it gains the snow-level
+  line with it. The e2e fixtures are lean, so the new rows are covered by unit tests,
+  not e2e.
 - The richer lists are asked for whenever a server is configured (`rich` on the request
   builders, from `Fetcher.local_url`), and each rich request carries its lean twin
   (`Request.lean`), which a public fallback sends instead: the rich multi-model request

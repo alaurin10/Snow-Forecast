@@ -6,6 +6,10 @@
 	let { bands, units }: { bands: BandOut[]; units: UnitSystem } = $props();
 	const c = $derived(converters(units));
 	const f = (v: number | null, d = 0) => (v === null ? '–' : v.toFixed(d));
+	// Milestone 3 (a self-hosted server): the wet-bulb now and freezing rain in 5 days.
+	const rich = $derived(bands.some((b) => (b.hourly.wetbulb_c ?? []).length > 0));
+	const frzHours = (b: BandOut) =>
+		(b.hourly.frz ?? []).slice(0, 120).filter((k) => k === 'freezing_rain').length;
 </script>
 
 <div class="table-wrap" use:hscroll>
@@ -19,6 +23,10 @@
 				<th>Next 24 h</th>
 				<th>Next 5 days</th>
 				<th>Days 6–10</th>
+				{#if rich}
+					<th>Wet-bulb</th>
+					<th>Freezing rain</th>
+				{/if}
 			</tr>
 		</thead>
 		<tbody>
@@ -31,6 +39,10 @@
 					<td>{f(c.snow(b.stats.next24_cm), c.snowDigits)} {c.snowUnit}</td>
 					<td><strong>{f(c.snow(b.stats.next5_cm), c.snowDigits)} {c.snowUnit}</strong></td>
 					<td>{f(c.snow(b.stats.d6_10_cm), c.snowDigits)} {c.snowUnit}</td>
+					{#if rich}
+						<td>{f(c.temp(b.hourly.wetbulb_c?.[0] ?? null))}{c.tempUnit}</td>
+						<td>{frzHours(b) ? `${frzHours(b)} h in 5 days` : '–'}</td>
+					{/if}
 				</tr>
 			{/each}
 		</tbody>

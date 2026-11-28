@@ -238,3 +238,21 @@ describe('publishedDanger', () => {
 		expect(publishedDanger(view('current'), '2026-11-06')).toBeNull();
 	});
 });
+
+describe('sun factor (self-hosted server)', () => {
+	it('shows only with the radiation forecast, worded as an estimate', () => {
+		const sunny = day('2026-03-10', {
+			sun_kwh: { N: 1.2, E: 4.1, S: 6.8, W: 3.9 },
+			levels: { snow: 0, wind: 0, rain: 0, warm: 0, sun: 2 },
+			stress: 2
+		});
+		expect(activeFactors(sunny)).toEqual(['sun']);
+		expect(cell(sunny, 'sun', 'metric')).toEqual({
+			value: '6.8 kWh/m²',
+			detail: 'S slopes',
+			level: 2
+		});
+		expect(drivers(sunny, 'metric')).toEqual(['strong sun on S slopes (estimate)']);
+		expect(activeFactors(day('2026-03-10'))).toEqual([]);
+	});
+});

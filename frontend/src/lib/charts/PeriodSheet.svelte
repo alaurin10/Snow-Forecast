@@ -87,7 +87,25 @@
 			<dt>High / low</dt>
 			<dd class="num">{temperature(p.tmax_c, units)} / {temperature(p.tmin_c, units)}</dd>
 			<dt>Lowest snow level</dt>
-			<dd class="num">{elevation(p.snow_level_min_m, units)}</dd>
+			<dd class="num">
+				{elevation(p.snow_level_min_m, units)}{#if p.snow_level_how}<span class="faint">
+						· {p.snow_level_how === 'wb' ? 'from the wet-bulb' : 'from the freezing level'}</span
+					>{/if}
+			</dd>
+			{#if p.wetbulb_min_c != null && p.wetbulb_max_c != null}
+				<dt>Wet-bulb</dt>
+				<dd class="num">
+					{temperature(p.wetbulb_min_c, units)} to {temperature(p.wetbulb_max_c, units)}
+				</dd>
+			{/if}
+			{#if p.frz}
+				<dt>{p.frz === 'freezing_rain' ? 'Freezing rain' : 'Sleet'}</dt>
+				<dd class="num">{p.frz_h} h likely</dd>
+			{/if}
+			{#if p.slr_col != null}
+				<dt>Column snow ratio</dt>
+				<dd class="num">{p.slr_col}:1</dd>
+			{/if}
 			<dt>Wind / gusts</dt>
 			<dd class="num">{speed(p.wind_max_kmh, units)} / {speed(p.gust_max_kmh, units)}</dd>
 			<dt>Cloud / chance of precip</dt>

@@ -6,14 +6,24 @@ import type { AvalancheView, OutlookDay, OutlookSteps } from '../types.gen';
 import { weekday } from '../time';
 import { cmToIn, elevation, kmhToMph, mmToIn, snow, speed, water, type UnitSystem } from '../units';
 
-export type Factor = 'snow' | 'wind' | 'rain' | 'warm';
+export type Factor = 'snow' | 'wind' | 'rain' | 'warm' | 'sun';
 export const FACTORS: readonly Factor[] = ['snow', 'wind', 'rain', 'warm'] as const;
 export const FACTOR_NAMES: Record<Factor, string> = {
 	snow: 'Snow',
 	wind: 'Wind',
 	rain: 'Rain',
-	warm: 'Warming'
+	warm: 'Warming',
+	sun: 'Sun (est.)'
 };
+/** The factors a day can show: sun only with the radiation forecast (a self-hosted server). */
+export const factorsFor = (d: OutlookDay): Factor[] =>
+	d.sun_kwh ? [...FACTORS, 'sun'] : [...FACTORS];
+
+/** The sunniest 35° aspect and its sunshine (kWh/m²) in the day. */
+export function sunniest(d: OutlookDay): [string, number] | null {
+	const got = Object.entries(d.sun_kwh ?? {}).filter((e): e is [string, number] => e[1] != null);
+	return got.length ? got.reduce((a, b) => (b[1] > a[1] ? b : a)) : null;
+}
 
 /** Weather loading, 0–3. Deliberately not the danger scale's words. */
 export const STRESS_WORDS = ['Little', 'Some', 'Strong', 'Very strong'] as const;
@@ -40,7 +50,15 @@ export interface Cell {
 
 /** One factor of one day, worded. */
 export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
-	const level = d.levels[f];
+	const level = d.levels[f] ?? 0;
+	if (f === 'sun') {
+		const top = sunniest(d);
+		return {
+			value: top ? `${top[1].toFixed(1)} kWh/m²` : '–',
+			detail: top ? `${top[0]} slopes` : '',
+			level
+		};
+	}
 	if (f === 'snow') {
 		const more = (d.storm_cm ?? 0) > (d.new_cm ?? 0) + 0.5;
 		return {
@@ -80,7 +98,8 @@ export function cell(d: OutlookDay, f: Factor, units: UnitSystem): Cell {
 }
 
 /** The factors pushing on the snowpack that day, in their usual order. */
-export const activeFactors = (d: OutlookDay): Factor[] => FACTORS.filter((f) => d.levels[f] > 0);
+export const activeFactors = (d: OutlookDay): Factor[] =>
+	factorsFor(d).filter((f) => (d.levels[f] ?? 0) > 0);
 
 /**
  * What each level takes, per factor, in the viewer's units: the key's table. Rounded
@@ -88,7 +107,8 @@ export const activeFactors = (d: OutlookDay): Factor[] => FACTORS.filter((f) => 
  */
 export function thresholds(
 	st: OutlookSteps,
-	units: UnitSystem
+	units: UnitSystem,
+	sun = false
 ): { factor: Factor; steps: string[] }[] {
 	const imp = units === 'imperial';
 	const depth = (cm: number) => (imp ? `${Math.round(cmToIn(cm))} in` : `${Math.round(cm)} cm`);
@@ -112,7 +132,15 @@ export function thresholds(
 			steps: st.rise_c.map((v, i) =>
 				i < st.thaw_h.length ? `${rise(v)}, or ${st.thaw_h[i]} h thaw` : rise(v)
 			)
-		}
+		},
+		...(sun && st.sun_kwh?.length
+			? [
+					{
+						factor: 'sun' as Factor,
+						steps: st.sun_kwh.map((v) => `${v} kWh/m² on the sunniest slope`)
+					}
+				]
+			: [])
 	];
 }
 
@@ -148,6 +176,9 @@ export function drivers(d: OutlookDay, units: UnitSystem): string[] {
 				: `${degrees(d.temp_rise_c ?? 0, units)} of warming in 24 h`
 		]);
 	}
+	const sun = lv.sun ?? 0;
+	const top = sunniest(d);
+	if (sun && top) out.push([sun, `strong sun on ${top[0]} slopes (estimate)`]);
 	return out.sort((a, b) => b[0] - a[0]).map(([, text]) => text);
 }
 
