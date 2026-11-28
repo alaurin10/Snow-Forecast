@@ -6,6 +6,7 @@ import ctypes
 import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -16,19 +17,28 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from snowwatch import avalanche, avalanche_zones, jobs, push
+from snowwatch import avalanche, avalanche_zones, jobs, modelwatch, push
 from snowwatch.config import ForecastConfig
 from snowwatch.http import Fetcher, fetcher_for, prune_raw
 from snowwatch.locations.service import list_locations, sync_webcams_yaml
 from snowwatch.models import Location
-from snowwatch.pipeline import run_all
+from snowwatch.pipeline import RunMemo, run_all
 from snowwatch.settings import Settings
 from snowwatch.store import repo, retention
 from snowwatch.store.backup import backup, vacuum
 from snowwatch.store.db import connect, migrate
 
 log = logging.getLogger("snowwatch.worker")
-RUN_TIME_BUDGET_S = 45 * 60
+# Past this, retries stop so an upstream outage can't hold the lock for hours. A full
+# run of 50 locations from a self-hosted server takes a few minutes (milestone 4), and
+# data-driven runs cover a few locations at a time; one-at-a-time runs against the
+# public API (20 s apart) take ~10 minutes for 25.
+RUN_TIME_BUDGET_S = 20 * 60
+# With data-driven refresh, the avalanche forecasts are refreshed after a run at most
+# this often (the avalanche_utc checks still run too).
+AVALANCHE_EVERY_S = 3 * 3600
+# Queued Manage jobs are looked for between a run's locations this often.
+JOBS_BETWEEN_S = 10.0
 
 
 def http_ping(url: str) -> None:
@@ -57,6 +67,11 @@ class Worker:
         self._nwac_warned = False
         self._ping = ping
         self._webcams_notes: tuple[tuple[str, ...], tuple[tuple[str, str], ...]] = ((), ())
+        self.memo = RunMemo()
+        self.planner = modelwatch.Planner()
+        self._watch_errors: dict[str, str] = {}
+        self._avalanche_at = 0.0  # time.monotonic() of the last refresh after a run
+        self._jobs_at = 0.0
         conn = connect(settings.database)
         applied = migrate(conn)
         if applied:
@@ -64,6 +79,12 @@ class Worker:
         runs, jobs_failed = retention.recover_interrupted(conn)
         if runs or jobs_failed:
             log.warning("marked %d interrupted runs and %d jobs as failed", runs, jobs_failed)
+        self.planner.last_run.update(repo.last_runs(conn))
+
+    @property
+    def data_refresh(self) -> bool:
+        """Runs follow the models' updates (schedule.refresh: data), only with a server."""
+        return self.cfg.schedule.refresh == "data" and self.settings.local_open_meteo
 
     def heartbeat(self) -> None:
         """Show the scheduler is alive (separate from the run lock, so a long run counts)."""
@@ -89,12 +110,21 @@ class Worker:
             time_budget_s=RUN_TIME_BUDGET_S,
         )
 
-    def full_run(self, ensembles: bool) -> None:
+    def full_run(self, ensembles: bool | None, only: list[str] | None = None) -> None:
         with self.lock, self._fetcher() as fetcher:
             conn = connect(self.settings.database)
+            started = datetime.now(UTC)
             run_id, results = run_all(
-                conn, fetcher, self.cfg, ensembles=ensembles, spacing_s=self.settings.site_spacing_s
+                conn,
+                fetcher,
+                self.cfg,
+                ensembles=ensembles,
+                only=only,
+                spacing_s=self.settings.site_spacing_s,
+                memo=self.memo,
+                between=self._jobs_between,
             )
+            self.planner.ran([r.location_id for r in results], started)
             ok = sum(r.ok for r in results)
             if ok:
                 self.ping(self.settings.healthchecks_run_url)
@@ -109,8 +139,66 @@ class Worker:
                 fetcher.local_seconds,
                 fetcher.fallbacks,
             )
-            avalanche_alerts = self._avalanche(conn, fetcher)
+            avalanche_alerts: push.Found | None = None
+            if only is None or time.monotonic() - self._avalanche_at >= AVALANCHE_EVERY_S:
+                self._avalanche_at = time.monotonic()
+                avalanche_alerts = self._avalanche(conn, fetcher)
             self._notify(conn, run_id, avalanche_alerts)
+
+    def watch_models(self) -> None:
+        """Read each model's latest run (modelwatch), keep it in `model_runs`, and with
+        data-driven refresh queue the locations a new run concerns. Never raises."""
+        try:
+            with self._fetcher() as fetcher:
+                runs, errors = modelwatch.read_runs(
+                    lambda url: fetcher.get_json(url, source="open-meteo-data")
+                )
+            if errors != self._watch_errors:  # said once, not every few minutes
+                for folder, why in sorted(errors.items()):
+                    log.warning("model watcher: %s: %s", folder, why)
+                self._watch_errors = errors
+            conn = connect(self.settings.database)
+            repo.save_model_runs(
+                conn,
+                {
+                    f: (
+                        r.init.isoformat(timespec="seconds") if r.init else None,
+                        r.available.isoformat(timespec="seconds") if r.available else None,
+                    )
+                    for f, r in runs.items()
+                },
+            )
+            uses = {
+                loc.id: modelwatch.folders_for(self.cfg.models_for(loc.country))
+                for loc in list_locations(conn)
+            }
+            advanced = self.planner.observe(runs, uses, datetime.now(UTC))
+            if advanced:
+                log.info(
+                    "new model runs: %s",
+                    ", ".join(f"{f} {runs[f].init:%d %Hz}" for f in advanced if runs[f].init),
+                )
+        except Exception:
+            log.exception("model watcher failed")
+
+    def data_run(self) -> None:
+        """With data-driven refresh: run the locations whose time has come (a model they
+        use has a new run, at most every 40 min; or 3 h have passed)."""
+        if not self.data_refresh:
+            return
+        now = datetime.now(UTC)
+        active = [loc.id for loc in list_locations(connect(self.settings.database))]
+        reasons = self.planner.reasons(active)
+        due = self.planner.take_due(active, now)
+        if not due:
+            return
+        log.info(
+            "data run: %d of %d locations (%s)",
+            len(due),
+            len(active),
+            ", ".join(reasons) or "3 h since the last run",
+        )
+        self.full_run(ensembles=None, only=due)
 
     def _notify(
         self, conn: sqlite3.Connection, run_id: int, extra: push.Found | None = None
@@ -221,38 +309,52 @@ class Worker:
 
     def process_jobs(self) -> None:
         if not self.lock.acquire(blocking=False):
-            return  # a scheduled run is in progress; jobs wait
+            return  # a run is in progress: it serves the queue between its locations
         try:
-            conn = connect(self.settings.database)
-            while (job := jobs.claim_next(conn)) is not None:
-                error = None
-                try:
-                    if job["kind"] == "pull" and job["location_id"]:
-                        with self._fetcher() as fetcher:
-                            run_id, results = run_all(
-                                conn,
-                                fetcher,
-                                self.cfg,
-                                kind="job",
-                                only=[job["location_id"]],
-                                ensembles=None,
-                                spacing_s=0,
-                            )
-                        failed = [e for r in results if not r.ok for e in r.errors]
-                        error = "; ".join(failed) or None
-                        with self._fetcher() as fetcher:
-                            avalanche_alerts = self._avalanche(conn, fetcher)
-                        self._notify(conn, run_id, avalanche_alerts)
-                    elif job["kind"] == "lookups":
-                        self.refresh_lookups(locked=True)
-                    else:
-                        error = f"unknown job kind {job['kind']!r}"
-                except Exception as e:
-                    log.exception("job %s failed", job["id"])
-                    error = f"{type(e).__name__}: {e}"
-                jobs.finish(conn, job["id"], error=error)
+            self._serve_jobs()
         finally:
             self.lock.release()
+
+    def _jobs_between(self) -> None:
+        """Between a run's locations (the run holds the lock): serve queued Manage jobs,
+        so adding a location doesn't wait for the whole run."""
+        if time.monotonic() - self._jobs_at < JOBS_BETWEEN_S:
+            return
+        self._jobs_at = time.monotonic()
+        self._serve_jobs()
+
+    def _serve_jobs(self) -> None:
+        """Every queued job, one after another. The caller holds the lock."""
+        conn = connect(self.settings.database)
+        while (job := jobs.claim_next(conn)) is not None:
+            error = None
+            try:
+                if job["kind"] == "pull" and job["location_id"]:
+                    with self._fetcher() as fetcher:
+                        run_id, results = run_all(
+                            conn,
+                            fetcher,
+                            self.cfg,
+                            kind="job",
+                            only=[job["location_id"]],
+                            ensembles=None,
+                            spacing_s=0,
+                            memo=self.memo,
+                        )
+                    self.planner.ran([r.location_id for r in results], datetime.now(UTC))
+                    failed = [e for r in results if not r.ok for e in r.errors]
+                    error = "; ".join(failed) or None
+                    with self._fetcher() as fetcher:
+                        avalanche_alerts = self._avalanche(conn, fetcher)
+                    self._notify(conn, run_id, avalanche_alerts)
+                elif job["kind"] == "lookups":
+                    self.refresh_lookups(locked=True)
+                else:
+                    error = f"unknown job kind {job['kind']!r}"
+            except Exception as e:
+                log.exception("job %s failed", job["id"])
+                error = f"{type(e).__name__}: {e}"
+            jobs.finish(conn, job["id"], error=error)
 
     def nightly(self) -> None:
         with self.lock:
@@ -260,8 +362,7 @@ class Worker:
             path = backup(conn, self.settings.backup_dir, today=datetime.now(UTC).date())
             log.info("backup written to %s", path)
             self.ping(self.settings.healthchecks_backup_url)
-            removed = prune_raw(self.settings.raw_dir)
-            log.info("pruned %d cached raw responses", removed)
+            self.prune_raw()
             from snowwatch.tiles import prune as prune_tiles
 
             max_bytes = self.settings.tiles_max_mb * 1_000_000
@@ -269,6 +370,12 @@ class Worker:
             log.info("pruned %d cached map tiles", removed)
             avalanche.prune(conn)
             log.info("retention: %s", retention.prune(conn))
+
+    def prune_raw(self) -> None:
+        """Raw responses older than http.RAW_KEEP_H (hourly: runs may be hourly)."""
+        removed = prune_raw(self.settings.raw_dir)
+        if removed:
+            log.info("pruned %d cached raw responses", removed)
 
     def _map_job(self, name: str) -> None:
         """Redraw one part of the map's pictures (only what changed) and update the index."""
@@ -519,15 +626,34 @@ def build_scheduler(worker: Worker) -> BlockingScheduler:
     cfg = worker.cfg.schedule
     sched = BlockingScheduler(timezone=UTC)
     opts = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 1800}
-    for t in cfg.runs_utc:
-        h, m = _hm(t)
+    # The model watcher runs either way: the Status page and snapshots show each model's
+    # run, and spots expire on it. Only data-driven refresh starts runs from it.
+    sched.add_job(
+        worker.watch_models,
+        IntervalTrigger(minutes=modelwatch.WATCH_MINUTES),
+        id="watch_models",
+        next_run_time=datetime.now(UTC),
+        **opts,
+    )
+    if worker.data_refresh:
         sched.add_job(
-            worker.full_run,
-            CronTrigger(hour=h, minute=m, timezone=UTC),
-            kwargs={"ensembles": t in cfg.ensemble_runs_utc},
-            id=f"run-{t}",
+            worker.data_run,
+            IntervalTrigger(minutes=1),
+            id="data_run",
+            next_run_time=datetime.now(UTC) + timedelta(seconds=30),
             **opts,
         )
+    else:
+        for t in cfg.runs_utc:
+            h, m = _hm(t)
+            sched.add_job(
+                worker.full_run,
+                CronTrigger(hour=h, minute=m, timezone=UTC),
+                kwargs={"ensembles": t in cfg.ensemble_runs_utc},
+                id=f"run-{t}",
+                **opts,
+            )
+    sched.add_job(worker.prune_raw, IntervalTrigger(hours=1), id="prune_raw", **opts)
     for t in cfg.avalanche_utc:
         h, m = _hm(t)
         sched.add_job(

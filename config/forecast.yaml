@@ -84,6 +84,11 @@ physics:
 verify_settled_ratio: 8
 
 schedule:
+  # "data" (with a self-hosted Open-Meteo server, OPEN_METEO_URL): each location runs a
+  # few minutes after a model it uses has a new run, at most every 40 minutes and at
+  # least every 3 hours (snowwatch/modelwatch.py). Without a server, or with "fixed",
+  # the runs below.
+  refresh: data
   # Every 3 hours. The global models update every 6–12 hours; the runs between catch
   # the hourly HRRR and NBM (US) and keep "now" fresh. Each run costs ~33 Open-Meteo
   # calls per location (`snowwatch budget` shows the daily total).

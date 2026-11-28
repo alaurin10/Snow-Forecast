@@ -8,7 +8,7 @@
 	import type { BandOut, Snapshot, TrendOut, VerificationOut } from '../types.gen';
 	import type { LoadState } from '../load';
 	import { confidenceNote, dayReads, trendRead, windowRead, type WindowRead } from '../confidence';
-	import { MODEL_NAMES, modelColor } from '../models';
+	import { MODEL_NAMES, modelColor, modelRunsLine } from '../models';
 	import { elevation, snow, snowNum, converters, type UnitSystem } from '../units';
 	import ModelAgreement from '../charts/ModelAgreement.svelte';
 	import ModelDays from '../charts/ModelDays.svelte';
@@ -76,6 +76,7 @@
 			: r.basis === 'models'
 				? 'across the models'
 				: '';
+	const runsLine = $derived(modelRunsLine(snap.model_runs, snap.models));
 </script>
 
 <div class="stackcol">
@@ -140,6 +141,9 @@
 			differ a little from the Forecast tab’s 6 AM to 6 AM days. A model’s line ends where its run
 			does.
 		</p>
+		{#if runsLine}
+			<p class="faint small foot runs">Model runs: {runsLine}</p>
+		{/if}
 	</section>
 
 	<div class="two">

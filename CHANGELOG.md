@@ -7,6 +7,17 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Fresher forecasts** (milestone 4, refresh and retention). With a self-hosted
+  Open-Meteo server, each location refreshes a few minutes after a model it uses has a
+  new run (HRRR and NBM hourly; at most every 40 minutes, at least every 3 hours;
+  `schedule.refresh: data`, or `fixed` for the old schedule), instead of every 3 hours.
+  The worker reads each model's run every 5 minutes; the Status page lists them and the
+  Confidence tab says which runs a forecast was made from ("GFS 18z · ECMWF 12z · HRRR
+  22z"). Spots are kept until their country's models update. Runs fetch four locations
+  at once, serve queued Manage jobs between locations, and fetch SNOTEL's daily values
+  every 6 hours. 24 snapshots are kept per location (was 8); after 48 h the daily
+  forecast history keeps runs 6 h apart plus each day's last (the scorecard's), and raw
+  responses are kept 6 h (was 24).
 - **More from the self-hosted server's data** (milestone 3b). The chart's freezing-level
   view is now **Snow level** (snow level solid, freezing level dashed); freezing rain
   and sleet get pink "Ice"/"Sleet" marks on the snow view; the temperature view adds a

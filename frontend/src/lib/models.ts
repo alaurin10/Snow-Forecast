@@ -28,3 +28,17 @@ const SLOT: Record<string, number> = {
 };
 
 export const modelColor = (m: string): string => `var(--s${SLOT[m] ?? 7})`;
+
+/** "18z": a model run's hour (UTC, as runs are named). */
+export const runHour = (iso: string): string =>
+	`${String(new Date(iso).getUTCHours()).padStart(2, '0')}z`;
+
+/** "GFS 18z · ECMWF 12z · HRRR 22z": each model's run, in the snapshot's model order. */
+export function modelRunsLine(runs: Record<string, string> | undefined, order: string[]): string {
+	if (!runs) return '';
+	const keys = [
+		...order.filter((m) => m in runs),
+		...Object.keys(runs).filter((m) => !order.includes(m))
+	];
+	return keys.map((m) => `${MODEL_NAMES[m] ?? m} ${runHour(runs[m])}`).join(' · ');
+}

@@ -327,6 +327,23 @@ def test_an_event_alerts_again_only_when_it_grows_a_lot(conn: sqlite3.Connection
     assert run(storm("2026-11-05", 52, "warning")) == {}
 
 
+def test_hourly_runs_send_no_repeats(conn: sqlite3.Connection) -> None:
+    """Milestone 4's data-driven refresh runs a location about hourly. Over a day of
+    hourly runs whose storm and powder day wobble, drop out and come back, each event
+    still alerts once (push_log), so no per-device minimum between digests is needed."""
+    run = Runs(conn)
+    run()
+    sent = []
+    wobble = [40, 44, 37, 0, 41, 46, 39, 0, 0, 42, 45, 43] * 2
+    for i, cm in enumerate(wobble):
+        flags = [storm("2026-11-05" if i % 5 else "2026-11-06", cm)] if cm else []
+        if cm and i % 3 == 0:
+            flags.append(powder("2026-11-07", 16 + i % 4))
+        got = run(*flags, after_h=1)
+        sent += got.get("whistler", [])
+    assert sent == [("storm_incoming 2026-11-06", None), ("powder_day 2026-11-07", None)]
+
+
 def test_a_powder_day_inside_a_storm_already_sent_stays_quiet(conn: sqlite3.Connection) -> None:
     run = Runs(conn)
     run()

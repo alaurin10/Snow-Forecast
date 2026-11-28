@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from snowwatch import avalanche, observations, spots, stations
+from snowwatch import avalanche, modelwatch, observations, spots, stations
 from snowwatch import avalanche_zones as zones
 from snowwatch import ensembles as ens
 from snowwatch.analysis.flags import SEVERITY, avalanche_flag
@@ -35,6 +35,7 @@ from snowwatch.api.models import (
     MapCloudsOut,
     MapWindLocation,
     MapWindOut,
+    ModelRunOut,
     NearbyOut,
     NearbyReport,
     NearbyStation,
@@ -53,7 +54,7 @@ from snowwatch.api.models import (
 from snowwatch.api.ratelimit import client_key
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
-from snowwatch.config import get_forecast_config
+from snowwatch.config import ForecastConfig, get_forecast_config
 from snowwatch.doc import BandOut, Snapshot
 from snowwatch.geo import bbox, contains, haversine_km
 from snowwatch.http import LOCAL_SUFFIX
@@ -259,6 +260,27 @@ def best_day(snap: Snapshot) -> BestDay | None:
 def avalanche_views(conn: sqlite3.Connection) -> dict[str, AvalancheView]:
     locs = service.list_locations(conn)
     return avalanche.views(conn, {loc.id: loc.tz or "UTC" for loc in locs})
+
+
+def _model_runs_out(conn: sqlite3.Connection, cfg: ForecastConfig) -> list[ModelRunOut]:
+    """Each model in use (either country's set) with its latest run, if the watcher has
+    seen one."""
+    rows = repo.model_runs(conn)
+    out = []
+    for model in dict.fromkeys(cfg.models_for("US") + cfg.models_for("CA")):
+        folders = modelwatch.MODEL_FOLDERS.get(model)
+        row = rows.get(folders[0]) if folders else None
+        if row is None:
+            continue
+        out.append(
+            ModelRunOut(
+                model=model,
+                label=modelwatch.LABELS.get(model, model),
+                init_time=row.init_time,
+                available_at=row.available_at,
+            )
+        )
+    return out
 
 
 def _ensembles_out(conn: sqlite3.Connection, settings: Settings) -> EnsemblesOut:
@@ -859,6 +881,7 @@ def make_router() -> APIRouter:
                     flags=len(snap.flags) if snap else 0,
                 )
             )
+        cfg: ForecastConfig = request.app.state.forecast_config
         return StatusOut(
             sources=sources,
             runs=runs,
@@ -867,6 +890,10 @@ def make_router() -> APIRouter:
             locations=ages,
             local=local,
             ensembles=ensembles,
+            model_runs=_model_runs_out(conn, cfg),
+            refresh="data"
+            if cfg.schedule.refresh == "data" and settings.local_open_meteo
+            else "fixed",
         )
 
     @router.get("/runs", response_model=list[RunOut])

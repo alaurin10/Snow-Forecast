@@ -111,6 +111,7 @@ def test_healthcheck_pings(env: Settings, monkeypatch: pytest.MonkeyPatch) -> No
     class Res:
         def __init__(self, ok: bool) -> None:
             self.ok = ok
+            self.location_id = "crystal"
 
     # After the forecasts, a run fetches the avalanche forecasts: not what's tested here,
     # and from the network (minutes of retries without one).

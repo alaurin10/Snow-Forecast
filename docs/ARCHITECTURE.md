@@ -25,10 +25,10 @@ browser ─► reverse proxy or tunnel (HTTPS) ─► api :8000 (FastAPI: the ap
 | Piece | What it does |
 |---|---|
 | `api` | `uvicorn --factory snowwatch.api.app:production_app`. Serves the built SvelteKit app and `/api`. Never calls weather services itself, except the Manage page's auto-detect, the map tile cache (which also fetches the Mapterhorn elevation tiles it paints terrain-adjusted snow totals on) and, with a self-hosted Open-Meteo server, forecasts for a tapped point (spots, below) |
-| `worker` | `snowwatch worker`. Eight forecast runs a day (every 3 hours), avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
+| `worker` | `snowwatch worker`. Forecast runs: with a self-hosted Open-Meteo server, each location a few minutes after a model it uses has a new run (at most every 40 min, at least every 3 h; `modelwatch.py` reads each model's `meta.json` every 5 min), otherwise eight a day (every 3 hours). Avalanche checks, the job queue (every 15 s), the map's pictures (radar and nowcast every 6 min, forecast frames to 10 days every 30 min, snow totals to 10 days hourly, with the same by elevation for the terrain-adjusted map), `config/webcams.yaml` where it changed (at start and every 5 min), ski runs from OpenStreetMap (weekly), lookups (weekly), a nightly backup and retention, a weekly VACUUM. Touches a heartbeat file every 30 s |
 | `openmeteo` | Optional (compose profile `openmeteo`, used when `OPEN_METEO_URL` is set): Open-Meteo's own server, image pinned by digest and run unmodified. It reads the public Open-Meteo data on AWS as asked and caches it in the `openmeteo-data` volume. It answers every forecast and elevation request from `worker` and `api` (Manage's auto-detect, spots); ensembles stay on the public API unless the downloader below fills its volume. No published port |
 | `openmeteo-ensembles` | Optional (compose profile `ensembles`): the same image running `docker/ensembles.sh`, which every 10 minutes downloads each new GEFS, ECMWF ENS and GEPS run (snowfall only, 16 days) from NOAA on AWS, ECMWF and Environment Canada into the `openmeteo-data` volume, where the server serves it at `/v1/ensemble` with no restart. One system at a time, 2 CPUs, a 2 h limit per download; it deletes what the server doesn't need after each run and skips runs below 5 GB free. It writes `ensembles/status.json` (each system's last run, time, size, last error) and `ensembles/disk.log` (a line a day). `worker` and `api` mount the volume read-only at `/openmeteo`; `snowwatch openmeteo status` reads it. The app uses what it downloads only with `OPEN_METEO_ENSEMBLES` (below) |
-| `./data` | `snowwatch.db`, `raw/` (24 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
+| `./data` | `snowwatch.db`, `raw/` (6 h of upstream responses, for `snowwatch rebuild`), `backups/`, `precip/`, `maps/` (model grid maps, cached NOAA GRIB messages and GeoMet grids, snow totals as numbers and by elevation, the terrain-adjusted snow tiles drawn so far), `tiles/`, `osm/`, `avalanche/zones.geojson` (every forecast zone in the map's box, rewritten with each avalanche check), `sat/` (the satellite index, the passes already judged and their grids, cached pass pictures, and each drawn view's tiles) |
 
 Both run from one image (`docker/Dockerfile`: a Node stage builds the app, a
 Python 3.12 slim stage runs it, as uid 1000, read-only, with no capabilities).
@@ -96,16 +96,30 @@ either is out of date, so the two sides can't drift.
 
 ## A forecast run
 
-For each active location (`pipeline.run_all`), 20 s apart to stay polite (no pause
-with a self-hosted Open-Meteo server, see below):
+For each active location (`pipeline.run_all`), 20 s apart to stay polite. With a
+self-hosted Open-Meteo server there's no pause: four threads fetch locations at once,
+and each is built and stored on the run's own thread as its fetch finishes (the
+database stays on one thread); queued Manage jobs are served between locations, so
+adding a location doesn't wait for the whole run.
+
+**When runs happen.** Without a server, or with `schedule.refresh: fixed`, at
+`schedule.runs_utc`. With a server (`refresh: data`), `modelwatch.py` reads each model
+folder's `static/meta.json` in the public data every 5 minutes into `model_runs`; when a
+model's `last_run_availability_time` moves on, the locations using it (the US or Canada
+set) run 5 minutes later, so the server has the new data at hand, at most once every
+40 minutes per location and at least every 3 hours. Each snapshot records the model
+runs it was made from (`model_runs`, "GFS 18z · ECMWF 12z" on the Confidence tab), and
+the Status page lists them. SNOTEL's daily values are fetched every 6 h (`RunMemo`);
+its hourly values, NWS alerts and the BC CSV every run.
 
 1. **Fetch** (`pipeline.fetch_responses`): Open-Meteo's high-resolution blend and
    multi-model forecasts at base, mid and summit, upper-air levels, ensembles at
    mid (twice a day, cached between), NWS alerts (US), and the snow station.
    Each source fails on its own; only the two Open-Meteo forecasts are required.
 2. **Build** (`analysis/build.py`) one snapshot document, described below.
-3. **Store**: the gzipped snapshot (newest 8 kept), per-day totals for the trend
-   and scorecard, observations, and when each flag was first raised.
+3. **Store**: the gzipped snapshot (newest 24 kept), per-day totals for the trend
+   and scorecard (after 48 h thinned to runs 6 h apart plus each local day's last,
+   `store/retention.py`), observations, and when each flag was first raised.
 4. **After the run**: avalanche forecasts, then one push digest per subscribed
    device covering every location with something new (`push.py`): a powder day or
    storm alerts once when it comes within 5 days, and again only if it grows a lot;
