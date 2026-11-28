@@ -480,3 +480,6 @@ class Snapshot(BaseModel):
     clouds: CloudsOut | None = None
     spot: SpotInfo | None = None  # a forecast for a tapped point, not a saved location
     snowpack: SnowpackOut | None = None  # model snow depth (milestone 3)
+    # Each model's latest run when this was made: model -> initialisation time (UTC, ISO),
+    # from the model watcher (milestone 4); empty before it has looked.
+    model_runs: dict[str, str] = {}

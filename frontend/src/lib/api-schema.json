@@ -2931,6 +2931,45 @@
       "title": "MetaOut",
       "type": "object"
     },
+    "ModelRunOut": {
+      "description": "One model's latest run, as the model watcher last read it (milestone 4).",
+      "properties": {
+        "available_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "init_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "label",
+        "init_time",
+        "available_at"
+      ],
+      "title": "ModelRunOut",
+      "type": "object"
+    },
     "NearbyOut": {
       "description": "What was measured and reported around a location (the Observed tab): the\nclosest snow stations and recent field reports (Avalanche Canada's Mountain\nInformation Network and NWAC's observations), read from the files the map's layers\nuse.",
       "properties": {
@@ -5763,6 +5802,13 @@
         "location": {
           "$ref": "#/$defs/LocationMeta"
         },
+        "model_runs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
         "models": {
           "items": {
             "type": "string"
@@ -6395,6 +6441,17 @@
             "$ref": "#/$defs/LocationAge"
           },
           "type": "array"
+        },
+        "model_runs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModelRunOut"
+          },
+          "type": "array"
+        },
+        "refresh": {
+          "default": "fixed",
+          "type": "string"
         },
         "runs": {
           "items": {

@@ -33,6 +33,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from snowwatch import modelwatch
 from snowwatch.analysis.build import build_snapshot
 from snowwatch.api.ratelimit import RateLimiter
 from snowwatch.config import ForecastConfig
@@ -78,6 +79,10 @@ ENS_CELL_DEG = 0.25  # spot ensembles are fetched per cell of this size…
 ENS_STEP_M = 100.0  # …and step of elevation
 ALERTS_CELL_DEG = 0.1  # NWS alerts are kept per cell of this size…
 ALERTS_TTL_S = 600.0  # …for this long
+# With the model watcher's stamps, a spot is kept until its country's models update, and
+# at most this long.
+MAX_SPOT_AGE_S = 3 * 3600.0
+STAMP_READ_S = 30.0  # the API rereads the watcher's stamps this often
 KEY_DIGITS = 3  # spots are built at the point rounded to ~100 m, which is also the cache key
 LOCAL_TIMEOUT_S = 60.0  # a cold area's first summit request took 52 s
 
@@ -663,6 +668,8 @@ class Built:
     etag: str
     gz: bytes
     built_at: float  # the service clock
+    built_wall: float = 0.0  # Unix time (to compare with the model watcher's stamp)
+    country: str = ""
 
 
 class SpotService:
@@ -682,10 +689,17 @@ class SpotService:
         clock: Callable[[], float] = time.monotonic,
         max_builds: int = 2,
         wait_s: float = 20.0,
+        stamp: Callable[[str], float | None] | None = None,
+        wall: Callable[[], float] = time.time,
     ) -> None:
         self.cfg = cfg
         self._build = build
         self.clock = clock
+        self.wall = wall
+        # The model watcher's stamp for a country (milestone 4): Unix time from which the
+        # server holds a model run newer than before. A spot built earlier is out of date
+        # from then. Without one (no watcher yet), spots keep `cache_minutes`.
+        self.stamp = stamp
         self.ttl_s = cfg.spots.cache_minutes * 60
         self.max_entries = cfg.spots.cache_entries
         self._cache: OrderedDict[tuple[float, float], Built] = OrderedDict()
@@ -709,11 +723,19 @@ class SpotService:
             hit = self._cache.get(key)
             if hit is None:
                 return None
-            if self.clock() - hit.built_at > self.ttl_s:
+            if self._expired(hit):
                 del self._cache[key]
                 return None
             self._cache.move_to_end(key)
             return hit
+
+    def _expired(self, hit: Built) -> bool:
+        age = self.clock() - hit.built_at
+        stamp = self.stamp(hit.country) if self.stamp is not None else None
+        if stamp is None:
+            return age > self.ttl_s
+        # Until the next model update, but never past MAX_SPOT_AGE_S ("now" moves on).
+        return hit.built_wall < stamp <= self.wall() or age > MAX_SPOT_AGE_S
 
     def _store(self, key: tuple[float, float], snap: Snapshot) -> Built:
         body = snap.model_dump_json().encode()
@@ -721,6 +743,8 @@ class SpotService:
             etag='"' + hashlib.sha256(body).hexdigest()[:16] + '"',
             gz=gzip.compress(body, 6),
             built_at=self.clock(),
+            built_wall=self.wall(),
+            country=snap.location.country,
         )
         with self._lock:
             self._cache[key] = built
@@ -877,6 +901,11 @@ def make_service(
             t0 = time.monotonic()
             try:
                 snap = build_spot(fetcher, cfg, ctx, lat, lon, now, times)
+                if conn is not None:
+                    inits = {k: r.init_time for k, r in repo.model_runs(conn).items()}
+                    snap.model_runs = modelwatch.runs_for(
+                        cfg.models_for(snap.location.country), inits
+                    )
                 log.info(
                     "spot %s built in %.1fs (%s)",
                     snap.location.id,
@@ -901,4 +930,43 @@ def make_service(
                         log.warning("spot usage not recorded: %s", e)
                     conn.close()
 
-    return SpotService(cfg, build)
+    stamps: dict[str, Any] = {"at": -1e9, "by_country": {}}
+    stamps_lock = threading.Lock()
+
+    def stamp(country: str) -> float | None:
+        """When the server's data for `country` last changed: the latest new run the
+        model watcher saw among the models spots there use, plus the time the server
+        is given to read it (modelwatch.PRELOAD_S). None before the watcher's first look."""
+        t = time.monotonic()
+        with stamps_lock:
+            if t - stamps["at"] > STAMP_READ_S:
+                stamps["at"] = t
+                stamps["by_country"] = _model_stamps(settings, cfg)
+            got: float | None = stamps["by_country"].get(country)
+            return got
+
+    return SpotService(cfg, build, stamp=stamp)
+
+
+def _model_stamps(settings: Settings, cfg: ForecastConfig) -> dict[str, float]:
+    """Each country's stamp (see make_service.stamp) from `model_runs`."""
+    if not settings.database.exists():
+        return {}
+    try:
+        conn = connect(settings.database, readonly=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        runs = repo.model_runs(conn)
+    finally:
+        conn.close()
+    out: dict[str, float] = {}
+    for country in ("US", "CA"):
+        changed = [
+            datetime.fromisoformat(runs[f].changed_at).timestamp()
+            for f in modelwatch.folders_for(cfg.models_for(country))
+            if f in runs
+        ]
+        if changed:
+            out[country] = max(changed) + modelwatch.PRELOAD_S
+    return out

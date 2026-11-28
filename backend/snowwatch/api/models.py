@@ -288,6 +288,15 @@ class LocationAge(BaseModel):
     flags: int
 
 
+class ModelRunOut(BaseModel):
+    """One model's latest run, as the model watcher last read it (milestone 4)."""
+
+    model: str  # the app's name, e.g. gfs_seamless
+    label: str  # e.g. GFS
+    init_time: str | None  # the run (UTC)
+    available_at: str | None  # when it became available
+
+
 class LocalServerOut(BaseModel):
     """The self-hosted Open-Meteo server (OPEN_METEO_URL), from today's requests."""
 
@@ -352,6 +361,10 @@ class StatusOut(BaseModel):
     local: LocalServerOut | None = None
     # Set with a self-hosted server: where ensembles come from, and shadow comparisons.
     ensembles: EnsemblesOut | None = None
+    # Each model's latest run (empty before the worker's model watcher has looked), and
+    # how runs are scheduled: "data" (when models update) or "fixed" (schedule.runs_utc).
+    model_runs: list[ModelRunOut] = []
+    refresh: str = "fixed"
 
 
 class MetaOut(BaseModel):

@@ -23,8 +23,11 @@ snow, fog, humid refreezes, showery periods) and the chart's Snow level view and
 freezing-rain marks. **Milestone 3c** (28 Nov 2026): the wet-bulb split backtested
 against last winter's SNOTEL, refined (0.0/1.0 °C and a warm-layer guard) and switched
 on, with the models' own split still scored as `cons_model`. Choosing the headline
-depth method from `cons_col`'s record is the owner's, after a few weeks. Milestones 4–5 are
-planned. Each milestone's PRs tick its checklist here and update this line.
+depth method from `cons_col`'s record is the owner's, after a few weeks. **Milestone 4** (28 Nov 2026):
+PR 1, refresh when models update (the model watcher, `schedule.refresh: data`), a pool of
+4 fetch threads, Manage jobs between locations, and thinner history (24 snapshots,
+`forecast_daily` runs 6 h apart after 48 h, 6 h of raw responses); PRs 2–3 next.
+Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
 taken on 26–27 Nov 2026 from a cloud sandbox running the real Open-Meteo server against
@@ -1104,7 +1107,7 @@ near mid), so `cons_model` against `cons_wb` on the scorecard is the check there
 every band. **Three PRs: refresh + retention; ensembles + budget planner; locations + UI.**
 
 ### Refresh when new data lands
-- [ ] New `backend/snowwatch/modelwatch.py`:
+- [x] New `backend/snowwatch/modelwatch.py`:
   - every 5 min, read `meta.json` for each model in use (bucket names: `ncep_hrrr_conus`,
     `ncep_nbm_conus`, `ncep_gfs013`, `ncep_gfs025`, `ecmwf_ifs025`, `dwd_icon`,
     `cmc_gem_gdps_15km`, `cmc_gem_rdps_10km`, `cmc_gem_hrdps`; `checks.MODEL_FOLDERS`
@@ -1113,31 +1116,33 @@ every band. **Three PRs: refresh + retention; ensembles + budget planner; locati
     (time for the local server to preload) for the locations that use it (the US set or
     the CA set, from `cfg.models_for`)
   - at most one run per 40 min per location; at least one every 3 h
-- [ ] `scheduler.py`:
+- [x] `scheduler.py`:
   - config `schedule.refresh: data | fixed` in `config/forecast.yaml`; `data` only when
     `local_open_meteo`
   - `runs_utc` stays as the `fixed` schedule
   - the spot cache (milestone 2) expires on the watcher's stamp
-- [ ] New `Snapshot.model_runs` (model → initialisation time): "GFS 18z · ECMWF 12z ·
+- [x] New `Snapshot.model_runs` (model → initialisation time): "GFS 18z · ECMWF 12z ·
   HRRR 22z" on the Confidence tab and status page.
 
 ### Faster runs
-- [ ] `pipeline.run_all`: fetch locations in a pool of 4 threads; database writes stay on
+- [x] `pipeline.run_all`: fetch locations in a pool of 4 threads; database writes stay on
   the calling thread.
-- [ ] A refresh interval per source: SNOTEL daily every 6 h; SNOTEL hourly, NWS alerts and
+- [x] A refresh interval per source: SNOTEL daily every 6 h; SNOTEL hourly, NWS alerts and
   the BC CSV each run.
-- [ ] Split runs into per-location steps so queued Manage jobs (`process_jobs`) don't wait
+- [x] Split runs into per-location steps so queued Manage jobs (`process_jobs`) don't wait
   behind the whole run's lock; revisit `RUN_TIME_BUDGET_S`.
-- [ ] Target: 50 locations in under 5 minutes.
+- [ ] Target: 50 locations in under 5 minutes. (Against the e2e stand-in server, the
+  app's side of 50 locations took 12 s with the pool, 15 s one at a time; the mini PC's
+  run with the real server is the owner's check.)
 
 ### Retention
-- [ ] `store/repo.py`: `SNAPSHOTS_KEPT` from 8 to 24.
-- [ ] `store/retention.py`: after 48 h, keep `forecast_daily` runs at least 6 h apart, plus
+- [x] `store/repo.py`: `SNAPSHOTS_KEPT` from 8 to 24.
+- [x] `store/retention.py`: after 48 h, keep `forecast_daily` runs at least 6 h apart, plus
   the last run before each local midnight (the scorecard's run, `verify.py`). Otherwise
   hourly runs add ~150k rows a day at 50 locations. The trend already picks runs 6 h apart
   (`api/public.py:_spaced_runs`).
-- [ ] `http.py:prune_raw`: raw responses from 24 h to 6 h.
-- [ ] `push.py`: test digest frequency with hourly runs; add a 3 h minimum per device for
+- [x] `http.py:prune_raw`: raw responses from 24 h to 6 h.
+- [x] `push.py`: test digest frequency with hourly runs; add a 3 h minimum per device for
   non-urgent digests if repeats show up.
 
 ### Richer ensembles
@@ -1183,6 +1188,43 @@ only to systems on the public API (milestone 1b off, or falling back).
 - 50 locations finish a run in under 5 minutes
 - Manage shows tier 1 within budget
 - database size is steady after two weeks
+
+### What PR 1 (refresh and retention) built and found (28 Nov 2026)
+
+- **The watcher** (`modelwatch.py`, `Worker.watch_models`) reads the nine folders'
+  `meta.json` every 5 minutes into a new table `model_runs` (migration
+  `012_model_runs.sql`), with or without a server: the Status page ("Model runs") and
+  each snapshot's `model_runs` read it, and spots expire on it. Only `refresh: data`
+  (with `OPEN_METEO_URL`) turns a new run into forecast runs (`Worker.data_run`, every
+  minute, runs whatever is due together). Its first look only records the runs; a
+  restarted worker takes each location's last run from its newest snapshot.
+- Model → folders: `gfs_seamless` reads `ncep_gfs013` and `ncep_gfs025` (not HRRR,
+  which the US set has as its own model, so Canadian locations don't follow HRRR's
+  hourly runs); `gem_seamless` the three GEM folders; the run that labels a model
+  ("GFS 18z") is its first folder's.
+- **Spots** are kept until their country's models update (the newest new run among
+  them, plus the 5 minutes the server is given), and never past 3 h; 60 minutes as
+  before while the watcher hasn't looked.
+- **Faster runs:** without spacing (a server), four threads fetch, and each location
+  is built and stored on the run's thread as it arrives; a pooled run gave the same
+  snapshots as a one-at-a-time run on the fixtures. While forecasts fall back, starts
+  are spaced 20 s apart again. The Fetcher's counters and host spacing are under a lock.
+  Queued Manage jobs are served between a run's locations (every 10 s at most), so a
+  new location doesn't wait for the run. `RUN_TIME_BUDGET_S` 45 → 20 minutes.
+  Against the e2e stand-in server (instant answers, 50 Canadian points, ensembles
+  "self-hosted"): 12 s for 50 locations with the pool, 15 s one at a time, so building
+  isn't the limit; the real server's answers (0.3–0.5 s per location warm) add little.
+- **Avalanche forecasts** after a data run at most every 3 h (they were fetched after
+  each of 8 runs a day); the `avalanche_utc` checks are unchanged.
+- **Retention:** thinning is greedy from the oldest run (keep a run 6 h after the last
+  kept, and each local day's last), so running it again drops nothing more. On four days
+  of hourly runs it kept 48 + ~10 of 96. Raw responses are pruned hourly now (6 h).
+- **Push:** a day of hourly runs with storms and powder days wobbling, dropping out and
+  moving a day sent each event once (`test_hourly_runs_send_no_repeats`), so no
+  per-device minimum was added. A device following several locations can still get a
+  digest per run that brings something new.
+- Without a server nothing changes except the watcher's 9 small reads every 5 minutes
+  (for the Status page and the Confidence tab's model runs).
 
 ## Milestone 5: Learning from history
 

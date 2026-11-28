@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -189,6 +190,9 @@ class Fetcher:
         self.host_spacing = HOST_SPACING_S if host_spacing is None else host_spacing
         self._clock = clock
         self._last_at: dict[str, float] = {}  # host -> when its last request started
+        # A run fetches several locations at once (pipeline.RUN_WORKERS): counters and
+        # host spacing are updated under this lock.
+        self._lock = threading.Lock()
         self._local_down_until = 0.0
         self._taken = 0  # calls already handed to the ledger (take_usage)
         self.fallbacks = 0  # forecast requests retried on the public API (server failed)
@@ -259,7 +263,9 @@ class Fetcher:
         reserve = 0.0
         if optional and self.ensemble_mode != "public" and self.forecasts_falling_back:
             reserve = self.public_reserve
-        return self.public_used() + pending + weight + reserve <= self.public_budget
+        with self._lock:  # the callback may share one database connection
+            used = self.public_used()
+        return used + pending + weight + reserve <= self.public_budget
 
     @property
     def forecasts_falling_back(self) -> bool:
@@ -397,9 +403,11 @@ class Fetcher:
         if ensemble:
             log.info("self-hosted ensembles: %s; using the public API", why)
         else:
-            if not self.fallbacks:
+            with self._lock:
+                first = not self.fallbacks
+                self.fallbacks += 1
+            if first:
                 log.warning("self-hosted Open-Meteo %s; using the public API", why)
-            self.fallbacks += 1
         resp, rec = self._get(url, fb_params, source=source, weight=fb_weight, fallback=True)
         return resp, rec, source
 
@@ -457,12 +465,13 @@ class Fetcher:
         gap = self.host_spacing.get(host)
         if not gap:
             return
-        last = self._last_at.get(host)
-        if last is not None:
-            wait = last + gap - self._clock()
-            if wait > 0:
-                self._sleep(wait)
-        self._last_at[host] = self._clock()
+        with self._lock:  # take the next slot, then wait for it outside the lock
+            now = self._clock()
+            last = self._last_at.get(host)
+            start = now if last is None else max(now, last + gap)
+            self._last_at[host] = start
+        if start > now:
+            self._sleep(start - now)
 
     def _get(
         self,
@@ -527,21 +536,23 @@ class Fetcher:
         return self.sources.setdefault(source, SourceStat())
 
     def _ok(self, source: str, weight: float) -> None:
-        st = self._stat(source)
-        st.ok += 1
-        st.weight += weight
-        st.last_ok_at = datetime.now(UTC).isoformat(timespec="seconds")
+        with self._lock:
+            st = self._stat(source)
+            st.ok += 1
+            st.weight += weight
+            st.last_ok_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     def _fail(self, source: str, message: str, status: int | None = None) -> FetchError:
         message = strip_queries(message)  # shown on the public Status page
-        st = self._stat(source)
-        st.errors += 1
-        st.last_error = message[:300]
-        st.last_error_at = datetime.now(UTC).isoformat(timespec="seconds")
+        with self._lock:
+            st = self._stat(source)
+            st.errors += 1
+            st.last_error = message[:300]
+            st.last_error_at = datetime.now(UTC).isoformat(timespec="seconds")
         return FetchError(f"{source}: {message}", status)
 
     def cache(self, source: str, key: str, data: Any) -> None:
-        """Keep a raw response for 24 h (for `snowwatch rebuild`)."""
+        """Keep a raw response for RAW_KEEP_H (for `snowwatch rebuild`)."""
         if self.raw_dir is None:
             return
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
@@ -597,7 +608,12 @@ def fetcher_for(settings: Settings, **kw: Any) -> Fetcher:
     return fetcher
 
 
-def prune_raw(raw_dir: Path, *, max_age_h: float = 24, now: float | None = None) -> int:
+# Raw responses kept for `snowwatch rebuild` (only the newest per request is read):
+# with hourly runs (milestone 4), 6 h holds several runs of every location.
+RAW_KEEP_H = 6.0
+
+
+def prune_raw(raw_dir: Path, *, max_age_h: float = RAW_KEEP_H, now: float | None = None) -> int:
     """Delete cached raw responses older than max_age_h. Returns the number removed."""
     if not raw_dir.exists():
         return 0

@@ -14,7 +14,8 @@ from snowwatch.analysis.build import DailyRecord
 from snowwatch.doc import Snapshot, Snotel
 from snowwatch.store.db import utcnow_iso
 
-SNAPSHOTS_KEPT = 8
+# Hourly runs (milestone 4): a day of them. The trend reads runs 6 h apart.
+SNAPSHOTS_KEPT = 24
 
 
 def _gz(data: Any) -> bytes:
@@ -496,3 +497,52 @@ def ensemble_states(conn: sqlite3.Connection) -> dict[str, EnsembleState]:
         )
         for r in rows
     }
+
+
+def save_model_runs(
+    conn: sqlite3.Connection,
+    runs: Mapping[str, tuple[str | None, str | None]],
+    now: datetime | None = None,
+) -> None:
+    """Each folder's latest run: folder -> (initialisation, availability), ISO times."""
+    stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds")
+    with conn:
+        for folder, (init, available) in runs.items():
+            conn.execute(
+                "INSERT INTO model_runs (folder, init_time, available_at, changed_at, "
+                "checked_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (folder) DO UPDATE SET "
+                "changed_at = CASE WHEN excluded.available_at IS NOT model_runs.available_at "
+                "THEN excluded.changed_at ELSE model_runs.changed_at END, "
+                "init_time = excluded.init_time, available_at = excluded.available_at, "
+                "checked_at = excluded.checked_at",
+                (folder, init, available, stamp, stamp),
+            )
+
+
+@dataclass(frozen=True)
+class ModelRunRow:
+    folder: str
+    init_time: str | None
+    available_at: str | None
+    changed_at: str
+    checked_at: str
+
+
+def model_runs(conn: sqlite3.Connection) -> dict[str, ModelRunRow]:
+    """The latest run per model folder (empty before the watcher's first look)."""
+    try:
+        rows = conn.execute("SELECT * FROM model_runs").fetchall()
+    except sqlite3.OperationalError:  # not migrated yet
+        return {}
+    return {
+        r["folder"]: ModelRunRow(
+            r["folder"], r["init_time"], r["available_at"], r["changed_at"], r["checked_at"]
+        )
+        for r in rows
+    }
+
+
+def last_runs(conn: sqlite3.Connection) -> dict[str, datetime]:
+    """When each location's newest snapshot was made."""
+    rows = conn.execute("SELECT location_id, MAX(created_at) AS at FROM snapshots GROUP BY 1")
+    return {r["location_id"]: datetime.fromisoformat(r["at"]) for r in rows if r["at"]}

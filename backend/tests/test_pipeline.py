@@ -117,8 +117,10 @@ def test_failed_location_keeps_last_snapshot(seeded: sqlite3.Connection) -> None
     assert whistler is not None and whistler.run_id == second
 
 
-def test_snapshots_are_pruned(seeded: sqlite3.Connection) -> None:
-    for _ in range(10):
+def test_snapshots_are_pruned(seeded: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert repo.SNAPSHOTS_KEPT == 24  # a day of hourly runs (milestone 4)
+    monkeypatch.setattr(repo, "SNAPSHOTS_KEPT", 3)
+    for _ in range(5):
         run(seeded, fetcher(), only=["sunshine"], ensembles=False)
     n = seeded.execute("SELECT COUNT(*) FROM snapshots WHERE location_id='sunshine'").fetchone()[0]
     assert n == repo.SNAPSHOTS_KEPT

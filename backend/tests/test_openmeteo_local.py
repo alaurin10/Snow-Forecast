@@ -292,7 +292,7 @@ def test_a_run_logs_public_weight_only_for_ensembles(seeded: sqlite3.Connection)
     )
     sleeps: list[float] = []
     run_id, results = local_run(seeded, f, sleeps)
-    assert all(r.ok for r in results) and sleeps == [0] * 5
+    assert all(r.ok for r in results) and sleeps == []  # fetched 4 at once, no pauses
     ens = sum(public_daily_weight(loc, config()) for loc in seed().values()) / 2
     weight = seeded.execute("SELECT api_weight FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
     assert weight == pytest.approx(ens, abs=0.5)
@@ -318,8 +318,12 @@ def test_a_run_falls_back_when_the_server_is_stopped(seeded: sqlite3.Connection)
     _, results = local_run(seeded, f, sleeps)
     assert all(r.ok for r in results)
     assert len(hits) == 1  # one failed connection, then straight to the public API
-    # Falling back, locations are spaced for the public API's per-minute limit again.
-    assert sleeps == [20.0] * 5
+    # Falling back, locations are spaced for the public API's per-minute limit again: the
+    # locations already started before the server was found down (up to four at once)
+    # went ahead, then one each 20 s (the test's sleeps don't pass time, so each waits
+    # 20 s more than the last).
+    assert 2 <= len(sleeps) <= 5
+    assert [round(s / 20) for s in sleeps] == list(range(1, len(sleeps) + 1))
     u = repo.usage_today(seeded)
     assert u.fallbacks == f.fallbacks > 6 * 3 and "api.open-meteo.com" in u.by_host
     row = seeded.execute(

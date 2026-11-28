@@ -1100,6 +1100,9 @@ export interface Snapshot {
 	flags?: Flag[];
 	generated_at: string;
 	location: LocationMeta;
+	model_runs?: {
+		[k: string]: string;
+	};
 	models: string[];
 	now: string;
 	ridge?: RidgeOut | null;
@@ -1565,6 +1568,8 @@ export interface StatusOut {
 	ensembles?: EnsemblesOut | null;
 	local?: LocalServerOut | null;
 	locations: LocationAge[];
+	model_runs?: ModelRunOut[];
+	refresh?: string;
 	runs: RunOut[];
 	sources: SourceRow[];
 	weight_today: number;
@@ -1640,6 +1645,18 @@ export interface LocationAge {
 	name: string;
 	station: string | null;
 	station_obs_time: string | null;
+}
+/**
+ * One model's latest run, as the model watcher last read it (milestone 4).
+ *
+ * This interface was referenced by `ApiTypes`'s JSON-Schema
+ * via the `definition` "ModelRunOut".
+ */
+export interface ModelRunOut {
+	available_at: string | null;
+	init_time: string | null;
+	label: string;
+	model: string;
 }
 /**
  * This interface was referenced by `ApiTypes`'s JSON-Schema

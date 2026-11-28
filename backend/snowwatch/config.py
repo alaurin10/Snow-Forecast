@@ -42,6 +42,10 @@ HHMM = Annotated[str, AfterValidator(_hhmm)]
 
 
 class Schedule(BaseModel):
+    # "data": run each location a few minutes after a model it uses has a new run (at
+    # most every 40 min, at least every 3 h; snowwatch/modelwatch.py), only with a
+    # self-hosted Open-Meteo server. "fixed" (and always without one): runs_utc.
+    refresh: Literal["data", "fixed"] = "data"
     runs_utc: list[HHMM] = Field(min_length=1)
     ensemble_runs_utc: list[HHMM]
     backup_utc: HHMM = "10:00"

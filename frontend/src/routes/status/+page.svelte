@@ -174,6 +174,31 @@
 			</section>
 		{/if}
 
+		{#if status.model_runs?.length}
+			<section class="card">
+				<h2>Model runs</h2>
+				<p class="muted small">
+					{status.refresh === 'data'
+						? 'Each location is refreshed a few minutes after a model it uses has a new run (at most every 40 minutes, at least every 3 hours).'
+						: 'Forecasts are refreshed on a fixed schedule; the newest run of each model:'}
+				</p>
+				<div class="table-wrap" use:hscroll>
+					<table class="data">
+						<thead><tr><th>Model</th><th>Run</th><th>Available</th></tr></thead>
+						<tbody>
+							{#each status.model_runs ?? [] as m (m.model)}
+								<tr>
+									<th scope="row">{m.label}</th>
+									<td>{m.init_time ? `${runName(m.init_time)}` : '–'}</td>
+									<td class="age">{ago(m.available_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</section>
+		{/if}
+
 		<section class="card">
 			<h2>Sources</h2>
 			{#if status.sources.length}
