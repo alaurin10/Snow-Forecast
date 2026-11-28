@@ -36,7 +36,9 @@ everywhere, a 15-day chart, a second "Less certain" mark at day 11; the map to 1
 from GFS) is explored, decided and planned; PR 1, the data (16-day forecasts, no
 ratings past day 10, the days 11–16 window), and PR 2, the location pages (a 15-day
 chart with a second "Less certain" mark, 16 days in the day by day, Calendar, Confidence
-tab, Compare and share, an Overview column), are built.
+tab, Compare and share, an Overview column), are built, and PR 3, the map's data (GFS
+from day 10 to 16 for the precipitation loop, snow totals, temperature and clouds), is
+built; the snow by elevation past day 10 is left for later.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1563,39 +1565,72 @@ probabilities, not amounts.
 - e2e: `e2e/sixteen.spec.ts` (both themes, 380 px and desktop).
 
 ### PR 3: the map's data (backend)
-- [ ] `maps/sources/gfs.py`: GFS 0.25° from `noaa-gfs-bdp-pds`, messages by byte range
+- [x] `maps/sources/gfs.py`: GFS 0.25° from `noaa-gfs-bdp-pds`, messages by byte range
   from each file's `.idx` and cached like NBM's (`grib.fetch_messages`), cut to the
   region:
-  - 6-hour `APCP`, `CPOFP`, 2 m `TMP` and the 0 °C `HGT`, from 246 h to 384 h;
+  - 6-hour `APCP`, the 6-hour average `CSNOW` (`CPOFP` is only at the hour), 2 m `TMP`
+    and the ground's `HGT`, from 246 h to 384 h;
   - the runs the map already follows (`map.nbm_cycles`);
   - measure time, memory and download per run against the figures above.
-- [ ] **Precipitation loop** (`render.forecast`): 6-hourly frames past each country's
+- [x] **Precipitation loop** (`render.forecast`): 6-hourly frames past each country's
   own source.
   - GFS fills in after NBM's 264 h in the US and after GDPS's 240 h in Canada, across
     the existing border cross-fade, to 384 h.
-  - Rate as 6-hour averages; snow or rain by `CPOFP`.
-- [ ] **Snow totals** (`totaldata.STEP_WINDOWS`, `totals.WINDOWS`):
+  - Rate as 6-hour averages; snow or rain by the 6-hour `CSNOW`.
+- [x] **Snow totals** (`totaldata.FAR_STEPS`, `totals.FAR_WINDOWS`):
   - steps every 24 h to 16 days (6 more, ~+17 MB of textures by RADAR-PLAN's ~55 MB
     for 19);
   - windows of 14 days and "to the end" (~15 days);
-  - snow by elevation from `bins.py` with GFS's 0 °C height less the snow-level offset
-    as the snow level.
-- [ ] **Temperature** (`layers.py` `temp`): every 6 h to 384 h from GFS beyond the
+  - not built: snow by elevation past day 10 (below, and a later item).
+- [x] **Temperature** (`layers.py` `temp`): every 6 h to 384 h from GFS beyond the
   current models, moved to the real ground as now.
-- [ ] **Forecast cloud cover** (`layers.py` `clouds`): every 6 h to 384 h from GFS's
+- [x] **Forecast cloud cover** (`layers.py` `clouds`): every 6 h to 384 h from GFS's
   6-hour average `TCDC` beyond the current models (~0.9 MB a step more, ~110 MB a day in
   all with the other fields).
-- [ ] Not extended: gusts, ridge wind and snow level (they stop at ~84 h for want of
+- [x] Not extended: gusts, ridge wind and snow level (they stop at ~84 h for want of
   sources, not because of the 16 days), and the 3D clouds request (`CLOUD_DAYS`), which
   follows the clouds' own timeline.
-- [ ] The index says where the second mark is (`less_certain_from`, a time) so the map's UI
+- [x] The index says where the second mark is (`less_certain_from`, a time) so the map's UI
   needn't guess; old apps ignore it. Frames carry `src: "gfs"`.
-- [ ] Disk: GFS messages pruned with the other GRIB caches (`data/maps/`).
-- [ ] Tests: the `.idx` parse and byte ranges, snow from `APCP` × `CPOFP`, the hand-over
+- [x] Disk: GFS messages pruned with the other GRIB caches (`data/maps/`).
+- [x] Tests: the `.idx` parse and byte ranges, snow from `APCP` × `CSNOW`, the hand-over
   at 240 h / 264 h, frames to 384 h, the new totals steps (on small saved messages, as
   the NBM tests do).
-- [ ] Docs: SOURCES (GFS 0.25°, its fields and sizes), ARCHITECTURE, MAP-PLAN (what the
+- [x] Docs: SOURCES (GFS 0.25°, its fields and sizes), ARCHITECTURE, MAP-PLAN (what the
   map shows past 10 days), THIRD_PARTY_NOTICES (NOAA GFS, public domain).
+- [ ] Later: snow by elevation past day 10 (`bins.py`), with GFS's 0 °C height (`HGT:0C
+  isotherm`, in every file) less the snow-level offset as the snow level.
+
+### What PR 3 (the map's data) built and found (28 Nov 2026)
+
+- **What the files hold** (probed the 27 and 28 Nov 00z runs): 3-hourly from 240 to
+  384 h, each with an `.idx`. Every 6-hour file has `APCP` over the six hours, `CSNOW`
+  and `TCDC` averaged over them, and 2 m `TMP` and `HGT` (ground and 0 °C) at the hour.
+  There's no `ASNOW` in the 0.25° files, and `CPOFP` is only at the hour, so snow water
+  is `APCP` × the six hours' `CSNOW` (the share of them with snow). One small real
+  message is a test fixture (`tests/fixtures/grib/gfs_20261128t00z_f300_csnow.grib2`,
+  34 KB) with an `.idx` excerpt.
+- **The grid** is a regular 0.25° lat/lon grid from 90°N, longitudes 0–360, and
+  `gribberish` returns 1-D latitudes and longitudes for it, which `grib.on_region`
+  (built for 2-D model grids) can't use. GFS's own bilinear interpolation onto the box
+  (`gfs.regrid`, round the 0°/360° seam) also avoids drawing 25 km squares.
+- **Cost** over the default box (1,700 px): 52 MB to fetch per run (24 steps × 2.2 MB,
+  plus the ground), two runs a day; 23 s to fetch and decode the 24 steps'
+  precipitation, temperature and clouds, ~11 s a pass from the cache; peak ~310 MB in a
+  process doing only that. The worker's jobs each read the cached messages once a run.
+- **Loop:** 24 more 6-hour frames (246–384 h), keyed by the GFS run and, to 264 h, NBM's
+  block, so a new GFS run redraws only them.
+- **Totals past 10 days** are the 10-day total (to where GDPS or NBM stops, ~240 h) plus
+  GFS's snow from there, at the ratio from its 2 m temperature, in both countries. They
+  have no snow by elevation: adding GFS's snow level to `bins.py`'s chain was more than
+  this PR needed, so the 14-day and to-the-end totals and the daily steps past day 10
+  are plain totals (the map's "Snow total" shows them as such) and are kept between runs
+  without waiting for a grid by elevation.
+- **Temperature and clouds** take GFS where GDPS has no frame, in both countries, with
+  NBM over it in the US to 264 h; GFS's temperature goes to sea level from its own
+  ground (`HGT:surface`, fetched once per run). Gusts, ridge wind, snow level and the
+  cloud heights stay as they were.
+- The index's `less_certain_from` is 240 h from the hour it was written, as the chart's.
 
 ### PR 4: the map's UI (frontend)
 - [ ] **Timeline** (`map/Timeline.svelte`):

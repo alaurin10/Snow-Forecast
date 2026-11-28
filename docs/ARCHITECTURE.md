@@ -47,15 +47,15 @@ backend/snowwatch/
   maps/       the map's weather pictures: region.py (the box) geomet.py (Environment
               Canada's WMS/WCS) grib.py (NOAA GRIB2 by byte range) palette.py
               blend.py (joins sources as numbers, with no visible seams)
-              render.py (frames, index, pruning) totals.py (snow totals to 10 days)
+              render.py (frames, index, pruning) totals.py (snow totals to 16 days)
               bins.py terrain_totals.py (snow totals every 250 m of elevation)
               tiles_render.py (those painted on the terrain as tiles, by the api)
               layers.py (snow level, temperature, wind, snow on the ground, observed snowfall,
               clouds) point.py (tap-for-numbers from the pictures' probes)
               sat.py (choosing recent Sentinel-2 views per location, daily VIIRS)
               satrender.py (drawing those views and cutting them into tiles)
-              sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps, snodas,
-              nohrsc, gibs)
+              sources/ (radar_eccc, rainviewer, hrrr, nbm, rdps_gdps, gfs (days
+              11–16), snodas, nohrsc, gibs)
   pipeline.py scheduler.py jobs.py http.py (retries, budgets, routing to a
   self-hosted Open-Meteo with the public fallback) cli.py checks.py (check-sources,
   openmeteo status) spots.py (a forecast for any point, built on request)

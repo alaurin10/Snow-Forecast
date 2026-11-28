@@ -85,7 +85,8 @@ from snowwatch.maps.palette import (
 from snowwatch.maps.point import PROBE_STEP
 from snowwatch.maps.region import Region, stitch
 from snowwatch.maps.smooth import blur, soften
-from snowwatch.maps.sources import hrrr, mrms, nbm, radar_eccc, rainviewer, rdps_gdps
+from snowwatch.maps.sources import gfs, hrrr, mrms, nbm, radar_eccc, rainviewer, rdps_gdps
+from snowwatch.maps.sources.gfs import Gfs
 from snowwatch.maps.sources.nbm import Nbm
 from snowwatch.maps.sources.rdps_gdps import GDPS, HRDPS, RDPS, RDPS_HOURLY, Run, run_of
 
@@ -138,6 +139,7 @@ ATTRIBUTION = {
     "gdps": "Forecast: Environment and Climate Change Canada GDPS",
     "hrrr": "Forecast: NOAA HRRR (NOAA Open Data Dissemination)",
     "nbm": "Forecast: NOAA National Blend of Models (NOAA Open Data Dissemination)",
+    "gfs": "Forecast past 10 days: NOAA GFS (NOAA Open Data Dissemination)",
     "snodas": "Snow on the ground: NOAA NOHRSC SNODAS (US), via NSIDC",
     "caldas": "Snow on the ground: Environment and Climate Change Canada CaLDAS",
     "nohrsc": "Observed snowfall: NOAA NOHRSC National Snowfall Analysis (US)",
@@ -145,6 +147,8 @@ ATTRIBUTION = {
 }
 
 RADAR_KINDS = {"radar", "nowcast"}
+# The forecast chart's day-10 mark (analysis/build.py LESS_CERTAIN_H), on the timeline.
+LESS_CERTAIN_H = 240
 FORECAST_KINDS = {"forecast"}
 # How much of the map's grid each kind of frame's numbers keep (dataframe.py, `ds`): radar
 # at 1 km is worth every pixel; HRDPS, HRRR and NBM (2.5–3 km) half; RDPS and GDPS
@@ -299,6 +303,9 @@ class Renderer:
         self.totals: list[TotalOut] = []
         self._prev_totals: dict[str, TotalOut] = {}
         self._nbm_run: int | None = None
+        # GFS for days 11–16 (milestone 4B): its run and fields, like NBM's.
+        self._gfs_obj: Gfs | None = None
+        self._gfs_run: int | None = None
         # The ground under the box (elevation.py), once per job: None not yet asked, False
         # couldn't be had.
         self._ground_grid: np.ndarray | bool | None = None
@@ -451,6 +458,9 @@ class Renderer:
             # The snow total as numbers, from `start` to each step's `end`
             # (totaldata.py): {"start", "key", "steps": [{"end", "hours", "data"}]}.
             "steps": steps,
+            # Where the timeline's second "Less certain" mark goes (milestone 4B): 10 days
+            # from this hour, like the forecast chart's. Old apps ignore it.
+            "less_certain_from": int(self.now()) // HOUR * HOUR + LESS_CERTAIN_H * HOUR,
             "attribution": [ATTRIBUTION[s] for s in srcs if s in ATTRIBUTION],
         }
 
@@ -879,6 +889,18 @@ class Renderer:
             self._nbm_obj = Nbm(self.net, self._nbm_run, region, self.grib_dir, self.grids_dir)
         return self._nbm_obj
 
+    def _gfs(self, region: Region) -> Gfs | None:
+        """The newest complete GFS run at the same hours as NBM's (once per job), for the
+        map past Canada's and NBM's reach (days 11–16)."""
+        if self._gfs_run is None:
+            run = gfs.latest_run(self.net, int(self.now()), self.nbm_cycles)
+            self._gfs_run = run if run is not None else 0
+        if not self._gfs_run:
+            return None
+        if self._gfs_obj is None or self._gfs_obj.region != region:
+            self._gfs_obj = Gfs(self.net, self._gfs_run, region, self.grib_dir)
+        return self._gfs_obj
+
     def _ground(
         self,
         region: Region,
@@ -999,6 +1021,9 @@ class Renderer:
             self._commit(region, FORECAST_KINDS, frames)
 
         frames += self._extended(region, prev, max(times), us, frames)
+        frames += self._outlook(
+            region, prev, max((f.t for f in frames), default=max(times)), us, frames
+        )
         index = self._commit(region, FORECAST_KINDS, frames)
         self._prune_work()
         return index
@@ -1098,6 +1123,74 @@ class Renderer:
                     self._commit(region, FORECAST_KINDS, done + out)
         return out
 
+    def _outlook(
+        self,
+        region: Region,
+        prev: dict[str, FrameOut],
+        after: int,
+        us: Nbm | None,
+        done: list[FrameOut],
+    ) -> list[FrameOut]:
+        """6-hourly frames past the last one (GDPS's 240 h) to GFS's 384 h (milestone 4B):
+        GFS in both countries, with NBM over it in the US while NBM reaches (264 h)."""
+        g = self._gfs(region)
+        if g is None:
+            return []
+        plan = g.times(after)
+        out: list[FrameOut] = []
+
+        def job(t: int) -> FrameOut | None:
+            block = None
+            if us is not None:
+                end = -(-us.lead(t) // nbm.BLOCK_H) * nbm.BLOCK_H
+                if 0 < end <= nbm.LAST_H:
+                    block = end
+            south_key = f"nbm:{us.run}:{block}" if us is not None and block else "none"
+            key = f"fg|{FINE_KEY}|{t}|gfs:{g.run}|{south_key}|{region.key}"
+            had = self._reusable(prev, key)
+            if had:
+                return had
+            far = g.precip(t)
+            if far is None:
+                return None
+            water, _, far_kinds = far
+            layers: list[Layer] = []
+            kind = ""
+            if us is not None and block:
+                got = us.precip(block, nbm.BLOCK_H)
+                if got is not None:
+                    apcp, k = got
+                    rate, k = soften(apcp / nbm.BLOCK_H, k, GRIB_SIGMA)
+                    layers.append(Layer("nbm", rate, self._us_weight(region, apcp), k))
+                    kind = "nbm"
+            rate, k = soften(water / gfs.STEP_H, far_kinds, GRIB_SIGMA)
+            layers.append(Layer("gfs", rate, 1.0, k))
+            src = {"north": "gfs", "south": kind or "gfs"}
+            name, data = self._precip(mosaic(layers), f"f{t}", DS_EXTENDED)
+            valid = valid_time(t, "forecast", gfs.STEP_H)
+            return FrameOut(
+                t,
+                False,
+                name,
+                key,
+                kind,
+                "forecast",
+                gfs.STEP_H,
+                src,
+                FINE,
+                data,
+                DS_EXTENDED,
+                valid,
+            )
+
+        with ThreadPoolExecutor(2) as pool:
+            for i, frame in enumerate(pool.map(job, plan), 1):
+                if frame is not None:
+                    out.append(frame)
+                if i % 8 == 0:
+                    self._commit(region, FORECAST_KINDS, done + out)
+        return out
+
     def _prune_work(self) -> None:
         """Drop cached downloads that haven't been used for a day."""
         grib.prune_cache(self.grib_dir)
@@ -1150,8 +1243,25 @@ class Renderer:
             last = min(last, us.run + nbm.LAST_H * HOUR)
         wins = totals.window_ends(t0, last)
         step_ends = [e for _, e in totals.window_ends(t0, last, totaldata.STEP_WINDOWS)]
+        # Past 10 days (milestone 4B): the total to `last` plus GFS's snow from there, for
+        # the 14-day and to-the-end windows and the daily steps to 16 days. Plain totals
+        # only: the snow by elevation stops at `last`.
+        far = self._gfs(region)
+        far_last = min(far.end(), t0 + totals.FAR_WINDOWS[-1] * HOUR) if far else 0
+        far_ends: set[int] = set()
+        if far is not None and far_last > last:
+            far_wins = [
+                (w, e) for w, e in totals.window_ends(t0, far_last, totals.FAR_WINDOWS) if e > last
+            ]
+            far_steps = [
+                e for _, e in totals.window_ends(t0, far_last, totaldata.FAR_STEPS) if e > last
+            ]
+            wins += far_wins
+            step_ends += far_steps
+            far_ends = {e for _, e in far_wins} | set(far_steps)
         runs_key = "|".join(f"{r.model.name}:{r.ref}" for r in chain)
         runs_key += f"|nbm:{us.run if us else ''}"
+        runs_key += f"|gfs:{far.run if far is not None and far_ends else ''}"
         runs_key += "|" + ",".join(f"{lv.name}:{lv.ref}" for lv in levels)
         steps_key = f"ts{STEPS_DRAWING}|{t0}|{runs_key}|{region.key}"
         steps_done = self._steps_ok(prev_steps, steps_key)
@@ -1161,7 +1271,9 @@ class Renderer:
         for w, end in wins:
             key = f"tb|{w}|{t0}|{end}|{runs_key}|{region.key}"
             had = self._prev_totals.get(key)
-            if had and (self.dir / had.file).exists() and self._bins_ok(had):
+            # A total past `last` has no snow by elevation to wait for.
+            plain_ok = end in far_ends
+            if had and (self.dir / had.file).exists() and (plain_ok or self._bins_ok(had)):
                 out.append(had)
             else:
                 todo.append((w, end, key))
@@ -1169,6 +1281,10 @@ class Renderer:
             return out, prev_steps
 
         ends = sorted({end for _, end, _ in todo} | (set() if steps_done else set(step_ends)))
+        # The models' totals run to `last`; past it they're that total plus GFS's snow.
+        near_ends = sorted(
+            {e for e in ends if e not in far_ends} | ({last} if far_ends & set(ends) else set())
+        )
         # HRDPS only needs help from RDPS if its domain stops short of where Canada's
         # models are used (it doesn't over the default box).
         north_w = north_weight(region)
@@ -1179,9 +1295,10 @@ class Renderer:
             else None
         )
         north = totals.north_totals(
-            self.net, region, t0, ends, chain, self.slr_bands, self.wcs_dir, domain
+            self.net, region, t0, near_ends, chain, self.slr_bands, self.wcs_dir, domain
         )
-        south = totals.south_totals(us, t0, ends)
+        south = totals.south_totals(us, t0, near_ends)
+        at_last: np.ndarray | None = None
         used = {k: _run_ts(v) for k, v in north.runs.items()}
         us_weight: np.ndarray | float = 0.0
         made: list[TotalOut] = []
@@ -1189,25 +1306,36 @@ class Renderer:
         areas: dict[int, np.ndarray] = {}
         wanted_steps = set() if steps_done else set(step_ends)
         by_window = {end: (w, key) for w, end, key in todo}
-        for end in ends:
-            n, s = north.cm.pop(end, None), south.pop(end, None)
-            if n is None and s is None:
-                continue
-            if s is not None:
-                us_weight = self._us_weight(region, s)
-            cm = totals.join(
-                None if n is None else n.astype(np.float32),
-                None if s is None else s.astype(np.float32),
-                us_weight if s is not None else 0.0,
-            )
+        for end in sorted(set(ends) | set(near_ends)):
+            if end in far_ends:
+                tail = far.snow_cm(last, end, self.slr_bands) if far is not None else None
+                if at_last is None or tail is None:
+                    continue
+                cm = at_last + tail
+                n, s = None, None
+            else:
+                n, s = north.cm.pop(end, None), south.pop(end, None)
+                if n is None and s is None:
+                    continue
+                if s is not None:
+                    us_weight = self._us_weight(region, s)
+                cm = totals.join(
+                    None if n is None else n.astype(np.float32),
+                    None if s is None else s.astype(np.float32),
+                    us_weight if s is not None else 0.0,
+                )
+                if end == last:
+                    at_last = cm
             if end in wanted_steps:
                 areas[end] = totaldata.area_plane(cm)
             if end not in by_window:
                 continue
             w, key = by_window[end]
-            runs = dict(used) if n is not None else {}
-            if s is not None and us is not None:
+            runs = dict(used) if n is not None or end in far_ends else {}
+            if (s is not None or end in far_ends) and us is not None:
                 runs["nbm"] = us.run
+            if end in far_ends and far is not None:
+                runs["gfs"] = far.run
             totals.save_grid(cm, self.totals_dir / f"{w}h.npy")
             span = round((end - t0) / HOUR)
             name = self._save(paint_total(cm), region, f"t{span}")
@@ -1230,8 +1358,8 @@ class Renderer:
                 self._snow_bins(
                     region,
                     t0,
-                    made,
-                    sorted(areas),
+                    [t for t in made if t.end not in far_ends],
+                    sorted(e for e in areas if e not in far_ends),
                     chain,
                     us,
                     levels,

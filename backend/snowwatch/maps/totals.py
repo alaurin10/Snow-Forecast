@@ -43,6 +43,9 @@ HOUR = 3600
 SYNOPTIC_S = 6 * HOUR
 # Window lengths in hours: 12 h, 24 h, 48 h, 3, 5, 7 and 10 days.
 WINDOWS = (12, 24, 48, 72, 120, 168, 240)
+# Past 10 days (milestone 4B): 14 days, and to GFS's end (16 days, shortened to where the
+# run stops), as the 10-day total plus GFS's snow from there (sources/gfs.py).
+FAR_WINDOWS = (336, 384)
 # A window longer than two days ends on a synoptic hour (00/06/12/18 UTC), where NBM's
 # 6-hour sums end; and it is dropped if the models stop well short of it.
 SHORT_H = 48
