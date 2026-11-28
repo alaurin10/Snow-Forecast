@@ -92,7 +92,7 @@ def test_nbm_snow_level_counts() -> None:
     assert how[0] == "wb" and level[0] == 900
 
 
-@pytest.mark.parametrize(("wb", "kind"), [(-1, "snow"), (0.5, "snow"), (1.2, "mix"), (2, "rain")])
+@pytest.mark.parametrize(("wb", "kind"), [(-1, "snow"), (0.0, "snow"), (0.6, "mix"), (1, "rain")])
 def test_precip_type_from_wet_bulb(wb: float, kind: str) -> None:
     assert precip_type(wb, PHYS) == kind
 
@@ -310,7 +310,7 @@ def test_model_flags_need_a_cold_band() -> None:
 
 
 @pytest.mark.parametrize(
-    ("wb", "share"), [(-3, 1.0), (0.5, 1.0), (1.25, 0.5), (2, 0.0), (None, None)]
+    ("wb", "share"), [(-3, 1.0), (0.0, 1.0), (0.5, 0.5), (1, 0.0), (None, None)]
 )
 def test_snow_fraction(wb: float | None, share: float | None) -> None:
     from snowwatch.analysis.snowlevel import snow_fraction
@@ -326,7 +326,7 @@ def test_wb_split_resplits_by_the_bands_own_wet_bulb() -> None:
         "precipitation": {0: 2.0, 1: 2.0, 2: 2.0},
         "snowfall": {0: 0.0, 1: 0.0, 2: 0.7},
         "rain": {0: 2.0, 1: 2.0, 2: 1.0},
-        "wet_bulb_temperature_2m": {0: -1.0, 1: 1.25},
+        "wet_bulb_temperature_2m": {0: -1.0, 1: 0.5},
     }
     got = _wb_split(series, 0.7, PHYS)
     assert got is not None
@@ -343,3 +343,25 @@ def test_wb_split_resplits_by_the_bands_own_wet_bulb() -> None:
     }
     assert (_wb_split(computed, 0.7, PHYS) or ({}, {}))[0][0] == 2.0
     assert _wb_split({"precipitation": {0: 1.0}}, 0.7, PHYS) is None  # lean data
+
+
+def test_wb_split_keeps_the_models_word_under_a_warm_layer() -> None:
+    from snowwatch.analysis.build import _wb_split
+
+    # −1 °C wet-bulb at the band, but a +4 °C layer above it melted the snow: the model's
+    # own (small) snow share stands.
+    series = {
+        "precipitation": {0: 2.0},
+        "snowfall": {0: 0.35},
+        "rain": {0: 1.5},
+        "wet_bulb_temperature_2m": {0: -1.0},
+        "temperature_2m": {0: -0.5},
+    }
+    upper = {
+        "geopotential_height_850hPa": {0: 1300.0},
+        "temperature_850hPa": {0: 4.0},
+    }
+    got = _wb_split(series, 0.7, PHYS, upper, 900)
+    assert got is not None
+    assert got[0][0] == pytest.approx(0.5) and got[1][0] == pytest.approx(1.5)
+    assert (_wb_split(series, 0.7, PHYS) or ({}, {}))[0][0] == 2.0  # no levels: all snow

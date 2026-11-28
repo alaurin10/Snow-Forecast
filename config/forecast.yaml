@@ -56,16 +56,19 @@ depth_method: slr
 # Milestone 3's physics (docs/OPEN-METEO-PLAN.md), used where a self-hosted Open-Meteo
 # server supplies humidity and more pressure levels; to tune against the scorecard.
 physics:
-  # How each model's precipitation becomes snow and rain at a band: "model" (its own
-  # split, often made at its grid's elevation) or "wetbulb" (split by its wet-bulb at the
-  # band, between wb_snow_max_c and wb_rain_min_c). Both are scored (cons_slr, cons_wb);
-  # switch when the scorecard shows cons_wb is closer.
-  snow_split: model
+  # How each model's precipitation becomes snow and rain at a band: "wetbulb" (split by
+  # its wet-bulb at the band, between wb_snow_max_c and wb_rain_min_c) or "model" (its
+  # own split, often made at its grid's lower, warmer elevation). Last winter at Crystal,
+  # Snoqualmie and Rainy Pass SNOTEL the models' own split put 16 points too little of
+  # the precipitation into snow (about 6.6 mm of snow water short per wet day); the
+  # wet-bulb split with these thresholds was within 4 (backend/scripts/backtest_split.py).
+  # The scorecard keeps scoring both (cons_wb, cons_model).
+  snow_split: wetbulb
   wet_snow_wb_c: 0.0           # snow through a wet-bulb this warm is heavy & wet
   showery_cape: 300            # J/kg in a snowy period: bursts heavier than the totals
   snow_level_wb_offset_m: 150  # snow level: this far below the wet-bulb 0 °C height
-  wb_snow_max_c: 0.5           # precipitation type from the surface wet-bulb: snow…
-  wb_rain_min_c: 2.0           # …rain from here, a mix between
+  wb_snow_max_c: 0.0           # precipitation type and split from the surface wet-bulb: snow…
+  wb_rain_min_c: 1.0           # …rain from here, a mix between (fitted to last winter)
   col_wind_start_kmh: 20       # column snow ratio: cut for wind above this…
   col_wind_full_kmh: 60        # …reaching the full cut here
   col_wind_cut: 0.3

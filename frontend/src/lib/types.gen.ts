@@ -1703,6 +1703,7 @@ export interface VerificationOut {
 export interface VerificationPair {
 	cons_cm: number | null;
 	cons_col_cm?: number | null;
+	cons_model_cm?: number | null;
 	cons_settled_cm?: number | null;
 	cons_slr_cm: number | null;
 	cons_water_mm?: number | null;

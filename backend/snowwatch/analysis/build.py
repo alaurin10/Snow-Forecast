@@ -51,6 +51,7 @@ from snowwatch.analysis.snowlevel import (
     profile_kind,
     snow_fraction,
     vote,
+    warm_layer,
     wet_bulb_c,
     wet_bulb_zero_m,
 )
@@ -254,9 +255,11 @@ class _BandWork:
     wb: Hourly = field(default_factory=dict)
     frz: dict[int, str | None] = field(default_factory=dict)
     # The mid band's snow water with every model's precipitation split into snow and rain
-    # by its wet-bulb at the band (`physics.snow_split`), scored as `cons_wb`; empty
-    # without wet-bulb data.
+    # by its wet-bulb at the band, scored as `cons_wb`; and with the models' own split,
+    # scored as `cons_model` while the headline uses the wet-bulb split
+    # (`physics.snow_split`). Empty without wet-bulb data.
     wb_sw: Hourly = field(default_factory=dict)
+    model_sw: Hourly = field(default_factory=dict)
 
 
 CLOUD_PAST_H = 3  # the map's satellite pictures reach this far back
@@ -367,8 +370,9 @@ def build_snapshot(
         # Each model's precipitation split into snow and rain by its own wet-bulb at this
         # band: some models split at their grid's elevation, so a base below the grid got
         # the summit's share of snow (ECMWF at Crystal, 27 Nov 2026).
-        wb_g, wb_liq_g = _wb_split_group(g, k, phys)
-        wb_s, wb_liq_s = _wb_split_group(s, k, phys)
+        band_m = loc.bands[i].elev_m
+        wb_g, wb_liq_g = _wb_split_group(g, k, phys, upper, band_m)
+        wb_s, wb_liq_s = _wb_split_group(s, k, phys, upper, band_m)
         blend_series = {
             "precipitation": blend.get("precipitation"),
             "wet_bulb_temperature_2m": blend.get("wet_bulb_temperature_2m"),
@@ -382,6 +386,7 @@ def build_snapshot(
         wb_g, wb_liq_g = {**sw_g, **wb_g}, {**liq_g, **wb_liq_g}
         wb_s, wb_liq_s = {**sw_s, **wb_s}, {**liq_s, **wb_liq_s}
         wb_blend_sw, wb_blend_liq = wb_blend or (blend_sw, blend_liq)
+        own_g, own_s, own_blend_sw = sw_g, sw_s, blend_sw
         if resplit and phys.snow_split == "wetbulb":
             sw_g, liq_g, sw_s, liq_s = wb_g, wb_liq_g, wb_s, wb_liq_s
             blend_sw, blend_liq = wb_blend_sw, wb_blend_liq
@@ -499,14 +504,19 @@ def build_snapshot(
             ]
         frz = _freezing_rain(all_hours, md, upper, loc.bands[i].elev_m, hourly_sw, hourly_liq, cfg)
         wb_sw: Hourly = {}
+        model_sw: Hourly = {}
         if i == 1 and resplit:
-            wb_sw = (
-                hourly_sw
-                if phys.snow_split == "wetbulb"
-                else _consensus_hourly(
+            # Both splits are scored whichever leads: the other one is made as the band
+            # loop makes the headline.
+            if phys.snow_split == "wetbulb":
+                wb_sw = hourly_sw
+                model_sw = _consensus_hourly(
+                    periods, own_g, own_s, own_blend_sw, water_all, short_until, mid_ens_mean, cfg
+                )
+            else:
+                wb_sw = _consensus_hourly(
                     periods, wb_g, wb_s, wb_blend_sw, water_all, short_until, mid_ens_mean, cfg
                 )
-            )
         work[i] = _BandWork(
             sw_c,
             liq_c,
@@ -525,6 +535,7 @@ def build_snapshot(
             wb=wb,
             frz=frz,
             wb_sw=wb_sw,
+            model_sw=model_sw,
         )
 
     bands_out = [
@@ -650,12 +661,21 @@ def _past(series: Hourly, now_h: int, hours: int) -> list[int]:
 
 
 def _wb_split(
-    series: Mapping[str, Hourly], k: float, phys: PhysicsConfig
+    series: Mapping[str, Hourly],
+    k: float,
+    phys: PhysicsConfig,
+    upper: Mapping[str, Hourly] | None = None,
+    elev_m: float | None = None,
 ) -> tuple[Hourly, Hourly] | None:
     """(snow water, liquid) per hour: the precipitation split by the wet-bulb at the band
     (snow at or below `wb_snow_max_c`, rain from `wb_rain_min_c`, a linear share
-    between). An hour without a wet-bulb keeps the model's own split. None when the
-    series has no wet-bulb at all (the public API's lean data)."""
+    between). An hour without a wet-bulb keeps the model's own split, and so does the
+    snow share of an hour with a warm layer aloft (`upper`, at least `sleet_warm_c`
+    above the band): snow melted on the way down isn't snow at the band whatever its
+    wet-bulb. None when the series has no wet-bulb at all (the public API's lean data).
+
+    Checked against last winter's SNOTEL snow-water gains at Crystal, Snoqualmie and
+    Rainy Pass (`scripts/backtest_split.py`, docs/OPEN-METEO-PLAN.md milestone 3c)."""
     wb = dict(series.get("wet_bulb_temperature_2m") or {})
     t2, rh = series.get("temperature_2m", {}), series.get("relative_humidity_2m", {})
     for h in t2:
@@ -674,18 +694,29 @@ def _wb_split(
             snow[h] = None if sv is None else sv / k
             liq[h] = own_liq.get(h)
             continue
-        snow[h], liq[h] = p * f, p * (1 - f)
+        sw = p * f
+        if f > 0 and upper and elev_m is not None:
+            levels = levels_at(upper, h, LEVELS)
+            warm = warm_layer(elev_m, t2.get(h), levels) if levels else None
+            if warm is not None and warm[0] >= phys.sleet_warm_c:
+                own = own_sw.get(h)
+                sw = min(sw, own / k if own is not None else sw)
+        snow[h], liq[h] = sw, p - sw
     return snow, liq
 
 
 def _wb_split_group(
-    group: Mapping[str, Mapping[str, Hourly]], k: float, phys: PhysicsConfig
+    group: Mapping[str, Mapping[str, Hourly]],
+    k: float,
+    phys: PhysicsConfig,
+    upper: Mapping[str, Mapping[str, Hourly]] | None = None,
+    elev_m: float | None = None,
 ) -> tuple[dict[str, Hourly], dict[str, Hourly]]:
     """`_wb_split` for each model that has a wet-bulb: (snow water, liquid) by model."""
     sw: dict[str, Hourly] = {}
     liq: dict[str, Hourly] = {}
     for m, v in group.items():
-        got = _wb_split(v, k, phys)
+        got = _wb_split(v, k, phys, (upper or {}).get(m), elev_m)
         if got is not None:
             sw[m], liq[m] = got
     return sw, liq
@@ -1689,6 +1720,10 @@ def _daily(
             if mid.wb_sw and all(mid.wb_sw.get(h) is not None for h in hs):
                 wbs = sum(_depth(mid.wb_sw[h], ratio_at[h], k) or 0.0 for h in hs)
                 records.append(DailyRecord(d, "cons_wb", r(wbs), r(swe + liq)))
+            # And with the models' own split while the headline uses the wet-bulb's.
+            if mid.model_sw and all(mid.model_sw.get(h) is not None for h in hs):
+                own = sum(_depth(mid.model_sw[h], ratio_at[h], k) or 0.0 for h in hs)
+                records.append(DailyRecord(d, "cons_model", r(own), r(swe + liq)))
     if inputs.station is not None:
         records += _station_records(inputs.station, models, days, day_hours, cfg)
     return rows, records
