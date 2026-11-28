@@ -1,4 +1,4 @@
-// Precipitation for the map: one timeline from three hours ago to ten days ahead, in one
+// Precipitation for the map: one timeline from three hours ago to 16 days ahead, in one
 // set of colours for rain, mix/ice and snow by rate.
 //
 // The server draws every frame (backend/snowwatch/maps/) over western North America and
@@ -7,8 +7,9 @@
 // nowcast (next 72 min, handing over to the forecast as it goes). Then the forecast, with
 // NOAA's models in the US and Canada's in Canada at every lead time, blended across the
 // border: hourly to ~48 h (HRRR, then NBM's hourly fields; HRDPS), 3-hourly to ~84 h (NBM;
-// RDPS) and 6-hourly to 10 days (NBM; GDPS). The server blends the sources as numbers, so
-// there are no joins to see.
+// RDPS), 6-hourly to 10 days (NBM; GDPS) and on to 16 days (NOAA's GFS, with NBM over it
+// in the US to day 11: milestone 4B). The server blends the sources as numbers, so there
+// are no joins to see.
 import type { UnitSystem } from './units';
 
 const HOUR = 3600;
@@ -110,7 +111,8 @@ export interface Frame {
 export interface Total {
 	/** The window's actual length in hours (shorter than `window` if the models stop sooner). */
 	hours: number;
-	/** The window asked for, in hours: 12, 24, 48, 72, 120, 168 or 240. */
+	/** The window asked for, in hours: 12, 24, 48, 72, 120, 168, 240, and since milestone
+	 *  4B 336 and 384 (to the end, from GFS past 10 days). */
 	window: number;
 	/** Unix seconds. */
 	start: number;
@@ -182,6 +184,9 @@ export interface PrecipIndex {
 	layers?: Record<string, { frames?: Partial<LayerFrame>[] }>;
 	/** The snow total as numbers at each step of its slider (newer servers). */
 	steps?: Partial<TotalSteps> | null;
+	/** Unix seconds: where the forecast becomes less certain, 10 days from the hour the
+	 *  index was written (milestone 4B; absent from older servers). */
+	less_certain_from?: number;
 }
 
 export interface Timeline {
@@ -196,6 +201,12 @@ export interface Timeline {
 	nowcastEnd: number;
 	/** Index of the first 3- or 6-hour frame (beyond ~48 h, loaded on demand), or -1. */
 	extendedFrom: number;
+	/** Unix seconds where the forecast becomes less certain (10 days out), or null. */
+	lessCertainAt: number | null;
+	/** Where that falls on the slider (a frame's index, or between two), or -1 if the
+	 *  frames don't reach past it. Days 11–16 lie beyond it: loaded when the slider gets
+	 *  there, and the player stops at it. */
+	lessCertain: number;
 	totals: Total[];
 	/** The snow total as numbers, step by step; null from an older server. */
 	steps: TotalSteps | null;
@@ -275,6 +286,10 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		typeof ix.steps?.start === 'number' && stepList.length
 			? { start: ix.steps.start, steps: stepList }
 			: null;
+	const lessCertainAt =
+		typeof ix.less_certain_from === 'number' && ix.less_certain_from > 0
+			? ix.less_certain_from
+			: null;
 	return {
 		steps,
 		frames,
@@ -284,6 +299,8 @@ export function toTimeline(ix: PrecipIndex): Timeline {
 		now,
 		nowcastEnd,
 		extendedFrom,
+		lessCertainAt,
+		lessCertain: lessCertainPos(frames, lessCertainAt),
 		totals,
 		attribution: Array.isArray(ix.attribution) ? ix.attribution : [],
 		layers
@@ -376,6 +393,14 @@ export function posAt(frames: Pick<Frame, 'valid'>[], t: number, slack = 600): n
 	return n - 1;
 }
 
+/** Where `at` (Unix seconds, from the index's `less_certain_from`) falls among frames, by
+ *  their valid times: a frame's index or between two; -1 when there's no mark, or the
+ *  frames don't run past it (an older server's loop ends at 10 days). */
+export function lessCertainPos(frames: Pick<Frame, 'valid'>[], at: number | null): number {
+	if (at === null || frames.length < 2 || frames[frames.length - 1].valid <= at) return -1;
+	return posAt(frames, at, 0) ?? -1;
+}
+
 /** How long a frame stays on screen while playing, by the time to the next one: quick
  *  through 6- and 12-minute radar, slower through hourly and 3- and 6-hourly forecast,
  *  so the weather moves at a steadier pace. */
@@ -451,7 +476,8 @@ const MODEL_NAMES: Record<string, string> = {
 	rdps: 'Canadian RDPS',
 	gdps: 'Canadian GDPS',
 	hrrr: 'NOAA HRRR',
-	nbm: "NOAA's National Blend of Models"
+	nbm: "NOAA's National Blend of Models",
+	gfs: "NOAA's GFS"
 };
 
 const modelName = (s: string | undefined) => (s && MODEL_NAMES[s]) || s || '';
@@ -545,11 +571,13 @@ export function totalSources(t: Total): string {
 		? Object.keys(runs)
 		: (t.source ?? 'hrdps').split('+').filter(Boolean);
 	const at = (m: string) => (runs[m] ? ` (${runClock(runs[m])})` : '');
-	const north = names.filter((m) => m !== 'nbm');
+	const north = names.filter((m) => m !== 'nbm' && m !== 'gfs');
 	const parts: string[] = [];
 	if (north.length)
 		parts.push(`Canada: ${north.map((m) => `${m.toUpperCase()}${at(m)}`).join(', ')}.`);
 	if (names.includes('nbm')) parts.push(`US: NOAA National Blend${at('nbm')}.`);
+	// Past 10 days (milestone 4B): the 10-day total plus GFS's snow from there.
+	if (names.includes('gfs')) parts.push(`Then both: NOAA GFS${at('gfs')}.`);
 	return parts.join(' ');
 }
 

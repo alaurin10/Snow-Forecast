@@ -16,6 +16,10 @@ async function open(page: Page) {
 	await expect(slider).toBeVisible({ timeout: 30_000 });
 	const pause = page.getByRole('button', { name: 'Pause' });
 	if (await pause.count()) await pause.click();
+	// Days 11–16 are fetched once the slider goes past the "Less certain" mark: once to the
+	// end and back, so every frame is wanted.
+	await slide(page, Number(await slider.getAttribute('max')));
+	await slide(page, 0);
 	// Every frame on hand: the track shows no "still loading" stripes.
 	await expect
 		.poll(() => slider.evaluate((el) => getComputedStyle(el).getPropertyValue('--buffer').trim()), {

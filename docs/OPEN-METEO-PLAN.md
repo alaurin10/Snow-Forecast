@@ -31,14 +31,15 @@ all three bands, a schedule per system and the budget planner; PR 3, adding seve
 ski areas from the catalog, the Overview and Calendar grouped by region with a filter
 and favourites, and new locations' first satellite pass. The 50-location run time and
 HRRR refresh timing on the mini PC are the owner's checks.
-**Milestone 4B** (16 days
-everywhere, a 15-day chart, a second "Less certain" mark at day 11; the map to 16 days
-from GFS) is explored, decided and planned; PR 1, the data (16-day forecasts, no
-ratings past day 10, the days 11–16 window), and PR 2, the location pages (a 15-day
-chart with a second "Less certain" mark, 16 days in the day by day, Calendar, Confidence
-tab, Compare and share, an Overview column), are built, and PR 3, the map's data (GFS
-from day 10 to 16 for the precipitation loop, snow totals, temperature and clouds), is
-built; the snow by elevation past day 10 is left for later.
+**Milestone 4B built** (28 Nov
+2026): 16 days everywhere. PR 1, the data (16-day forecasts, no ratings past day 10, the
+days 11–16 window); PR 2, the location pages (a 15-day chart with a second "Less
+certain" mark, 16 days in the day by day, Calendar, Confidence tab, Compare and share, an
+Overview column); PR 3, the map's data (GFS from day 10 to 16 for the precipitation
+loop, snow totals, temperature and clouds); PR 4, the map's UI (the timeline to 16 days
+with its day-10 mark, playing to day 10, days 11–16 loaded when reached, totals to 14
+days and the end). Left for later: the snow by elevation past day 10. The map job's time
+with GFS and a look on a phone are the owner's checks on the mini PC.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1633,27 +1634,68 @@ probabilities, not amounts.
 - The index's `less_certain_from` is 240 h from the hour it was written, as the chart's.
 
 ### PR 4: the map's UI (frontend)
-- [ ] **Timeline** (`map/Timeline.svelte`):
+- [x] **Timeline** (`map/Timeline.svelte`):
   - the slider runs to 16 days, the same as the rest past 48 h (its dashed band), with a
     tick and "Less certain" 10 days from now like the chart's;
   - labels read as now, e.g. "Thu 13 · 6-hour average · in 15 days";
   - day names thin out where they'd crowd;
   - the player stops at day 10 unless the slider is already past it.
-- [ ] **Loading days 11–16** (`precip/layer.ts`, `loader.ts`): frames past day 10 load
+- [x] **Loading days 11–16** (`precip/layer.ts`, `loader.ts`): frames past day 10 load
   when the slider reaches them, as frames past 48 h already do, and are let go when it
   leaves, if that's needed to stay within the GPU budget (below).
-- [ ] **Snow total slider**: stops at 14 days and "to the end".
-- [ ] **Temperature marks** to 16 days (`TEMP_MARKS`); the cloud cover's timeline too.
-- [ ] **Copy**: the Layers sheet's text ("to 16 days, the last 6 days from GFS alone")
-  and the colour keys.
-- [ ] **Unchanged**: the spot panel's and feature cards' totals (24 h, 3 days, 7 days).
-- [ ] **Measure** with `e2e/perf.spec.ts`, its fixture extended to 384 h:
+- [x] **Snow total slider**: stops at 14 days and "to the end".
+- [x] **Temperature marks** to 16 days (`TEMP_MARKS`); the cloud cover's timeline too.
+- [x] **Copy**: the Layers sheet's text ("to 16 days, the last 6 days from GFS alone")
+  and the colour keys (unchanged: they don't name a time).
+- [x] **Unchanged**: the spot panel's and feature cards' totals (24 h, 3 days, 7 days).
+- [x] **Measure** with `e2e/perf.spec.ts`, its fixture extended to 384 h (the spec
+  measures the phone profile only; desktop wasn't measured):
   - GPU process peak while playing and while scrubbing into days 11–16, phone and
     desktop;
   - keep within MAP-PLAN's measured peak plus ~20 %, or load and drop the days 11–16
     frames as above.
-- [ ] e2e: the timeline to 16 days, its day-11 mark and labels, totals at 14 days, at
+- [x] e2e: the timeline to 16 days, its day-11 mark and labels, totals at 14 days, at
   380 px and desktop.
+
+### What PR 4 (the map's UI) built and found (28 Nov 2026)
+
+- **The mark:** the index's `less_certain_from` (PR 3) is placed among the frames by
+  their valid times (`radar.lessCertainPos`), so it falls between the 6-hour frames
+  standing for 237 h and 243 h. Under the slider it's a firmer tick with "Less certain →"
+  after it where there's ~80 px of slider left; on a phone (~200 px of slider, the mark
+  at ~78%) the tick alone, as the chart does where its labels would crowd. Putting the
+  words before the tick on a phone hid every day name between "Now" and day 10. Day
+  names that would crowd the mark are left out. The clouds' loop gets the same mark from
+  its own frames; the temperature's slider gains a 10-day mark (a firmer tick) and ends
+  at ~16 days.
+- **Playing** runs to the mark and round again, unless the slider is already at or past
+  it (then to the end). The same for the temperature's slider (its 10-day mark).
+- **Loading:** the radar's frames past the mark wait until the slider goes past it; until
+  then the frame just after the mark is fetched too, so the slider blends across it.
+  Once fetched they stay: days 11–16 cost little (below), so nothing is dropped.
+- **Snow total slider:** marks at 14 days and the end ("16d", "Next 16 days"). On a
+  narrow slider every other mark is unnamed (its tick stays, and the mark it's on is
+  named), here and on the temperature's slider. The 14-day and to-the-end totals are
+  plain totals: zoomed in, the map shows them without the terrain adjustment.
+- **Measured** (`e2e/perf.spec.ts`, phone profile, headless Chromium with the GPU in
+  software; peaks over the whole run, two runs each, with a new step scrubbing into days
+  11–16):
+
+  | Fixture | GPU process, peak | Page process, peak |
+  |---|---|---|
+  | Before PR 4, the old 24-hour fixture | 312–320 MB | 369–391 MB |
+  | PR 4, fixture to 240 h (today's 10 days) | 357–363 MB | 389–396 MB |
+  | PR 4, fixture to 384 h (16 days) | 371–381 MB | 413–428 MB |
+
+  Days 11–16 add ~15 MB on the GPU (+4%) and ~25 MB to the page over the 10-day loop,
+  well within the plan's +20%. The bigger step is days 2–10, which the old fixture
+  didn't have. The page's peak stays under the spec's 520 MB guard.
+- The e2e fixture's 70 frames past 24 h reuse six drawn pictures under their own names
+  (drawing them all would have doubled the fixture's ~50 s).
+- e2e: the loop to 16 days and its mark (both widths), days 11–16 fetched only when
+  reached, playing stopping at the mark, and the totals to 14 days and the end
+  (`e2e/sixteen.spec.ts`); `radar.spec.ts` takes its slider to the end once so every
+  frame is fetched.
 
 ### Tests and verification
 - Backend: a fixture-built snapshot reaches 16 days. Its days 11–16 rest on the

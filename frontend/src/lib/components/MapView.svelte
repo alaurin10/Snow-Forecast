@@ -1750,9 +1750,14 @@
 			onChange: radarChanged
 		});
 		radarLayer.setFrames(
-			list.map((f) => ({ file: f.data!, url: dataUrl(f), full: (f.ds ?? 1) === 1 }))
+			list.map((f) => ({ file: f.data!, url: dataUrl(f), full: (f.ds ?? 1) === 1 })),
+			untrack(() => reach)
 		);
 		radarLayer.setPosition(untrack(() => pos));
+	});
+	$effect(() => {
+		const r = reach;
+		if (glRadar) radarLayer?.setReach(r);
 	});
 	$effect(() => {
 		const p = pos;
@@ -1831,7 +1836,7 @@
 		});
 		if (untrack(() => frame) !== near) frame = near;
 	});
-	// The temperature's slider runs to 10 days, the snow level's to 3½: keep within it.
+	// The temperature's slider runs to 16 days, the snow level's to 3½: keep within it.
 	$effect(() => {
 		const sc = fieldScale;
 		if (!sc?.hours.length) return;
@@ -1850,7 +1855,13 @@
 			untrack(() => fieldHours),
 			sc.marks
 		);
-		if (p >= last - 1e-3) p = 0;
+		// It plays to the 10-day mark ("Less certain"), unless already at or past it.
+		const stop = sc.stop > 0 ? sc.stop : -1;
+		let end = stop > 0 && p < stop - 1e-3 ? stop : last;
+		if (p >= end - 1e-3) {
+			p = 0;
+			end = stop > 0 ? stop : last;
+		}
 		let before = performance.now();
 		let hold = 300;
 		let loops = 0;
@@ -1860,7 +1871,7 @@
 			const dt = Math.min(100, t - before);
 			before = t;
 			if (hold > 0) return void (hold -= dt);
-			if (p >= last) {
+			if (p >= end) {
 				// A few loops, then rest at the start.
 				if (++loops >= 3) {
 					playing = false;
@@ -1868,15 +1879,16 @@
 					return;
 				}
 				p = 0;
+				end = stop > 0 ? stop : last;
 				fieldHours = 0;
 				hold = 500;
 				return;
 			}
 			if (fieldLayer?.waiting && stalled < 3000) return void (stalled += dt);
 			stalled = 0;
-			p = Math.min(last, p + dt / FIELD_MARK_MS);
+			p = Math.min(end, p + dt / FIELD_MARK_MS);
 			fieldHours = hoursAt(p, sc.marks);
-			if (p >= last) hold = 1200;
+			if (p >= end) hold = 1200;
 		});
 		return () => cancelAnimationFrame(raf);
 	});
@@ -2150,6 +2162,19 @@
 	 */
 	let fetchRun = 0;
 	let extendedWanted = $state(false);
+	/**
+	 * Days 11–16, past the "Less certain" mark (milestone 4B), are fetched only once the
+	 * slider goes past it (playing stops there): until then the loop's frames reach the one
+	 * just after the mark, so the slider still blends across it.
+	 */
+	let farWanted = $state(false);
+	const reach = $derived(
+		farWanted || view.lessCertain <= 0 ? count - 1 : Math.ceil(view.lessCertain)
+	);
+	$effect(() => {
+		const lc = view.lessCertain;
+		if (looping && lc > 0 && Math.max(frame, pos) > lc) farWanted = true;
+	});
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	async function fetchAll() {
 		const run = ++fetchRun;
@@ -2159,6 +2184,7 @@
 		const order = list
 			.map((f, i) => ({ f, i, d: Math.abs(i - frame) + (i < frame ? 0.5 : 0) }))
 			.filter((x) => extendedWanted || from < 0 || x.i < from)
+			.filter((x) => x.i <= reach)
 			// The cloud layer fetches its own (as numbers).
 			.filter((x) => !(glClouds && !x.f.past && x.f.data))
 			.sort((a, b) => a.d - b.d)
@@ -2183,6 +2209,9 @@
 	});
 	$effect(() => {
 		if (extendedWanted && ready) void untrack(fetchAll);
+	});
+	$effect(() => {
+		if (farWanted && ready) void untrack(fetchAll);
 	});
 	$effect(() => () => clearTimeout(idleTimer));
 	// Another loop (or a new index): note what's already downloaded, fetch the rest.
@@ -2271,22 +2300,28 @@
 		let waits = 0;
 		let loops = 0;
 		let id: ReturnType<typeof setTimeout>;
+		// It plays to the "Less certain" mark (10 days out), unless already past it.
+		const stop = view.lessCertain > 0 ? Math.floor(view.lessCertain) : -1;
+		let end = stop >= 0 && untrack(() => frame) < stop ? stop : count - 1;
 		const tick = () => {
 			const a = frames[frame];
 			const b = frames[(frame + 1) % count];
 			id = setTimeout(tick, frameMs(a && b && b.t > a.t ? b.t - a.t : 3600));
 			if (hold > 0) return void hold--;
-			const next = (frame + 1) % count;
+			const next = frame >= end ? 0 : frame + 1;
 			if ((waiting || !hasFrame(frames[next])) && waits++ < 10) return;
 			waits = 0;
-			// A few loops, then rest on "now": endless playback keeps the phone busy.
-			if (next === 0 && ++loops >= 3) {
-				playing = false;
-				frame = Math.max(0, view.now);
-				return;
+			if (next === 0) {
+				// A few loops, then rest on "now": endless playback keeps the phone busy.
+				if (++loops >= 3) {
+					playing = false;
+					frame = Math.max(0, view.now);
+					return;
+				}
+				end = stop >= 0 ? stop : count - 1;
 			}
 			frame = next;
-			if (next === count - 1) hold = 4;
+			if (next === end) hold = 4;
 			else if (next === view.now) hold = 3;
 		};
 		id = setTimeout(tick, 600);
@@ -2302,6 +2337,9 @@
 		const last = count - 1;
 		const nowAt = view.now;
 		let p = untrack(() => pos);
+		// It plays to the "Less certain" mark (10 days out), unless already at or past it.
+		const stop = view.lessCertain > 0 ? Math.floor(view.lessCertain) : -1;
+		let end = stop >= 0 && p < stop ? stop : last;
 		let before = performance.now();
 		let hold = 400;
 		let stalled = 0;
@@ -2324,6 +2362,7 @@
 					return;
 				}
 				p = 0;
+				end = stop >= 0 ? stop : last;
 			} else {
 				if (radarLayer?.waiting && stalled < 3000) {
 					stalled += dt;
@@ -2336,8 +2375,8 @@
 				if (nowAt > 0 && p < nowAt && next >= nowAt) {
 					p = nowAt;
 					hold = 900;
-				} else if (next >= last) {
-					p = last;
+				} else if (next >= end) {
+					p = end;
 					hold = 1800;
 					wrap = true;
 				} else p = next;

@@ -1,10 +1,12 @@
 """Precipitation frames for the e2e server (e2e/serve.sh), so the map's timeline has
-something to play: radar for the past two hours, a short nowcast and a day of hourly
-forecast, at the real picture size over the real box, with bands of rain and snow that
-drift east; snow totals for a few windows, more snow over a wider area the longer
-the window; and clouds: a satellite picture, then forecast cloud cover with its heights
-(a deck over the Cascades, based at 1,500 m with its top at 2,500 m); and the snow level
-every 3 hours as rain, mix or snow, on a made-up ground (the real one needs the network).
+something to play: radar for the past two hours, a short nowcast, a day of hourly
+forecast, then 3-hourly frames to 84 h and 6-hourly ones to 384 h (16 days, marked less
+certain 10 days out: milestone 4B), at the real picture size over the real box, with
+bands of rain and snow that drift east; snow totals for a few windows to 16 days, more
+snow over a wider area the longer the window; and clouds: a satellite picture, then
+forecast cloud cover with its heights (a deck over the Cascades, based at 1,500 m with
+its top at 2,500 m); and the snow level every 3 hours as rain, mix or snow, on a made-up
+ground (the real one needs the network).
 Written fresh each run (no binaries in git).
 
     uv run --frozen python ../frontend/e2e/precip_fixture.py <data>/precip
@@ -41,6 +43,12 @@ WIDTH = 1700  # config/forecast.yaml map.width
 RADAR = 10  # every 12 minutes
 NOWCAST = 3
 FORECAST = 24  # hourly
+# Then 3-hourly to 84 h and 6-hourly to 384 h, as the server lists them past 48 h. A few
+# pictures are drawn and reused under each frame's own name (drawing all 70 would double
+# the time this takes); the map fetches and holds each frame separately all the same.
+EXTENDED = [(h, 3) for h in range(27, 85, 3)] + [(h, 6) for h in range(90, 385, 6)]
+EXTENDED_PICTURES = 6
+LESS_CERTAIN_H = 240  # render.py: the second "Less certain" mark
 
 
 def picture(region, step: int, ds: int, blind: bool = False) -> tuple[bytes, bytes]:
@@ -202,11 +210,40 @@ def main(out: Path) -> None:
                 "valid": t - 1800 if kind == "forecast" else t,
             }
         )
+    hour = now // 3600 * 3600
+    drawn: list[tuple[bytes, bytes]] = []
+    for i, (h, span) in enumerate(EXTENDED):
+        t = hour + h * 3600
+        if len(drawn) < EXTENDED_PICTURES:
+            drawn.append(picture(region, len(times) + i * 3, 4))
+        data, numbers = drawn[i % EXTENDED_PICTURES]
+        name = f"f{t}-{hashlib.sha1(data).hexdigest()[:12]}.{FINE_EXT}"
+        data_name = f"f{t}-{hashlib.sha1(numbers).hexdigest()[:12]}.{dataframe.EXT}"
+        (out / name).write_bytes(data)
+        (out / data_name).write_bytes(numbers)
+        north = "gfs" if h > 240 else "gdps"
+        south = "nbm" if h <= 264 else "gfs"
+        frames.append(
+            {
+                "t": t,
+                "past": False,
+                "file": name,
+                "key": name.split("-")[0],
+                "south": south if south == "nbm" else "",
+                "kind": "forecast",
+                "span_h": span,
+                "src": {"north": north, "south": south},
+                "palette": "fine",
+                "data": data_name,
+                "ds": 4,
+                "valid": t - span * 1800,
+            }
+        )
     totals = []
     h, w = region.height, region.width
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     start = now // 3600 * 3600
-    for window in (12, 24, 72, 240):
+    for window in (12, 24, 72, 240, 336, 384):
         reach = 150 + window * 3.0
         cm = (window / 2) * np.exp(-((xs - 700) ** 2 + (ys - 900) ** 2) / (2 * reach**2))
         buf = io.BytesIO()
@@ -214,15 +251,16 @@ def main(out: Path) -> None:
         png = buf.getvalue()
         name = f"t{window}-{hashlib.sha1(png).hexdigest()[:12]}.png"
         (out / name).write_bytes(png)
+        far = window > 240
         totals.append(
             {
-                "hours": window,
+                "hours": window - 4 if far else window,
                 "window": window,
                 "start": start,
-                "end": start + window * 3600,
+                "end": start + (window - 4 if far else window) * 3600,
                 "file": name,
                 "key": name,
-                "source": "hrdps+nbm",
+                "source": "hrdps+nbm+gfs" if far else "hrdps+nbm",
             }
         )
     # The snow total as numbers at each step of its slider: the same patch, and by
@@ -231,11 +269,17 @@ def main(out: Path) -> None:
     bh, bw = bins.shape_for(region)
     by, bx = np.mgrid[0:bh, 0:bw].astype(np.float32)
     rise = np.clip((bins.ELEVS - 500) / 1500, 0, 1) * 1.5
-    for hours in totaldata.STEP_WINDOWS:
+    # Past 10 days (milestone 4B) the steps are plain totals, without snow by elevation.
+    far_steps = [h - 4 for h in totaldata.FAR_STEPS]
+    for hours in [*totaldata.STEP_WINDOWS, *far_steps]:
         reach = 150 + hours * 3.0
         cm = (hours / 2) * np.exp(-((xs - 700) ** 2 + (ys - 900) ** 2) / (2 * reach**2))
-        cell = (hours / 2) * np.exp(-((bx * 2 - 700) ** 2 + (by * 2 - 900) ** 2) / (2 * reach**2))
-        grid = cell[..., None] * rise[None, None, :]
+        grid = None
+        if hours <= 240:
+            cell = (hours / 2) * np.exp(
+                -((bx * 2 - 700) ** 2 + (by * 2 - 900) ** 2) / (2 * reach**2)
+            )
+            grid = cell[..., None] * rise[None, None, :]
         data = totaldata.encode(totaldata.area_plane(cm.astype(np.float32)), grid)
         name = f"s{hours}-{hashlib.sha1(data).hexdigest()[:12]}.{totaldata.EXT}"
         (out / name).write_bytes(data)
@@ -251,6 +295,7 @@ def main(out: Path) -> None:
         "frames": frames,
         "totals": totals,
         "steps": {"start": start, "key": "e2e", "steps": steps},
+        "less_certain_from": start + LESS_CERTAIN_H * 3600,
         "layers": {
             "clouds": {"frames": clouds(out, region, now)},
             "snowlevel": {"frames": snow_level(out, region, now)},

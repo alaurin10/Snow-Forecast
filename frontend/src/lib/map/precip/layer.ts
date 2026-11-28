@@ -82,6 +82,8 @@ export class RadarLayer {
 	static readonly ID = 'radar';
 	readonly id: string;
 	private frames: RadarFrame[] = [];
+	/** The last frame to have on hand (days 11–16 wait until the slider goes there). */
+	private reach = Infinity;
 	private pos = 0;
 	private gfx: PrecipGl | null = null;
 	private tex = new Map<string, FrameTex>();
@@ -168,9 +170,11 @@ export class RadarLayer {
 
 	// ---- What to show ---------------------------------------------------------------
 
-	/** The timeline's frames, in order. Frames no longer in it are freed. */
-	setFrames(frames: RadarFrame[]) {
+	/** The timeline's frames, in order, and the last of them to fetch (all by default).
+	 *  Frames no longer in it, or past `reach`, are freed. */
+	setFrames(frames: RadarFrame[], reach = Infinity) {
 		this.frames = frames;
+		this.reach = reach;
 		const files = new Set(frames.map((f) => f.file));
 		this.sharp = this.sharp.filter((f) => files.has(f));
 		this.rewant();
@@ -182,6 +186,13 @@ export class RadarLayer {
 		}
 		for (const key of [...this.queue.keys()]) if (!wanted.has(key)) this.queue.delete(key);
 		this.changed();
+	}
+
+	/** The last frame to fetch: frames past it are fetched once it moves on to them. */
+	setReach(reach: number) {
+		if (reach === this.reach) return;
+		this.reach = reach;
+		this.rewant();
 	}
 
 	/** The slider's position: a frame's index, or between two. */
@@ -266,12 +277,14 @@ export class RadarLayer {
 	}
 
 	private wants(): Want[] {
-		const out: Want[] = this.frames.map((f, at) => ({
-			key: this.baseKey(f),
-			url: f.url,
-			half: this.opts.lean && f.full,
-			at
-		}));
+		const out: Want[] = this.frames
+			.map((f, at) => ({
+				key: this.baseKey(f),
+				url: f.url,
+				half: this.opts.lean && f.full,
+				at
+			}))
+			.filter((w) => w.at <= this.reach);
 		for (const file of this.sharp) {
 			const at = this.frames.findIndex((f) => f.file === file);
 			if (at >= 0) out.push({ key: file, url: this.frames[at].url, half: false, at, first: true });

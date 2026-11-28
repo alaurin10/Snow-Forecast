@@ -7,6 +7,7 @@
 // same index as the precipitation frames (../radar.ts).
 import type { MapWeather, MapWind } from '../prefs.svelte';
 import {
+	lessCertainPos,
 	totalLabel,
 	totalName,
 	totalSources,
@@ -198,6 +199,9 @@ export interface WeatherView {
 	now: number;
 	nowcastEnd: number;
 	extendedFrom: number;
+	/** Where the forecast becomes less certain (10 days out) on the loop's slider: a
+	 *  frame's index or between two; -1 if the loop doesn't reach past it. */
+	lessCertain: number;
 	picks: Pick[];
 	/** The snow total as numbers (a continuous slider): its start and each step's hours. */
 	steps: { start: number; hours: number[] } | null;
@@ -209,6 +213,7 @@ const NONE: WeatherView = {
 	now: -1,
 	nowcastEnd: -1,
 	extendedFrom: -1,
+	lessCertain: -1,
 	picks: [],
 	steps: null
 };
@@ -307,6 +312,7 @@ export function weatherView(tl: Timeline | null, weather: MapWeather, wind: MapW
 			now: tl.now,
 			nowcastEnd: tl.nowcastEnd,
 			extendedFrom: tl.extendedFrom,
+			lessCertain: tl.lessCertain,
 			picks: [],
 			steps: null
 		};
@@ -326,7 +332,8 @@ export function weatherView(tl: Timeline | null, weather: MapWeather, wind: MapW
 		frames,
 		// Clouds: "now" is the last satellite picture (the forecast's cloud cover follows);
 		// the forecast layers start after it.
-		now: weather === 'clouds' ? frames.findLastIndex((f) => f.past) : -1
+		now: weather === 'clouds' ? frames.findLastIndex((f) => f.past) : -1,
+		lessCertain: lessCertainPos(frames, tl.lessCertainAt)
 	};
 }
 
@@ -362,7 +369,8 @@ const MODELS: Record<string, string> = {
 	hrdps: 'Canadian HRDPS',
 	rdps: 'Canadian RDPS',
 	gdps: 'Canadian GDPS',
-	nbm: "NOAA's National Blend of Models"
+	nbm: "NOAA's National Blend of Models",
+	gfs: "NOAA's GFS"
 };
 
 /** Where a frame of one of the loop layers came from, for the map's info panel. */
@@ -428,8 +436,9 @@ export const WEATHER_CHOICES: { id: MapWeather; label: string }[] = [
 
 // ---- The snow total's continuous slider ------------------------------------------------
 
-/** The windows the slider marks, evenly spaced along it (between them it is continuous). */
-export const TOTAL_MARKS = [12, 24, 48, 72, 120, 168, 240];
+/** The windows the slider marks, evenly spaced along it (between them it is continuous):
+ *  to 10 days, then 14 days and the end (~16 days, from GFS: milestone 4B). */
+export const TOTAL_MARKS = [12, 24, 48, 72, 120, 168, 240, 336];
 
 /** The marks a total's steps reach (the last may stop short of a window: it is the end). */
 export function totalMarks(stepHours: number[]): number[] {
@@ -472,15 +481,25 @@ export const markTick = (h: number) => (h < 48 ? `${h}h` : `${Math.round(h / 24)
 // ---- The temperature's continuous slider ----------------------------------------------
 
 /** Hours ahead the temperature slider marks, evenly spaced along it (between them it is
- *  continuous): fine in the first days, coarse beyond, as the snow total's. */
-export const TEMP_MARKS = [12, 24, 48, 72, 120, 168];
+ *  continuous): fine in the first days, coarse beyond, as the snow total's. Past 10 days
+ *  (milestone 4B) the end follows: ~16 days. */
+export const TEMP_MARKS = [12, 24, 48, 72, 120, 168, 240];
+/** The mark where the forecast becomes less certain: playing stops there. */
+export const LESS_CERTAIN_H = 240;
 
 /** The temperature slider: its frames' hours from the first, and its marks (hours from the
  *  first frame) with their ticks, from "now" (the first frame) to the last frame. */
 export function tempSlider(
 	frames: { t: number }[],
 	nowS = Date.now() / 1000
-): { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null {
+): {
+	t0: number;
+	hours: number[];
+	marks: number[];
+	ticks: string[];
+	/** The 10-day mark's index (playing stops there), or -1 if the frames end by then. */
+	stop: number;
+} | null {
 	if (frames.length < 2) return null;
 	const t0 = frames[0].t;
 	const hours = frames.map((f) => (f.t - t0) / HOUR);
@@ -488,16 +507,18 @@ export function tempSlider(
 	const ahead = (t0 - nowS) / HOUR; // the first frame is up to a few hours ahead
 	const marks = [0];
 	const ticks = ['Now'];
+	let stop = -1;
 	for (const h of TEMP_MARKS) {
 		const at = h - ahead;
 		if (at > marks[marks.length - 1] + 1 && at < last - 6) {
+			if (h === LESS_CERTAIN_H) stop = marks.length;
 			marks.push(at);
 			ticks.push(aheadTick(h));
 		}
 	}
 	marks.push(last);
 	ticks.push(aheadTick(Math.round(last + ahead)));
-	return { t0, hours, marks, ticks };
+	return { t0, hours, marks, ticks, stop };
 }
 
 /** A temperature mark's tick: "12h", then whole days ("1d", "10d"). */
