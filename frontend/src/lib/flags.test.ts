@@ -51,3 +51,11 @@ describe('flag wording', () => {
 		expect(isNew(f({ first_run: 7 }), null)).toBe(false);
 	});
 });
+
+describe('freezing rain flag', () => {
+	it('names the day and band', () => {
+		const fr = f({ type: 'freezing_rain', date: '2026-12-05', detail: 'base', value: 3 });
+		expect(flagTitle(fr)).toBe('Freezing rain Sat');
+		expect(flagText(fr, 'metric')).toContain('at the base (3 h)');
+	});
+});

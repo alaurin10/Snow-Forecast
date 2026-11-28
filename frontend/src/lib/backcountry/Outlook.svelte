@@ -16,7 +16,7 @@
 		activeFactors,
 		cell,
 		FACTOR_NAMES,
-		FACTORS,
+		factorsFor,
 		outlookSummary,
 		publishedDanger,
 		STRESS_MEANINGS,
@@ -39,7 +39,15 @@
 
 	let { days, avy, avyLoad = 'ready', today, units, graded = true, steps = null }: Props = $props();
 	const summary = $derived(graded ? outlookSummary(days, today, units) : '');
-	const table = $derived(steps ? thresholds(steps, units) : []);
+	const table = $derived(
+		steps
+			? thresholds(
+					steps,
+					units,
+					days.some((d) => d.sun_kwh)
+				)
+			: []
+	);
 	const center = $derived(
 		avy?.doc?.center_id && avy.doc.center_id !== 'avcan'
 			? avy.doc.center_id
@@ -63,7 +71,7 @@
 		<ul class="days">
 			{#each days as d (d.date)}
 				{@const lvl = avyLoad === 'loading' ? null : publishedDanger(avy, d.date)}
-				{@const shown = graded ? activeFactors(d) : FACTORS}
+				{@const shown = graded ? activeFactors(d) : factorsFor(d)}
 				{@const name = d.date === today ? 'Today' : weekday(d.date)}
 				<li
 					class="day"

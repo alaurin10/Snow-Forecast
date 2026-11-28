@@ -52,6 +52,8 @@ export interface Step {
 	dir: number | null;
 	cloud: number | null;
 	fl: number | null;
+	/** Snow level (m): wet-bulb based with a self-hosted server, else freezing level − 305 m. */
+	snowLevel: number | null;
 }
 
 /** Ranges the data can fill. */
@@ -138,7 +140,8 @@ export function buildSteps(h: HourlyOut, range: Range, all = false): Step[] {
 			gust: max(idx.map((i) => h.gust_kmh[i]).filter(num)),
 			dir: h.wdir[mid] ?? null,
 			cloud: mean(idx.map((i) => h.cloud[i]).filter(num)),
-			fl: mean(idx.map((i) => h.fl_m[i]).filter(num))
+			fl: mean(idx.map((i) => h.fl_m[i]).filter(num)),
+			snowLevel: mean(idx.map((i) => h.snow_level_m?.[i]).filter(num))
 		});
 	}
 	return steps;

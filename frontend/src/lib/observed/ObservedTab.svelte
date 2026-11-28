@@ -17,6 +17,7 @@
 	import MeasuredVsForecast from './MeasuredVsForecast.svelte';
 	import NearbyStations from './NearbyStations.svelte';
 	import FieldReports from './FieldReports.svelte';
+	import ModelSnowpack from './ModelSnowpack.svelte';
 
 	interface Props {
 		snap: Snapshot;
@@ -76,6 +77,7 @@
 
 		<h2 class="divider"><span>In detail</span></h2>
 		<SnowpackDetail {read} {units} {width} />
+		<ModelSnowpack {snap} {units} />
 		<MeasuredVsForecast data={scores} {units} load={scoresLoad} {width} />
 		{@render near()}
 	{:else}
@@ -93,6 +95,7 @@
 				</p>
 			{/if}
 		</section>
+		<ModelSnowpack {snap} {units} />
 		{@render near()}
 	{/if}
 	{#if showReports && nearby}

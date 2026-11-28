@@ -226,7 +226,8 @@
 		} else if (metric === 'fl') {
 			const e = elevs.map((x) => c.height(x.m) ?? 0);
 			for (const st of axSteps)
-				for (const v of [c.height(st.flLo), c.height(st.flHi)]) if (v !== null) e.push(v);
+				for (const v of [c.height(st.flLo), c.height(st.flHi), c.height(st.snowLevel)])
+					if (v !== null) e.push(v);
 			axis = niceAxis(Math.min(...vals, ...e) * 0.9, Math.max(...vals, ...e) * 1.05, 4);
 		} else if (metric === 'slr') axis = { min: 4, max: 20, ticks: [5, 8, 11, 14, 17, 20] };
 		else axis = { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
@@ -354,6 +355,7 @@
 		} else {
 			line = linePath(view.val, y);
 			if (metric === 'wind') line2 = linePath((st) => c.speed(st.gust), y);
+			if (metric === 'fl') line2 = linePath((st) => c.height(st.snowLevel), y);
 		}
 		// Model spread as a soft band behind the line.
 		const spread =
@@ -1256,7 +1258,8 @@
 		{:else if metric === 'cloud'}
 			<span>Thicker band: more of the sky covered</span>
 		{:else}
-			<span>Dashed lines: this location's elevations</span>
+			<span>Solid: freezing level · Dashed: snow level</span>
+			<span>Faint dashed lines: this location's elevations</span>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
 				><i class="sw band-sw b-{metric}"></i>Model range</span

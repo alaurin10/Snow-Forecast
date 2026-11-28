@@ -36,6 +36,7 @@
 			meta ? `Storms on the way (${amount(meta.storm_cm)} in 48 h)` : 'Storms on the way'
 		],
 		['wind_hold', 'Wind holds at resorts'],
+		['freezing_rain', 'Freezing rain'],
 		['avalanche_danger', 'Avalanche danger High or Extreme']
 	]);
 

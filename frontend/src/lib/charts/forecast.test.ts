@@ -152,3 +152,11 @@ describe('buildSteps with every step', () => {
 		expect(all[47].cum).toBeCloseTo(24);
 	});
 });
+
+describe('snow level line', () => {
+	it('averages the snow level per step, null without it', () => {
+		const h = { ...hourly(), snow_level_m: Array.from({ length: 48 }, () => 1200) };
+		expect(buildSteps(h, 1)[0].snowLevel).toBe(1200);
+		expect(buildSteps(hourly(), 1)[0].snowLevel).toBeNull();
+	});
+});

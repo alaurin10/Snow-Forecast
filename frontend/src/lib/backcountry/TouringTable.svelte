@@ -23,6 +23,15 @@
 	const dayPeriod = (date: string) =>
 		top.periods.find((p) => p.date === date && p.kind === 'day') ?? null;
 	const sun = (date: string) => snap.sun.find((s) => s.date === date) ?? null;
+	// Milestone 3 (a self-hosted server): rime and fog hours, and spring corn windows.
+	const humid = $derived(days.some((d) => d.sky?.rime_h != null));
+	const corn = (date: string) => {
+		const c = (snap.backcountry?.corn ?? []).find((x) => x.date === date);
+		return c?.windows.length
+			? c.windows.map((w) => `${w.aspect} ${clock(w.start)}`).join(', ')
+			: '–';
+	};
+	const hasCorn = $derived((snap.backcountry?.corn ?? []).length > 0);
 	const bandLabel = (b: string) => snap.bands.find((x) => x.band === b)?.label ?? b;
 	const clock = (iso: string | null | undefined) => {
 		if (!iso) return '–';
@@ -77,6 +86,26 @@
 					<th scope="row">Lowest visibility</th>
 					{#each days as d (d.date)}<td class="num">{vis(d.sky?.vis_min_m)}</td>{/each}
 				</tr>
+				{#if humid}
+					<tr>
+						<th scope="row">Fog or flat light</th>
+						{#each days as d (d.date)}<td class="num"
+								>{d.sky?.fog_h ? `${d.sky.fog_h} h` : 'unlikely'}</td
+							>{/each}
+					</tr>
+					<tr>
+						<th scope="row">Rime or icing</th>
+						{#each days as d (d.date)}<td class="num"
+								>{d.sky?.rime_h ? `${d.sky.rime_h} h` : 'unlikely'}</td
+							>{/each}
+					</tr>
+				{/if}
+				{#if hasCorn}
+					<tr>
+						<th scope="row">Corn softens (est.)</th>
+						{#each days as d (d.date)}<td class="num">{corn(d.date)}</td>{/each}
+					</tr>
+				{/if}
 
 				<tr class="group"><th colspan={cols} scope="colgroup">Wind and cold up high</th></tr>
 				<tr>
