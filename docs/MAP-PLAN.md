@@ -1593,8 +1593,33 @@ softness is honest rather than smoothed over.
 - Cost, measured over the default box: 52 MB per GFS run (two a day), ~23 s to fetch and
   decode, ~11 s a pass from the cache.
 
-The timeline, the totals slider and the browser's loading of days 11–16 are PR 4 of that
-milestone.
+**The map's UI (PR 4 of that milestone):**
+
+- **Timeline:** the loop runs to 16 days. 10 days out (the index's `less_certain_from`,
+  placed between the frames by their valid times) a firmer tick, with "Less certain →"
+  after it where the slider has ~80 px left, or the tick alone on a phone, like the
+  forecast chart's day-10 mark. Day names that would crowd it are left out. The clouds'
+  loop has the same mark; the temperature's slider gains a 10-day mark and ends at ~16
+  days.
+- **Playing** runs to the mark and round again, unless the slider is already at or past
+  it.
+- **Loading:** the radar's frames past the mark wait until the slider goes past it (the
+  one just after the mark comes with the rest, so the slider blends across it). Once
+  fetched they stay.
+- **Snow total slider:** marks at 14 days and the end. On a narrow slider every other
+  mark goes unnamed (its tick stays). Past 10 days the totals are plain: zoomed in, no
+  terrain adjustment.
+- **Measured** (`e2e/perf.spec.ts`, phone profile, GPU in software, two runs each, with a
+  new step scrubbing into days 11–16):
+
+  | Fixture | GPU process, peak | Page process, peak |
+  |---|---|---|
+  | Before, the old 24-hour fixture | 312–320 MB | 369–391 MB |
+  | Fixture to 240 h (today's 10 days) | 357–363 MB | 389–396 MB |
+  | Fixture to 384 h (16 days) | 371–381 MB | 413–428 MB |
+
+  Days 11–16 add ~15 MB on the GPU (+4%) and ~25 MB to the page over the 10-day loop;
+  the fixture now carries days 2–16 (six drawn pictures reused under each frame's name).
 
 ## Files
 

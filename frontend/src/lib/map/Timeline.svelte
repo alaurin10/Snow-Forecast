@@ -1,10 +1,11 @@
 <!--
   The weather layer's controls at the foot of the map (the layer itself is chosen in the
   row of types above it, or in Layers): for the loops,
-  a player and a slider (radar from three hours ago, through the nowcast, to ten days out;
-  snow level and wind to three and a half days; clouds over the last three hours); for the
-  snow total, a slider that stops at each window (12 hours to 10 days); for the others, a
-  window picker; and the colour key for whichever is showing.
+  a player and a slider (radar from three hours ago, through the nowcast, to 16 days out,
+  marked "Less certain" 10 days out; snow level and wind to three and a half days; clouds
+  over the last three hours, then the forecast); for the snow total, a slider that stops at
+  each window (12 hours to 16 days); for the others, a window picker; and the colour key
+  for whichever is showing.
 -->
 <script lang="ts">
 	import { elevation, type UnitSystem } from '../units';
@@ -68,7 +69,14 @@
 		totalHours?: number;
 		/** The temperature or snow level's continuous slider (frames drawn as numbers): the first
 		 *  frame's time, the frames' and the marks' hours from it, and the marks' ticks. */
-		field?: { t0: number; hours: number[]; marks: number[]; ticks: string[] } | null;
+		field?: {
+			t0: number;
+			hours: number[];
+			marks: number[];
+			ticks: string[];
+			/** The 10-day mark's index, or -1. */
+			stop?: number;
+		} | null;
 		/** Where that slider is: hours from the first frame. */
 		fieldHours?: number;
 	}
@@ -113,13 +121,30 @@
 	let trackWidth = $state(300);
 	/** A day name needs about this much room (a three-letter name and its tick mark). */
 	const TICK_PX = 30;
+	/** "Less certain →" at the ticks' size, and its tick mark. */
+	const LC_PX = 80;
+	/**
+	 * The second "Less certain" mark, 10 days out (milestone 4B), like the forecast chart's:
+	 * a tick, with its words after it where the slider has room for them (on a phone, the
+	 * tick alone). Null when the loop stops before it.
+	 */
+	const lessCertain = $derived.by(() => {
+		const p = view.lessCertain;
+		if (p <= 0 || p >= count - 1) return null;
+		const at = pct(p);
+		return { at, after: ((100 - at) / 100) * trackWidth >= LC_PX };
+	});
 	// Under the slider: "Now" where the observations end, then each new day of the
 	// forecast. Beyond two days a day is only a few frames wide, so names that would crowd
-	// the one before are left out.
+	// the one before, or the "Less certain" words, are left out.
 	const ticks = $derived.by(() => {
 		const out: { at: number; name: string; now?: boolean }[] = [];
 		const nowAt = view.now;
 		if (nowAt >= 0 && nowAt < count - 1) out.push({ at: pct(nowAt), name: 'Now', now: true });
+		const px = (a: number, b: number) => ((b - a) / 100) * trackWidth;
+		const lc = lessCertain;
+		const clear = (at: number) =>
+			!lc || px(at, lc.at) >= TICK_PX / 2 || px(lc.at, at) >= (lc.after ? LC_PX : 0) + TICK_PX / 2;
 		let prevDay = -1;
 		frames.forEach((f, i) => {
 			if (f.kind !== 'forecast') return;
@@ -128,11 +153,15 @@
 			const newDay = prevDay >= 0 && day !== prevDay;
 			prevDay = day;
 			const last = out[out.length - 1];
-			if (newDay && !(last && ((pct(i) - last.at) / 100) * trackWidth < TICK_PX))
+			if (newDay && !(last && px(last.at, pct(i)) < TICK_PX) && clear(pct(i)))
 				out.push({ at: pct(i), name: start.toLocaleDateString('en-US', { weekday: 'short' }) });
 		});
 		return out;
 	});
+	/** On a narrow slider every other mark of the continuous sliders goes unnamed (its tick
+	 *  stays), so their names don't run together. */
+	const named = (i: number, n: number) =>
+		n < 2 || i === 0 || i === n - 1 || trackWidth / (n - 1) >= 26 || i % 2 === 0;
 	// The nowcast's stretch of the slider, between the radar and the forecast.
 	const nowcastBand = $derived.by(() => {
 		const from = view.now;
@@ -207,7 +236,7 @@
 				{@const last = marks.length - 1}
 				{@const at = posAt(totalHours, marks)}
 				<div class="player">
-					<div class="track">
+					<div class="track" bind:clientWidth={trackWidth}>
 						<input
 							type="range"
 							min="0"
@@ -229,7 +258,7 @@
 						<div class="ticks" aria-hidden="true">
 							{#each marks as h, i (h)}
 								<span class:now={Math.abs(at - i) < 0.05} style:left="{(i / last) * 100}%"
-									>{markTick(h)}</span
+									>{named(i, marks.length) || Math.abs(at - i) < 0.05 ? markTick(h) : ''}</span
 								>
 							{/each}
 						</div>
@@ -320,7 +349,7 @@
 						{#if playing}<path d="M8 5v14M16 5v14" />{:else}<path d="M7 5l12 7-12 7z" />{/if}
 					</svg>
 				</button>
-				<div class="track">
+				<div class="track" bind:clientWidth={trackWidth}>
 					<input
 						type="range"
 						min="0"
@@ -349,8 +378,14 @@
 					/>
 					<div class="ticks" aria-hidden="true">
 						{#each field.marks as h, i (h)}
-							<span class:now={Math.abs(at - i) < 0.05} style:left="{(i / last) * 100}%"
-								>{field.ticks[i]}</span
+							<span
+								class:now={Math.abs(at - i) < 0.05}
+								class:firm={i === field.stop}
+								style:left="{(i / last) * 100}%"
+								title={i === field.stop ? 'Less certain after 10 days' : undefined}
+								>{named(i, field.marks.length) || Math.abs(at - i) < 0.05
+									? field.ticks[i]
+									: ''}</span
 							>
 						{/each}
 					</div>
@@ -428,6 +463,11 @@
 						{#each ticks as d (d.at)}
 							<span class:now={d.now} style:left="{d.at}%">{d.name}</span>
 						{/each}
+						{#if lessCertain}
+							<span class="lc" style:left="{lessCertain.at}%" title="Less certain after 10 days"
+								>{lessCertain.after ? 'Less certain →' : ''}</span
+							>
+						{/if}
 					</div>
 				</div>
 				<div class="time" aria-live="off">
@@ -735,9 +775,19 @@
 		font-weight: 600;
 		border-left-color: var(--accent);
 	}
+	/* The "Less certain" mark (10 days out): its tick at the spot and the words after it.
+	   A firmer tick than a day's, also on the temperature's slider. */
+	.ticks span.lc {
+		transform: none;
+		min-height: 13px;
+		border-left-color: var(--text-2);
+	}
+	.ticks span.firm {
+		border-left-color: var(--text-2);
+	}
 	/* One width whatever it says, so the slider beside it never changes size while it's
 	   being dragged. Wide enough for the longest labels ("Tue 11 PM–12 AM",
-	   "6-hour avg · in 10 days", "radar · 2 h 48 min ago"). */
+	   "6-hour avg · in 15 days", "radar · 2 h 48 min ago"). */
 	.time {
 		display: grid;
 		text-align: right;

@@ -83,19 +83,20 @@
 			id: 'radar',
 			label: 'Radar',
 			name: 'Radar & forecast',
-			about: 'Radar for the last three hours, then the forecast hour by hour.'
+			about:
+				'Radar for the last three hours, then the forecast to 16 days: hour by hour at first, the last 6 days from GFS alone, less certain.'
 		},
 		{
 			id: 'totals',
 			label: 'Snow total',
-			about: 'Forecast snow, with the ratio from the forecast temperature.'
+			about: 'Forecast snow to 16 days, with the ratio from the forecast temperature.'
 		},
 		{ id: 'snowlevel', label: 'Snow level', about: 'Forecast snow level, to about 3½ days.' },
 		{
 			id: 'temp',
 			label: 'Temp',
 			name: 'Temperature',
-			about: 'Forecast temperature to 10 days, adjusted to the height of the terrain.'
+			about: 'Forecast temperature to 16 days, adjusted to the height of the terrain.'
 		},
 		{ id: 'wind', label: 'Wind', about: 'Forecast wind, to about 3½ days.' },
 		{
@@ -110,7 +111,11 @@
 			name: 'Observed snow',
 			about: 'Snow that fell, analysed from reports and radar (the US only).'
 		},
-		{ id: 'clouds', label: 'Clouds', about: 'Satellite clouds, the last three hours (GOES-West).' }
+		{
+			id: 'clouds',
+			label: 'Clouds',
+			about: 'Satellite clouds for the last three hours (GOES-West), then the forecast to 16 days.'
+		}
 	];
 	const OVERLAYS = $derived<Choice<MapOverlay>[]>(
 		(

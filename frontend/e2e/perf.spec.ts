@@ -1,5 +1,6 @@
 // The map's memory budget (docs/MAP-PLAN.md, "Performance rules"), measured: on the
-// phone profile, radar playing, a pan and zoom, the slope overlay and a 3D pan. The
+// phone profile, radar playing, a pan and zoom, scrubbing into days 11–16, the slope
+// overlay and a 3D pan. The
 // browser is launched here so its processes can be measured (proportional set size of
 // each Chromium process, from /proc, so Linux only). Numbers go to perf.json in the test's
 // output folder and to the console, to compare before and after a change.
@@ -182,6 +183,22 @@ test('the map stays within its memory budget on a phone', solo, async ({ baseURL
 		await page.waitForTimeout(1500);
 		await heap();
 		steps.panned = sample();
+
+		// Into days 11–16 (milestone 4B): they're fetched once the slider goes past the
+		// "Less certain" mark, so paused, to the end and back across the mark.
+		const pause = page.getByRole('button', { name: 'Pause' });
+		if (await pause.isVisible()) await pause.click();
+		const slider = page.getByRole('slider', { name: 'Time' });
+		const max = Number(await slider.getAttribute('max'));
+		for (const v of [max, max * 0.9, max * 0.75, max * 0.85, max]) {
+			await slider.evaluate((el: HTMLInputElement, v) => {
+				el.value = String(v);
+				el.dispatchEvent(new Event('input', { bubbles: true }));
+			}, v);
+			await page.waitForTimeout(1500);
+		}
+		await heap();
+		steps.days11_16 = sample();
 
 		// 3D, then a short pan (SwiftShader makes every 3D frame slow).
 		await page.getByRole('button', { name: '3D terrain' }).click();
