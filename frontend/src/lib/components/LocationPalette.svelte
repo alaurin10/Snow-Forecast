@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { modal } from '../modal';
 	import { recentSpots, spotSearch } from '../recentSpots';
+	import { favourites, regionGroup } from '../locgroups.svelte';
 
 	interface Props {
 		locations: { id: string; name: string; region: string }[];
@@ -22,8 +23,13 @@
 		region: 'Recent spot',
 		href: resolve('/spot') + spotSearch(sp.lat, sp.lon)
 	}));
+	// Favourites (starred on the Overview) first, then the Manage order.
+	const ordered = $derived([
+		...locations.filter((l) => favourites.has(l.id)),
+		...locations.filter((l) => !favourites.has(l.id))
+	]);
 	const items = $derived<Item[]>([
-		...locations.map((l) => ({
+		...ordered.map((l) => ({
 			key: l.id,
 			name: l.name,
 			region: l.region,
@@ -31,9 +37,20 @@
 		})),
 		...spots
 	]);
-	const shown = $derived(
-		items.filter((l) => `${l.name} ${l.region}`.toLowerCase().includes(q.trim().toLowerCase()))
-	);
+	// Every word must match the name, the region or its state or province.
+	const shown = $derived.by(() => {
+		const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+		return items.filter((l) => {
+			const hay = `${l.name} ${l.region} ${regionGroup(l.region)}`.toLowerCase();
+			return words.every((w) => hay.includes(w));
+		});
+	});
+	// With ~50 locations the list scrolls: keep the highlighted one in view.
+	let list = $state<HTMLUListElement | null>(null);
+	$effect(() => {
+		void at;
+		list?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+	});
 	const open = (item: Item) => {
 		onclose();
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved above
@@ -65,7 +82,7 @@
 				autocomplete="off"
 			/>
 		</label>
-		<ul role="listbox" aria-label="Locations">
+		<ul role="listbox" aria-label="Locations" bind:this={list}>
 			{#each shown as l, i (l.key)}
 				<li role="option" aria-selected={i === at}>
 					<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved above -->

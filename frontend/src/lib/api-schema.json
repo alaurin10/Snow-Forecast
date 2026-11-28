@@ -706,6 +706,46 @@
       "title": "BudgetOut",
       "type": "object"
     },
+    "CatalogAddIn": {
+      "description": "Ski areas to add from the catalog, each resolved and saved by the worker.",
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 25,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "title": "CatalogAddIn",
+      "type": "object"
+    },
+    "CatalogAddOut": {
+      "properties": {
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/JobOut"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "title": "CatalogAddOut",
+      "type": "object"
+    },
     "CatalogItem": {
       "properties": {
         "country": {
@@ -2154,6 +2194,17 @@
     },
     "JobOut": {
       "properties": {
+        "arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "created_at": {
           "type": "string"
         },
@@ -7454,6 +7505,12 @@
       },
       "type": "array"
     },
+    "catalog_add": {
+      "$ref": "#/$defs/CatalogAddOut"
+    },
+    "catalog_add_in": {
+      "$ref": "#/$defs/CatalogAddIn"
+    },
     "compare": {
       "$ref": "#/$defs/CompareOut"
     },
@@ -7566,6 +7623,8 @@
     "save",
     "job",
     "budget",
+    "catalog_add_in",
+    "catalog_add",
     "lookups",
     "avalanche",
     "plan",

@@ -17,6 +17,7 @@
 		reorderLocations,
 		resolveLocation,
 		searchCatalog,
+		addFromCatalog,
 		updateLocation,
 		waitForJob
 	} from '../../lib/api';
@@ -57,6 +58,11 @@
 	// Add a resort
 	let query = $state('');
 	let results = $state<CatalogItem[]>([]);
+	// "Add several": catalog ski areas ticked to add at once, each with every suggestion.
+	let picked = $state<CatalogItem[]>([]);
+	const isPicked = (c: CatalogItem) => picked.some((p) => p.id === c.id);
+	const togglePick = (c: CatalogItem) =>
+		(picked = isPicked(c) ? picked.filter((p) => p.id !== c.id) : [...picked, c]);
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	let searchSeq = 0;
 
@@ -181,6 +187,40 @@
 			pins: [{ band: 'mid', lat: c.lat, lon: c.lon }]
 		});
 
+	async function addPicked() {
+		const names = new Map(picked.map((c) => [c.id, c.name]));
+		busy = true;
+		error = null;
+		try {
+			const res = await addFromCatalog(picked.map((c) => c.id));
+			const skipped = Object.entries(res.skipped ?? {}).map(
+				([id, why]) => `${names.get(id) ?? id} (${why})`
+			);
+			picked = [];
+			mode = 'list';
+			message =
+				`Adding ${res.jobs.length} ski area${res.jobs.length === 1 ? '' : 's'} with the detected details; ` +
+				'each appears on the overview once its first forecast is ready.' +
+				(skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '');
+			await load();
+			const jobs = await Promise.all(
+				res.jobs.map((j) => waitForJob(j.id, () => {}, leaving.signal))
+			);
+			if (leaving.signal.aborted) return;
+			const failed = jobs.filter((j) => j.status === 'failed');
+			message =
+				`Added ${jobs.length - failed.length} of ${jobs.length}.` +
+				(failed.length
+					? ` Not added: ${failed.map((j) => `${names.get(j.arg ?? '') ?? j.arg}: ${j.error}`).join('; ')}.`
+					: '');
+			await load();
+		} catch (e) {
+			if (!leaving.signal.aborted && !signedOut(e)) error = friendlyError(e);
+		} finally {
+			busy = false;
+		}
+	}
+
 	const detectZone = () =>
 		detect({
 			kind: 'backcountry',
@@ -301,6 +341,7 @@
 		lookups !== null &&
 			(lookups.ski_areas === 0 || lookups.snotel_stations === 0 || lookups.avy_zones === 0)
 	);
+	const ensRoom = $derived(Math.max(0, Math.round(budget?.ensembles_available ?? 0)));
 	const atCap = $derived(budget !== null && budget.active >= budget.max_locations);
 	const perLoc = $derived(budget && budget.active ? Math.round(budget.total / budget.active) : 150);
 </script>
@@ -339,12 +380,11 @@
 	{#if budget && budget.tiers?.length && (budget.ensembles_local?.length ?? 0) < 3}
 		<details class="muted small tiers" class:bad={!budget.tier_fits}>
 			<summary>
-				Public ensembles: tier {budget.tier} of 4, {budget.tier_label} (about {Math.round(
-					budget.ensembles_total
-				).toLocaleString('en-US')} of {Math.round(budget.ensembles_available ?? 0).toLocaleString(
-					'en-US'
-				)} calls a day available).{#if !budget.tier_fits}
-					Even the lowest tier is over; fewer locations would fit.{/if}
+				Public ensembles: tier {budget.tier} of 4, {budget.tier_label}: about
+				{Math.round(budget.ensembles_total).toLocaleString('en-US')} calls a day, {ensRoom > 0
+					? `of ${ensRoom.toLocaleString('en-US')} available`
+					: 'with nothing left over after the forecasts'}.
+				{#if !budget.tier_fits}Even the lowest tier is over; fewer locations would fit.{/if}
 			</summary>
 			<p>
 				The richest tier that fits is used, and adding locations drops a tier on its own. Systems
@@ -411,7 +451,16 @@
 		{#if results.length}
 			<ul class="results">
 				{#each results as c (c.id)}
-					<li>
+					<li class="pickrow">
+						<label class="pick" title="Add several at once">
+							<input
+								type="checkbox"
+								checked={isPicked(c)}
+								disabled={busy}
+								aria-label="Add {c.name} with the others ticked"
+								onchange={() => togglePick(c)}
+							/>
+						</label>
 						<button class="result" disabled={busy} onclick={() => pickResort(c)}>
 							<strong>{c.name}</strong>
 							<span class="faint">
@@ -434,7 +483,24 @@
 		{#if busy}<p class="muted small">
 				Detecting elevations, timezone, weather office, snow station and avalanche zone…
 			</p>{/if}
-		<div class="actions"><button class="btn" onclick={() => (mode = 'list')}>Cancel</button></div>
+		{#if picked.length}
+			<p class="small picked">
+				Ticked: {picked.map((c) => c.name).join(', ')}. They're added with the detected details
+				(elevations, snow station, avalanche zone), which you can edit afterwards.
+			</p>
+		{:else if results.length}
+			<p class="faint small">
+				Pick one to check its details first, or tick several to add them at once.
+			</p>
+		{/if}
+		<div class="actions">
+			{#if picked.length}
+				<button class="btn primary" disabled={busy || atCap} onclick={addPicked}
+					>Add {picked.length} ski area{picked.length === 1 ? '' : 's'}</button
+				>
+			{/if}
+			<button class="btn" onclick={() => (mode = 'list')}>Cancel</button>
+		</div>
 	</section>
 {:else if mode === 'zone'}
 	<section class="card">
@@ -679,5 +745,26 @@
 	}
 	.tiers li.current {
 		font-weight: 600;
+	}
+	.pickrow {
+		display: flex;
+		align-items: stretch;
+		gap: 6px;
+	}
+	.pickrow .result {
+		flex: 1;
+	}
+	.pick {
+		display: flex;
+		align-items: center;
+		padding: 0 4px;
+		cursor: pointer;
+	}
+	.pick input {
+		width: 18px;
+		height: 18px;
+	}
+	.picked {
+		margin: 8px 0 0;
 	}
 </style>

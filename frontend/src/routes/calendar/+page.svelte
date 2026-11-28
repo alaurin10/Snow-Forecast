@@ -15,6 +15,7 @@
 	import type { StormCycle } from '../../lib/stormcycles';
 	import LocationDaySheet from '../../lib/components/LocationDaySheet.svelte';
 	import StormSheet from '../../lib/components/StormSheet.svelte';
+	import { MANY, favourites, filterRows, groupRows } from '../../lib/locgroups.svelte';
 
 	let rows = $state<OverviewRow[] | null>(null);
 	let error = $state<string | null>(null);
@@ -55,6 +56,19 @@
 				total: days.reduce((a, d) => a + d.cm, 0)
 			};
 		})
+	);
+	// Many locations: a filter, favourites (set on the Overview) first, then a group per
+	// state or province.
+	const many = $derived(shown.length >= MANY);
+	let query = $state('');
+	const groups = $derived(
+		many
+			? groupRows(
+					filterRows(grid, query, (g) => g.r),
+					favourites.set,
+					(g) => g.r
+				)
+			: [{ label: '', rows: grid }]
 	);
 	const dates = $derived(
 		[...new Set(grid.flatMap((g) => [...g.days.keys()]))].sort().slice(0, DAYS)
@@ -138,6 +152,16 @@
 			No storms of {snow(5, prefs.units)} or more in the next {DAYS} days.
 		</p>
 	{/if}
+	{#if many}
+		<div class="lfilter">
+			<input
+				type="search"
+				aria-label="Filter locations"
+				placeholder="Filter by name or region"
+				bind:value={query}
+			/>
+		</div>
+	{/if}
 	<div class="mdates" style:--n={dates.length} aria-hidden="true">
 		{#each dates as d (d)}
 			<span class:weekend={['Sat', 'Sun'].includes(weekday(d))} class:today={d === today}
@@ -146,29 +170,32 @@
 		{/each}
 	</div>
 	<ul class="mrows">
-		{#each grid as g (g.r.id)}
-			<li>
-				<div class="mname">
-					<a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a>
-					<span class="num">{snow(g.total, prefs.units)}</span>
-				</div>
-				<div class="mcells" style:--n={dates.length}>
-					{#each dates as d (d)}
-						{@const day = g.days.get(d)}
-						{#if day}
-							<button
-								class="heat b{bucket(day.cm)}"
-								class:rainy={day.rainy}
-								onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
-								aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
-								>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
-							>
-						{:else}
-							<span></span>
-						{/if}
-					{/each}
-				</div>
-			</li>
+		{#each groups as grp (grp.label)}
+			{#if grp.label}<li class="ghead"><h2>{grp.label}</h2></li>{/if}
+			{#each grp.rows as g (g.r.id)}
+				<li>
+					<div class="mname">
+						<a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a>
+						<span class="num">{snow(g.total, prefs.units)}</span>
+					</div>
+					<div class="mcells" style:--n={dates.length}>
+						{#each dates as d (d)}
+							{@const day = g.days.get(d)}
+							{#if day}
+								<button
+									class="heat b{bucket(day.cm)}"
+									class:rainy={day.rainy}
+									onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
+									aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
+									>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
+								>
+							{:else}
+								<span></span>
+							{/if}
+						{/each}
+					</div>
+				</li>
+			{/each}
 		{/each}
 	</ul>
 	<div class="legend mlegend">
@@ -206,6 +233,16 @@
 	</section>
 
 	<section class="card gridcard">
+		{#if many}
+			<div class="lfilter">
+				<input
+					type="search"
+					aria-label="Filter locations"
+					placeholder="Filter by name or region"
+					bind:value={query}
+				/>
+			</div>
+		{/if}
 		<div class="scroller" use:hscroll>
 			<table class="cal">
 				<thead>
@@ -223,41 +260,46 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each grid as g (g.r.id)}
-						<tr class:hot={hover?.id === g.r.id}>
-							<th class="loc" scope="row"
-								><a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a></th
-							>
-							{#each dates as d (d)}
-								{@const day = g.days.get(d)}
-								<td>
-									{#if day}
-										<button
-											class="tile b{bucket(day.cm)}"
-											class:rainy={day.rainy}
-											onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
-											aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
-											onpointerenter={() =>
-												(hover = {
-													id: g.r.id,
-													d,
-													text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
-												})}
-											onpointerleave={() => (hover = null)}
-											onfocus={() =>
-												(hover = {
-													id: g.r.id,
-													d,
-													text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
-												})}
-											onblur={() => (hover = null)}
-											>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
-										>
-									{/if}
-								</td>
-							{/each}
-							<td class="tot num">{snowNum(g.total, prefs.units)}</td>
-						</tr>
+					{#each groups as grp (grp.label)}
+						{#if grp.label}<tr class="ghead"
+								><th colspan={dates.length + 2} scope="colgroup">{grp.label}</th></tr
+							>{/if}
+						{#each grp.rows as g (g.r.id)}
+							<tr class:hot={hover?.id === g.r.id}>
+								<th class="loc" scope="row"
+									><a href={resolve('/location/[id]', { id: g.r.id })}>{g.r.name}</a></th
+								>
+								{#each dates as d (d)}
+									{@const day = g.days.get(d)}
+									<td>
+										{#if day}
+											<button
+												class="tile b{bucket(day.cm)}"
+												class:rainy={day.rainy}
+												onclick={() => (openDay = { id: g.r.id, name: g.r.name, date: d })}
+												aria-label={`${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)}${day.rainy ? ', rain' : ''}. Details`}
+												onpointerenter={() =>
+													(hover = {
+														id: g.r.id,
+														d,
+														text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
+													})}
+												onpointerleave={() => (hover = null)}
+												onfocus={() =>
+													(hover = {
+														id: g.r.id,
+														d,
+														text: `${g.r.name}, ${dayName(d)}: ${snow(day.cm, prefs.units)} of snow${day.rainy ? ', rain' : ''}`
+													})}
+												onblur={() => (hover = null)}
+												>{show(day.cm) ? snowNum(day.cm, prefs.units) : ''}</button
+											>
+										{/if}
+									</td>
+								{/each}
+								<td class="tot num">{snowNum(g.total, prefs.units)}</td>
+							</tr>
+						{/each}
 					{/each}
 				</tbody>
 			</table>
@@ -724,5 +766,28 @@
 		.tile {
 			width: 42px;
 		}
+	}
+	.lfilter {
+		padding: 0 0 8px;
+	}
+	.lfilter input {
+		width: 100%;
+		font: inherit;
+		padding: 7px 10px;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+	}
+	.ghead h2,
+	tr.ghead th {
+		margin: 12px 0 2px;
+		padding-top: 10px;
+		text-align: left;
+		font-size: 0.78rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--text-2);
 	}
 </style>

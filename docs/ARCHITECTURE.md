@@ -100,7 +100,11 @@ For each active location (`pipeline.run_all`), 20 s apart to stay polite. With a
 self-hosted Open-Meteo server there's no pause: four threads fetch locations at once,
 and each is built and stored on the run's own thread as its fetch finishes (the
 database stays on one thread); queued Manage jobs are served between locations, so
-adding a location doesn't wait for the whole run.
+adding a location doesn't wait for the whole run. Manage's "Add from catalog" queues a
+`catalog` job per ski area (`jobs.arg` holds its catalog id): the worker resolves it as
+auto-detect does, saves it with every suggestion (`locations/from_catalog.py`) and fetches
+its first forecast; its first satellite pass follows within 30 minutes
+(`Worker.satellite_new`, one location at a time, `sat.refresh(only=…)`).
 
 **When runs happen.** Without a server, or with `schedule.refresh: fixed`, at
 `schedule.runs_utc`. With a server (`refresh: data`), `modelwatch.py` reads each model

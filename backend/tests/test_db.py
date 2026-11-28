@@ -49,6 +49,7 @@ def test_migrate_creates_every_table_once(tmp_path: Path) -> None:
         "010_ensemble_shadow",
         "011_spot_ensembles",
         "012_model_runs",
+        "013_job_arg",
     ]
     assert table_names(conn) >= EXPECTED
     assert not table_names(conn) & {"alerts", "obs_hourly"}

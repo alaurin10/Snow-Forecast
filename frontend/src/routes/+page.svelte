@@ -22,6 +22,7 @@
 	import { monthDay, weekday } from '../lib/time';
 	import { forgetSpots, recentSpots, spotSearch, type RecentSpot } from '../lib/recentSpots';
 	import { elevation } from '../lib/units';
+	import { MANY, favourites, filterRows, groupRows } from '../lib/locgroups.svelte';
 
 	let rows = $state<OverviewRow[] | null>(null);
 	// Spots opened lately in this browser (points tapped on the map for a full forecast).
@@ -63,6 +64,17 @@
 		});
 		// "My order" is the order set on the Manage page, which is how the rows arrive.
 		return prefs.sort === 'snow' ? [...out].sort((a, b) => b.total - a.total) : out;
+	});
+	// Many locations: a filter, favourites first, then a group per state or province.
+	const many = $derived((rows?.length ?? 0) >= MANY);
+	let query = $state('');
+	const groups = $derived.by(() => {
+		if (!many) return [{ label: '', rows: list }];
+		return groupRows(
+			filterRows(list, query, (x) => x.r),
+			favourites.set,
+			(x) => x.r
+		);
 	});
 	// The locations in the share image: the snowiest that fit, until some are picked.
 	let sharePick = $state<string[] | null>(null);
@@ -186,58 +198,86 @@
 			<span class="ltot">{DAYS} days, {c.snowUnit}</span>
 			{#if wide}<span class="l5">Next 5 days</span>{/if}
 		</div>
+		{#if many}
+			<div class="lfilter">
+				<input
+					type="search"
+					aria-label="Filter locations"
+					placeholder="Filter by name or region"
+					bind:value={query}
+				/>
+			</div>
+		{/if}
 		<ul class="list">
-			{#each list as { r, days, total } (r.id)}
-				<li>
-					<a class="lrow" href={href(r.id)}>
-						<span class="lname">
-							<strong>{r.name}</strong>
-							{#if r.alerts?.length}
-								<small class="alert">{r.alerts[0]}</small>
+			{#each groups as g (g.label)}
+				{#if g.label}<li class="ghead"><h2>{g.label}</h2></li>{/if}
+				{#each g.rows as { r, days, total } (r.id)}
+					<li class:starred={many}>
+						<a class="lrow" href={href(r.id)}>
+							<span class="lname">
+								<strong>{r.name}</strong>
+								{#if r.alerts?.length}
+									<small class="alert">{r.alerts[0]}</small>
+								{:else}
+									<small
+										>{r.region}{r.kind === 'backcountry'
+											? ' · Backcountry'
+											: ''}{#if rated(r) && !wide}
+											· Avalanche {r.danger?.level}{/if}</small
+									>
+								{/if}
+							</span>
+							{#if wide && anyRated}
+								<span class="lavy">
+									{#if rated(r)}<span class="danger d{r.danger?.level}"
+											>{r.danger?.level} · {dangerWord(r.danger?.level)}</span
+										>{/if}
+								</span>
+							{/if}
+							{#if r.run_id == null}
+								<small class="none">No forecast yet</small>
 							{:else}
-								<small
-									>{r.region}{r.kind === 'backcountry'
-										? ' · Backcountry'
-										: ''}{#if rated(r) && !wide}
-										· Avalanche {r.danger?.level}{/if}</small
+								<span
+									class="lbars"
+									role="img"
+									aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
 								>
-							{/if}
-						</span>
-						{#if wide && anyRated}
-							<span class="lavy">
-								{#if rated(r)}<span class="danger d{r.danger?.level}"
-										>{r.danger?.level} · {dangerWord(r.danger?.level)}</span
-									>{/if}
-							</span>
-						{/if}
-						{#if r.run_id == null}
-							<small class="none">No forecast yet</small>
-						{:else}
-							<span
-								class="lbars"
-								role="img"
-								aria-label={`${r.name}, snow by day: ${describeDays(days, (cm) => snow(cm, prefs.units))}`}
-							>
-								{#each days as d (d.date)}<span class="bar"
-										><i class={d.kind} style:height="{barH(d.cm, wide ? 40 : 34)}px"
-										></i>{#if wide}<small class="num" class:zero={d.cm < 0.1}
-												>{d.cm >= 0.1 ? snowNum(d.cm, prefs.units) : '–'}</small
+									{#each days as d (d.date)}<span class="bar"
+											><i class={d.kind} style:height="{barH(d.cm, wide ? 40 : 34)}px"
+											></i>{#if wide}<small class="num" class:zero={d.cm < 0.1}
+													>{d.cm >= 0.1 ? snowNum(d.cm, prefs.units) : '–'}</small
+												>{/if}</span
+										>{/each}
+								</span>
+								<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}
+									>{snowNum(total, prefs.units)}</span
+								>
+								{#if wide}
+									<span class="l5 num"
+										><b>{snowNum(r.next5_cm, prefs.units)} {c.snowUnit}</b
+										>{#if r.next5_p90_cm}<small
+												>{snowNum(r.next5_p10_cm, prefs.units)}–{snowNum(
+													r.next5_p90_cm,
+													prefs.units
+												)} likely</small
 											>{/if}</span
-									>{/each}
-							</span>
-							<span class="ltotal num" class:zero={Number(snowNum(total, prefs.units)) === 0}
-								>{snowNum(total, prefs.units)}</span
-							>
-							{#if wide}
-								<span class="l5 num"
-									><b>{snowNum(r.next5_cm, prefs.units)} {c.snowUnit}</b>{#if r.next5_p90_cm}<small
-											>{snowNum(r.next5_p10_cm, prefs.units)}–{snowNum(r.next5_p90_cm, prefs.units)} likely</small
-										>{/if}</span
-								>
+									>
+								{/if}
 							{/if}
+						</a>
+						{#if many}
+							<button
+								class="star"
+								class:on={favourites.has(r.id)}
+								aria-pressed={favourites.has(r.id)}
+								aria-label="Favourite: {r.name}"
+								onclick={() => favourites.toggle(r.id)}>{favourites.has(r.id) ? '★' : '☆'}</button
+							>
 						{/if}
-					</a>
-				</li>
+					</li>
+				{/each}
+			{:else}
+				<li class="nomatch muted small">No location matches “{query}”.</li>
 			{/each}
 		</ul>
 	</section>
@@ -645,5 +685,49 @@
 	}
 	.spots a:hover {
 		background: var(--hover);
+	}
+	.lfilter {
+		padding: 0 4px 8px;
+	}
+	.lfilter input {
+		width: 100%;
+		font: inherit;
+		padding: 7px 10px;
+		border-radius: 8px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text);
+	}
+	.ghead h2 {
+		margin: 12px 4px 2px;
+		font-size: 0.78rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--text-2);
+	}
+	.list li.starred {
+		display: flex;
+		align-items: center;
+	}
+	.list li.starred .lrow {
+		flex: 1;
+		min-width: 0;
+	}
+	.star {
+		flex: none;
+		border: 0;
+		background: none;
+		color: var(--text-2);
+		font-size: 1.1rem;
+		width: 32px;
+		height: 32px;
+		cursor: pointer;
+	}
+	.star.on {
+		color: var(--accent);
+	}
+	.nomatch {
+		padding: 10px 4px;
 	}
 </style>

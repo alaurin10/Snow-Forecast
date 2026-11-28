@@ -15,6 +15,7 @@
 
 <script lang="ts">
 	import { MAX_LOCS } from '../compare';
+	import { regionGroup } from '../locgroups.svelte';
 
 	interface Props {
 		items: AddItem[];
@@ -31,8 +32,12 @@
 
 	const full = $derived(picked.length >= MAX_LOCS);
 	const shown = $derived.by(() => {
-		const q = query.trim().toLocaleLowerCase();
-		return q ? items.filter((i) => `${i.name} ${i.region}`.toLocaleLowerCase().includes(q)) : items;
+		// Every word must match the name, the region or its state or province.
+		const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+		return items.filter((i) => {
+			const hay = `${i.name} ${i.region} ${regionGroup(i.region)}`.toLocaleLowerCase();
+			return words.every((w) => hay.includes(w));
+		});
 	});
 </script>
 

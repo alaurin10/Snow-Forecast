@@ -98,14 +98,29 @@ def region_for(
     width: int = WIDTH,
 ) -> Region:
     """A fixed box (south, west, north, east), widened to take in any location outside
-    it with a degree to spare. Without a box, the old behaviour: follow the locations."""
+    it with a degree to spare. Locations inside it, however many, leave it as it is, so
+    the map's jobs don't grow with locations in the West (milestone 4). Without a box,
+    the old behaviour: follow the locations."""
     if box is None:
         return region_around(points, width)
+    return box_region(*widen_box(box, points), width)
+
+
+def widen_box(
+    box: tuple[float, float, float, float], points: Iterable[tuple[float, float]]
+) -> tuple[float, float, float, float]:
+    """The box, widened only for points outside it (to a degree past each)."""
     south, west, north, east = box
     for lat, lon in points:
-        south, north = min(south, lat - 1), max(north, lat + 1)
-        west, east = min(west, lon - 1), max(east, lon + 1)
-    return box_region(south, west, north, east, width)
+        if lat < south:
+            south = lat - 1
+        elif lat > north:
+            north = lat + 1
+        if lon < west:
+            west = lon - 1
+        elif lon > east:
+            east = lon + 1
+    return south, west, north, east
 
 
 def spread(values: np.ndarray, passes: int, empty: float = 0) -> np.ndarray:

@@ -23,11 +23,14 @@ snow, fog, humid refreezes, showery periods) and the chart's Snow level view and
 freezing-rain marks. **Milestone 3c** (28 Nov 2026): the wet-bulb split backtested
 against last winter's SNOTEL, refined (0.0/1.0 °C and a warm-layer guard) and switched
 on, with the models' own split still scored as `cons_model`. Choosing the headline
-depth method from `cons_col`'s record is the owner's, after a few weeks. **Milestone 4** (28 Nov 2026):
+depth method from `cons_col`'s record is the owner's, after a few weeks. **Milestone 4 built** (28 Nov 2026):
 PR 1, refresh when models update (the model watcher, `schedule.refresh: data`), a pool of
 4 fetch threads, Manage jobs between locations, and thinner history (24 snapshots,
 `forecast_daily` runs 6 h apart after 48 h, 6 h of raw responses); PR 2, ensembles at
-all three bands, a schedule per system and the budget planner; PR 3 next.
+all three bands, a schedule per system and the budget planner; PR 3, adding several
+ski areas from the catalog, the Overview and Calendar grouped by region with a filter
+and favourites, and new locations' first satellite pass. The 50-location run time and
+HRRR refresh timing on the mini PC are the owner's checks.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1175,15 +1178,15 @@ only to systems on the public API (milestone 1b off, or falling back).
   plus 2,000 for spots, leaving ~660 margin.
 
 ### ~50 locations
-- [ ] Manage, "Add from catalog": multi-select over `catalog_ski_areas`
+- [x] Manage, "Add from catalog": multi-select over `catalog_ski_areas`
   (`searchCatalog`), each resolved via `locations/resolve.py` as a queued job.
-- [ ] Overview (`frontend/src/routes/+page.svelte`) and Calendar grouped by region, with a
+- [x] Overview (`frontend/src/routes/+page.svelte`) and Calendar grouped by region, with a
   filter and browser-saved favourites.
-- [ ] Check at 50: the Compare picker (`CompareAdd.svelte`), push-digest length, the
+- [x] Check at 50: the Compare picker (`CompareAdd.svelte`), push-digest length, the
   location palette.
-- [ ] A new location's first satellite pass (4–5 min each, `scheduler.satellite`) runs in
+- [x] A new location's first satellite pass (4–5 min each, `scheduler.satellite`) runs in
   the background, at most 2 an hour.
-- [ ] The map box is fixed to the West (`maps/region.py`, `map.region`), so map jobs don't
+- [x] The map box is fixed to the West (`maps/region.py`, `map.region`), so map jobs don't
   grow with locations in the West.
 
 **Done when:**
@@ -1262,6 +1265,34 @@ only to systems on the public API (milestone 1b off, or falling back).
   cell and the three bands' 100 m steps); public ones stay at mid within the allowance.
 - The test fixtures were captured at mid only; the test transport answers a three-band
   request with mid's answer at each band.
+
+### What PR 3 (locations and UI) built and found (28 Nov 2026)
+
+- **Add from catalog:** "Add a resort" results have a tick box; "Add N ski areas" sends
+  them to `POST /api/admin/locations/catalog` (up to 25), which skips unknown ids, ones
+  already added (by `catalog_ref`) or already queued, refuses past `MAX_LOCATIONS`
+  (counting what's queued), and queues a `catalog` job each (migration `013_job_arg.sql`
+  adds `jobs.arg` for the catalog id). The worker resolves each like auto-detect from
+  the catalog's point and elevations, takes every suggestion
+  (`locations/from_catalog.py`; the id gets `-2` if taken), saves it and fetches its
+  first forecast. Picking a single result still opens the review as before.
+- **Overview and Calendar:** with 9 or more locations (`MANY`), a filter (name, region
+  or state), favourites first (a star on each Overview row, kept in `localStorage`; the
+  Calendar and palette follow it) and a heading per state or province
+  (`lib/locgroups.svelte.ts`: "Snoqualmie Pass, WA", "WA Cascades" and "Washington" all
+  group as Washington; other regions stay as written). Smaller lists look as before.
+  Checked at 48 locations in a browser (phone and desktop).
+- **Checked at 50:** the Compare picker already searches past 8 (now also by state);
+  the location palette scrolls, so arrow keys now keep the highlighted row in view,
+  and it lists favourites first; a push digest for 50 locations shows 3 lines and
+  "+47 more" (~1 KB, `test_a_digest_for_50_locations_stays_small`).
+- **Satellite:** `Worker.satellite_new` every 30 minutes gives one location missing from
+  the satellite index its first pass (`sat.refresh(only=…)` leaves every other
+  location's views and index entry untouched); nothing happens before the first full
+  pass, which covers everyone.
+- **Map box:** `map.region` was already fixed, but a location within a degree of its
+  edge widened it; now only locations outside the box do (`maps/region.widen_box`, also
+  for the avalanche-zone box), so locations in the West never change the map's jobs.
 
 ## Milestone 5: Learning from history
 

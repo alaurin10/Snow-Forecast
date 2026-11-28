@@ -6,7 +6,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from snowwatch.api.admin import BudgetOut, CatalogItem, JobOut, LookupStatus, SaveOut
+from snowwatch.api.admin import (
+    BudgetOut,
+    CatalogAddIn,
+    CatalogAddOut,
+    CatalogItem,
+    JobOut,
+    LookupStatus,
+    SaveOut,
+)
 from snowwatch.api.auth import Me
 from snowwatch.avalanche import AvalancheView
 from snowwatch.avalanche_zones import ZonesOut
@@ -410,6 +418,8 @@ class ApiTypes(BaseModel):
     save: SaveOut
     job: JobOut
     budget: BudgetOut
+    catalog_add_in: CatalogAddIn
+    catalog_add: CatalogAddOut
     lookups: LookupStatus
     avalanche: dict[str, AvalancheView]
     plan: PlanOut

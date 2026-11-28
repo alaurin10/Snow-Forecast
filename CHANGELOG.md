@@ -7,6 +7,16 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **Room for ~50 locations** (milestone 4, locations and UI). Manage's "Add a resort"
+  can tick several ski areas and add them at once: the worker resolves each with every
+  detected detail and fetches its forecast (`POST /api/admin/locations/catalog`, a
+  queued `catalog` job each). With nine or more locations the Overview and Calendar get
+  a filter, browser-saved favourites (the star on the Overview) and a group per state
+  or province; the Compare picker and the location palette match a state's name too,
+  and the palette lists favourites first. A new location's first satellite pass runs in
+  the background within half an hour instead of waiting for the next full pass. The
+  map's box no longer widens for locations within a degree of its edge, only for ones
+  outside it.
 - **Ensembles at every elevation** (milestone 4, ensembles and budget). Each ensemble
   system is asked at base, mid and summit in one request, so each band's likely range,
   chances and the forecast after 48 h come from its own members (no more "(est.)" from
