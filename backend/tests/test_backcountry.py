@@ -249,3 +249,11 @@ def test_day_weather_without_snow_on_the_ground() -> None:
 def test_outlook_steps_must_rise() -> None:
     with pytest.raises(ValueError, match="rise"):
         BackcountryConfig(outlook_snow_cm=(10, 5, 40))
+
+
+def test_a_humid_night_refreezes_partly_at_best() -> None:
+    hs = hours(12)
+    temps = dict.fromkeys(hs, -6.0)
+    clear = dict.fromkeys(hs, 0.0)
+    assert refreeze(hs, temps, clear, CFG, dict.fromkeys(hs, 80.0)).status == "Good"
+    assert refreeze(hs, temps, clear, CFG, dict.fromkeys(hs, 98.0)).status == "Partial"

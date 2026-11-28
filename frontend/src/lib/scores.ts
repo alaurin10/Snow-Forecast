@@ -5,6 +5,8 @@ import type { VerificationOut, VerificationRow, WaterRow } from './types.gen';
 const NAMES: Record<string, string> = {
 	cons: 'Consensus (model snowfall, 7:1)',
 	cons_slr: 'Consensus (temperature-based depth)',
+	cons_col: 'Consensus (column snow ratio)',
+	cons_wb: 'Consensus (rain and snow split by wet-bulb)',
 	cons_settled: 'Consensus as settled snow',
 	stn_settled: 'At the station’s elevation, as settled snow',
 	stn_cons: 'Consensus at the station’s elevation',
@@ -13,6 +15,8 @@ const NAMES: Record<string, string> = {
 const SHORT: Record<string, string> = {
 	cons: 'the 7:1 consensus',
 	cons_slr: 'the consensus',
+	cons_col: 'the column-ratio consensus',
+	cons_wb: 'the wet-bulb consensus',
 	cons_settled: 'the settled-snow consensus',
 	stn_settled: 'the forecast at the station',
 	stn_cons: 'the forecast at the station',

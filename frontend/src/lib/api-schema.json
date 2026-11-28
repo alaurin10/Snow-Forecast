@@ -3929,6 +3929,17 @@
             }
           ]
         },
+        "cape_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cloud_mean": {
           "anyOf": [
             {
@@ -4037,6 +4048,10 @@
               "type": "null"
             }
           ]
+        },
+        "showery": {
+          "default": false,
+          "type": "boolean"
         },
         "slr": {
           "anyOf": [
@@ -6794,6 +6809,17 @@
           ]
         },
         "cons_water_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cons_wb_cm": {
           "anyOf": [
             {
               "type": "number"

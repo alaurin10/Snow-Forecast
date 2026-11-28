@@ -102,6 +102,12 @@
 				<dt>{p.frz === 'freezing_rain' ? 'Freezing rain' : 'Sleet'}</dt>
 				<dd class="num">{p.frz_h} h likely</dd>
 			{/if}
+			{#if p.showery}
+				<dt>Showery</dt>
+				<dd>
+					bursts heavier than the totals{p.cape_max != null ? ` (CAPE ${p.cape_max} J/kg)` : ''}
+				</dd>
+			{/if}
 			{#if p.slr_col != null}
 				<dt>Column snow ratio</dt>
 				<dd class="num">{p.slr_col}:1</dd>

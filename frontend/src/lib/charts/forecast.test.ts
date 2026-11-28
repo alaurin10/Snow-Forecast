@@ -160,3 +160,22 @@ describe('snow level line', () => {
 		expect(buildSteps(hourly(), 1)[0].snowLevel).toBeNull();
 	});
 });
+
+describe('wet-bulb and freezing rain per step', () => {
+	it('aggregates the wet-bulb and marks freezing rain over sleet', () => {
+		const n = 48;
+		const h = {
+			...hourly(),
+			wetbulb_c: Array.from({ length: n }, (_, i) => (i % 2 ? 1 : -1)),
+			frz: Array.from({ length: n }, (_, i) =>
+				i === 1 ? 'sleet' : i === 2 ? 'freezing_rain' : null
+			)
+		};
+		const hourlySteps = buildSteps(h, 1);
+		expect(hourlySteps[0].wetbulb).toBe(-1);
+		expect(hourlySteps[1].frz).toBe('sleet');
+		expect(hourlySteps[2].frz).toBe('freezing_rain');
+		expect(buildSteps(hourly(), 1)[0].wetbulb).toBeNull();
+		expect(buildSteps(hourly(), 1).some((s) => s.frz)).toBe(false);
+	});
+});

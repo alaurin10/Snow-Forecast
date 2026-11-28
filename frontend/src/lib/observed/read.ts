@@ -157,7 +157,13 @@ export const waterAtStation = (data: VerificationOut): boolean =>
 /** The forecast new snow a day is scored against (cm). */
 export function forecastSnow(data: VerificationOut, p: VerificationPair): number | null {
 	if (snowAtStation(data)) return p.stn_settled_cm ?? null;
-	return p.cons_settled_cm ?? (data.headline === 'cons_slr' ? p.cons_slr_cm : p.cons_cm);
+	const headline =
+		data.headline === 'cons_slr'
+			? p.cons_slr_cm
+			: data.headline === 'cons_col'
+				? (p.cons_col_cm ?? p.cons_slr_cm)
+				: p.cons_cm;
+	return p.cons_settled_cm ?? headline;
 }
 
 /** The forecast precipitation a day is scored against (mm). */

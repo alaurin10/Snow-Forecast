@@ -7,6 +7,15 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **More from the self-hosted server's data** (milestone 3b). The chart's freezing-level
+  view is now **Snow level** (snow level solid, freezing level dashed); freezing rain
+  and sleet get pink "Ice"/"Sleet" marks on the snow view; the temperature view adds a
+  dotted wet-bulb line. A rain/snow split by each band's wet-bulb is scored as
+  `cons_wb` (switch with `physics.snow_split: wetbulb`). Spots without a station use the
+  models' snow depth for rain on snow; snow falling through a wet-bulb above 0 °C is
+  "Heavy & wet"; fog costs the ski day a step; very humid nights refreeze Partial at
+  best; snowy periods with high CAPE say "showery". The scorecard names `cons_col` and
+  `cons_wb`.
 - **Richer weather on the page** (milestone 3, UI). With the self-hosted server: wet-bulb
   and freezing rain in the band table and period details, how the snow level was found,
   the column snow ratio, a "Sun (est.)" factor in the avalanche-weather outlook, fog,

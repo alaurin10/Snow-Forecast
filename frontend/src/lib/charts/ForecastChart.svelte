@@ -171,6 +171,22 @@
 					}))
 			: []
 	);
+	// Freezing rain and sleet: a small ice mark over each step that has some (the snow view).
+	const hasFrz = $derived(steps.some((st) => st.frz));
+	const frzMarks = $derived(
+		metric === 'precip'
+			? steps
+					.map((st, k) => ({ st, k }))
+					.filter(({ st }) => st.frz)
+					.map(({ st, k }) => ({
+						left: `${(((k * W + W / 2) / 1000) * 100).toFixed(2)}%`,
+						label: st.frz === 'freezing_rain' ? 'Ice' : 'Sleet',
+						title:
+							st.frz === 'freezing_rain' ? 'Freezing rain likely' : 'Sleet (ice pellets) likely'
+					}))
+			: []
+	);
+	const hasWetbulb = $derived(steps.some((st) => st.wetbulb !== null));
 	// Snow ratio zones (the backend's bands: 8, 11, 14 and 17 to 1).
 	const ZONES = [
 		{ lo: 4, hi: 9.5, name: 'Heavy & wet', cls: 'z-wet' },
@@ -209,13 +225,14 @@
 			if (metric === 'temp') return c.temp(st.temp);
 			if (metric === 'wind') return c.speed(st.wind);
 			if (metric === 'cloud') return st.cloud;
-			return c.height(st.fl);
+			// The snow level view: the snow level leads, the freezing level is the dashed line.
+			return c.height(st.snowLevel ?? st.fl);
 		};
 		const vals = axSteps.map(val).filter((v): v is number => v !== null);
 		let axis;
 		if (metric === 'temp') {
 			const spread = axSteps
-				.flatMap((st) => [c.temp(st.tempLo), c.temp(st.tempHi)])
+				.flatMap((st) => [c.temp(st.tempLo), c.temp(st.tempHi), c.temp(st.wetbulb)])
 				.filter((v): v is number => v !== null);
 			const lo = Math.min(c.freezing, ...vals, ...spread);
 			const hi = Math.max(c.freezing, ...vals, ...spread);
@@ -226,7 +243,7 @@
 		} else if (metric === 'fl') {
 			const e = elevs.map((x) => c.height(x.m) ?? 0);
 			for (const st of axSteps)
-				for (const v of [c.height(st.flLo), c.height(st.flHi), c.height(st.snowLevel)])
+				for (const v of [c.height(st.flLo), c.height(st.flHi), c.height(st.fl)])
 					if (v !== null) e.push(v);
 			axis = niceAxis(Math.min(...vals, ...e) * 0.9, Math.max(...vals, ...e) * 1.05, 4);
 		} else if (metric === 'slr') axis = { min: 4, max: 20, ticks: [5, 8, 11, 14, 17, 20] };
@@ -250,7 +267,7 @@
 			temp: `Temperature (${c.tempUnit})`,
 			wind: `Wind (${c.speedUnit})`,
 			cloud: 'Cloud by height: thicker = more of the sky covered',
-			fl: `Freezing level (${c.heightUnit})`
+			fl: `Snow level (${c.heightUnit})`
 		}[metric]
 	);
 
@@ -355,7 +372,8 @@
 		} else {
 			line = linePath(view.val, y);
 			if (metric === 'wind') line2 = linePath((st) => c.speed(st.gust), y);
-			if (metric === 'fl') line2 = linePath((st) => c.height(st.snowLevel), y);
+			if (metric === 'fl') line2 = linePath((st) => c.height(st.fl), y);
+			if (metric === 'temp') line2 = linePath((st) => c.temp(st.wetbulb), y);
 		}
 		// Model spread as a soft band behind the line.
 		const spread =
@@ -697,13 +715,18 @@
 			},
 			{
 				id: 'fl' as Metric,
-				label: 'Freezing level',
-				short: 'Freezing',
-				tiny: 'Frz lvl',
-				chip: elevation(s.fl, units).replace(/\s*(ft|m)$/, ''),
+				label: 'Snow level',
+				short: 'Snow level',
+				tiny: 'Snow lvl',
+				chip: elevation(s.snowLevel ?? s.fl, units).replace(/\s*(ft|m)$/, ''),
 				color: 'var(--level)',
-				value: elevation(s.fl, units),
-				sub: zone(s.fl)
+				value: elevation(s.snowLevel ?? s.fl, units),
+				sub: [
+					zone(s.snowLevel ?? s.fl),
+					s.fl === null ? null : `freezing ${elevation(s.fl, units)}`
+				]
+					.filter(Boolean)
+					.join(' · ')
 			},
 			{
 				id: 'slr' as Metric,
@@ -1098,6 +1121,9 @@
 				<path d={paths.line2} class="line2 m-{metric}" />
 				<path d={paths.line} class="line m-{metric}" />
 			</svg>
+			{#each frzMarks as m (m.left)}<span class="frzlbl" style:left={m.left} title={m.title}
+					>{m.label}</span
+				>{/each}
 			{#each rainMarks as m (m.left)}<span class="rainlbl" style:left={m.left} style:top={m.top}
 					>{m.label}</span
 				>{/each}
@@ -1244,6 +1270,8 @@
 				water)</span
 			>
 			<span><i class="sw line-sw"></i>Total snow (right axis)</span>
+			{#if hasFrz}<span><i class="sw frz-sw"></i>Ice / Sleet: freezing rain or ice pellets</span
+				>{/if}
 		{:else if metric === 'slr'}
 			<span><i class="sw z-dry-sw"></i>Dry powder</span>
 			<span><i class="sw z-light-sw"></i>Light</span>
@@ -1253,16 +1281,21 @@
 			<span><i class="sw" style:background="var(--rain)"></i>Rain</span>
 		{:else if metric === 'temp'}
 			<span>{STEP[R] === 12 ? 'Day highs, night lows · ' : ''}Dashed: freezing</span>
+			{#if hasWetbulb}<span
+					>Dotted: wet-bulb (rain or snow? snow at or below about 0.5°C / 33°F)</span
+				>{/if}
 		{:else if metric === 'wind'}
 			<span>Solid: wind · Dashed: gusts</span>
 		{:else if metric === 'cloud'}
 			<span>Thicker band: more of the sky covered</span>
 		{:else}
-			<span>Solid: freezing level · Dashed: snow level</span>
+			<span>Solid: snow level · Dashed: freezing level</span>
 			<span>Faint dashed lines: this location's elevations</span>
 		{/if}
 		{#if metric === 'temp' || metric === 'fl'}<span
-				><i class="sw band-sw b-{metric}"></i>Model range</span
+				><i class="sw band-sw b-{metric}"></i>Model range{metric === 'fl'
+					? ' of the freezing level'
+					: ''}</span
 			>{/if}
 		<span class="lower-key"
 			><i class="sw cloud-sw"></i>Cloud cover <i class="sw pop-sw"></i>Chance of precipitation
@@ -1886,6 +1919,25 @@
 	}
 	.b-rain {
 		fill: var(--rain);
+	}
+	.frzlbl {
+		position: absolute;
+		top: 2px;
+		transform: translateX(-50%);
+		font-size: 0.62rem;
+		font-weight: 700;
+		padding: 0 3px;
+		border-radius: 3px;
+		color: #fff;
+		background: var(--ice);
+		pointer-events: auto;
+		white-space: nowrap;
+	}
+	.frz-sw {
+		background: var(--ice);
+	}
+	.line2.m-temp {
+		stroke-dasharray: 2 4;
 	}
 	.rainlbl {
 		position: absolute;

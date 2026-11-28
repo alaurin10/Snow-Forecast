@@ -85,3 +85,9 @@ def test_new_snow_leads_when_nothing_pulls_it_down() -> None:
 def test_missing_data_is_not_a_penalty() -> None:
     f = DayFacts(None, None, None, None, None, None, None, None)
     assert rate(f, CFG).rating == "Fair"  # no snow, unknown sky
+
+
+def test_fog_hours_mean_flat_light() -> None:
+    assert "flat_light" in codes(replace(DRY_CLEAR, fog_h=3))
+    assert "flat_light" not in codes(replace(DRY_CLEAR, fog_h=1))
+    assert "flat_light" not in codes(replace(DRY_CLEAR, fog_h=None))

@@ -56,6 +56,13 @@ depth_method: slr
 # Milestone 3's physics (docs/OPEN-METEO-PLAN.md), used where a self-hosted Open-Meteo
 # server supplies humidity and more pressure levels; to tune against the scorecard.
 physics:
+  # How each model's precipitation becomes snow and rain at a band: "model" (its own
+  # split, often made at its grid's elevation) or "wetbulb" (split by its wet-bulb at the
+  # band, between wb_snow_max_c and wb_rain_min_c). Both are scored (cons_slr, cons_wb);
+  # switch when the scorecard shows cons_wb is closer.
+  snow_split: model
+  wet_snow_wb_c: 0.0           # snow through a wet-bulb this warm is heavy & wet
+  showery_cape: 300            # J/kg in a snowy period: bursts heavier than the totals
   snow_level_wb_offset_m: 150  # snow level: this far below the wet-bulb 0 °C height
   wb_snow_max_c: 0.5           # precipitation type from the surface wet-bulb: snow…
   wb_rain_min_c: 2.0           # …rain from here, a mix between
@@ -101,6 +108,7 @@ skiday:
   gust_closed_kmh: 90   # 55 mph (−2)
   flat_light_vis_m: 1000
   flat_light_cloud_low_pct: 80
+  flat_light_fog_h: 2   # or this many lift hours of likely fog (needs humidity)
   very_cold_c: -18      # 0 °F high
 
 # Backcountry layer. The app never rates whether a tour is safe.
@@ -135,6 +143,8 @@ backcountry:
   fog_rh_pct: 97                   # fog/flat light: this humid with low cloud…
   fog_cloud_low_pct: 70
   fog_vis_m: 1000                  # …or visibility under this
+  refreeze_humid_pct: 95           # a night this humid refreezes Partial at best
+  model_snow_min_cm: 5             # no station: this much model snow at mid is snow cover
 
 # The Map page's radar and forecast pictures (see docs/MAP-PLAN.md).
 map:

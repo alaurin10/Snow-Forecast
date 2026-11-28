@@ -58,6 +58,12 @@ class BackcountryConfig(BaseModel):
     fog_rh_pct: float = 97.0
     fog_cloud_low_pct: float = 70.0
     fog_vis_m: float = 1000.0
+    # A night this humid (mean %) refreezes no better than Partial: near-saturated air
+    # keeps the surface from losing heat.
+    refreeze_humid_pct: float = 95.0
+    # Without a snow station, at least this much model snow on the ground at mid counts
+    # as snow cover (for rain on snow).
+    model_snow_min_cm: float = 5.0
 
     @field_validator(
         "outlook_snow_cm",
@@ -173,9 +179,14 @@ class Refreeze:
 
 
 def refreeze(
-    hours: Sequence[int], temp_c: Hourly, cloud_pct: Hourly, cfg: BackcountryConfig
+    hours: Sequence[int],
+    temp_c: Hourly,
+    cloud_pct: Hourly,
+    cfg: BackcountryConfig,
+    rh_pct: Hourly | None = None,
 ) -> Refreeze:
-    """How well the surface refreezes overnight: the low and how much of the night is clear."""
+    """How well the surface refreezes overnight: the low and how much of the night is
+    clear. With humidity, a near-saturated night is Partial at best."""
     temps = [v for h in hours if (v := temp_c.get(h)) is not None]
     clouds = [v for h in hours if (v := cloud_pct.get(h)) is not None]
     if not temps:
@@ -184,7 +195,13 @@ def refreeze(
     clear = (
         sum(1 for c in clouds if c < cfg.refreeze_clear_cloud_pct) / len(clouds) if clouds else None
     )
-    if low <= cfg.refreeze_good_c and (clear is None or clear >= cfg.refreeze_clear_frac):
+    rhs = [v for h in hours if (v := (rh_pct or {}).get(h)) is not None]
+    humid = bool(rhs) and sum(rhs) / len(rhs) >= cfg.refreeze_humid_pct
+    if (
+        low <= cfg.refreeze_good_c
+        and (clear is None or clear >= cfg.refreeze_clear_frac)
+        and not humid
+    ):
         status = "Good"
     elif low <= cfg.refreeze_partial_c:
         status = "Partial"
