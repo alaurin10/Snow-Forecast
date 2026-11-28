@@ -60,9 +60,15 @@ export interface Step {
 	frz: 'freezing_rain' | 'sleet' | null;
 }
 
+/** The longest range runs to the end of the data (milestone 4B: 16 days of forecast,
+ *  today and the next 15). It's offered once the data reaches this far, so a forecast
+ *  ending a little short of 15 days out (late in the evening, the end of day 16 is
+ *  barely 15 days away) still has it. */
+export const LAST_RANGE_MIN_H = 348;
+
 /** Ranges the data can fill. */
 export function availableRanges(hours: number): Range[] {
-	return RANGES.filter((r) => r * 24 <= hours);
+	return RANGES.filter((r) => (r === 15 ? hours >= LAST_RANGE_MIN_H : r * 24 <= hours));
 }
 
 const num = (v: number | null | undefined): v is number => v !== null && v !== undefined;
@@ -91,7 +97,8 @@ export function buildSteps(h: HourlyOut, range: Range, all = false): Step[] {
 	let start = 0;
 	while (start < len && !aligned(start)) start++;
 	const fits = Math.floor((len - start) / step);
-	const n = all ? fits : Math.min((range * 24) / step, fits);
+	// The 15-day range shows everything to the end of the data.
+	const n = all || range === 15 ? fits : Math.min((range * 24) / step, fits);
 	const steps: Step[] = [];
 	let cum = 0;
 	for (let k = 0; k < n; k++) {

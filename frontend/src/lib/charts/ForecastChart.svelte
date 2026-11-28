@@ -591,10 +591,21 @@
 			labelLeft: `${p.x.toFixed(1)}px`
 		}));
 	});
-	// Days 6 and on are less certain.
+	// Days 6 and on are less certain, and days 11 and on (milestone 4B) less certain
+	// still: a veil from 5 days out, and one more tick and label 10 days out, drawn alike
+	// otherwise (the snapshot's `less_certain_from`: 120 and 240 hours from its first hour).
+	const LABEL_PX = 100; // room a "Less certain →" label needs
 	const conf = $derived.by(() => {
 		const p = pos(120);
 		return p > 0 && p < 1 ? { left: `${(p * 100).toFixed(2)}%`, roomy: p < 0.85 } : null;
+	});
+	const conf2 = $derived.by(() => {
+		const p = pos(240);
+		if (!(p > 0 && p < 1)) return null;
+		const first = pos(120);
+		// Its label only where it fits before the edge and clear of the first one's.
+		const clear = first <= 0 || first >= 1 || (p - first) * plotW > LABEL_PX;
+		return { left: `${(p * 100).toFixed(2)}%`, roomy: (1 - p) * plotW > LABEL_PX && clear };
 	});
 
 	const clock = (hr: number) =>
@@ -603,6 +614,7 @@
 		const out: { left: string; name: string; sub: string; strong: boolean; minor?: boolean }[] = [];
 		const t = band.hourly.t;
 		const at = (i: number) => `${(pos(i) * 100).toFixed(2)}%`;
+		let noons = 0;
 		for (let i = i0; i < i0 + span && i < t.length; i++) {
 			const hr = hourOf(t[i]);
 			if (R === 1) {
@@ -619,6 +631,8 @@
 				else if (hr === 12) out.push({ left: at(i), name: 'Noon', sub: '', strong: false });
 			} else if (hr === 12) {
 				const d = dateOf(t[i]);
+				// Fifteen days on a phone: every other day's name, or they'd overprint.
+				if (R === 15 && phone && noons++ & 1) continue;
 				out.push({
 					left: at(i),
 					name: weekday(d),
@@ -1140,6 +1154,11 @@
 			{#if conf}
 				<div class="conf" style:left={conf.left}>
 					{#if conf.roomy}<span>Less certain →</span>{/if}
+				</div>
+			{/if}
+			{#if conf2}
+				<div class="conf conf2" style:left={conf2.left}>
+					{#if conf2.roomy}<span>Less certain →</span>{/if}
 				</div>
 			{/if}
 			{#each refs as r (r.key)}
@@ -2124,6 +2143,10 @@
 		right: 0;
 		background: color-mix(in srgb, var(--surface) 45%, transparent);
 		pointer-events: none;
+	}
+	/* The second mark (10 days out) adds no veil of its own: the first one carries on. */
+	.conf2 {
+		background: none;
 	}
 	/* A short tick marks where "less certain" starts, instead of a full-height line. */
 	.conf::before {

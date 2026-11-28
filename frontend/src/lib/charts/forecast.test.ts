@@ -47,9 +47,21 @@ describe('availableRanges', () => {
 		expect(availableRanges(240)).toEqual([1, 3, 5, 10]);
 		expect(availableRanges(48)).toEqual([1]);
 	});
+	it('offers 15 days once the data reaches about 14.5 days', () => {
+		// Sixteen days of forecast (today and the next 15) end 15.0–15.9 days from now.
+		expect(availableRanges(377)).toEqual([1, 3, 5, 10, 15]);
+		expect(availableRanges(350)).toEqual([1, 3, 5, 10, 15]);
+		expect(availableRanges(340)).toEqual([1, 3, 5, 10]);
+	});
 });
 
 describe('buildSteps', () => {
+	it('runs 15 days to the end of the data', () => {
+		// The 48 test hours start 1 PM: day and night halves from 6 PM, to the last whole one.
+		const s = buildSteps(hourly(), 15);
+		expect(s.map((x) => x.hours)).toEqual([12, 12, 12]);
+		expect(s[0].t.slice(11, 13)).toBe('18');
+	});
 	it('uses hourly steps for one day', () => {
 		const s = buildSteps(hourly(), 1);
 		expect(s).toHaveLength(24);

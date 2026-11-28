@@ -1,6 +1,6 @@
 <!--
   Chance of at least each amount: the share of ensemble members that reach it, for the
-  next five days and for days 6–10, as bars. Replaces two step curves that needed
+  next five days, days 6–10 and days 11–16, as bars. Replaces two step curves that needed
   reading off an axis.
 -->
 <script lang="ts">
@@ -10,12 +10,14 @@
 		/** Member totals in cm for each window (any order); empty when there are none. */
 		next5: number[];
 		d6_10: number[];
+		/** Days 11–16 (milestone 4B); empty in older snapshots. */
+		d11_16?: number[];
 		units: UnitSystem;
 		/** The members are scaled from the mid-mountain ensemble. */
 		estimated?: boolean;
 	}
 
-	let { next5, d6_10, units, estimated = false }: Props = $props();
+	let { next5, d6_10, d11_16 = [], units, estimated = false }: Props = $props();
 	const c = $derived(converters(units));
 	// Round amounts in each unit system: 1 in to 2 ft, or 2 cm to 60 cm.
 	const steps = $derived(units === 'imperial' ? [1, 3, 6, 12, 18, 24] : [2, 5, 15, 30, 45, 60]);
@@ -26,7 +28,8 @@
 	};
 	const cols = $derived([
 		{ name: 'Next 5 days', members: next5 },
-		{ name: 'Days 6–10', members: d6_10 }
+		{ name: 'Days 6–10', members: d6_10 },
+		...(d11_16.length ? [{ name: 'Days 11–16', members: d11_16 }] : [])
 	]);
 	const none = $derived(!next5.length && !d6_10.length);
 </script>

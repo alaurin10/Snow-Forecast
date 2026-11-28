@@ -92,7 +92,10 @@ describe('model table', () => {
 			models: snowy.models,
 			units: 'imperial'
 		});
-		expect(container.querySelectorAll('thead th').length).toBe(12); // label, ten days, total
+		// Label, every day (16 since milestone 4B; the fixture's run has 16), total.
+		expect(container.querySelectorAll('thead th').length).toBe(days.length + 2);
+		expect(days.length).toBe(16);
+		expect(getByText('10-day total')).toBeTruthy();
 		expect(getByText('Ensembles 10–90%')).toBeTruthy();
 		expect(getByText('Models’ median')).toBeTruthy();
 		expect(getByText('GFS')).toBeTruthy();
@@ -101,7 +104,7 @@ describe('model table', () => {
 		expect(icon.querySelector('td.tot')?.textContent).toBe('–');
 		const gfs = getByText('GFS').closest('tr')!;
 		expect(gfs.querySelector('td.tot')?.textContent).toMatch(/^\d+\.\d$/);
-		expect(gfs.querySelectorAll('.heat').length).toBe(10);
+		expect(gfs.querySelectorAll('.heat').length).toBeGreaterThanOrEqual(15);
 	});
 });
 

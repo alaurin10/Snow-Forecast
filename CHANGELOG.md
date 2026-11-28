@@ -7,6 +7,13 @@ Notable changes to Snow Watch. The format follows
 ## [Unreleased]
 
 ### Added
+- **16 days on the location pages** (milestone 4B). The forecast chart's 15-day view
+  runs to the end of the forecast with a second "Less certain →" mark 10 days out (bars
+  and lines look the same throughout). The day by day lists 16 days, the Calendar shows
+  16 columns (on a phone the rows scroll sideways together, names and dates staying in
+  step), the Confidence tab's table shows 16 days with a 10-day total and its chances
+  add days 11–16, the day-by-day image can share 16 days, and wide screens' Overview
+  adds a "Days 11–16" column.
 - **16-day forecasts** (milestone 4B, the data). Every location and spot now carries
   today and the next 15 days: the high-resolution blend is asked for 16 days (it was
   11), snapshots hold 32 day-and-night periods and 16 days of hours, and a "Days 11–16"
