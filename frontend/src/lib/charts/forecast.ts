@@ -54,6 +54,10 @@ export interface Step {
 	fl: number | null;
 	/** Snow level (m): wet-bulb based with a self-hosted server, else freezing level − 305 m. */
 	snowLevel: number | null;
+	/** Wet-bulb temperature (°C), aggregated like `temp`; null without a self-hosted server. */
+	wetbulb: number | null;
+	/** Freezing rain or sleet in some hour of the step (freezing rain wins). */
+	frz: 'freezing_rain' | 'sleet' | null;
 }
 
 /** Ranges the data can fill. */
@@ -110,6 +114,8 @@ export function buildSteps(h: HourlyOut, range: Range, all = false): Step[] {
 		// Orange is for a bar that is itself 6+ in of snow, not every bar on a snowy day.
 		if (kind === 'snow' && snow >= HEAVY_CM) kind = 'heavy';
 		const temps = idx.map((i) => h.temp_c[i]).filter(num);
+		const wbs = idx.map((i) => h.wetbulb_c?.[i]).filter(num);
+		const frzs = idx.map((i) => h.frz?.[i]);
 		const night = h.is_day[mid] === 0;
 		const tempKind = step === 12 ? (night ? 'low' : 'high') : 'mean';
 		steps.push({
@@ -141,7 +147,13 @@ export function buildSteps(h: HourlyOut, range: Range, all = false): Step[] {
 			dir: h.wdir[mid] ?? null,
 			cloud: mean(idx.map((i) => h.cloud[i]).filter(num)),
 			fl: mean(idx.map((i) => h.fl_m[i]).filter(num)),
-			snowLevel: mean(idx.map((i) => h.snow_level_m?.[i]).filter(num))
+			snowLevel: mean(idx.map((i) => h.snow_level_m?.[i]).filter(num)),
+			wetbulb: tempKind === 'high' ? max(wbs) : tempKind === 'low' ? min(wbs) : mean(wbs),
+			frz: frzs.includes('freezing_rain')
+				? 'freezing_rain'
+				: frzs.includes('sleet')
+					? 'sleet'
+					: null
 		});
 	}
 	return steps;

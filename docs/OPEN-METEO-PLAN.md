@@ -17,8 +17,11 @@ is the owner's check. **Milestone 3 built** (27 Nov 2026): PR 1, the richer vari
 precipitation type and freezing rain (flag and push alert), the column snow ratio
 scored as `cons_col`, ridge wind between six levels, sun on slopes, rime and fog, the
 models' snowpack, and fixtures captured from the server (`live-20261127`); PR 2, the
-UI for them. Choosing the headline depth method from `cons_col`'s record is the
-owner's, after a few weeks. Milestones 4–5 are
+UI for them. **Milestone 3b built** (28 Nov 2026): more from the same data (a
+wet-bulb rain/snow split scored as `cons_wb`, model snow cover for rain on snow, wet
+snow, fog, humid refreezes, showery periods) and the chart's Snow level view and
+freezing-rain marks. Choosing the headline depth method and the split from `cons_col`'s
+and `cons_wb`'s records is the owner's, after a few weeks. Milestones 4–5 are
 planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -997,6 +1000,46 @@ Choices made while building, beyond the checklist:
   day after a Good or Partial refreeze, whatever the season.
 - Freezing rain and sleet are also worked out from the lean upper-air levels (850–500
   hPa temperature), so installs without a server get them too, more coarsely.
+
+## Milestone 3b: More from the richer data
+
+**Goal:** after milestone 3, use the same variables to make existing numbers more
+accurate, and put the most useful new ones on the forecast chart, in views it already
+has (no new chart cards: a spring "sun on slopes" view is the one candidate, to revisit
+in March once corn windows have proven themselves). **One PR.**
+
+### More accurate
+- [x] **Rain and snow split by wet-bulb at each band** (`build._wb_split`): each model's
+  precipitation, snow at or below `wb_snow_max_c`, rain from `wb_rain_min_c`, linear
+  between. Scored as `cons_wb` (same depth conversion as `cons_slr`); the headline
+  switches with `physics.snow_split: wetbulb` once the scorecard shows it's closer.
+- [x] **Snow cover without a station:** the models' snow depth at mid (≥ 5 cm,
+  `model_snow_min_cm`) counts as snow for rain on snow, so spots get the warning.
+- [x] **Wet snow:** a period whose snow falls through a wet-bulb at or above 0 °C
+  (`wet_snow_wb_c`) is "Heavy & wet" whatever its ratio (powder-day flag, ski-day rating).
+- [x] **Fog and flat light:** two or more lift hours of likely fog (humidity with low
+  cloud or poor visibility) cost the ski day a step (`flat_light_fog_h`).
+- [x] **Humid refreezes:** a night at ≥ 95 % humidity refreezes Partial at best.
+- [x] **Showery:** a snowy period with CAPE ≥ 300 J/kg says bursts can beat the totals.
+
+### On the chart
+- [x] The freezing-level view becomes **Snow level**: the snow level is the solid line
+  and the chip, the freezing level the dashed line, with the models' range around it.
+- [x] **Freezing rain and sleet marks** (pink "Ice" / "Sleet") over the snow view's steps.
+- [x] **Wet-bulb** as a dotted line on the temperature view (with the server).
+- [x] Scorecard names for `cons_col` (missed in milestone 3) and `cons_wb`.
+- [x] Tests: the split (shares, per-hour fallback, lean data), `cons_wb` and the switch,
+  snow cover from the models, wet and showery periods, fog, humid nights, chart steps.
+
+### What it found (28 Nov 2026)
+- **The split matters a lot.** On the captured server forecasts, the next 5 days at mid:
+  Crystal 16.8 → 27.0 cm, Whistler 14.5 → 18.4 cm, Snoqualmie 7.3 → 21.7 cm (summit
+  11.9 → 39.6 cm, its 20 mm of summit rain gone). The models' own split often puts rain
+  on the upper bands, but the wet-bulb thresholds are first guesses and a 2 °C wet-bulb
+  for all-rain may count too much snow. That size of change is why it ships scored, not
+  switched.
+- The chart's rain/snow marks come from snow and rain amounts, not the hourly type, so
+  they change only if the split is switched on.
 
 ## Milestone 4: Fresher and wider
 

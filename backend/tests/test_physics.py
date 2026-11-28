@@ -304,3 +304,42 @@ def test_ridge_interpolates_between_bracketing_levels() -> None:
 def test_model_flags_need_a_cold_band() -> None:
     warm = {"precipitation_type": {0: 3}, "temperature_2m": {0: 1.7}}
     assert model_flag_kind(warm, 0, PHYS) is None
+
+
+# --- the wet-bulb rain/snow split ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("wb", "share"), [(-3, 1.0), (0.5, 1.0), (1.25, 0.5), (2, 0.0), (None, None)]
+)
+def test_snow_fraction(wb: float | None, share: float | None) -> None:
+    from snowwatch.analysis.snowlevel import snow_fraction
+
+    assert snow_fraction(wb, PHYS) == share
+
+
+def test_wb_split_resplits_by_the_bands_own_wet_bulb() -> None:
+    from snowwatch.analysis.build import _wb_split
+
+    # The model says all rain (its grid is lower), but the band's wet-bulb says snow.
+    series = {
+        "precipitation": {0: 2.0, 1: 2.0, 2: 2.0},
+        "snowfall": {0: 0.0, 1: 0.0, 2: 0.7},
+        "rain": {0: 2.0, 1: 2.0, 2: 1.0},
+        "wet_bulb_temperature_2m": {0: -1.0, 1: 1.25},
+    }
+    got = _wb_split(series, 0.7, PHYS)
+    assert got is not None
+    snow, liq = got
+    assert snow[0] == 2.0 and liq[0] == 0.0
+    assert snow[1] == pytest.approx(1.0) and liq[1] == pytest.approx(1.0)
+    assert snow[2] == pytest.approx(1.0) and liq[2] == 1.0  # no wet-bulb: the model's own
+    # From temperature and humidity when the model has no wet-bulb field.
+    computed = {
+        **series,
+        "wet_bulb_temperature_2m": {},
+        "temperature_2m": {0: -2.0},
+        "relative_humidity_2m": {0: 90.0},
+    }
+    assert (_wb_split(computed, 0.7, PHYS) or ({}, {}))[0][0] == 2.0
+    assert _wb_split({"precipitation": {0: 1.0}}, 0.7, PHYS) is None  # lean data

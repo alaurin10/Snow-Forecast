@@ -1322,6 +1322,7 @@ export interface HourlyOut {
 export interface PeriodOut {
 	basis: string | null;
 	blend_cm: number | null;
+	cape_max?: number | null;
 	cloud_mean: number | null;
 	date: string;
 	ens: EnsStats | null;
@@ -1340,6 +1341,7 @@ export interface PeriodOut {
 	ptype: string;
 	quality: string | null;
 	rain_mm: number | null;
+	showery?: boolean;
 	slr: number | null;
 	slr_col?: number | null;
 	snow_cm: number | null;
@@ -1704,6 +1706,7 @@ export interface VerificationPair {
 	cons_settled_cm?: number | null;
 	cons_slr_cm: number | null;
 	cons_water_mm?: number | null;
+	cons_wb_cm?: number | null;
 	date: string;
 	from_swe: boolean;
 	observed_cm: number | null;

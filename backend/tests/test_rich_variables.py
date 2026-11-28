@@ -124,3 +124,47 @@ def test_lean_fixtures_fall_back_to_the_freezing_level() -> None:
     assert snap.bands[1].hourly.wetbulb_c == []
     assert snap.snowpack is None
     assert all(o.sun_kwh is None for o in snap.backcountry.outlook)  # type: ignore[union-attr]
+
+
+def test_wet_bulb_split_is_scored_and_can_lead() -> None:
+    _, records = rich("snoqualmie")
+    by = {r.source: 0.0 for r in records}
+    for r in records:
+        by[r.source] = by.get(r.source, 0.0) + (r.snow_cm or 0.0)
+    assert "cons_wb" in by and by["cons_wb"] != by["cons_slr"]
+    loc = seed()["snoqualmie"]
+    at = datetime.fromisoformat(json.loads((RICH / "meta.json").read_text())["captured_at"])
+    cfg = config().model_copy(
+        update={"physics": config().physics.model_copy(update={"snow_split": "wetbulb"})}
+    )
+    inputs = inputs_from_responses(loc, load_responses(RICH / loc.id), cfg, stations={})
+    _, recs = build_snapshot(loc, inputs, cfg, at)
+    slr = sum(r.snow_cm or 0 for r in recs if r.source == "cons_slr")
+    wb = sum(r.snow_cm or 0 for r in recs if r.source == "cons_wb")
+    assert slr == pytest.approx(wb)  # the headline now is the wet-bulb split
+
+
+def test_model_snow_depth_means_snow_cover_without_a_station() -> None:
+    # Whistler's captured run has no station data (its SNOTEL answer was empty) but the
+    # models hold 30 cm at mid: rain on snow is reported.
+    snap, _ = rich("whistler")
+    assert snap.snotel is None or snap.snotel.depth_cm is None
+    assert snap.backcountry is not None
+    assert snap.backcountry.warming.rain_on_snow_mm is not None
+
+
+def test_showery_and_wet_snow_from_cape_and_wet_bulb() -> None:
+    loc = seed()["crystal"]
+    at = datetime.fromisoformat(json.loads((RICH / "meta.json").read_text())["captured_at"])
+    inputs = inputs_from_responses(loc, load_responses(RICH / loc.id), config(), stations={})
+    mid = inputs.blend[1]
+    mid.hourly["cape"] = dict.fromkeys(mid.hourly["temperature_2m"], 800.0)
+    for name in list(inputs.multi[1].hourly):
+        if name.startswith("wet_bulb_temperature_2m"):
+            inputs.multi[1].hourly[name] = dict.fromkeys(inputs.multi[1].hourly[name], 0.4)
+    snap, _ = build_snapshot(loc, inputs, config(), at)
+    snowy = [p for p in snap.bands[1].periods if (p.swe_mm or 0) >= 0.18]
+    assert snowy and all(p.showery and p.cape_max == 800 for p in snowy)
+    assert all(p.quality == "Heavy & wet" for p in snowy if p.slr is not None)
+    base, _ = rich("crystal")
+    assert not any(p.showery for p in base.bands[1].periods)

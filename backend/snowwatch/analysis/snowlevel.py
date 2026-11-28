@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,16 @@ Kind = str  # "freezing_rain" or "sleet"
 
 class PhysicsConfig(BaseModel):
     """Milestone 3's thresholds (config `physics:`), to tune against the scorecard."""
+
+    # How each model's precipitation becomes snow and rain at a band: "model" (its own
+    # snowfall and rain) or "wetbulb" (split by its wet-bulb at the band). Both are scored
+    # (cons_slr, cons_wb); switch once the scorecard shows which is closer.
+    snow_split: Literal["model", "wetbulb"] = "model"
+    # Snow that falls through air with a wet-bulb at least this warm is heavy and wet.
+    wet_snow_wb_c: float = 0.0
+    # Showery: CAPE (J/kg) at least this high in a snowy period means bursts heavier than
+    # the totals suggest.
+    showery_cape: float = 300
 
     # Snow level: this far below the wet-bulb 0 °C height.
     snow_level_wb_offset_m: float = Field(150, ge=0, le=600)
@@ -111,6 +122,19 @@ def precip_type(wb_c: float | None, cfg: PhysicsConfig) -> str | None:
     if wb_c >= cfg.wb_rain_min_c:
         return "rain"
     return "mix"
+
+
+def snow_fraction(wb_c: float | None, cfg: PhysicsConfig) -> float | None:
+    """The share of the precipitation falling as snow, from the surface wet-bulb: all of
+    it at or below `wb_snow_max_c`, none from `wb_rain_min_c`, linear between."""
+    if wb_c is None:
+        return None
+    lo, hi = cfg.wb_snow_max_c, cfg.wb_rain_min_c
+    if wb_c <= lo:
+        return 1.0
+    if wb_c >= hi:
+        return 0.0
+    return (hi - wb_c) / (hi - lo)
 
 
 def warm_layer(

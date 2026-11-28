@@ -30,6 +30,7 @@ class SkiDayConfig(BaseModel):
     gust_closed_kmh: float = 90
     flat_light_vis_m: float = 1000
     flat_light_cloud_low_pct: float = 80
+    flat_light_fog_h: int = 2  # or this many lift hours of likely fog (humidity, milestone 3)
     very_cold_c: float = -18
 
 
@@ -45,6 +46,7 @@ class DayFacts:
     cloud_low: float | None  # mean %, mid, lift hours
     vis_min_m: float | None  # mid, lift hours
     tmax_c: float | None  # mid, lift hours
+    fog_h: int | None = None  # lift hours of likely fog at mid (needs humidity)
 
 
 @dataclass(frozen=True)
@@ -99,7 +101,8 @@ def rate(f: DayFacts, cfg: SkiDayConfig) -> Rating:
         penalties.append((1, Reason("gusts", gust)))
     low_vis = f.vis_min_m is not None and f.vis_min_m < cfg.flat_light_vis_m
     low_cloud = f.cloud_low is not None and f.cloud_low >= cfg.flat_light_cloud_low_pct
-    if low_vis or low_cloud:
+    foggy = f.fog_h is not None and f.fog_h >= cfg.flat_light_fog_h
+    if low_vis or low_cloud or foggy:
         penalties.append((1, Reason("flat_light")))
     if f.tmax_c is not None and f.tmax_c < cfg.very_cold_c:
         penalties.append((1, Reason("very_cold", f.tmax_c)))

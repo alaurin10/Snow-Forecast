@@ -35,6 +35,7 @@ from snowwatch.analysis.series import (
 )
 from snowwatch.analysis.skiday import DayFacts, rate
 from snowwatch.analysis.slr import (
+    SNOWING_SWE_MM,
     WET_MM,
     column_period_ratio,
     hourly_slr,
@@ -43,10 +44,12 @@ from snowwatch.analysis.slr import (
     ratio_for,
 )
 from snowwatch.analysis.snowlevel import (
+    PhysicsConfig,
     levels_at,
     model_flag_kind,
     precip_type,
     profile_kind,
+    snow_fraction,
     vote,
     wet_bulb_c,
     wet_bulb_zero_m,
@@ -250,6 +253,10 @@ class _BandWork:
     col_ratios: list[float | None] = field(default_factory=list)
     wb: Hourly = field(default_factory=dict)
     frz: dict[int, str | None] = field(default_factory=dict)
+    # The mid band's snow water with every model's precipitation split into snow and rain
+    # by its wet-bulb at the band (`physics.snow_split`), scored as `cons_wb`; empty
+    # without wet-bulb data.
+    wb_sw: Hourly = field(default_factory=dict)
 
 
 CLOUD_PAST_H = 3  # the map's satellite pictures reach this far back
@@ -344,6 +351,7 @@ def build_snapshot(
     # band, like the freezing level.
     snow_level, sl_how = _snow_level(all_hours, low_md, upper, low_m, fl[0], cfg)
 
+    phys = cfg.physics
     work: dict[int, _BandWork] = {}
     for i in (1, 0, 2):  # mid first: the other bands scale from it
         md = split_models(inputs.multi[i], [*global_models, *short_models])
@@ -356,6 +364,27 @@ def build_snapshot(
         blend_sw = _swe(blend.get("snowfall"), k)
         blend_liq = _add(blend.get("rain"), blend.get("showers"))
         water_all = [*_var(g, "precipitation").values(), *_var(s, "precipitation").values()]
+        # Each model's precipitation split into snow and rain by its own wet-bulb at this
+        # band: some models split at their grid's elevation, so a base below the grid got
+        # the summit's share of snow (ECMWF at Crystal, 27 Nov 2026).
+        wb_g, wb_liq_g = _wb_split_group(g, k, phys)
+        wb_s, wb_liq_s = _wb_split_group(s, k, phys)
+        blend_series = {
+            "precipitation": blend.get("precipitation"),
+            "wet_bulb_temperature_2m": blend.get("wet_bulb_temperature_2m"),
+            "temperature_2m": blend.get("temperature_2m"),
+            "relative_humidity_2m": blend.get("relative_humidity_2m"),
+            "snowfall": blend.get("snowfall"),
+            "rain": blend_liq,
+        }
+        wb_blend = _wb_split(blend_series, k, phys)
+        resplit = any(m in wb_g or m in wb_s for m in md) or wb_blend is not None
+        wb_g, wb_liq_g = {**sw_g, **wb_g}, {**liq_g, **wb_liq_g}
+        wb_s, wb_liq_s = {**sw_s, **wb_s}, {**liq_s, **wb_liq_s}
+        wb_blend_sw, wb_blend_liq = wb_blend or (blend_sw, blend_liq)
+        if resplit and phys.snow_split == "wetbulb":
+            sw_g, liq_g, sw_s, liq_s = wb_g, wb_liq_g, wb_s, wb_liq_s
+            blend_sw, blend_liq = wb_blend_sw, wb_blend_liq
 
         temp = consensus_line(
             all_hours,
@@ -442,7 +471,15 @@ def build_snapshot(
             shape_l = {h: shape_value(h, liq_g, liq_s, short_until, blend_liq) for h in p.hours}
             hourly_liq.update(scale_to_total(p.hours, shape_l, lq.value, support))
             swe_p = [hourly_sw.get(h) or 0.0 for h in p.hours]
-            ratios.append(period_ratio(swe_p, [temp[0].get(h) for h in p.hours], cfg.slr_bands))
+            ratio, label = period_ratio(swe_p, [temp[0].get(h) for h in p.hours], cfg.slr_bands)
+            # Wet snow: melting on the way down (the wet-bulb at or above
+            # `wet_snow_wb_c` while it snows) makes it heavy and wet whatever its ratio.
+            wb_snowing = median(
+                wb.get(h) for h, sw in zip(p.hours, swe_p, strict=True) if sw >= SNOWING_SWE_MM
+            )
+            if ratio is not None and wb_snowing is not None and wb_snowing >= phys.wet_snow_wb_c:
+                label = cfg.slr_bands[0].label
+            ratios.append((ratio, label))
             col_ratios.append(
                 column_period_ratio(
                     swe_p,
@@ -461,6 +498,15 @@ def build_snapshot(
                 for (ratio, label), col in zip(ratios, col_ratios, strict=True)
             ]
         frz = _freezing_rain(all_hours, md, upper, loc.bands[i].elev_m, hourly_sw, hourly_liq, cfg)
+        wb_sw: Hourly = {}
+        if i == 1 and resplit:
+            wb_sw = (
+                hourly_sw
+                if phys.snow_split == "wetbulb"
+                else _consensus_hourly(
+                    periods, wb_g, wb_s, wb_blend_sw, water_all, short_until, mid_ens_mean, cfg
+                )
+            )
         work[i] = _BandWork(
             sw_c,
             liq_c,
@@ -478,6 +524,7 @@ def build_snapshot(
             col_ratios=col_ratios,
             wb=wb,
             frz=frz,
+            wb_sw=wb_sw,
         )
 
     bands_out = [
@@ -600,6 +647,77 @@ def _member_depths(
 
 def _past(series: Hourly, now_h: int, hours: int) -> list[int]:
     return [h for h in series if now_h - hours * 3600 <= h < now_h]
+
+
+def _wb_split(
+    series: Mapping[str, Hourly], k: float, phys: PhysicsConfig
+) -> tuple[Hourly, Hourly] | None:
+    """(snow water, liquid) per hour: the precipitation split by the wet-bulb at the band
+    (snow at or below `wb_snow_max_c`, rain from `wb_rain_min_c`, a linear share
+    between). An hour without a wet-bulb keeps the model's own split. None when the
+    series has no wet-bulb at all (the public API's lean data)."""
+    wb = dict(series.get("wet_bulb_temperature_2m") or {})
+    t2, rh = series.get("temperature_2m", {}), series.get("relative_humidity_2m", {})
+    for h in t2:
+        if wb.get(h) is None:
+            wb[h] = wet_bulb_c(t2.get(h), rh.get(h))
+    precip = series.get("precipitation", {})
+    if not precip or not any(v is not None for v in wb.values()):
+        return None
+    own_sw, own_liq = series.get("snowfall", {}), series.get("rain", {})
+    snow: Hourly = {}
+    liq: Hourly = {}
+    for h, p in precip.items():
+        f = snow_fraction(wb.get(h), phys)
+        if p is None or f is None:
+            sv = own_sw.get(h)
+            snow[h] = None if sv is None else sv / k
+            liq[h] = own_liq.get(h)
+            continue
+        snow[h], liq[h] = p * f, p * (1 - f)
+    return snow, liq
+
+
+def _wb_split_group(
+    group: Mapping[str, Mapping[str, Hourly]], k: float, phys: PhysicsConfig
+) -> tuple[dict[str, Hourly], dict[str, Hourly]]:
+    """`_wb_split` for each model that has a wet-bulb: (snow water, liquid) by model."""
+    sw: dict[str, Hourly] = {}
+    liq: dict[str, Hourly] = {}
+    for m, v in group.items():
+        got = _wb_split(v, k, phys)
+        if got is not None:
+            sw[m], liq[m] = got
+    return sw, liq
+
+
+def _consensus_hourly(
+    periods: Sequence[Period],
+    sw_g: Mapping[str, Hourly],
+    sw_s: Mapping[str, Hourly],
+    blend_sw: Hourly,
+    water_all: Sequence[Hourly],
+    short_until: int,
+    ens_means: Sequence[float | None],
+    cfg: ForecastConfig,
+) -> Hourly:
+    """The consensus snow water hour by hour, made as the band loop makes it, for an
+    alternative set of model series (the wet-bulb split, scored as `cons_wb`)."""
+    out: Hourly = {}
+    for j, p in enumerate(periods):
+        c = period_consensus(
+            p.hours,
+            sw_g,
+            short_range=sw_s,
+            blend=blend_sw,
+            early=j < cfg.blend_periods,
+            ens_mean=ens_means[j],
+            min_models=cfg.consensus_min_models,
+        )
+        support = support_counts(p.hours, water_all)
+        shape = {h: shape_value(h, sw_g, sw_s, short_until, blend_sw) for h in p.hours}
+        out.update(scale_to_total(p.hours, shape, c.value, support))
+    return out
 
 
 def _snow_level(
@@ -796,7 +914,13 @@ def _backcountry(
     )
     recent = sum(mid_past.get(h) or 0.0 for h in _past(mid_past, now_h, 72))
     on_ground = inputs.snotel.depth_cm if inputs.snotel else None
-    on_snow = (on_ground or 0) > 0 or recent >= 1.0
+    # Without a station (every spot), the models' snow on the ground at mid says whether
+    # there is snow for rain to fall on (milestone 3's snow depth).
+    model_m = inputs.blend[1].get("snow_depth").get(now_h)
+    model_snow = (
+        on_ground is None and model_m is not None and model_m * 100 >= bcfg.model_snow_min_cm
+    )
+    on_snow = (on_ground or 0) > 0 or recent >= 1.0 or model_snow
     rain48 = bc.total_over(mid.hourly_liq, next48)
     warming = WarmingOut(
         fl_rise_m=r(fl_rise.amount, -1),
@@ -811,7 +935,9 @@ def _backcountry(
     for i in range(3):
         w = work[i]
         for p in nights:
-            f = bc.refreeze(p.hours, w.temp[0], w.cloud, bcfg)
+            f = bc.refreeze(
+                p.hours, w.temp[0], w.cloud, bcfg, inputs.blend[i].get("relative_humidity_2m")
+            )
             refreeze.append(
                 RefreezeNight(
                     date=p.date.isoformat(),
@@ -860,7 +986,9 @@ def _backcountry(
                     *_local_hours(p.date, 0, cfg.day_start_hour, tz),
                 }
             )
-            frozen = bc.refreeze(night, mid_temp, mid.cloud, bcfg)
+            frozen = bc.refreeze(
+                night, mid_temp, mid.cloud, bcfg, inputs.blend[1].get("relative_humidity_2m")
+            )
             day_hours = _local_hours(p.date, 0, 24, tz)
             got = bc.corn_windows(day_hours, sun_mid, mid_temp, frozen.status, bcfg)
             if got:
@@ -976,7 +1104,12 @@ def _outlook(
                 *_local_hours(day, 0, cfg.day_start_hour, tz),
             }
         )
-        frozen = [bc.refreeze(night, temps[i], clouds[i], bcfg) for i in range(3)]
+        frozen = [
+            bc.refreeze(
+                night, temps[i], clouds[i], bcfg, inputs.blend[i].get("relative_humidity_2m")
+            )
+            for i in range(3)
+        ]
         fallen = sum(mid_all.get(h) or 0.0 for h in mid_all if h <= hours[-1])
         sun_kwh = {a: daily_kwh(series, hours) for a, series in sun.items()} if sun else None
         facts = bc.day_weather(
@@ -1114,6 +1247,15 @@ def _days(
         rain = [v for h in lift if (v := mid.hourly_liq.get(h)) is not None]
         clouds = [v for h in lift if (v := blend_mid.get("cloud_cover_low").get(h)) is not None]
         vis = [v for h in lift if (v := blend_mid.get("visibility").get(h)) is not None]
+        fog_h = bc.sky(
+            lift,
+            {"low": blend_mid.get("cloud_cover_low")},
+            blend_mid.get("visibility"),
+            dict.fromkeys(lift, 1.0),
+            rh_pct=blend_mid.get("relative_humidity_2m"),
+            temp_c=mid.temp[0],
+            cfg=cfg.backcountry,
+        ).fog_h
         codes = [v for h in lift if (v := blend_mid.get("weather_code").get(h)) is not None]
         day_cm = po.snow_cm
         quality = po.quality if (day_cm or 0.0) >= night_cm else night_quality or po.quality
@@ -1128,6 +1270,7 @@ def _days(
             gust_max_kmh=max(gusts) if gusts else (top_p.gust_max_kmh if top_p else None),
             cloud_low=sum(clouds) / len(clouds) if clouds else None,
             vis_min_m=min(vis) if vis else None,
+            fog_h=fog_h,
             tmax_c=max(temps) if temps else po.tmax_c,
         )
         rating = rate(facts, scfg) if loc.kind == "resort" else None
@@ -1202,6 +1345,7 @@ def _band_out(
     k = cfg.snowfall_cm_per_mm
     min_m = cfg.ensemble_min_members
     pop = blend.get("precipitation_probability")
+    cape = blend.get("cape")
 
     period_ratio_of: dict[int, float | None] = {}
     out_periods: list[PeriodOut] = []
@@ -1218,6 +1362,7 @@ def _band_out(
         wbs = [v for h in p.hours if (v := w.wb.get(h)) is not None]
         hows = [how for h in p.hours if (how := sl_how.get(h)) is not None]
         frz = [kind for h in p.hours if (kind := w.frz.get(h))]
+        capes = [v for h in p.hours if (v := cape.get(h)) is not None]
         winds = [v for h in p.hours if (v := w.wind[0].get(h)) is not None]
         gusts = [v for h in p.hours if (v := w.gust.get(h)) is not None]
         clouds = [v for h in p.hours if (v := w.cloud.get(h)) is not None]
@@ -1261,6 +1406,10 @@ def _band_out(
                 gust_max_kmh=r(max(gusts), 0) if gusts else None,
                 cloud_mean=r(sum(clouds) / len(clouds), 0) if clouds else None,
                 pop_max=max(pops) if pops else None,
+                cape_max=r(max(capes), 0) if capes else None,
+                showery=bool(capes)
+                and max(capes) >= phys.showery_cape
+                and (c.value or 0.0) >= SNOWING_SWE_MM,
                 slr_col=w.col_ratios[j] if w.col_ratios else None,
                 wetbulb_min_c=r(min(wbs)) if wbs else None,
                 wetbulb_max_c=r(max(wbs)) if wbs else None,
@@ -1535,6 +1684,11 @@ def _daily(
             if mid.col_ratios and all(h in col_at for h in hs):
                 col = sum(_depth(mid.hourly_sw[h], col_at[h], k) or 0.0 for h in hs)
                 records.append(DailyRecord(d, "cons_col", r(col), r(swe + liq)))
+            # And with the precipitation split by wet-bulb at the band (`cons_wb`): the
+            # same depth conversion as cons_slr, so only the split differs.
+            if mid.wb_sw and all(mid.wb_sw.get(h) is not None for h in hs):
+                wbs = sum(_depth(mid.wb_sw[h], ratio_at[h], k) or 0.0 for h in hs)
+                records.append(DailyRecord(d, "cons_wb", r(wbs), r(swe + liq)))
     if inputs.station is not None:
         records += _station_records(inputs.station, models, days, day_hours, cfg)
     return rows, records

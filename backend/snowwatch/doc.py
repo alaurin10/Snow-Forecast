@@ -66,6 +66,8 @@ class PeriodOut(BaseModel):
     snow_level_how: str | None = None
     frz: str | None = None  # "freezing_rain" or "sleet" in some hour of the period
     frz_h: int = 0  # hours of it
+    cape_max: float | None = None  # J/kg, the high-resolution blend
+    showery: bool = False  # snowy with enough CAPE for bursts heavier than the totals
 
 
 class WindowOut(BaseModel):

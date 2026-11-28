@@ -21,8 +21,9 @@ bands are unchanged; this forecast is only for the scorecard.
 
 The forecast is the one from the last run issued before d began, so every score is a
 1-day lead. Sources: the consensus (model snowfall at 7:1, `cons`; the temperature-based
-snow ratio, `cons_slr`; the column snow ratio, `cons_col`, with a self-hosted server's
-pressure levels; settled, `cons_settled`; `headline` names the one the app shows),
+snow ratio, `cons_slr`; the column snow ratio, `cons_col`, and rain and snow split by
+the wet-bulb at the band, `cons_wb`, with a self-hosted server's data; settled,
+`cons_settled`; `headline` names the one the app shows),
 the ensemble median and each model. Stations sit at their own elevation, which can differ
 from the mid band, so scores show bias as much as skill.
 """
@@ -84,6 +85,7 @@ class VerificationPair(BaseModel):
     cons_cm: float | None
     cons_slr_cm: float | None
     cons_col_cm: float | None = None  # the column snow ratio (milestone 3)
+    cons_wb_cm: float | None = None  # rain and snow split by wet-bulb at the band
     cons_settled_cm: float | None = None
     observed_water_mm: float | None = None  # the gauge's catch
     cons_water_mm: float | None = None  # the consensus's water, snow and rain
@@ -190,7 +192,16 @@ def _forecasts(
     return out
 
 
-ORDER = ("cons", "cons_slr", "cons_col", "cons_settled", "stn_settled", "stn_cons", "ens_p50")
+ORDER = (
+    "cons",
+    "cons_slr",
+    "cons_col",
+    "cons_wb",
+    "cons_settled",
+    "stn_settled",
+    "stn_cons",
+    "ens_p50",
+)
 
 
 def _order(source: str) -> tuple[int, str]:
@@ -256,8 +267,8 @@ def verification(
         caught = observed[d].water_mm
         assert caught is not None
         for source, (_, w) in forecasts[d].items():
-            # cons_slr's and cons_col's water is the consensus's: scored once, as cons.
-            if w is not None and source not in (*NOT_SCORED, "cons_slr", "cons_col"):
+            # The other consensus depths share cons's water: scored once, as cons.
+            if w is not None and source not in (*NOT_SCORED, "cons_slr", "cons_col", "cons_wb"):
                 water_pairs[source].append((w, caught))
 
     rows = []
@@ -305,6 +316,7 @@ def verification(
             cons_cm=fc.get("cons", (None, None))[0],
             cons_slr_cm=fc.get("cons_slr", (None, None))[0],
             cons_col_cm=fc.get("cons_col", (None, None))[0],
+            cons_wb_cm=fc.get("cons_wb", (None, None))[0],
             cons_settled_cm=fc.get("cons_settled", (None, None))[0],
             observed_water_mm=r1(o.water_mm),
             cons_water_mm=fc.get("cons", (None, None))[1],
