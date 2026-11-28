@@ -31,6 +31,9 @@ all three bands, a schedule per system and the budget planner; PR 3, adding seve
 ski areas from the catalog, the Overview and Calendar grouped by region with a filter
 and favourites, and new locations' first satellite pass. The 50-location run time and
 HRRR refresh timing on the mini PC are the owner's checks.
+**Milestone 4B** (16 days
+everywhere, a 15-day chart, a second "Less certain" mark at day 11; the map to 16 days
+from GFS) is explored, decided and planned.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1294,6 +1297,287 @@ only to systems on the public API (milestone 1b off, or falling back).
   edge widened it; now only locations outside the box do (`maps/region.widen_box`, also
   for the avalanche-zone box), so locations in the West never change the map's jobs.
 
+## Milestone 4B: 16 days
+
+**Goal:** show the models out to 16 days wherever the app shows a forecast: the
+forecast chart (a new 15-day range), the day by day, the Calendar, the Confidence tab,
+Compare and the map. Days 11–16 are a rough guide, but they look like every other day:
+the only difference is a second "Less certain" mark at day 10, like the one at day 5.
+**Four PRs: the data; the location pages; the map's data; the map's UI.** Explored and
+decided on 28 Nov 2026 (below); nothing is built yet.
+
+**15 or 16 days.** Open-Meteo's `forecast_days=16` returns today and the next 15
+calendar days. In the captured forecasts GFS's last hour was 11 PM on day 16 (Wed 4 Nov
+→ Thu 19 Nov; Fri 27 Nov → Sat 12 Dec), so 16 calendar days are really there, with only
+day 16's night cut short. Counted from now it's 15.3–15.4 days. So the day by day and
+the Calendar show **16 days**, and the chart, whose buttons count days from now (1, 3, 5,
+10), gets a **15-day** button.
+
+### What the exploration found (28 Nov 2026)
+
+**The forecasts already reach 16 days, except the blend.** How far each answer reached
+from the time it was captured (`live-20261104` and `live-20261127`, the second from the
+self-hosted server; Crystal and Whistler, mid band):
+
+| Request | Asked | Reaches |
+|---|---|---|
+| Blend (`best_match`) | 11 days + 3 past | **10.3 days** |
+| Multi-model | 16 days | GFS 15.3, ECMWF 14.6, NBM 10.8 (US), GEM 9.5, ICON 7.0, HRRR / HRDPS 1.8 days |
+| Upper air | 16 days + 3 past | the same, per model |
+| Ensembles | 16 days | GEFS 15.4, ECMWF ENS 14.1, GEPS 15.4 days |
+| Clouds (the map's 3D clouds) | 10 days | 9.3 days |
+
+- **The 10-day limit comes from the build, not the data.** `build_snapshot` takes its
+  hours from the blend's mid temperature (`all_hours`), and the blend is asked for 11
+  days. On top of that, `periods: 20` (10 days of day and night halves) and
+  `hourly_hours: 240` cap the snapshot. The daily rows (`_daily`, the Confidence tab's
+  running totals, `forecast_daily`) already run to 16 days.
+- **The consensus already copes as models end.** `period_consensus` takes the median
+  of the global models while at least 3 cover a period (`consensus_min_models`), and
+  the ensemble mean otherwise. That switch already happens around day 9.5, when GEM
+  ends. So days 11–16 are the ensemble mean, from three systems until ECMWF ENS ends
+  (~14 days), then GEFS and GEPS. The hourly lines (`consensus_line`) are the models'
+  median, from GFS and ECMWF to day ~14.6, then GFS alone. Their min–max band then
+  collapses to one line, which the UI should say rather than show as certainty.
+- **What stays as it is:**
+  - Flags and push alerts look 5 days ahead (`flags.py`, `push.LEAD_DAYS`).
+  - The avalanche-weather outlook is 7 days (`outlook_days`).
+  - The scorecard scores forecasts up to 2 days ahead.
+
+  None of these should reach into days 11–16: an alert about day 14 would be noise.
+- **The snapshot gets bigger.** Crystal from the 27 Nov server fixtures: **226 KB of
+  JSON, 32 KB gzipped**. The three bands' `hourly` arrays are 141 KB of that, about
+  200 bytes per hour per band. At 384 hours and 32 periods: an estimated **~340 KB, ~48
+  KB gzipped**, over the 300 KB the tests allow (`test_rich_variables`, `test_spots`).
+  The hourly arrays must stay hourly: the chart (`pos(i)`, `buildSteps`), the day sheet
+  and Compare index them by hour from the first.
+- **Public calls:** asking the blend for 16 days instead of 11 makes it 19 days with
+  the past ones. That's past Open-Meteo's 14, so its weight goes from 6.3 to ~8.6 per
+  run, about +18 a day per location on 8 runs. It's free with a server; without one,
+  the budget planner (`budget.py`) takes it out of what's left for ensembles. At 25
+  locations without a server that's ~450 more a day: the planner drops from tier 2
+  (three bands, two runs) to tier 3 (mid only, every run). Checked with `budget.plan`.
+- **Ensemble downloads** (milestone 1b) already fetch 16 days (GEFS 0.5° and GEPS to
+  384 h, ECMWF ENS to 360 h).
+
+**The location pages stop at 10 days in these places:**
+- The forecast chart: `RANGES` has a hidden `15` (12-hour steps) that never shows,
+  because `availableRanges` needs 360 hours of `hourly`.
+  - Its "Less certain →" veil starts at 120 h (`conf`).
+  - Its x labels are one per day at noon, which is too crowded for 16 days on a phone.
+- The day by day (`DayList`, `PeriodGrid`) follows `periods`, so it grows with them.
+  The ski-day rating reads lift-hour gusts, low cloud and visibility.
+- The Calendar shows `DAYS = 10`. On a phone all ten cells fit without sideways
+  scrolling, and sixteen wouldn't.
+- Compare: `COMPARE_RANGES` stops at 10 days, and its dates are sliced to 10.
+- The Confidence tab:
+  - `ModelDays` shows 10 days on narrow screens and 16 on wide ones.
+  - `ModelTable` shows 10.
+  - The chances use the `next5` and `d6_10` windows.
+- Share images go up to 10 days (`SHARE_DAYS`). The Overview keeps 7 bars.
+
+**The map stops at 10 days, and so do its sources:**
+- **Sources:**
+  - NBM in the US goes to 264 h, 6-hourly past 192 h (`maps/sources/nbm.py`).
+  - GDPS in Canada goes to 240 h (`rdps_gdps.py`).
+  - Nothing goes further.
+- **What's built from them:**
+  - The precipitation loop runs hourly to 48 h, then 3- and 6-hourly to 10 days.
+  - Snow totals have steps every 24 h to 10 days and windows to 240 h (`totaldata.py`,
+    `totals.py`).
+  - Temperature and forecast clouds go to 10 days; snow level, gusts and ridge wind to
+    ~84 h (`layers.py`).
+- **The terrain layers** have no time axis, so there's nothing to extend: slope,
+  aspect, ATES, avalanche problems and the concern index (today's bulletin), and the
+  wind-loading windows (`WIND_WINDOWS`).
+- **On the GPU:** the map keeps every loop frame on the graphics chip (`precip/layer.ts`).
+  Phones hold the forecast frames at half resolution. The snow totals' 19 steps take
+  ~55 MB of textures (RADAR-PLAN). The measured GPU peak is 322–372 MB in the headless
+  browser (MAP-PLAN), so more frames have to be measured, not assumed.
+
+**GFS can carry the map to 16 days** (probed on NOAA's bucket `noaa-gfs-bdp-pds`, the 27
+Nov 00z run):
+- The 0.25° files are 3-hourly from 240 h to 384 h (`f246`, `f303`, `f384` all there),
+  each with an `.idx`.
+- A whole file is 542 MB, so only single messages are fetched by byte range, as NBM's
+  are.
+- There's no `ASNOW` in the 0.25° files. Snow has to come from `APCP` × `CPOFP` (percent
+  frozen), with depth from the snow-ratio bands and the temperature.
+
+Message sizes (global, so the whole message even for the West's box):
+
+| Message (at f300) | Size |
+|---|---|
+| `APCP` 294–300 h (6-hour sum) | 0.37 MB |
+| `CPOFP` (percent frozen) | 0.59 MB |
+| `CSNOW` 6-hour average | 0.03 MB |
+| `TMP` 2 m | 0.87 MB |
+| `HGT` 0 °C isotherm | 0.89 MB |
+| `TCDC` entire atmosphere, 6-hour average | 0.89 MB |
+| `UGRD` / `VGRD` 10 m | 0.96 / 0.93 MB |
+
+So a 6-hour step costs ~1.0 MB for precipitation and snow, ~2.8 MB with temperature and
+the 0 °C height, and ~3.7 MB with clouds too. The 24 steps past 240 h come to ~24 / 67 /
+89 MB per run. At the map's two NBM runs a day (`map.nbm_cycles`) that's at most ~180
+MB a day, small next to the ensembles' ~15 GB a day. GFS is a 25 km model: the frames
+will look soft, and at days 11–16 that softness is honest.
+
+Considered and not chosen: the self-hosted Open-Meteo server as the map's grid source
+(points on a 0.25° grid, ~13,500 over the box). It would answer the map from the same
+data as the pages, but it would make the map depend on the server, and the JSON for 6
+days of hourly fields is tens of MB per variable. GeoMet's GEPS products are
+probabilities, not amounts.
+
+### Decisions (the owner's, 28 Nov 2026)
+
+| Question | Decision |
+|---|---|
+| 16 days without a server too? | **Yes.** The longer blend's ~18 calls a day per location come out of the ensembles (25 locations without a server: tier 2 → tier 3) |
+| How days 11–16 look | **The same as every other day**: the same bars, lines and colours, nothing darker or fainter. One more mark at day 10 like the existing one at day 5: a short tick and "Less certain →", with no extra veil (the day-5 veil carries on as it is) |
+| Ski-day rating for days 11–16 | **None** ("–"): it reads lift-hour gusts, low cloud and visibility, which mean nothing two weeks out |
+| Day by day on a phone | **Just more rows**, no divider or switch |
+| Calendar on a phone | **Scrolls sideways** for 16 days, the dates and every row's cells together; desktop shows all 16 columns (it already scrolls if narrow) |
+| Map layers to 16 days | **Everything that can be:** the precipitation loop, snow totals (and by elevation), temperature, and forecast cloud cover. Gusts, ridge wind and snow level stay at ~84 h: they stop there for want of sources well before day 10, which is a different question from 16 days. GFS's 0 °C height is still read, inside the snow by elevation |
+| Map loop playback | **Plays to day 10.** Days 11–16 load and play only once the slider is moved into them |
+| Alerts | **None for days 6–16** (unchanged: flags and push alerts look 5 days ahead) |
+
+### PR 1: the data (backend)
+- [ ] `sources/openmeteo.py`: `blend_request(forecast_days=16)`. Check that the server's
+  `best_match` reaches 16 days for US and Canadian points (it should continue on GFS),
+  and record what each blend column reaches past day 10 (weather code, visibility,
+  cloud layers, chance of precipitation) in `docs/SOURCES.md`.
+- [ ] `analysis/build.py`:
+  - the hours run to the furthest of the blend and the global models (not the blend
+    alone), so a short or old blend answer doesn't cut the forecast;
+  - `periods: 32` and `hourly_hours: 384` in `config/forecast.yaml`;
+  - a third window, `WINDOWS["d11_16"] = (20, 32)`, with its own ensemble statistics;
+  - `Snapshot.less_certain_from`: the times of the day-5 and day-10 marks (now + 120 h
+    and the start of the 11th day), so every view puts them in the same place;
+  - `DayOut.rating` left empty for days 11–16, and `PeriodOut.nmodels` kept honest
+    (1 when only GFS is left, which the period sheet can say).
+- [ ] Unchanged on purpose, with tests saying so:
+  - flags and push alerts (5 days ahead);
+  - the avalanche-weather outlook (7 days);
+  - the scorecard (up to 2 days ahead);
+  - `forecast_daily` (already 16 days).
+- [ ] Snapshot size: measure on new fixtures. Raise the tests' limit to 400 KB if the
+  measured size is under ~360 KB. Otherwise round days 11–16's hourly values more coarsely
+  before thinking of 3-hourly steps.
+- [ ] `api/models.py` `OverviewRow`: the days 11–16 total and its ensemble range, for a
+  "Days 11–16" column on the Overview.
+- [ ] Spots: the same build, so they get 16 days too (free on the server).
+- [ ] New fixtures from the server with the 16-day blend: `snowwatch capture-fixtures
+  --out backend/tests/fixtures/live-<date>/`, the way Appendix A runs it. The e2e
+  stand-in server (`e2e/openmeteo_fixture.py`) moves to them.
+- [ ] `snowwatch check-sources --local`: a reach-per-model table in its SOURCES.md
+  section.
+- [ ] Regenerate types; CHANGELOG; ARCHITECTURE ("A forecast run", the snapshot).
+
+### PR 2: the location pages (frontend)
+- [ ] **Forecast chart** (`charts/forecast.ts`, `ForecastChart.svelte`):
+  - The hidden `15` range becomes available: 12-hour steps from now to the end of the
+    data (~31 bars). It shows whenever the data reaches past ~14.5 days, so a run that
+    ends a little before 360 h doesn't hide it (just before local midnight, the end of
+    day 16 is barely 15 days away).
+  - The range picker fits five buttons at 380 px.
+  - X labels every other day on a phone, every day on wider screens.
+  - Bars and lines look the same on every day. A second tick and "Less certain →" at
+    the start of day 11 (`less_certain_from`), like the day-5 one; no second veil.
+    Where the two labels would crowd (the 10-day view, a phone) the day-10 one shows
+    only its tick.
+- [ ] **Day by day** (`DayList`, `PeriodGrid`): rows for days 11–16, the same as the
+  others, with no rating ("–"). The day sheet and the period sheet open as for any day.
+- [ ] **Calendar**: 16 columns on desktop. On a phone the dates and the cells scroll
+  sideways together (one scroller), the cells keeping their size and numbers; names
+  stay above their rows. Storms in days 11–16 are listed like the others.
+- [ ] **Confidence tab**:
+  - `ModelTable` gets 16 columns (it scrolls sideways);
+  - `ModelDays` gets a "16 days" choice on narrow screens;
+  - the chances gain the days 11–16 window.
+- [ ] **Compare**: `COMPARE_RANGES` gains 15, and its dates go to 16.
+- [ ] **Share**: day by day up to 16 days. The Overview card keeps 7.
+- [ ] **Overview**: the 7 bars stay. Desktop adds a "Days 11–16" column (total and
+  range) beside "Next 5 days".
+- [ ] **Checks**: e2e at 380 px and desktop, in both themes: the 15-day chart and its
+  two marks, the day by day to 16 days, the Calendar scrolling sideways on a phone,
+  Compare at 15. The e2e fixtures need the 16-day snapshots from PR 1.
+
+### PR 3: the map's data (backend)
+- [ ] `maps/sources/gfs.py`: GFS 0.25° from `noaa-gfs-bdp-pds`, messages by byte range
+  from each file's `.idx` and cached like NBM's (`grib.fetch_messages`), cut to the
+  region:
+  - 6-hour `APCP`, `CPOFP`, 2 m `TMP` and the 0 °C `HGT`, from 246 h to 384 h;
+  - the runs the map already follows (`map.nbm_cycles`);
+  - measure time, memory and download per run against the figures above.
+- [ ] **Precipitation loop** (`render.forecast`): 6-hourly frames past each country's
+  own source.
+  - GFS fills in after NBM's 264 h in the US and after GDPS's 240 h in Canada, across
+    the existing border cross-fade, to 384 h.
+  - Rate as 6-hour averages; snow or rain by `CPOFP`.
+- [ ] **Snow totals** (`totaldata.STEP_WINDOWS`, `totals.WINDOWS`):
+  - steps every 24 h to 16 days (6 more, ~+17 MB of textures by RADAR-PLAN's ~55 MB
+    for 19);
+  - windows of 14 days and "to the end" (~15 days);
+  - snow by elevation from `bins.py` with GFS's 0 °C height less the snow-level offset
+    as the snow level.
+- [ ] **Temperature** (`layers.py` `temp`): every 6 h to 384 h from GFS beyond the
+  current models, moved to the real ground as now.
+- [ ] **Forecast cloud cover** (`layers.py` `clouds`): every 6 h to 384 h from GFS's
+  6-hour average `TCDC` beyond the current models (~0.9 MB a step more, ~110 MB a day in
+  all with the other fields).
+- [ ] Not extended: gusts, ridge wind and snow level (they stop at ~84 h for want of
+  sources, not because of the 16 days), and the 3D clouds request (`CLOUD_DAYS`), which
+  follows the clouds' own timeline.
+- [ ] The index says where day 11 starts (`less_certain_from`, a time) so the map's UI
+  needn't guess; old apps ignore it. Frames carry `src: "gfs"`.
+- [ ] Disk: GFS messages pruned with the other GRIB caches (`data/maps/`).
+- [ ] Tests: the `.idx` parse and byte ranges, snow from `APCP` × `CPOFP`, the hand-over
+  at 240 h / 264 h, frames to 384 h, the new totals steps (on small saved messages, as
+  the NBM tests do).
+- [ ] Docs: SOURCES (GFS 0.25°, its fields and sizes), ARCHITECTURE, MAP-PLAN (what the
+  map shows past 10 days), THIRD_PARTY_NOTICES (NOAA GFS, public domain).
+
+### PR 4: the map's UI (frontend)
+- [ ] **Timeline** (`map/Timeline.svelte`):
+  - the slider runs to 16 days, the same as the rest past 48 h (its dashed band), with a
+    tick and "Less certain" at day 11 like the chart's;
+  - labels read as now, e.g. "Thu 13 · 6-hour average · in 15 days";
+  - day names thin out where they'd crowd;
+  - the player stops at day 10 unless the slider is already past it.
+- [ ] **Loading days 11–16** (`precip/layer.ts`, `loader.ts`): frames past day 10 load
+  when the slider reaches them, as frames past 48 h already do, and are let go when it
+  leaves, if that's needed to stay within the GPU budget (below).
+- [ ] **Snow total slider**: stops at 14 days and "to the end".
+- [ ] **Temperature marks** to 16 days (`TEMP_MARKS`); the cloud cover's timeline too.
+- [ ] **Copy**: the Layers sheet's text ("to 16 days, the last 6 days from GFS alone")
+  and the colour keys.
+- [ ] **Unchanged**: the spot panel's and feature cards' totals (24 h, 3 days, 7 days).
+- [ ] **Measure** with `e2e/perf.spec.ts`, its fixture extended to 384 h:
+  - GPU process peak while playing and while scrubbing into days 11–16, phone and
+    desktop;
+  - keep within MAP-PLAN's measured peak plus ~20 %, or load and drop the days 11–16
+    frames as above.
+- [ ] e2e: the timeline to 16 days, its day-11 mark and labels, totals at 14 days, at
+  380 px and desktop.
+
+### Tests and verification
+- Backend: a fixture-built snapshot reaches 16 days. Its days 11–16 rest on the
+  ensemble mean and have no ratings. No flag is raised past day 5. The size stays within
+  the limit.
+- Frontend: unit tests for the 15-day range's steps and labels, the two "Less certain"
+  marks, the Calendar's sideways scroll. e2e screenshots in both themes at 380 px and
+  desktop.
+- Map: frames and totals to 384 h on saved GFS messages; the perf spec's GPU numbers
+  written into MAP-PLAN.
+- On the mini PC (owner): the map job's time and download with GFS added, and a look at
+  the 15-day chart, the day by day and the Calendar on a phone.
+
+**Done when:** every location and spot shows 16 days in the day by day, the Calendar,
+the Confidence tab and Compare, and 15 days ahead on the forecast chart, marked "Less
+certain" at day 5 and again at day 11; the map's precipitation loop, snow totals,
+temperature and cloud cover reach 16 days within the GPU budget; and nothing alerts on
+days 6–16.
+
 ## Milestone 5: Learning from history
 
 **Goal:** use years of model history plus station records to weight and correct the
@@ -1352,6 +1636,7 @@ new location shows historical skill immediately.
 | 2 | `spots.py`, `config/borders.geojson`, `store/migrations/011_spot_ensembles.sql`, `frontend/src/lib/components/LocationView.svelte`, `frontend/src/routes/spot/+page.svelte` | `pipeline.py` (shared fetch helper), `doc.py`, `api/public.py`, `api/app.py`, `config/forecast.yaml`, `routes/location/[id]/+page.svelte`, `map/Inspector.svelte`, `components/MapView.svelte`, `api.ts`, `LocationPalette.svelte`, `routes/+page.svelte`, `service-worker.ts`, `swRoute.ts`, ARCHITECTURE, SECURITY |
 | 3 | `analysis/snowlevel.py`, new fixtures folder | `sources/openmeteo.py`, `analysis/slr.py`, `freezing.py`, `ridge.py`, `backcountry.py`, `flags.py`, `build.py`, `verify.py`, `push.py`, `doc.py`, `config/forecast.yaml`, BandTable, PeriodSheet, DaySheet, ForecastChart, backcountry and observed components, SOURCES |
 | 4 | `modelwatch.py`, `budget.py` | `scheduler.py`, `pipeline.py`, `store/retention.py`, `store/repo.py`, `http.py`, `sources/openmeteo.py`, `analysis/build.py`, `config/forecast.yaml`, `push.py`, Manage (catalog add, budget), Overview, Calendar, Confidence tab, status page |
+| 4B | `maps/sources/gfs.py` | `sources/openmeteo.py`, `analysis/build.py`, `doc.py`, `api/models.py`, `config/forecast.yaml`, `maps/render.py`, `maps/totaldata.py`, `maps/totals.py`, `maps/layers.py`, ForecastChart, `charts/forecast.ts`, DayList, PeriodGrid, Calendar, Confidence tab, Compare, Overview, share, `map/Timeline.svelte`, `precip/layer.ts`, LayersSheet, SOURCES, MAP-PLAN |
 | 5 | `calibrate.py`, migrations for `obs_history` and `model_skill` | `analysis/consensus.py`, `verify.py`, `store/retention.py`, `sources/snotel.py`, `sources/bc_asws.py`, `scheduler.py`, `cli.py`, Confidence tab |
 
 (Backend paths are under `backend/snowwatch/`, frontend paths under `frontend/src/lib/`
@@ -1399,6 +1684,11 @@ End to end, per milestone:
   - a unit test with a fake clock: `meta.json` changes trigger runs, and limits hold
   - 50-location run time on the mini PC
   - database size before and after retention; planner tests for each tier
+- **M4B:**
+  - a fixture snapshot to 16 days, no ratings on days 11–16, no flags past day 5
+  - e2e of the 15-day chart, the day by day and the Calendar at 380 px and desktop, light
+    and dark
+  - map frames and totals to 384 h; the GPU peak from `e2e/perf.spec.ts`
 - **M5:**
   - `snowwatch calibrate --report` for the seed locations shows held-out results
   - `cons_cal` rows appear in `forecast_daily` and on the scorecard
@@ -1421,6 +1711,8 @@ End to end, per milestone:
   change file names (the GEPS land file) and throttle (ECMWF's AWS mirror). Each system
   falls back to the public API on its own, and the freshness check catches a downloader
   that stalls quietly.
+- **Days 11–16 are weak.** Snowfall amounts that far out are a rough guide; milestone
+  4B marks them "Less certain" and never alerts on them. On the map they're GFS alone.
 - **Bias learning is research.** It ships in `score` mode and is applied only when the live
   scorecard shows it helps.
 - Open questions, to settle while building:
@@ -1522,6 +1814,7 @@ Start each in a fresh session on an up-to-date `main`. Prompt:
 | 2 Forecast anywhere | M1 (M1b helpful: spot ensembles without an allowance) | none |
 | 3 Richer variables | M1 (M2 helpful: spots get the new fields too) | after a few weeks, compare `cons_col` on the scorecard and choose the headline method |
 | 4 Fresher and wider | M1 | add locations up to ~50 (Manage → Add from catalog) |
+| 4B 16 days | M1 (M4 helpful) | check the 15-day chart, the day by day and the Calendar on a phone; the map job's time and download with GFS |
 | 5 Learning from history | M1 (M4 helpful: more locations to learn from) | switch `calibration` to `apply` when the scorecard shows it helps |
 
 ## Appendix D: how the ensembles were tested
