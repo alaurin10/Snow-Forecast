@@ -34,7 +34,9 @@ HRRR refresh timing on the mini PC are the owner's checks.
 **Milestone 4B** (16 days
 everywhere, a 15-day chart, a second "Less certain" mark at day 11; the map to 16 days
 from GFS) is explored, decided and planned; PR 1, the data (16-day forecasts, no
-ratings past day 10, the days 11–16 window), is built.
+ratings past day 10, the days 11–16 window), and PR 2, the location pages (a 15-day
+chart with a second "Less certain" mark, 16 days in the day by day, Calendar, Confidence
+tab, Compare and share, an Overview column), are built.
 Milestone 5 is planned. Each milestone's PRs tick its checklist here and update this line.
 
 Research findings and an implementation plan for handoff. Every measurement below was
@@ -1511,7 +1513,7 @@ probabilities, not amounts.
   the Calendar and the rest are PR 2's.
 
 ### PR 2: the location pages (frontend)
-- [ ] **Forecast chart** (`charts/forecast.ts`, `ForecastChart.svelte`):
+- [x] **Forecast chart** (`charts/forecast.ts`, `ForecastChart.svelte`):
   - The hidden `15` range becomes available: 12-hour steps from now to the end of the
     data (~31 bars). It shows whenever the data reaches past ~14.5 days, so a run that
     ends a little before 360 h doesn't hide it (just before local midnight, the end of
@@ -1523,22 +1525,42 @@ probabilities, not amounts.
     days from now (`less_certain_from`), like the day-5 one; no second veil.
     Where the two labels would crowd (the 10-day view, a phone) the day-10 one shows
     only its tick.
-- [ ] **Day by day** (`DayList`, `PeriodGrid`): rows for days 11–16, the same as the
+- [x] **Day by day** (`DayList`, `PeriodGrid`): rows for days 11–16, the same as the
   others, with no rating ("–"). The day sheet and the period sheet open as for any day.
-- [ ] **Calendar**: 16 columns on desktop. On a phone the dates and the cells scroll
+- [x] **Calendar**: 16 columns on desktop. On a phone the dates and the cells scroll
   sideways together (one scroller), the cells keeping their size and numbers; names
   stay above their rows. Storms in days 11–16 are listed like the others.
-- [ ] **Confidence tab**:
+- [x] **Confidence tab**:
   - `ModelTable` gets 16 columns (it scrolls sideways);
   - `ModelDays` gets a "16 days" choice on narrow screens;
   - the chances gain the days 11–16 window.
 - [x] **Compare**: `COMPARE_RANGES` gains 15, and its dates go to 16 (done in PR 1).
-- [ ] **Share**: day by day up to 16 days. The Overview card keeps 7.
-- [ ] **Overview**: the 7 bars stay. Desktop adds a "Days 11–16" column (total and
+- [x] **Share**: day by day up to 16 days. The Overview card keeps 7.
+- [x] **Overview**: the 7 bars stay. Desktop adds a "Days 11–16" column (total and
   range) beside "Next 5 days".
-- [ ] **Checks**: e2e at 380 px and desktop, in both themes: the 15-day chart and its
+- [x] **Checks**: e2e at 380 px and desktop, in both themes: the 15-day chart and its
   two marks, the day by day to 16 days, the Calendar scrolling sideways on a phone,
   Compare at 15. The e2e fixtures need the 16-day snapshots from PR 1.
+
+### What PR 2 (the location pages) built and found (28 Nov 2026)
+
+- **Chart:** the 15-day range runs to the end of the data and is offered from 348 hours
+  (`LAST_RANGE_MIN_H`). The day-10 mark is a tick at 240 h with no veil of its own; its
+  label shows only where it has ~100 px before the edge and clear of the day-5 label,
+  so in the 10-day view (whose first bar starts at the next 6 AM or 6 PM) it's a tick
+  at the right edge. On a phone the 15-day view names every other day.
+- **Calendar on a phone:** the cells keep the 31 px they have when ten fit; the rows
+  scroll sideways in their card, the names stay in view (sticky), and the pinned dates
+  strip follows the rows' scroll (a transform, since a sticky-top row can't sit inside a
+  sideways scroller). Desktop shows 16 columns in its existing scroller.
+- **Confidence tab:** the model table shows 16 days, but its total is now a "10-day
+  total": past day 10 only GFS (and ECMWF to day 15) are left, so a 16-day total would
+  be "–" for every model and the median. The day-by-day dots keep 10 days on a phone
+  with "Show all 16 days" under them. The chances gain "Days 11–16".
+- **Overview:** the "Days 11–16" column (total and likely range) shows from 1,280 px
+  wide; narrower desktops keep the row as it was.
+- **Share:** the day-by-day image offers 16 days (it follows the chart's 15).
+- e2e: `e2e/sixteen.spec.ts` (both themes, 380 px and desktop).
 
 ### PR 3: the map's data (backend)
 - [ ] `maps/sources/gfs.py`: GFS 0.25° from `noaa-gfs-bdp-pds`, messages by byte range

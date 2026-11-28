@@ -27,8 +27,11 @@
 	const M = { top: 10, right: 8, bottom: 22, left: 34 };
 	const H = 240;
 	const iw = $derived(Math.max(0, W - M.left - M.right));
-	// A phone has room for ten days of dots; wider screens show every day there is.
-	const days = $derived(iw < 520 ? allDays.slice(0, 10) : allDays);
+	// A phone has room for ten days of dots, and can ask for all 16 (milestone 4B); wider
+	// screens show every day there is.
+	const narrow = $derived(iw < 520);
+	let all = $state(false);
+	const days = $derived(narrow && !all ? allDays.slice(0, 10) : allDays);
 	const shown = $derived(
 		models.filter((m) => days.some((d) => d.models[m] !== null && d.models[m] !== undefined))
 	);
@@ -114,6 +117,11 @@
 			{/each}
 		{/snippet}
 	</Frame>
+	{#if narrow && allDays.length > 10}
+		<button class="more" aria-pressed={all} onclick={() => (all = !all)}
+			>{all ? 'Show 10 days' : `Show all ${allDays.length} days`}</button
+		>
+	{/if}
 </div>
 
 <style>
@@ -163,5 +171,17 @@
 		border-top: 2px solid var(--text);
 		margin-right: 5px;
 		vertical-align: 3px;
+	}
+	.more {
+		display: block;
+		margin: 4px 0 0 auto;
+		padding: 4px 0;
+		border: 0;
+		background: none;
+		color: var(--accent-ink);
+		font: inherit;
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
 	}
 </style>

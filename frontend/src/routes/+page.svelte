@@ -196,7 +196,7 @@
 					>{/each}
 			</span>
 			<span class="ltot">{DAYS} days, {c.snowUnit}</span>
-			{#if wide}<span class="l5">Next 5 days</span>{/if}
+			{#if wide}<span class="l5">Next 5 days</span><span class="l5 l16">Days 11–16</span>{/if}
 		</div>
 		{#if many}
 			<div class="lfilter">
@@ -261,6 +261,17 @@
 													prefs.units
 												)} likely</small
 											>{/if}</span
+									>
+									<!-- Days 11–16 (milestone 4B): a rough guide, so shown on wide screens
+									     only, as the ensembles' likely range. -->
+									<span class="l5 l16 num"
+										>{#if r.d11_16_cm != null}<b>{snowNum(r.d11_16_cm, prefs.units)} {c.snowUnit}</b
+											>{#if r.d11_16_p90_cm}<small
+													>{snowNum(r.d11_16_p10_cm, prefs.units)}–{snowNum(
+														r.d11_16_p90_cm,
+														prefs.units
+													)} likely</small
+												>{/if}{:else}<small>–</small>{/if}</span
 									>
 								{/if}
 							{/if}
@@ -625,6 +636,11 @@
 	@media (max-width: 1099px) and (min-width: 641px) {
 		.lavy {
 			display: none;
+		}
+	}
+	@media (max-width: 1279px) {
+		.l16 {
+			display: none !important;
 		}
 	}
 	/* Beside the rail: narrower bars, so long names have room. */

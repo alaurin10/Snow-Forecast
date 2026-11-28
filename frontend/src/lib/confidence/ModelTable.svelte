@@ -18,23 +18,27 @@
 		count?: number;
 	}
 
-	let { days, models, units, count = 10 }: Props = $props();
+	let { days, models, units, count = 16 }: Props = $props();
 	const c = $derived(converters(units));
 	const cols = $derived(days.slice(0, count));
 	const shown = $derived(
 		models.filter((m) => cols.some((d) => d.models[m] !== null && d.models[m] !== undefined))
 	);
-	/** A model's total over the days shown, or null when it stops before the last. */
+	// The total covers the first ten days: past them most models have stopped (16 days
+	// are shown, milestone 4B), and only GFS would have one.
+	const TOTAL_DAYS = 10;
+	const totalCols = $derived(cols.slice(0, TOTAL_DAYS));
+	/** A model's total over the first ten days, or null when it stops before the last. */
 	const total = (m: string) => {
-		const vals = cols.map((d) => d.models[m]);
+		const vals = totalCols.map((d) => d.models[m]);
 		return vals.some((v) => v === null || v === undefined)
 			? null
 			: vals.reduce<number>((acc, v) => acc + (v ?? 0), 0);
 	};
 	const medianTotal = $derived(
-		cols.some((d) => d.median === null)
+		totalCols.some((d) => d.median === null)
 			? null
-			: cols.reduce<number>((acc, d) => acc + (d.median ?? 0), 0)
+			: totalCols.reduce<number>((acc, d) => acc + (d.median ?? 0), 0)
 	);
 	const num = (cm: number | null | undefined) => snowNum(cm ?? null, units);
 	const range = (d: DayRead) =>
@@ -54,7 +58,9 @@
 						></th
 					>
 				{/each}
-				<th scope="col" class="tot">Total</th>
+				<th scope="col" class="tot"
+					>{cols.length > TOTAL_DAYS ? `${TOTAL_DAYS}-day total` : 'Total'}</th
+				>
 			</tr>
 		</thead>
 		<tbody>

@@ -262,7 +262,7 @@
 			: null
 	);
 	// Day by day as an image: as many days as the chart shows (at least 3), up to the data.
-	const SHARE_DAYS = [3, 5, 7, 10] as const;
+	const SHARE_DAYS = [3, 5, 7, 10, 16] as const;
 	const daysAvailable = $derived(new Set((band?.periods ?? []).map((p) => p.date)).size);
 	const shareDayChoices = $derived(SHARE_DAYS.filter((n) => n <= Math.max(3, daysAvailable)));
 	let shareDaysPick = $state<number | null>(null);

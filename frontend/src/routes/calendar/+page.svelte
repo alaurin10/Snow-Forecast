@@ -32,7 +32,7 @@
 	const c = $derived(converters(prefs.units));
 	// In the order set on the Manage page.
 	const shown = $derived((rows ?? []).filter((r) => r.run_id != null));
-	const DAYS = 10;
+	const DAYS = 16; // today and the next 15 (milestone 4B)
 	// A day counts as rainy with at least 1 mm (0.04 in) of rain and almost no snow.
 	const WET_MM = 1;
 
@@ -87,6 +87,12 @@
 		return n <= 0 ? 'now' : n === 1 ? 'tomorrow' : `in ${n} days`;
 	};
 	const show = (cm: number) => Number(snowNum(cm, prefs.units)) > 0;
+	// Phones fit ten days across; with more the rows scroll sideways (and the dates with
+	// them), each cell keeping the size ten would have.
+	const PHONE_FIT = 10;
+	const phoneWide = $derived(dates.length > PHONE_FIT);
+	let rowsW = $state(0);
+	let rowsX = $state(0);
 	// A day or a storm opens in a popup over the calendar.
 	let openDay = $state<{ id: string; name: string; date: string } | null>(null);
 	let openStorm = $state<StormCycle | null>(null);
@@ -162,14 +168,28 @@
 			/>
 		</div>
 	{/if}
-	<div class="mdates" style:--n={dates.length} aria-hidden="true">
-		{#each dates as d (d)}
-			<span class:weekend={['Sat', 'Sun'].includes(weekday(d))} class:today={d === today}
-				>{weekday(d).slice(0, 2)}<small>{Number(d.slice(8))}</small></span
-			>
-		{/each}
+	<!-- More days than fit (16): the rows scroll sideways together, the names stay in
+	     view, and the pinned dates follow the rows. -->
+	<div class="mdates" class:wide={phoneWide} aria-hidden="true">
+		<div
+			class="mdgrid"
+			style:--n={dates.length}
+			style:transform={phoneWide ? `translateX(${-rowsX}px)` : null}
+		>
+			{#each dates as d (d)}
+				<span class:weekend={['Sat', 'Sun'].includes(weekday(d))} class:today={d === today}
+					>{weekday(d).slice(0, 2)}<small>{Number(d.slice(8))}</small></span
+				>
+			{/each}
+		</div>
 	</div>
-	<ul class="mrows">
+	<ul
+		class="mrows"
+		class:wide={phoneWide}
+		style:--vw="{rowsW}px"
+		bind:clientWidth={rowsW}
+		onscroll={(e) => (rowsX = e.currentTarget.scrollLeft)}
+	>
 		{#each groups as grp (grp.label)}
 			{#if grp.label}<li class="ghead"><h2>{grp.label}</h2></li>{/if}
 			{#each grp.rows as g (g.r.id)}
@@ -636,11 +656,43 @@
 		margin: 0;
 		font-size: 0.88rem;
 	}
-	.mdates,
+	.mdgrid,
 	.mcells {
 		display: grid;
 		grid-template-columns: repeat(var(--n), minmax(0, 1fr));
 		gap: 3px;
+	}
+	/* Sixteen days on a phone: cells as wide as ten would be (31 px at 380 px), the rows
+	   scrolling sideways in their card, the dates following them. */
+	.mdates.wide {
+		overflow: hidden;
+	}
+	.mdates.wide .mdgrid {
+		/* Line up with the cells: the card's border and padding (1 + 12 px). */
+		margin-left: 13px;
+		width: max-content;
+		will-change: transform;
+	}
+	.mdates.wide .mdgrid,
+	.mrows.wide .mcells {
+		grid-template-columns: repeat(var(--n), 31px);
+	}
+	.mrows.wide {
+		overflow-x: auto;
+		overscroll-behavior-x: contain;
+	}
+	.mrows.wide .mcells {
+		width: max-content;
+	}
+	.mrows.wide li {
+		width: max-content;
+		min-width: 100%;
+	}
+	.mrows.wide .mname,
+	.mrows.wide .ghead h2 {
+		position: sticky;
+		left: 0;
+		width: calc(var(--vw) - 24px);
 	}
 	.mdates {
 		position: sticky;

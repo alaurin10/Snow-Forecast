@@ -65,7 +65,7 @@
 	});
 	// A band's own ensemble members when they were asked for at every elevation;
 	// otherwise mid's, scaled to it.
-	const membersFor = (name: 'next5' | 'd6_10'): number[] => {
+	const membersFor = (name: 'next5' | 'd6_10' | 'd11_16'): number[] => {
 		const own = band.windows[name]?.members_cm;
 		if (band.band !== 'mid' && own?.length) return own;
 		const m = mid.windows[name]?.members_cm ?? [];
@@ -154,6 +154,7 @@
 			<ChanceLadder
 				next5={membersFor('next5')}
 				d6_10={membersFor('d6_10')}
+				d11_16={membersFor('d11_16')}
 				{units}
 				estimated={band.band !== 'mid' && !band.windows.next5?.members_cm?.length}
 			/>
